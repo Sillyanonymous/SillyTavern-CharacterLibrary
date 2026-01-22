@@ -36,6 +36,8 @@ const DEFAULT_SETTINGS = {
     duplicateMinScore: 35,
     // Rich creator notes rendering (experimental) - uses sandboxed iframe with full CSS/HTML support
     richCreatorNotes: true,
+    // Highlight/accent color (CSS color value)
+    highlightColor: '#4a9eff',
 };
 
 // In-memory settings cache
@@ -138,6 +140,25 @@ function setSettings(settings) {
 }
 
 /**
+ * Apply the highlight color to CSS variables
+ * Converts hex color to RGB for glow effect
+ * @param {string} color - CSS color value (hex)
+ */
+function applyHighlightColor(color) {
+    if (!color) color = DEFAULT_SETTINGS.highlightColor;
+    
+    // Set the main accent color
+    document.documentElement.style.setProperty('--accent', color);
+    
+    // Convert hex to RGB for glow effect
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+}
+
+/**
  * Setup the Gallery Settings Modal
  */
 function setupSettingsModal() {
@@ -164,6 +185,9 @@ function setupSettingsModal() {
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
     
+    // Appearance
+    const highlightColorInput = document.getElementById('settingsHighlightColor');
+    
     if (!settingsBtn || !settingsModal) return;
     
     // Open modal
@@ -185,6 +209,11 @@ function setupSettingsModal() {
         
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
+        
+        // Appearance
+        if (highlightColorInput) {
+            highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
+        }
         
         settingsModal.classList.remove('hidden');
     };
@@ -208,8 +237,17 @@ function setupSettingsModal() {
         minScoreValue.textContent = minScoreSlider.value;
     };
     
+    // Live preview highlight color
+    if (highlightColorInput) {
+        highlightColorInput.oninput = () => {
+            applyHighlightColor(highlightColorInput.value);
+        };
+    }
+    
     // Save settings
     saveSettingsBtn.onclick = () => {
+        const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
+        
         setSettings({
             chubToken: chubTokenInput.value || null,
             chubRememberToken: rememberTokenCheckbox.checked,
@@ -220,7 +258,11 @@ function setupSettingsModal() {
             searchInNotes: searchNotesCheckbox.checked,
             defaultSort: defaultSortSelect.value,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
+            highlightColor: newHighlightColor,
         });
+        
+        // Apply highlight color
+        applyHighlightColor(newHighlightColor);
         
         // Also update the current session search checkboxes
         const searchName = document.getElementById('searchName');
@@ -238,18 +280,46 @@ function setupSettingsModal() {
         closeModal();
     };
     
-    // Reset to defaults
+    // Restore defaults - resets to default values AND saves them
     resetSettingsBtn.onclick = () => {
+        // Reset form UI to defaults
         chubTokenInput.value = '';
         rememberTokenCheckbox.checked = false;
-        minScoreSlider.value = 35;
-        minScoreValue.textContent = '35';
-        searchNameCheckbox.checked = true;
-        searchTagsCheckbox.checked = true;
-        searchAuthorCheckbox.checked = false;
-        searchNotesCheckbox.checked = false;
-        defaultSortSelect.value = 'name_asc';
-        richCreatorNotesCheckbox.checked = false;
+        minScoreSlider.value = DEFAULT_SETTINGS.duplicateMinScore;
+        minScoreValue.textContent = String(DEFAULT_SETTINGS.duplicateMinScore);
+        searchNameCheckbox.checked = DEFAULT_SETTINGS.searchInName;
+        searchTagsCheckbox.checked = DEFAULT_SETTINGS.searchInTags;
+        searchAuthorCheckbox.checked = DEFAULT_SETTINGS.searchInAuthor;
+        searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
+        defaultSortSelect.value = DEFAULT_SETTINGS.lastUsedSort;
+        richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
+        if (highlightColorInput) {
+            highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
+        }
+        
+        // Apply default highlight color immediately
+        applyHighlightColor(DEFAULT_SETTINGS.highlightColor);
+        
+        // Save defaults to storage (preserving token if "remember" was checked)
+        const preserveToken = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
+        setSettings({
+            ...DEFAULT_SETTINGS,
+            chubToken: preserveToken,
+        });
+        
+        // Update current session UI
+        const searchName = document.getElementById('searchName');
+        const searchTags = document.getElementById('searchTags');
+        const searchAuthor = document.getElementById('searchAuthor');
+        const searchNotes = document.getElementById('searchNotes');
+        const sortSelect = document.getElementById('sortSelect');
+        if (searchName) searchName.checked = DEFAULT_SETTINGS.searchInName;
+        if (searchTags) searchTags.checked = DEFAULT_SETTINGS.searchInTags;
+        if (searchAuthor) searchAuthor.checked = DEFAULT_SETTINGS.searchInAuthor;
+        if (searchNotes) searchNotes.checked = DEFAULT_SETTINGS.searchInNotes;
+        if (sortSelect) sortSelect.value = DEFAULT_SETTINGS.lastUsedSort;
+        
+        showToast('Settings restored to defaults', 'success');
     };
 }
 
@@ -270,6 +340,9 @@ function getQueryParam(name) {
 document.addEventListener('DOMContentLoaded', async () => {
     // Load settings first to ensure defaults are available
     loadGallerySettings();
+    
+    // Apply saved highlight color
+    applyHighlightColor(getSetting('highlightColor'));
     
     // Reset filters and search on page load
     resetFiltersAndSearch();

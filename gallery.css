@@ -2669,6 +2669,39 @@ textarea.glass-input {
     border-color: var(--accent);
 }
 
+/* Color picker input group */
+.color-input-group {
+    align-items: center;
+}
+
+.color-input-group input[type="color"] {
+    width: 50px;
+    height: 36px;
+    padding: 0;
+    border: 2px solid var(--glass-border);
+    border-radius: 6px;
+    cursor: pointer;
+    background: transparent;
+}
+
+.color-input-group input[type="color"]::-webkit-color-swatch-wrapper {
+    padding: 2px;
+}
+
+.color-input-group input[type="color"]::-webkit-color-swatch {
+    border-radius: 4px;
+    border: none;
+}
+
+.color-input-group input[type="color"]:hover {
+    border-color: var(--accent);
+}
+
+.color-preview-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
 .settings-slider-group {
     display: flex;
     align-items: center;
