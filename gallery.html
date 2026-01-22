@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SillyTavern Character Library</title>
+    <link rel="stylesheet" href="gallery.css?v=25">
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- DOMPurify for HTML sanitization -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Toolbar -->
+        <header class="topbar">
+            <div class="logo-area">
+                <i class="fa-solid fa-layer-group accent-icon"></i>
+                <h1>Character<span>Library</span></h1>
+            </div>
+
+            <div class="view-toggle">
+                <button class="view-toggle-btn active" data-view="characters">
+                    <i class="fa-solid fa-users"></i> Characters
+                </button>
+                <button class="view-toggle-btn" data-view="chats">
+                    <i class="fa-solid fa-comments"></i> Chats
+                </button>
+                <button class="view-toggle-btn" data-view="chub">
+                    <i class="fa-solid fa-cloud-arrow-down"></i> ChubAI
+                </button>
+            </div>
+
+            <div class="search-area">
+                <div class="search-box">
+                    <i class="fa-solid fa-search"></i>
+                    <input type="text" id="searchInput" placeholder="Search characters...">
+                    <button id="clearSearchBtn" class="clear-search-btn hidden" title="Clear search">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </div>
+                <div class="search-settings-container">
+                    <button id="searchSettingsBtn" class="glass-btn icon-only" title="Search Settings">
+                        <i class="fa-solid fa-sliders"></i>
+                    </button>
+                    <div id="searchSettingsMenu" class="dropdown-menu hidden">
+                        <label><input type="checkbox" id="searchName" checked> Character Name</label>
+                        <label><input type="checkbox" id="searchTags" checked> Tags</label>
+                        <label><input type="checkbox" id="searchAuthor" checked> Author</label>
+                        <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="filter-area" id="filterArea">
+                <select id="sortSelect" class="glass-select">
+                    <option value="name_asc">Name (A-Z)</option>
+                    <option value="name_desc">Name (Z-A)</option>
+                    <option value="date_new">Date Added (Newest)</option>
+                    <option value="date_old">Date Added (Oldest)</option>
+                </select>
+                <button id="favoritesFilterBtn" class="glass-btn favorites-filter-btn" title="Show favorites only">
+                    <i class="fa-solid fa-star"></i>
+                </button>
+                <div class="filter-group" style="position: relative;">
+                    <button id="tagFilterBtn" class="glass-btn tag-filter-btn" title="Filter by tags">
+                        <i class="fa-solid fa-tags"></i> <span id="tagFilterLabel">Tags</span>
+                    </button>
+                    <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 250px; max-height: 400px;">
+                        <div class="tag-search-row">
+                            <input type="text" id="tagSearchInput" placeholder="Find tags...">
+                            <button id="clearAllTagsBtn" class="glass-btn icon-only clear-tags-btn" title="Clear all tag filters">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div id="tagFilterContent" style="overflow-y: auto; flex: 1;">
+                             <!-- Tags injected via JS -->
+                        </div>
+                    </div>
+                </div>
+                <button id="refreshBtn" class="glass-btn icon-only" title="Refresh">
+                    <i class="fa-solid fa-sync"></i>
+                </button>
+                <div class="more-options-container">
+                    <button id="moreOptionsBtn" class="glass-btn icon-only" title="More Options">
+                        <i class="fa-solid fa-ellipsis-vertical"></i>
+                    </button>
+                    <div id="moreOptionsMenu" class="dropdown-menu hidden">
+                        <button id="importBtn" class="dropdown-item">
+                            <i class="fa-solid fa-download"></i> Import Characters
+                        </button>
+                        <button id="checkDuplicatesBtn" class="dropdown-item">
+                            <i class="fa-solid fa-clone"></i> Find Duplicates
+                        </button>
+                        <button id="gallerySettingsBtn" class="dropdown-item">
+                            <i class="fa-solid fa-gear"></i> Gallery Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters wrapper - prevents layout shift by maintaining consistent space -->
+            <div class="filters-wrapper">
+                <!-- Chats-specific filters (hidden by default via CSS) -->
+                <div class="filter-area chats-filters" id="chatsFilterArea">
+                    <select id="chatsSortSelect" class="glass-select">
+                        <option value="recent">Most Recent</option>
+                        <option value="oldest">Oldest First</option>
+                        <option value="char_asc">Character (A-Z)</option>
+                        <option value="char_desc">Character (Z-A)</option>
+                        <option value="most_messages">Most Messages</option>
+                        <option value="least_messages">Least Messages</option>
+                        <option value="longest_chat">Longest Chat</option>
+                        <option value="shortest_chat">Shortest Chat</option>
+                        <option value="most_chats">Most Chats (Character)</option>
+                    </select>
+                    <div class="grouping-toggle">
+                        <button class="glass-btn grouping-btn active" data-group="flat" title="Flat list">
+                            <i class="fa-solid fa-list"></i>
+                        </button>
+                        <button class="glass-btn grouping-btn" data-group="grouped" title="Group by character">
+                            <i class="fa-solid fa-layer-group"></i>
+                        </button>
+                    </div>
+                    <button id="refreshChatsViewBtn" class="glass-btn icon-only" title="Refresh Chats">
+                        <i class="fa-solid fa-sync"></i>
+                    </button>
+                </div>
+
+                <!-- ChubAI-specific filters (hidden by default) -->
+                <div class="filter-area chub-filters" id="chubFilterArea">
+                    <!-- Discovery Mode Toggle -->
+                    <div class="chub-view-toggle">
+                        <button class="chub-view-btn active" data-chub-view="browse" title="Browse all characters">
+                            <i class="fa-solid fa-compass"></i> Browse
+                        </button>
+                        <button class="chub-view-btn" data-chub-view="timeline" title="New from followed authors (requires token)">
+                            <i class="fa-solid fa-users"></i> Following
+                        </button>
+                    </div>
+                    
+                    <!-- Discovery Preset (combined sort + time logic) -->
+                    <select id="chubDiscoveryPreset" class="glass-select" title="Discovery mode">
+                        <optgroup label="Popular">
+                            <option value="popular_week" selected>🔥 Hot This Week</option>
+                            <option value="popular_month">📈 Hot This Month</option>
+                            <option value="popular_all">👑 Most Downloaded</option>
+                        </optgroup>
+                        <optgroup label="Quality">
+                            <option value="rated_week">⭐ Top Rated (Week)</option>
+                            <option value="rated_all">⭐ Top Rated (All Time)</option>
+                        </optgroup>
+                        <optgroup label="Discovery">
+                            <option value="newest">🆕 Newest</option>
+                            <option value="updated">🔄 Recently Updated</option>
+                            <option value="random">🎲 Random</option>
+                        </optgroup>
+                    </select>
+                    
+                    <!-- Content Toggles -->
+                    <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
+                        <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
+                    </button>
+                    
+                    <!-- Feature Filters -->
+                    <div class="chub-more-filters" style="position: relative;">
+                        <button id="chubFiltersBtn" class="glass-btn" title="Filter by character features">
+                            <i class="fa-solid fa-sliders"></i> Features
+                        </button>
+                        <div id="chubFiltersDropdown" class="dropdown-menu hidden" style="width: 240px;">
+                            <div class="dropdown-section-title">Character must have:</div>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterImages"> <i class="fa-solid fa-images"></i> Image Gallery</label>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterLore"> <i class="fa-solid fa-book"></i> Lorebook</label>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterExpressions"> <i class="fa-solid fa-face-smile"></i> Expressions</label>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterGreetings"> <i class="fa-solid fa-comments"></i> Alt Greetings</label>
+                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                            <div class="dropdown-section-title">Quality filters:</div>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterVerified"> <i class="fa-solid fa-circle-check"></i> Verified Only</label>
+                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                            <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires login)</span>:</div>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
+                        </div>
+                    </div>
+                    
+                    <!-- Account & Refresh -->
+                    <button id="chubLoginBtn" class="glass-btn icon-only" title="ChubAI Login Settings">
+                        <i class="fa-solid fa-user-circle"></i>
+                    </button>
+                    <button id="refreshChubBtn" class="glass-btn icon-only" title="Refresh">
+                        <i class="fa-solid fa-sync"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Grid Area -->
+        <main class="gallery-content">
+            <div id="loading" class="loading-spinner">
+                <i class="fa-solid fa-circle-notch fa-spin"></i> Loading Library...
+            </div>
+            
+            <div id="characterGrid" class="character-grid">
+                <!-- Cards will be injected here -->
+            </div>
+
+            <!-- Chats View (hidden by default) -->
+            <div id="chatsView" class="chats-view hidden">
+                <div id="chatsGrid" class="chats-grid">
+                    <!-- Chat cards will be injected here -->
+                </div>
+                <div id="chatsGroupedView" class="chats-grouped-view hidden">
+                    <!-- Grouped chat cards will be injected here -->
+                </div>
+            </div>
+
+            <!-- ChubAI View (hidden by default) -->
+            <div id="chubView" class="chub-view hidden">
+                <!-- Browse Section -->
+                <div id="chubBrowseSection" class="chub-section">
+                    <!-- Search Bar for ChubAI -->
+                    <div class="chub-search-bar">
+                        <div class="chub-search-input-wrapper">
+                            <i class="fa-solid fa-search"></i>
+                            <input type="text" id="chubSearchInput" placeholder="Search ChubAI characters...">
+                            <button id="chubSearchBtn" class="chub-search-submit">
+                                <i class="fa-solid fa-arrow-right"></i>
+                            </button>
+                        </div>
+                        <!-- Creator Search -->
+                        <div class="chub-creator-search">
+                            <div class="chub-creator-search-wrapper">
+                                <i class="fa-solid fa-user"></i>
+                                <input type="text" id="chubCreatorSearchInput" placeholder="Search by creator...">
+                                <button id="chubCreatorSearchBtn" class="chub-search-submit" title="Search by creator">
+                                    <i class="fa-solid fa-arrow-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="chub-popular-tags" id="chubPopularTags">
+                            <!-- Popular tags injected here -->
+                        </div>
+                    </div>
+                    
+                    <!-- Author Filter Banner (shown when filtering by author) -->
+                    <div id="chubAuthorBanner" class="chub-author-banner hidden">
+                        <div class="chub-author-banner-content">
+                            <i class="fa-solid fa-user"></i>
+                            <span>Showing characters by <strong id="chubAuthorBannerName">Author</strong></span>
+                        </div>
+                        <div class="chub-author-banner-actions">
+                            <button id="chubFollowAuthorBtn" class="glass-btn" title="Follow this author on ChubAI">
+                                <i class="fa-solid fa-heart"></i> <span>Follow</span>
+                            </button>
+                            <button id="chubClearAuthorBtn" class="glass-btn icon-only" title="Clear author filter">
+                                <i class="fa-solid fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Results Grid -->
+                    <div id="chubGrid" class="chub-grid">
+                        <!-- ChubAI cards will be injected here -->
+                    </div>
+                    
+                    <!-- Load More Button -->
+                    <div class="chub-load-more" id="chubLoadMore" style="display: none;">
+                        <button id="chubLoadMoreBtn" class="glass-btn">
+                            <i class="fa-solid fa-plus"></i> Load More
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Timeline Section (hidden by default) -->
+                <div id="chubTimelineSection" class="chub-section hidden">
+                    <div class="chub-timeline-header">
+                        <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
+                        <p>New characters from authors you follow</p>
+                    </div>
+                    <div id="chubTimelineGrid" class="chub-grid">
+                        <!-- Timeline cards will be injected here -->
+                    </div>
+                    <div class="chub-load-more" id="chubTimelineLoadMore" style="display: none;">
+                        <button id="chubTimelineLoadMoreBtn" class="glass-btn">
+                            <i class="fa-solid fa-plus"></i> Load More
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Chat Preview Modal -->
+    <div id="chatPreviewModal" class="modal-overlay hidden">
+        <div class="modal-glass chat-preview-modal">
+            <div class="modal-header">
+                <div class="chat-preview-header-info">
+                    <img id="chatPreviewAvatar" src="" alt="" class="chat-preview-avatar">
+                    <div>
+                        <h2 id="chatPreviewTitle">Chat Preview</h2>
+                        <p class="chat-preview-meta">
+                            <span id="chatPreviewCharName"></span> • 
+                            <span id="chatPreviewMessageCount"></span> messages • 
+                            <span id="chatPreviewDate"></span>
+                        </p>
+                    </div>
+                </div>
+                <div class="modal-controls">
+                    <button id="chatPreviewOpenBtn" class="action-btn primary"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in SillyTavern</button>
+                    <button id="chatPreviewDeleteBtn" class="action-btn secondary" style="color: #e74c3c;"><i class="fa-solid fa-trash"></i></button>
+                    <button class="close-btn" id="chatPreviewClose">&times;</button>
+                </div>
+            </div>
+            <div class="chat-preview-body">
+                <div id="chatPreviewMessages" class="chat-preview-messages">
+                    <div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading messages...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ChubAI Login Modal -->
+    <div id="chubLoginModal" class="modal-overlay hidden">
+        <div class="modal-glass chub-login-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-key"></i> ChubAI Authentication</h2>
+                <button class="close-btn" id="chubLoginClose">&times;</button>
+            </div>
+            <div class="chub-login-body">
+                <p class="chub-login-info">
+                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <strong>Browsing and downloading public characters works without a token!</strong>
+                </p>
+                <p class="chub-login-info">
+                    <i class="fa-solid fa-key" style="color: var(--accent);"></i>
+                    <strong>Optional:</strong> Add your URQL_TOKEN to access your favorites and restricted content.
+                </p>
+                
+                <div class="chub-login-form">
+                    <div class="form-group">
+                        <label for="chubApiKeyInput">URQL_TOKEN</label>
+                        <input type="password" id="chubApiKeyInput" class="glass-input" placeholder="Paste your URQL_TOKEN here..." autocomplete="off">
+                    </div>
+                    <label class="checkbox-label" style="margin-top: 10px;">
+                        <input type="checkbox" id="chubRememberKey"> Remember token
+                    </label>
+                    <div class="chub-login-status" style="display:none;"></div>
+                </div>
+                
+                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+                    <summary style="cursor: pointer; color: var(--accent);">
+                        <i class="fa-solid fa-question-circle"></i> How to get your URQL_TOKEN
+                    </summary>
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border); font-size: 0.9rem; color: var(--text-secondary);">
+                        <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                            <li>Go to <a href="https://chub.ai" target="_blank" style="color: var(--accent);">chub.ai</a> and log in</li>
+                            <li>Open your browser's Developer Tools (F12)</li>
+                            <li>Go to the <strong>Application</strong> tab (or Storage in Firefox)</li>
+                            <li>In the left sidebar, expand <strong>Local Storage</strong></li>
+                            <li>Click on <code>https://chub.ai</code></li>
+                            <li>Find the key <code style="color: #e74c3c; font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
+                        </ol>
+                        <p style="margin-top: 10px; font-style: italic;">
+                            The token is a long string that authenticates you with ChubAI's API.
+                        </p>
+                    </div>
+                </details>
+                
+                <div class="chub-login-actions">
+                    <button id="chubSaveKeyBtn" class="action-btn primary">
+                        <i class="fa-solid fa-save"></i> Save Token
+                    </button>
+                    <button id="chubClearKeyBtn" class="action-btn secondary" style="display:none;">
+                        <i class="fa-solid fa-trash"></i> Clear Token
+                    </button>
+                    <a href="https://chub.ai" target="_blank" class="action-btn secondary">
+                        <i class="fa-solid fa-external-link"></i> ChubAI Website
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ChubAI Character Preview Modal -->
+    <div id="chubCharModal" class="modal-overlay hidden">
+        <div class="modal-glass chub-char-modal">
+            <div class="modal-header">
+                <div class="chub-char-header-info">
+                    <img id="chubCharAvatar" src="" alt="" class="chub-char-avatar">
+                    <div>
+                        <h2 id="chubCharName">Character Name</h2>
+                        <p class="chub-char-meta">
+                            by <a id="chubCharCreator" href="#" title="Click to see all characters by this author">Creator</a>
+                            <a id="chubCreatorExternal" href="#" target="_blank" class="creator-external-link" title="Open author's ChubAI profile"><i class="fa-solid fa-external-link"></i></a> •
+                            <span id="chubCharRating"><i class="fa-solid fa-star"></i> 0</span> •
+                            <span id="chubCharDownloads"><i class="fa-solid fa-download"></i> 0</span>
+                        </p>
+                    </div>
+                </div>
+                <div class="modal-controls">
+                    <a id="chubOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on ChubAI">
+                        <i class="fa-solid fa-external-link"></i>
+                    </a>
+                    <button id="chubDownloadBtn" class="action-btn primary">
+                        <i class="fa-solid fa-download"></i> Download to SillyTavern
+                    </button>
+                    <button class="close-btn" id="chubCharClose">&times;</button>
+                </div>
+            </div>
+            <div class="chub-char-body">
+                <div class="chub-char-tags" id="chubCharTags">
+                    <!-- Tags injected here -->
+                </div>
+                <div class="chub-char-stats">
+                    <div class="chub-stat">
+                        <i class="fa-solid fa-message"></i>
+                        <span id="chubCharTokens">0</span> tokens
+                    </div>
+                    <div class="chub-stat">
+                        <i class="fa-solid fa-calendar"></i>
+                        <span id="chubCharDate">Unknown</span>
+                    </div>
+                    <div class="chub-stat" id="chubCharGreetingsStat" style="display: none;">
+                        <i class="fa-solid fa-comment-dots"></i>
+                        <span id="chubCharGreetingsCount">0</span> greetings
+                    </div>
+                    <div class="chub-stat" id="chubCharLorebookStat" style="display: none;">
+                        <i class="fa-solid fa-book"></i>
+                        Lorebook
+                    </div>
+                </div>
+                
+                <!-- Creator's Notes Section (public ChubAI description) -->
+                <div class="chub-char-section">
+                    <h3><i class="fa-solid fa-sticky-note"></i> Creator's Notes</h3>
+                    <div id="chubCharCreatorNotes" class="scrolling-text">
+                        No description available.
+                    </div>
+                </div>
+                
+                <!-- Tagline Section -->
+                <div class="chub-char-section" id="chubCharTaglineSection" style="display: none;">
+                    <h3><i class="fa-solid fa-quote-left"></i> Tagline</h3>
+                    <p id="chubCharTagline"></p>
+                </div>
+                
+                <!-- Character Definition Description Section -->
+                <div class="chub-char-section" id="chubCharDescriptionSection" style="display: none;">
+                    <h3><i class="fa-solid fa-scroll"></i> Description</h3>
+                    <div id="chubCharDescription" class="scrolling-text"></div>
+                </div>
+                
+                <!-- Personality Section -->
+                <div class="chub-char-section" id="chubCharPersonalitySection" style="display: none;">
+                    <h3><i class="fa-solid fa-brain"></i> Personality</h3>
+                    <div id="chubCharPersonality" class="scrolling-text"></div>
+                </div>
+                
+                <!-- Scenario Section -->
+                <div class="chub-char-section" id="chubCharScenarioSection" style="display: none;">
+                    <h3><i class="fa-solid fa-theater-masks"></i> Scenario</h3>
+                    <div id="chubCharScenario" class="scrolling-text"></div>
+                </div>
+                
+                <!-- First Message Section -->
+                <div class="chub-char-section" id="chubCharFirstMsgSection" style="display: none;">
+                    <h3><i class="fa-solid fa-message"></i> First Message Preview</h3>
+                    <div id="chubCharFirstMsg" class="scrolling-text first-message-preview"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit/Detail Modal -->
+    <div id="charModal" class="modal-overlay hidden">
+        <div class="modal-glass">
+            <div class="modal-header">
+                <h2 id="modalTitle">Character Name</h2>
+                <div class="modal-controls">
+                    <button id="favoriteCharBtn" class="action-btn favorite-btn" title="Toggle Favorite">
+                        <i class="fa-regular fa-star"></i>
+                    </button>
+                    <button id="deleteCharBtn" class="action-btn secondary" style="color: #e74c3c; border-color: rgba(231, 76, 60, 0.3);" title="Delete Character">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                    <button id="modalChatBtn" class="action-btn primary"><i class="fa-solid fa-comments"></i> Chat</button>
+                    <button class="close-btn" id="modalClose">&times;</button>
+                </div>
+            </div>
+            
+            <div class="modal-body">
+                <div class="modal-sidebar">
+                    <div class="char-portrait-container">
+                        <img id="modalImage" src="" alt="Character Portrait">
+                        <!-- Sprite/Avatar Navigation - Disabled (SillyTavern standard characters are single-image)
+                        <div class="gallery-nav">
+                            <button id="prevSprite" class="nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
+                            <span id="spriteCounter">1/1</span>
+                            <button id="nextSprite" class="nav-btn"><i class="fa-solid fa-chevron-right"></i></button>
+                        </div>
+                        -->
+                    </div>
+                    <!--
+                    <div class="sidebar-actions">
+                        <button class="glass-btn full-width"><i class="fa-solid fa-image"></i> Change Avatar</button>
+                    </div>
+                    -->
+                    <div class="sidebar-section">
+                        <div class="sidebar-label"><i class="fa-solid fa-tags"></i> Tags</div>
+                        <div class="tags-container" id="modalTags">
+                            <!-- Tags injected here -->
+                        </div>
+                        <div class="tag-input-wrapper hidden" id="tagInputWrapper">
+                            <input type="text" id="tagInput" class="glass-input tag-input" placeholder="Add tag...">
+                            <div id="tagAutocomplete" class="tag-autocomplete hidden"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-content-tabs">
+                    <div class="tab-nav">
+                        <button class="tab-btn active" data-tab="details">Details</button>
+                        <button class="tab-btn" data-tab="edit">Edit</button>
+                        <button class="tab-btn" data-tab="chats">Chats</button>
+                        <button class="tab-btn" data-tab="gallery">Gallery</button>
+                        <button class="tab-btn" data-tab="related">Related</button>
+                    </div>
+                    
+                    <div class="tab-pane active" id="pane-details">
+                        <p class="meta-info">
+                            Created: <span id="modalDate"></span> 
+                            <span id="modalAuthorContainer" style="display:none">• Author: <a href="#" id="modalAuthor" class="creator-link" title="Click to filter by this creator"></a></span>
+                        </p>
+                        
+                        <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
+                            <details class="creator-notes-details" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent);"><i class="fa-solid fa-feather-pointed"></i> Creator's Notes</summary>
+                                <div id="modalCreatorNotes" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                            </details>
+                        </div>
+
+                        <div class="description-box">
+                            <h3>Description</h3>
+                            <div id="modalDescription" class="scrolling-text"></div>
+                        </div>
+                        <div class="first-mes-box">
+                            <h3>First Message</h3>
+                            <div id="modalFirstMes" class="scrolling-text"></div>
+                        </div>
+
+                        <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 20px;">
+                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent);">Alternate Greetings (<span id="altGreetingsCount">0</span>)</summary>
+                                <div id="modalAltGreetings" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                            </details>
+                        </div>
+
+                        <div class="lorebook-box" id="modalLorebookBox" style="display:none; margin-top: 20px;">
+                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent);"><i class="fa-solid fa-book"></i> Embedded Lorebook (<span id="lorebookEntryCount">0</span> entries)</summary>
+                                <div id="modalLorebookContent" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                            </details>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="pane-edit">
+                        <div class="edit-lock-header">
+                            <div class="lock-status" id="editLockStatus">
+                                <i class="fa-solid fa-lock"></i>
+                                <span>Fields are locked. Click unlock to edit.</span>
+                            </div>
+                            <button type="button" id="toggleEditLockBtn" class="action-btn secondary small">
+                                <i class="fa-solid fa-lock-open"></i> Unlock Editing
+                            </button>
+                        </div>
+
+                        <div class="edit-section">
+                            <h4 class="section-header"><i class="fa-solid fa-user"></i> Basic Information</h4>
+                            <div class="form-group">
+                                <label>Character Name</label>
+                                <input type="text" id="editName" class="glass-input">
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group half">
+                                    <label>Creator / Author</label>
+                                    <input type="text" id="editCreator" class="glass-input" placeholder="Who made this character">
+                                </div>
+                                <div class="form-group half">
+                                    <label>Character Version</label>
+                                    <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Tags <span class="label-hint">(comma-separated)</span></label>
+                                <input type="text" id="editTags" class="glass-input" placeholder="tag1, tag2, tag3">
+                            </div>
+                        </div>
+
+                        <div class="edit-section">
+                            <h4 class="section-header"><i class="fa-solid fa-scroll"></i> Character Definition</h4>
+                            <div class="form-group">
+                                <label>Description / Persona</label>
+                                <textarea id="editDescription" class="glass-input" rows="5" placeholder="Who is this character?"></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Personality Summary</label>
+                                <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Scenario / Setting</label>
+                                <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="edit-section">
+                            <h4 class="section-header"><i class="fa-solid fa-comments"></i> Messages</h4>
+                            <div class="form-group">
+                                <label>First Message</label>
+                                <textarea id="editFirstMes" class="glass-input" rows="5" placeholder="Opening message from the character..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Alternate Greetings <span class="label-hint">(one per text box)</span></label>
+                                <div id="altGreetingsEditContainer" class="alt-greetings-container">
+                                    <!-- Dynamically populated -->
+                                </div>
+                                <button type="button" id="addAltGreetingBtn" class="action-btn secondary small" style="margin-top: 10px;">
+                                    <i class="fa-solid fa-plus"></i> Add Greeting
+                                </button>
+                            </div>
+                            <div class="form-group">
+                                <label>Example Dialogue <span class="label-hint">(for training context)</span></label>
+                                <textarea id="editMesExample" class="glass-input" rows="5" placeholder="{{user}}: Hello!\n{{char}}: *waves* Hi there!"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="edit-section">
+                            <h4 class="section-header"><i class="fa-solid fa-wand-magic-sparkles"></i> Advanced (Prompt Overrides)</h4>
+                            <div class="form-group">
+                                <label>System Prompt <span class="label-hint">(Main Prompt Override)</span></label>
+                                <textarea id="editSystemPrompt" class="glass-input" rows="4" placeholder="Overrides your default system prompt..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Post-History Instructions <span class="label-hint">(Jailbreak)</span></label>
+                                <textarea id="editPostHistoryInstructions" class="glass-input" rows="4" placeholder="Instructions placed after chat history..."></textarea>
+                            </div>
+                            <div class="form-group">
+                                <label>Creator's Notes <span class="label-hint">(For users, not sent to AI)</span></label>
+                                <textarea id="editCreatorNotes" class="glass-input" rows="4" placeholder="Tips, warnings, or info for users..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="edit-section lorebook-edit-section">
+                            <details id="lorebookEditDetails">
+                                <summary class="section-header clickable">
+                                    <i class="fa-solid fa-book"></i> Embedded Lorebook 
+                                    <span id="lorebookEditCount" class="lorebook-count">(0 entries)</span>
+                                    <i class="fa-solid fa-chevron-down expand-icon"></i>
+                                </summary>
+                                <div class="lorebook-edit-content">
+                                    <div id="lorebookEntriesEdit" class="lorebook-entries-container">
+                                        <!-- Dynamically populated -->
+                                    </div>
+                                    <button type="button" id="addLorebookEntryBtn" class="action-btn secondary small" style="margin-top: 10px;">
+                                        <i class="fa-solid fa-plus"></i> Add Entry
+                                    </button>
+                                </div>
+                            </details>
+                        </div>
+
+                        <div class="form-actions" id="editFormActions">
+                            <button id="cancelEditBtn" class="action-btn secondary" style="display: none;"><i class="fa-solid fa-times"></i> Cancel</button>
+                            <button id="saveEditBtn" class="action-btn primary" disabled><i class="fa-solid fa-save"></i> Save Changes</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="pane-chats">
+                        <div class="chats-header">
+                            <h4><i class="fa-solid fa-message"></i> Chat History</h4>
+                            <div class="chats-actions">
+                                <button id="newChatBtn" class="action-btn secondary small"><i class="fa-solid fa-plus"></i> New Chat</button>
+                                <button id="refreshChatsBtn" class="action-btn secondary small"><i class="fa-solid fa-refresh"></i></button>
+                            </div>
+                        </div>
+                        <div class="chats-list" id="chatsList">
+                            <div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading chats...</div>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="pane-gallery">
+                        <div class="gallery-header">
+                            <h4><i class="fa-solid fa-images"></i> Character Library</h4>
+                            <div class="gallery-actions">
+                                <button id="localizeMediaBtn" class="action-btn secondary small" title="Download remote images from character card">
+                                    <i class="fa-solid fa-download"></i> Download Media
+                                </button>
+                            </div>
+                        </div>
+                        <div class="gallery-sprites-grid" id="spritesGrid">
+                            <!-- User images for this character -->
+                        </div>
+                        <div class="upload-zone" id="uploadZone">
+                            <i class="fa-solid fa-cloud-upload"></i> Drop images here to add sprites
+                            <input type="file" id="imageUploadInput" multiple accept="image/*" style="display: none;">
+                        </div>
+                    </div>
+
+                    <div class="tab-pane" id="pane-related">
+                        <div class="related-header">
+                            <h4><i class="fa-solid fa-diagram-project"></i> Related Characters</h4>
+                            <div class="related-info">
+                                <i class="fa-solid fa-info-circle"></i>
+                                <span>Characters that may share the same universe, creator, or themes</span>
+                            </div>
+                        </div>
+                        <div class="related-filters">
+                            <label class="related-filter-toggle">
+                                <input type="checkbox" id="relatedFilterTags" checked>
+                                <span><i class="fa-solid fa-tags"></i> Shared Tags</span>
+                            </label>
+                            <label class="related-filter-toggle">
+                                <input type="checkbox" id="relatedFilterCreator" checked>
+                                <span><i class="fa-solid fa-user-pen"></i> Same Creator</span>
+                            </label>
+                            <label class="related-filter-toggle">
+                                <input type="checkbox" id="relatedFilterContent" checked>
+                                <span><i class="fa-solid fa-file-lines"></i> Content Similarity</span>
+                            </label>
+                        </div>
+                        <div class="related-results" id="relatedResults">
+                            <div class="related-loading"><i class="fa-solid fa-spinner fa-spin"></i> Finding related characters...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+
+    <!-- Chub Gallery Info Modal -->
+    <div id="chubGalleryModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content chub-gallery-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-images"></i> Gallery Images Available</h3>
+                <button class="close-confirm-btn" id="closeChubGalleryModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p>The following imported characters have additional gallery images on ChubAI that are not included in the character card:</p>
+                <div id="chubGalleryList" class="chub-gallery-list">
+                    <!-- Gallery items will be populated here -->
+                </div>
+                <div class="import-info">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <span>Gallery images contain additional artwork for these characters. Visit ChubAI to view and download them.</span>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="closeChubGalleryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Got it</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import Characters Modal -->
+    <div id="importModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content import-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-download"></i> Import Characters</h3>
+                <button class="close-confirm-btn" id="closeImportModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p>Paste Chub AI character URLs below (one per line):</p>
+                <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
+https://chub.ai/characters/author/another-character
+..."></textarea>
+                <div class="import-info">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <span>Supports chub.ai and characterhub.org links. Characters will be imported as PNG files.</span>
+                </div>
+                <div id="importProgress" class="import-progress hidden">
+                    <div class="import-progress-header">
+                        <span>Importing characters...</span>
+                        <span id="importProgressCount">0/0</span>
+                    </div>
+                    <div class="import-progress-bar">
+                        <div id="importProgressFill" class="import-progress-fill"></div>
+                    </div>
+                    <div id="importLog" class="import-log"></div>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="cancelImportBtn" class="action-btn secondary"><i class="fa-solid fa-times"></i> Cancel</button>
+                <button id="startImportBtn" class="action-btn primary"><i class="fa-solid fa-download"></i> Import</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Localize Media Modal -->
+    <div id="localizeModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content import-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-download"></i> Download Remote Media</h3>
+                <button class="close-confirm-btn" id="closeLocalizeModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p id="localizeStatus">Scanning character for remote media...</p>
+                <div id="localizeProgress" class="import-progress">
+                    <div class="import-progress-header">
+                        <span>Downloading media...</span>
+                        <span id="localizeProgressCount">0/0</span>
+                    </div>
+                    <div class="import-progress-bar">
+                        <div id="localizeProgressFill" class="import-progress-fill"></div>
+                    </div>
+                    <div id="localizeLog" class="import-log"></div>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="closeLocalizeBtn" class="action-btn secondary"><i class="fa-solid fa-times"></i> Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Duplicates Found Modal -->
+    <div id="duplicatesModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content duplicates-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-clone"></i> Duplicates Found</h3>
+                <button class="close-confirm-btn" id="closeDuplicatesModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p id="duplicatesStatus">The following duplicate files were detected (exact match by checksum):</p>
+                <div id="duplicatesList" class="duplicates-list">
+                    <!-- Duplicate items will be populated here -->
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="keepAllDuplicatesBtn" class="action-btn secondary"><i class="fa-solid fa-check"></i> Keep All</button>
+                <button id="deleteSelectedDuplicatesBtn" class="action-btn primary"><i class="fa-solid fa-trash"></i> Delete Selected</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Character Duplicates Scan Modal -->
+    <div id="charDuplicatesModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content char-duplicates-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-clone"></i> Character Duplicates</h3>
+                <button class="close-confirm-btn" id="closeCharDuplicatesModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <div id="charDuplicatesScanStatus" class="char-duplicates-status">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Scanning library for duplicates...
+                </div>
+                <div id="charDuplicatesResults" class="char-duplicates-results">
+                    <!-- Duplicate groups will be populated here -->
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="closeCharDuplicatesModalBtn" class="action-btn secondary"><i class="fa-solid fa-check"></i> Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pre-Import Duplicate Warning Modal -->
+    <div id="preImportDuplicateModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content pre-import-duplicate-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-exclamation-triangle"></i> Potential Duplicate Found</h3>
+                <button class="close-confirm-btn" id="closePreImportDuplicateModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <div id="preImportDuplicateInfo" class="pre-import-info">
+                    <!-- Import character info -->
+                </div>
+                <div id="preImportDuplicateMatches" class="pre-import-matches">
+                    <!-- Existing matches will be populated here -->
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="preImportSkipBtn" class="action-btn secondary"><i class="fa-solid fa-ban"></i> Skip Import</button>
+                <button id="preImportAnyway" class="action-btn secondary"><i class="fa-solid fa-plus"></i> Import Anyway</button>
+                <button id="preImportReplaceBtn" class="action-btn primary"><i class="fa-solid fa-rotate"></i> Replace Existing</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Save Confirmation Modal -->
+    <div id="confirmSaveModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-clipboard-check"></i> Confirm Changes</h3>
+                <button class="close-confirm-btn" id="closeConfirmModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p>Review the following changes before saving:</p>
+                <div class="changes-diff" id="changesDiff">
+                    <!-- Diff will be populated here -->
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="cancelSaveBtn" class="action-btn secondary"><i class="fa-solid fa-times"></i> Cancel</button>
+                <button id="confirmSaveBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Confirm Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Gallery Settings Modal -->
+    <div id="gallerySettingsModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content settings-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-gear"></i> Gallery Settings</h3>
+                <button class="close-confirm-btn" id="closeSettingsModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body settings-body">
+                <!-- ChubAI Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-cloud"></i> ChubAI Integration</h4>
+                    <div class="settings-row">
+                        <label for="settingsChubToken">URQL Token:</label>
+                        <div class="settings-input-group">
+                            <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
+                            <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsRememberToken"> Remember token
+                        </label>
+                        <span class="settings-hint">Found in browser DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
+                    </div>
+                </div>
+                
+                <!-- Duplicate Detection Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-clone"></i> Duplicate Detection</h4>
+                    <div class="settings-row">
+                        <label for="settingsMinScore">Minimum Match Score:</label>
+                        <div class="settings-slider-group">
+                            <input type="range" id="settingsMinScore" min="20" max="80" step="5" value="35">
+                            <span id="minScoreValue">35</span>
+                        </div>
+                        <span class="settings-hint">Lower = more matches shown. Scoring: Name (15-25 pts), Creator (20 pts), Description (up to 20 pts), First Message (up to 15 pts)</span>
+                    </div>
+                </div>
+                
+                <!-- Search Defaults Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-search"></i> Default Search Options</h4>
+                    <div class="settings-row checkboxes">
+                        <label><input type="checkbox" id="settingsSearchName" checked> Character Name</label>
+                        <label><input type="checkbox" id="settingsSearchTags" checked> Tags</label>
+                        <label><input type="checkbox" id="settingsSearchAuthor"> Author</label>
+                        <label><input type="checkbox" id="settingsSearchNotes"> Creator Notes</label>
+                    </div>
+                </div>
+                
+                <!-- Default Sort Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-sort"></i> Default Sort Order</h4>
+                    <div class="settings-row">
+                        <select id="settingsDefaultSort" class="glass-select">
+                            <option value="name_asc">Name (A-Z)</option>
+                            <option value="name_desc">Name (Z-A)</option>
+                            <option value="date_new">Date Added (Newest)</option>
+                            <option value="date_old">Date Added (Oldest)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Experimental Features Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-flask"></i> Experimental Features</h4>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsRichCreatorNotes"> Enable rich creator's notes rendering
+                        </label>
+                        <span class="settings-hint">Uses sandboxed iframe to render creator notes with full CSS/HTML support. May cause issues with some characters that use unusual formatting.</span>
+                    </div>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="resetSettingsBtn" class="action-btn secondary"><i class="fa-solid fa-undo"></i> Reset to Defaults</button>
+                <button id="saveSettingsBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="gallery.js?v=59"></script>
+</body>
+</html>
