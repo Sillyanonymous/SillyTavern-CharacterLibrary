@@ -3331,21 +3331,29 @@ function openGreetingsModal() {
     document.getElementById('greetingsModalSave').onclick = () => {
         // Update First Message
         const newFirstMes = document.getElementById('expandedFirstMes').value;
-        firstMesField.value = newFirstMes;
-        firstMesField.dispatchEvent(new Event('input', { bubbles: true }));
+        const firstMesFieldCurrent = document.getElementById('editFirstMes');
+        if (firstMesFieldCurrent) {
+            firstMesFieldCurrent.value = newFirstMes;
+            firstMesFieldCurrent.dispatchEvent(new Event('input', { bubbles: true }));
+        }
         
         // Collect and update alternate greetings
         const expandedContainer = document.getElementById('expandedAltGreetingsContainer');
         const expandedGreetings = [];
-        expandedContainer.querySelectorAll('.expanded-greeting-textarea').forEach(textarea => {
-            expandedGreetings.push(textarea.value);
-        });
+        if (expandedContainer) {
+            expandedContainer.querySelectorAll('.expanded-greeting-textarea').forEach(textarea => {
+                expandedGreetings.push(textarea.value);
+            });
+        }
         
         // Clear and repopulate alt greetings container in main edit form
-        altGreetingsContainer.innerHTML = '';
-        expandedGreetings.forEach((greeting, idx) => {
-            addAltGreetingField(altGreetingsContainer, greeting, idx);
-        });
+        const altGreetingsContainerCurrent = document.getElementById('altGreetingsEditContainer');
+        if (altGreetingsContainerCurrent) {
+            altGreetingsContainerCurrent.innerHTML = '';
+            expandedGreetings.forEach((greeting, idx) => {
+                addAltGreetingField(altGreetingsContainerCurrent, greeting, idx);
+            });
+        }
         
         closeModal();
         document.removeEventListener('keydown', handleKeydown);
@@ -3465,35 +3473,40 @@ function openLorebookModal() {
         const expandedContainer = document.getElementById('expandedLorebookContainer');
         const newEntries = [];
         
-        expandedContainer.querySelectorAll('.expanded-lorebook-entry').forEach((entryEl, idx) => {
-            newEntries.push({
-                name: entryEl.querySelector('.expanded-lorebook-name')?.value || '',
-                keys: entryEl.querySelector('.expanded-lorebook-keys')?.value || '',
-                secondaryKeys: entryEl.querySelector('.expanded-lorebook-secondary-keys')?.value || '',
-                content: entryEl.querySelector('.expanded-lorebook-content')?.value || '',
-                enabled: entryEl.querySelector('.expanded-lorebook-enabled')?.checked ?? true,
-                selective: entryEl.querySelector('.expanded-lorebook-selective')?.checked ?? false,
-                constant: entryEl.querySelector('.expanded-lorebook-constant')?.checked ?? false,
-                order: parseInt(entryEl.querySelector('.expanded-lorebook-order')?.value) || idx,
-                priority: parseInt(entryEl.querySelector('.expanded-lorebook-priority')?.value) || 10
+        if (expandedContainer) {
+            expandedContainer.querySelectorAll('.expanded-lorebook-entry').forEach((entryEl, idx) => {
+                newEntries.push({
+                    name: entryEl.querySelector('.expanded-lorebook-name')?.value || '',
+                    keys: entryEl.querySelector('.expanded-lorebook-keys')?.value || '',
+                    secondaryKeys: entryEl.querySelector('.expanded-lorebook-secondary-keys')?.value || '',
+                    content: entryEl.querySelector('.expanded-lorebook-content')?.value || '',
+                    enabled: entryEl.querySelector('.expanded-lorebook-enabled')?.checked ?? true,
+                    selective: entryEl.querySelector('.expanded-lorebook-selective')?.checked ?? false,
+                    constant: entryEl.querySelector('.expanded-lorebook-constant')?.checked ?? false,
+                    order: parseInt(entryEl.querySelector('.expanded-lorebook-order')?.value) || idx,
+                    priority: parseInt(entryEl.querySelector('.expanded-lorebook-priority')?.value) || 10
+                });
             });
-        });
+        }
         
         // Clear and repopulate lorebook container in main edit form
-        lorebookContainer.innerHTML = '';
-        newEntries.forEach((entry, idx) => {
-            addLorebookEntryField(lorebookContainer, {
-                comment: entry.name,
-                keys: entry.keys.split(',').map(k => k.trim()).filter(k => k),
-                secondary_keys: entry.secondaryKeys.split(',').map(k => k.trim()).filter(k => k),
-                content: entry.content,
-                enabled: entry.enabled,
-                selective: entry.selective,
-                constant: entry.constant,
-                order: entry.order,
-                priority: entry.priority
-            }, idx);
-        });
+        const lorebookContainerCurrent = document.getElementById('lorebookEntriesEdit');
+        if (lorebookContainerCurrent) {
+            lorebookContainerCurrent.innerHTML = '';
+            newEntries.forEach((entry, idx) => {
+                addLorebookEntryField(lorebookContainerCurrent, {
+                    comment: entry.name,
+                    keys: entry.keys.split(',').map(k => k.trim()).filter(k => k),
+                    secondary_keys: entry.secondaryKeys.split(',').map(k => k.trim()).filter(k => k),
+                    content: entry.content,
+                    enabled: entry.enabled,
+                    selective: entry.selective,
+                    constant: entry.constant,
+                    order: entry.order,
+                    priority: entry.priority
+                }, idx);
+            });
+        }
         
         updateLorebookCount();
         closeModal();
@@ -4349,13 +4362,19 @@ function setupEventListeners() {
     // Add Alternate Greeting Button
     const addAltGreetingBtn = document.getElementById('addAltGreetingBtn');
     if (addAltGreetingBtn) {
-        addAltGreetingBtn.onclick = () => addAltGreetingField();
+        addAltGreetingBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            addAltGreetingField();
+        };
     }
     
     // Add Lorebook Entry Button
     const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
     if (addLorebookEntryBtn) {
-        addLorebookEntryBtn.onclick = () => {
+        addLorebookEntryBtn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             addLorebookEntryField();
             updateLorebookCount();
         };
@@ -4426,7 +4445,7 @@ function addAltGreetingField(container, value = '', index = null) {
     wrapper.innerHTML = `
         <div style="display: flex; align-items: flex-start; gap: 8px;">
             <span style="color: var(--accent); font-weight: bold; padding-top: 8px;">#${idx + 1}</span>
-            <textarea class="glass-input alt-greeting-input" rows="3" placeholder="Alternate greeting message..." style="flex: 1;">${escapeHtml(value)}</textarea>
+            <textarea class="glass-input alt-greeting-input" rows="3" placeholder="Alternate greeting message..." style="flex: 1;"></textarea>
             <button type="button" class="remove-alt-greeting-btn" style="background: rgba(255,100,100,0.2); border: 1px solid rgba(255,100,100,0.3); color: #f88; padding: 8px 10px; border-radius: 6px; cursor: pointer;" title="Remove this greeting">
                 <i class="fa-solid fa-trash"></i>
             </button>
@@ -4434,6 +4453,12 @@ function addAltGreetingField(container, value = '', index = null) {
     `;
     
     container.appendChild(wrapper);
+    
+    // Set the textarea value directly (not via innerHTML) to ensure .value property is set
+    const textarea = wrapper.querySelector('.alt-greeting-input');
+    if (textarea && value) {
+        textarea.value = value;
+    }
     
     // Add remove button handler
     const removeBtn = wrapper.querySelector('.remove-alt-greeting-btn');
@@ -4533,7 +4558,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
     
     wrapper.innerHTML = `
         <div class="lorebook-entry-header">
-            <input type="text" class="glass-input lorebook-entry-name-input" placeholder="Entry name/comment" value="${escapeHtml(name)}" style="flex: 1; font-weight: 600;">
+            <input type="text" class="glass-input lorebook-entry-name-input" placeholder="Entry name/comment" style="flex: 1; font-weight: 600;">
             <div class="lorebook-entry-controls">
                 <label class="lorebook-entry-toggle ${enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                     <input type="checkbox" class="lorebook-enabled-checkbox" ${enabled ? 'checked' : ''} style="display: none;">
@@ -4548,19 +4573,19 @@ function addLorebookEntryField(container, entry = null, index = null) {
             <div class="lorebook-entry-row">
                 <div class="form-group flex-1">
                     <label>Keys <span class="label-hint">(comma-separated)</span></label>
-                    <input type="text" class="glass-input lorebook-keys-input" placeholder="keyword1, keyword2" value="${escapeHtml(keyStr)}">
+                    <input type="text" class="glass-input lorebook-keys-input" placeholder="keyword1, keyword2">
                 </div>
             </div>
             <div class="lorebook-entry-row">
                 <div class="form-group flex-1">
                     <label>Secondary Keys <span class="label-hint">(optional, for selective)</span></label>
-                    <input type="text" class="glass-input lorebook-secondary-keys-input" placeholder="secondary1, secondary2" value="${escapeHtml(secondaryKeyStr)}">
+                    <input type="text" class="glass-input lorebook-secondary-keys-input" placeholder="secondary1, secondary2">
                 </div>
             </div>
             <div class="lorebook-entry-row">
                 <div class="form-group flex-1">
                     <label>Content</label>
-                    <textarea class="glass-input lorebook-content-input" rows="3" placeholder="Lore content...">${escapeHtml(content)}</textarea>
+                    <textarea class="glass-input lorebook-content-input" rows="3" placeholder="Lore content..."></textarea>
                 </div>
             </div>
             <div class="lorebook-entry-row" style="gap: 15px;">
@@ -4574,17 +4599,25 @@ function addLorebookEntryField(container, entry = null, index = null) {
                 </label>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label style="font-size: 0.85em;">Order:</label>
-                    <input type="number" class="glass-input lorebook-order-input" value="${order}" style="width: 60px; padding: 4px 8px;">
+                    <input type="number" class="glass-input lorebook-order-input" style="width: 60px; padding: 4px 8px;">
                 </div>
                 <div style="display: flex; align-items: center; gap: 6px;">
                     <label style="font-size: 0.85em;">Priority:</label>
-                    <input type="number" class="glass-input lorebook-priority-input" value="${priority}" style="width: 60px; padding: 4px 8px;">
+                    <input type="number" class="glass-input lorebook-priority-input" style="width: 60px; padding: 4px 8px;">
                 </div>
             </div>
         </div>
     `;
     
     container.appendChild(wrapper);
+    
+    // Set input values directly (not via innerHTML) to ensure .value properties are set correctly
+    wrapper.querySelector('.lorebook-entry-name-input').value = name;
+    wrapper.querySelector('.lorebook-keys-input').value = keyStr;
+    wrapper.querySelector('.lorebook-secondary-keys-input').value = secondaryKeyStr;
+    wrapper.querySelector('.lorebook-content-input').value = content;
+    wrapper.querySelector('.lorebook-order-input').value = order;
+    wrapper.querySelector('.lorebook-priority-input').value = priority;
     
     // Toggle enabled handler
     const toggleLabel = wrapper.querySelector('.lorebook-entry-toggle');
