@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=25">
+    <link rel="stylesheet" href="gallery.css?v=32">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -597,22 +597,36 @@
 
                         <div class="edit-section">
                             <h4 class="section-header"><i class="fa-solid fa-scroll"></i> Character Definition</h4>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Description / Persona</label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editDescription" data-label="Description / Persona" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editDescription" class="glass-input" rows="5" placeholder="Who is this character?"></textarea>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Personality Summary</label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editPersonality" data-label="Personality Summary" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..."></textarea>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Scenario / Setting</label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editScenario" data-label="Scenario / Setting" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..."></textarea>
                             </div>
                         </div>
 
                         <div class="edit-section">
-                            <h4 class="section-header"><i class="fa-solid fa-comments"></i> Messages</h4>
+                            <h4 class="section-header">
+                                <i class="fa-solid fa-comments"></i> Messages
+                                <button type="button" id="expandGreetingsBtn" class="section-expand-btn hidden" title="Edit all greetings in expanded view">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                            </h4>
                             <div class="form-group">
                                 <label>First Message</label>
                                 <textarea id="editFirstMes" class="glass-input" rows="5" placeholder="Opening message from the character..."></textarea>
@@ -626,34 +640,52 @@
                                     <i class="fa-solid fa-plus"></i> Add Greeting
                                 </button>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Example Dialogue <span class="label-hint">(for training context)</span></label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editMesExample" data-label="Example Dialogue" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editMesExample" class="glass-input" rows="5" placeholder="{{user}}: Hello!\n{{char}}: *waves* Hi there!"></textarea>
                             </div>
                         </div>
 
                         <div class="edit-section">
                             <h4 class="section-header"><i class="fa-solid fa-wand-magic-sparkles"></i> Advanced (Prompt Overrides)</h4>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>System Prompt <span class="label-hint">(Main Prompt Override)</span></label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editSystemPrompt" data-label="System Prompt" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editSystemPrompt" class="glass-input" rows="4" placeholder="Overrides your default system prompt..."></textarea>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Post-History Instructions <span class="label-hint">(Jailbreak)</span></label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editPostHistoryInstructions" data-label="Post-History Instructions" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editPostHistoryInstructions" class="glass-input" rows="4" placeholder="Instructions placed after chat history..."></textarea>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group expandable-field">
                                 <label>Creator's Notes <span class="label-hint">(For users, not sent to AI)</span></label>
+                                <button type="button" class="expand-field-btn hidden" data-field="editCreatorNotes" data-label="Creator's Notes" title="Expand editor">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
                                 <textarea id="editCreatorNotes" class="glass-input" rows="4" placeholder="Tips, warnings, or info for users..."></textarea>
                             </div>
                         </div>
 
                         <div class="edit-section lorebook-edit-section">
+                            <h4 class="section-header">
+                                <i class="fa-solid fa-book"></i> Embedded Lorebook
+                                <span id="lorebookEditCount" class="lorebook-count">(0 entries)</span>
+                                <button type="button" id="expandLorebookBtn" class="section-expand-btn hidden" title="Edit lorebook in expanded view">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                            </h4>
                             <details id="lorebookEditDetails">
-                                <summary class="section-header clickable">
-                                    <i class="fa-solid fa-book"></i> Embedded Lorebook 
-                                    <span id="lorebookEditCount" class="lorebook-count">(0 entries)</span>
+                                <summary class="lorebook-toggle-summary">
                                     <i class="fa-solid fa-chevron-down expand-icon"></i>
+                                    <span>Show/Hide Entries</span>
                                 </summary>
                                 <div class="lorebook-edit-content">
                                     <div id="lorebookEntriesEdit" class="lorebook-entries-container">

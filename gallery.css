@@ -606,41 +606,46 @@ body {
 }
 
 /* Lorebook Editor Section */
+.lorebook-edit-section .section-header {
+    margin-bottom: 10px;
+}
+
+.lorebook-edit-section .section-header .lorebook-count {
+    color: var(--text-secondary);
+    font-size: 0.85em;
+    font-weight: normal;
+    margin-left: 5px;
+}
+
 .lorebook-edit-section details {
     border: 1px solid var(--glass-border);
     border-radius: 8px;
     background: rgba(0,0,0,0.15);
 }
 
-.lorebook-edit-section summary.section-header {
+.lorebook-toggle-summary {
     cursor: pointer;
-    padding: 12px 15px;
-    margin: 0;
+    padding: 10px 15px;
     display: flex;
     align-items: center;
     gap: 8px;
     user-select: none;
     border-radius: 8px;
     transition: background 0.2s;
+    color: var(--text-secondary);
+    font-size: 0.9em;
 }
 
-.lorebook-edit-section summary.section-header:hover {
+.lorebook-toggle-summary:hover {
     background: rgba(255,255,255,0.05);
 }
 
-.lorebook-edit-section summary.section-header .lorebook-count {
-    color: var(--text-secondary);
-    font-size: 0.9em;
-    font-weight: normal;
-}
-
-.lorebook-edit-section summary.section-header .expand-icon {
-    margin-left: auto;
+.lorebook-toggle-summary .expand-icon {
     font-size: 0.8em;
     transition: transform 0.2s;
 }
 
-.lorebook-edit-section details[open] summary .expand-icon {
+.lorebook-edit-section details[open] .lorebook-toggle-summary .expand-icon {
     transform: rotate(180deg);
 }
 
@@ -1016,6 +1021,379 @@ h3 {
 
 .form-group {
     margin-bottom: 20px;
+}
+
+/* Expandable field container */
+.form-group.expandable-field {
+    position: relative;
+}
+
+.expand-field-btn {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 26px;
+    height: 26px;
+    background: rgba(74, 158, 255, 0.2);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 6px;
+    color: var(--accent);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+    z-index: 1;
+}
+
+.expand-field-btn:hover {
+    background: rgba(74, 158, 255, 0.35);
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+.expand-field-btn.hidden {
+    display: none;
+}
+
+/* Section expand button (in section headers for Greetings/Lorebook) */
+.section-expand-btn {
+    margin-left: auto;
+    width: 28px;
+    height: 28px;
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid rgba(74, 158, 255, 0.25);
+    border-radius: 6px;
+    color: var(--accent);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    transition: all 0.15s ease;
+}
+
+.section-expand-btn:hover {
+    background: rgba(74, 158, 255, 0.3);
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+.section-expand-btn.hidden {
+    display: none;
+}
+
+/* Expanded field modal */
+.expand-field-modal {
+    width: 90vw !important;
+    max-width: 900px !important;
+    height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.expand-field-body {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.expand-field-textarea {
+    flex: 1;
+    width: 100%;
+    min-height: 300px;
+    resize: none;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    padding: 15px;
+}
+
+/* Section expand modal (Greetings & Lorebook) */
+.section-expand-modal {
+    width: 95vw !important;
+    max-width: 1000px !important;
+    height: 85vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.section-expand-body {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+/* Greetings expanded modal styles */
+.expanded-greeting-section {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.expanded-section-label {
+    color: var(--accent);
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--glass-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.expanded-section-label i {
+    opacity: 0.8;
+}
+
+.expanded-greeting-textarea {
+    width: 100%;
+    resize: vertical;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    padding: 15px;
+}
+
+.expanded-greeting-textarea.first-message {
+    min-height: 180px;
+}
+
+.expanded-greetings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.expanded-greeting-item {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    padding: 15px;
+}
+
+.expanded-greeting-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.expanded-greeting-num {
+    color: var(--accent);
+    font-weight: bold;
+    font-size: 0.95rem;
+}
+
+.expanded-greeting-delete {
+    background: rgba(255, 100, 100, 0.15);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    color: #f88;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.expanded-greeting-delete:hover {
+    background: rgba(255, 100, 100, 0.3);
+    border-color: rgba(255, 100, 100, 0.5);
+}
+
+.no-alt-greetings {
+    color: var(--text-secondary);
+    opacity: 0.6;
+    text-align: center;
+    padding: 30px;
+    font-style: italic;
+}
+
+/* Lorebook expanded modal styles */
+.lorebook-expand-modal {
+    max-width: 1100px !important;
+}
+
+.expanded-lorebook-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 15px;
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 5px;
+}
+
+.expanded-lorebook-header span {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.expanded-lorebook-list {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.expanded-lorebook-entry {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 20px;
+    transition: opacity 0.2s ease;
+}
+
+.expanded-lorebook-entry.disabled {
+    opacity: 0.5;
+}
+
+.expanded-lorebook-entry-header {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 15px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.expanded-lorebook-entry-header .expanded-lorebook-name {
+    flex: 1;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.expanded-lorebook-entry-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.expanded-lorebook-toggle {
+    padding: 5px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.expanded-lorebook-toggle.enabled {
+    background: rgba(100, 255, 100, 0.15);
+    border: 1px solid rgba(100, 255, 100, 0.3);
+    color: #8f8;
+}
+
+.expanded-lorebook-toggle.disabled {
+    background: rgba(255, 100, 100, 0.15);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    color: #f88;
+}
+
+.expanded-lorebook-delete {
+    background: rgba(255, 100, 100, 0.15);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    color: #f88;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.expanded-lorebook-delete:hover {
+    background: rgba(255, 100, 100, 0.3);
+    border-color: rgba(255, 100, 100, 0.5);
+}
+
+.expanded-lorebook-entry-body {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.expanded-lorebook-row {
+    display: flex;
+    gap: 15px;
+    width: 100%;
+}
+
+.expanded-lorebook-row .form-group {
+    margin-bottom: 0;
+    width: 100%;
+}
+
+.expanded-lorebook-row .form-group.flex-1 {
+    flex: 1;
+    min-width: 0;
+}
+
+.expanded-lorebook-row input.glass-input,
+.expanded-lorebook-row textarea.glass-input {
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.expanded-lorebook-content {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    min-height: 120px;
+    resize: vertical;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.expanded-lorebook-options {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    margin-top: 10px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.expanded-lorebook-options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.expanded-lorebook-options label:hover {
+    color: var(--text-primary);
+}
+
+.expanded-lorebook-number {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.expanded-lorebook-number label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.expanded-lorebook-number input {
+    width: 65px;
+    padding: 5px 10px;
+    text-align: center;
+}
+
+.no-lorebook-entries {
+    color: var(--text-secondary);
+    opacity: 0.6;
+    text-align: center;
+    padding: 40px;
+    font-style: italic;
 }
 
 .form-group label {
@@ -3045,6 +3423,17 @@ textarea.glass-input {
     text-overflow: ellipsis;
 }
 
+/* Clickable character name in chats view */
+.clickable-char-name {
+    cursor: pointer;
+    transition: color 0.15s ease;
+}
+
+.clickable-char-name:hover {
+    color: var(--accent) !important;
+    text-decoration: underline;
+}
+
 .chat-card-chat-name {
     font-size: 0.85rem;
     color: var(--accent);
@@ -3477,6 +3866,73 @@ textarea.glass-input {
     padding: 60px;
     color: var(--text-secondary);
     font-size: 1.1rem;
+}
+
+/* Chat message action buttons (edit/delete) */
+.chat-message {
+    position: relative;
+}
+
+.chat-message-actions {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+}
+
+.chat-message:hover .chat-message-actions {
+    opacity: 1;
+}
+
+/* For user messages, keep buttons on right - they appear opposite the name due to row-reverse */
+.chat-message.user .chat-message-actions {
+    right: 5px;
+    left: auto;
+}
+
+.chat-msg-action-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.5);
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    transition: all 0.15s ease;
+}
+
+.chat-msg-action-btn:hover {
+    background: rgba(74, 158, 255, 0.3);
+    color: var(--accent);
+}
+
+.chat-msg-action-btn.danger:hover {
+    background: rgba(231, 76, 60, 0.3);
+    color: #e74c3c;
+}
+
+/* Edit message modal styles */
+#editMessageModal .glass-input {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    padding: 12px;
+    border-radius: 8px;
+}
+
+#editMessageModal .glass-input:focus {
+    outline: none;
+    border-color: var(--accent);
 }
 
 /* ========================================

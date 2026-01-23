@@ -649,10 +649,21 @@ async function fetchCharacters(forceRefresh = false) {
 
 // Process and Render (extracted to be reusable)
 function processAndRender(data) {
+    // Store the current active character's avatar to re-link after refresh
+    const activeCharAvatar = activeChar ? activeChar.avatar : null;
+    
     allCharacters = Array.isArray(data) ? data : (data.data || []);
     
     // Filter valid
     allCharacters = allCharacters.filter(c => c && c.avatar);
+    
+    // Re-link activeChar to the new object in allCharacters if modal is open
+    if (activeCharAvatar) {
+        const updatedChar = allCharacters.find(c => c.avatar === activeCharAvatar);
+        if (updatedChar) {
+            activeChar = updatedChar;
+        }
+    }
     
     // Populate Tags set for the filter dropdown
     const allTags = new Set();
@@ -2460,15 +2471,53 @@ async function performSave() {
                 }
             }
             
+            // Also update the character in allCharacters array for immediate grid refresh
+            const charIndex = allCharacters.findIndex(c => c.avatar === activeChar.avatar);
+            if (charIndex !== -1) {
+                // Copy all updated fields to the array entry
+                Object.assign(allCharacters[charIndex], {
+                    name: pendingPayload.name,
+                    description: pendingPayload.description,
+                    first_mes: pendingPayload.first_mes,
+                    personality: pendingPayload.personality,
+                    scenario: pendingPayload.scenario,
+                    mes_example: pendingPayload.mes_example,
+                    system_prompt: pendingPayload.system_prompt,
+                    post_history_instructions: pendingPayload.post_history_instructions,
+                    creator_notes: pendingPayload.creator_notes,
+                    creator: pendingPayload.creator,
+                    character_version: pendingPayload.character_version,
+                    tags: pendingPayload.tags,
+                    alternate_greetings: pendingPayload.alternate_greetings,
+                    character_book: pendingPayload.character_book
+                });
+                if (allCharacters[charIndex].data) {
+                    const existingExt = allCharacters[charIndex].data.extensions;
+                    Object.assign(allCharacters[charIndex].data, pendingPayload.data);
+                    if (existingExt) {
+                        allCharacters[charIndex].data.extensions = existingExt;
+                    }
+                }
+                // Ensure activeChar points to the array entry
+                activeChar = allCharacters[charIndex];
+            }
+            
             // Update original values to reflect saved state
             originalValues = collectEditValues();
+            
+            // Refresh the modal display to show saved changes
+            refreshModalDisplay();
+            
+            // Force re-render the grid to show updated data immediately
+            performSearch();
             
             // Close confirmation and lock editing
             document.getElementById('confirmSaveModal').classList.add('hidden');
             setEditLock(true);
             pendingPayload = null;
             
-            fetchCharacters(); // Refresh grid
+            // Also fetch from server to ensure full sync (in background)
+            fetchCharacters();
         } else {
             const err = await response.text();
             showToast("Error saving: " + err, "error");
@@ -2476,6 +2525,88 @@ async function performSave() {
     } catch (e) {
         showToast("Network error saving character: " + e.message, "error");
     }
+}
+
+/**
+ * Refresh the modal display with current activeChar data
+ * Called after save to update the Details tab without re-opening the modal
+ */
+function refreshModalDisplay() {
+    if (!activeChar) return;
+    
+    const char = activeChar;
+    
+    // Update modal title
+    document.getElementById('modalTitle').innerText = char.name;
+    
+    // Update author
+    const author = char.creator || (char.data ? char.data.creator : "") || "";
+    const authContainer = document.getElementById('modalAuthorContainer');
+    const authorEl = document.getElementById('modalAuthor');
+    if (author && authContainer) {
+        authorEl.innerText = author;
+        authContainer.style.display = 'inline';
+    } else if (authContainer) {
+        authContainer.style.display = 'none';
+    }
+    
+    // Update Creator Notes
+    const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
+    const notesBox = document.getElementById('modalCreatorNotesBox');
+    const notesContainer = document.getElementById('modalCreatorNotes');
+    if (creatorNotes && notesBox && notesContainer) {
+        notesBox.style.display = 'block';
+        renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
+    } else if (notesBox) {
+        notesBox.style.display = 'none';
+    }
+    
+    // Update Description/First Message
+    const desc = char.description || (char.data ? char.data.description : "") || "";
+    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+    document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
+    document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
+    
+    // Update Alternate Greetings
+    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
+    const altBox = document.getElementById('modalAltGreetingsBox');
+    if (altBox) {
+        if (altGreetings && altGreetings.length > 0) {
+            document.getElementById('altGreetingsCount').innerText = altGreetings.length;
+            const listHTML = altGreetings.map((g, i) => 
+                `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
+            ).join('');
+            document.getElementById('modalAltGreetings').innerHTML = listHTML;
+            altBox.style.display = 'block';
+        } else {
+            altBox.style.display = 'none';
+        }
+    }
+    
+    // Update Embedded Lorebook
+    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
+    const lorebookBox = document.getElementById('modalLorebookBox');
+    if (lorebookBox) {
+        if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
+            document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
+            const lorebookHTML = characterBook.entries.map((entry, i) => {
+                const keys = entry.keys || entry.key || [];
+                const keyStr = Array.isArray(keys) ? keys.join(', ') : keys;
+                const content = entry.content || '';
+                const name = entry.comment || entry.name || `Entry ${i + 1}`;
+                const enabled = entry.enabled !== false;
+                
+                return `<div class="lorebook-entry" style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid ${enabled ? 'var(--accent)' : '#666'};"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><strong style="color: ${enabled ? 'var(--accent)' : '#888'};">${escapeHtml(name.trim())}</strong><span style="font-size: 0.8em; color: ${enabled ? '#8f8' : '#f88'};">${enabled ? '✓ Enabled' : '✗ Disabled'}</span></div><div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;"><i class="fa-solid fa-key"></i> ${escapeHtml(keyStr) || '(no keys)'}</div><div style="font-size: 0.9em; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">${escapeHtml(content.trim().substring(0, 300))}${content.length > 300 ? '...' : ''}</div></div>`;
+            }).join('');
+            document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
+            lorebookBox.style.display = 'block';
+        } else {
+            lorebookBox.style.display = 'none';
+        }
+    }
+    
+    // Update tags in sidebar
+    renderSidebarTags(getTags(char), !isEditLocked);
 }
 
 // Legacy saveCharacter now shows confirmation
@@ -2499,6 +2630,8 @@ function setEditLock(locked) {
     // All editable inputs in the edit pane
     const editInputs = document.querySelectorAll('#pane-edit .glass-input');
     const removeGreetingBtns = document.querySelectorAll('.remove-alt-greeting-btn');
+    const expandFieldBtns = document.querySelectorAll('.expand-field-btn');
+    const sectionExpandBtns = document.querySelectorAll('.section-expand-btn');
     
     if (locked) {
         lockHeader?.classList.remove('unlocked');
@@ -2519,6 +2652,10 @@ function setEditLock(locked) {
         if (cancelBtn) cancelBtn.style.display = 'none';
         if (addAltGreetingBtn) addAltGreetingBtn.disabled = true;
         removeGreetingBtns.forEach(btn => btn.disabled = true);
+        
+        // Hide expand buttons when locked
+        expandFieldBtns.forEach(btn => btn.classList.add('hidden'));
+        sectionExpandBtns.forEach(btn => btn.classList.add('hidden'));
         
         // Lorebook editor
         const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
@@ -2556,6 +2693,10 @@ function setEditLock(locked) {
         if (cancelBtn) cancelBtn.style.display = '';
         if (addAltGreetingBtn) addAltGreetingBtn.disabled = false;
         removeGreetingBtns.forEach(btn => btn.disabled = false);
+        
+        // Show expand buttons when unlocked
+        expandFieldBtns.forEach(btn => btn.classList.remove('hidden'));
+        sectionExpandBtns.forEach(btn => btn.classList.remove('hidden'));
         
         // Lorebook editor
         const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
@@ -2979,7 +3120,641 @@ document.addEventListener('DOMContentLoaded', () => {
             hideTagAutocomplete();
         }
     });
+    
+    // Initialize expand field buttons
+    initExpandFieldButtons();
+    
+    // Initialize section expand buttons (Greetings and Lorebook)
+    initSectionExpandButtons();
 });
+
+// ==============================================
+// Expand Field Modal for Larger Text Editing
+// ==============================================
+
+/**
+ * Initialize click handlers for expand field buttons
+ */
+function initExpandFieldButtons() {
+    document.querySelectorAll('.expand-field-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const fieldId = btn.dataset.field;
+            const fieldLabel = btn.dataset.label;
+            openExpandedFieldEditor(fieldId, fieldLabel);
+        });
+    });
+}
+
+/**
+ * Initialize section expand buttons for Greetings and Lorebook
+ */
+function initSectionExpandButtons() {
+    // Greetings expand button
+    const expandGreetingsBtn = document.getElementById('expandGreetingsBtn');
+    if (expandGreetingsBtn) {
+        expandGreetingsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openGreetingsModal();
+        });
+    }
+    
+    // Lorebook expand button
+    const expandLorebookBtn = document.getElementById('expandLorebookBtn');
+    if (expandLorebookBtn) {
+        expandLorebookBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openLorebookModal();
+        });
+    }
+}
+
+/**
+ * Open full-screen modal for editing all greetings (First Message + Alternate Greetings)
+ */
+function openGreetingsModal() {
+    // Get current values from the edit form
+    const firstMesField = document.getElementById('editFirstMes');
+    const altGreetingsContainer = document.getElementById('altGreetingsEditContainer');
+    
+    if (!firstMesField) {
+        showToast('Greetings fields not found', 'error');
+        return;
+    }
+    
+    // Collect current alternate greetings
+    const altGreetings = [];
+    if (altGreetingsContainer) {
+        const altInputs = altGreetingsContainer.querySelectorAll('.alt-greeting-input');
+        altInputs.forEach(input => {
+            altGreetings.push(input.value);
+        });
+    }
+    
+    // Build modal HTML
+    let altGreetingsHtml = '';
+    altGreetings.forEach((greeting, idx) => {
+        altGreetingsHtml += `
+            <div class="expanded-greeting-item" data-index="${idx}">
+                <div class="expanded-greeting-header">
+                    <span class="expanded-greeting-num">#${idx + 1}</span>
+                    <button type="button" class="expanded-greeting-delete" title="Delete this greeting">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+                <textarea class="glass-input expanded-greeting-textarea" rows="6" placeholder="Alternate greeting message...">${escapeHtml(greeting)}</textarea>
+            </div>
+        `;
+    });
+    
+    const modalHtml = `
+        <div id="greetingsExpandModal" class="modal-overlay">
+            <div class="modal-glass section-expand-modal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-comments"></i> Edit Greetings</h2>
+                    <div class="modal-controls">
+                        <button id="greetingsModalSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply All</button>
+                        <button class="close-btn" id="greetingsModalClose">&times;</button>
+                    </div>
+                </div>
+                <div class="section-expand-body">
+                    <div class="expanded-greeting-section">
+                        <h3 class="expanded-section-label"><i class="fa-solid fa-message"></i> First Message</h3>
+                        <textarea id="expandedFirstMes" class="glass-input expanded-greeting-textarea first-message" rows="8" placeholder="Opening message from the character...">${escapeHtml(firstMesField.value)}</textarea>
+                    </div>
+                    
+                    <div class="expanded-greeting-section">
+                        <h3 class="expanded-section-label">
+                            <i class="fa-solid fa-layer-group"></i> Alternate Greetings
+                            <button type="button" id="addExpandedGreetingBtn" class="action-btn secondary small" style="margin-left: auto;">
+                                <i class="fa-solid fa-plus"></i> Add Greeting
+                            </button>
+                        </h3>
+                        <div id="expandedAltGreetingsContainer" class="expanded-greetings-list">
+                            ${altGreetingsHtml || '<div class="no-alt-greetings">No alternate greetings yet. Click "Add Greeting" to create one.</div>'}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('greetingsExpandModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById('greetingsExpandModal');
+    const expandedFirstMes = document.getElementById('expandedFirstMes');
+    
+    // Focus first message textarea
+    setTimeout(() => expandedFirstMes.focus(), 50);
+    
+    // Close handlers
+    const closeModal = () => modal.remove();
+    
+    document.getElementById('greetingsModalClose').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    
+    // Escape key handler
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    document.addEventListener('keydown', handleKeydown);
+    
+    // Add greeting handler
+    document.getElementById('addExpandedGreetingBtn').onclick = () => {
+        const container = document.getElementById('expandedAltGreetingsContainer');
+        
+        // Remove "no greetings" message if present
+        const noGreetingsMsg = container.querySelector('.no-alt-greetings');
+        if (noGreetingsMsg) noGreetingsMsg.remove();
+        
+        const idx = container.querySelectorAll('.expanded-greeting-item').length;
+        const newGreetingHtml = `
+            <div class="expanded-greeting-item" data-index="${idx}">
+                <div class="expanded-greeting-header">
+                    <span class="expanded-greeting-num">#${idx + 1}</span>
+                    <button type="button" class="expanded-greeting-delete" title="Delete this greeting">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+                <textarea class="glass-input expanded-greeting-textarea" rows="6" placeholder="Alternate greeting message..."></textarea>
+            </div>
+        `;
+        container.insertAdjacentHTML('beforeend', newGreetingHtml);
+        
+        // Add delete handler to new item
+        const newItem = container.lastElementChild;
+        setupGreetingDeleteHandler(newItem);
+        
+        // Focus the new textarea
+        const newTextarea = newItem.querySelector('textarea');
+        newTextarea.focus();
+    };
+    
+    // Setup delete handlers for existing items
+    function setupGreetingDeleteHandler(item) {
+        const deleteBtn = item.querySelector('.expanded-greeting-delete');
+        deleteBtn.onclick = () => {
+            item.remove();
+            renumberExpandedGreetings();
+        };
+    }
+    
+    function renumberExpandedGreetings() {
+        const container = document.getElementById('expandedAltGreetingsContainer');
+        const items = container.querySelectorAll('.expanded-greeting-item');
+        items.forEach((item, idx) => {
+            item.dataset.index = idx;
+            const numSpan = item.querySelector('.expanded-greeting-num');
+            if (numSpan) numSpan.textContent = `#${idx + 1}`;
+        });
+        
+        // Show "no greetings" message if empty
+        if (items.length === 0) {
+            container.innerHTML = '<div class="no-alt-greetings">No alternate greetings yet. Click "Add Greeting" to create one.</div>';
+        }
+    }
+    
+    // Setup delete handlers for initial items
+    modal.querySelectorAll('.expanded-greeting-item').forEach(setupGreetingDeleteHandler);
+    
+    // Save/Apply handler
+    document.getElementById('greetingsModalSave').onclick = () => {
+        // Update First Message
+        const newFirstMes = document.getElementById('expandedFirstMes').value;
+        firstMesField.value = newFirstMes;
+        firstMesField.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        // Collect and update alternate greetings
+        const expandedContainer = document.getElementById('expandedAltGreetingsContainer');
+        const expandedGreetings = [];
+        expandedContainer.querySelectorAll('.expanded-greeting-textarea').forEach(textarea => {
+            expandedGreetings.push(textarea.value);
+        });
+        
+        // Clear and repopulate alt greetings container in main edit form
+        altGreetingsContainer.innerHTML = '';
+        expandedGreetings.forEach((greeting, idx) => {
+            addAltGreetingField(altGreetingsContainer, greeting, idx);
+        });
+        
+        closeModal();
+        document.removeEventListener('keydown', handleKeydown);
+        showToast('Greetings updated', 'success');
+    };
+}
+
+/**
+ * Open full-screen modal for editing all lorebook entries
+ */
+function openLorebookModal() {
+    const lorebookContainer = document.getElementById('lorebookEntriesEdit');
+    
+    if (!lorebookContainer) {
+        showToast('Lorebook container not found', 'error');
+        return;
+    }
+    
+    // Collect current lorebook entries from the edit form
+    const entries = [];
+    lorebookContainer.querySelectorAll('.lorebook-entry-edit').forEach((entryEl, idx) => {
+        const name = entryEl.querySelector('.lorebook-entry-name-input')?.value || '';
+        const keys = entryEl.querySelector('.lorebook-keys-input')?.value || '';
+        const secondaryKeys = entryEl.querySelector('.lorebook-secondary-keys-input')?.value || '';
+        const content = entryEl.querySelector('.lorebook-content-input')?.value || '';
+        const enabled = entryEl.querySelector('.lorebook-enabled-checkbox')?.checked ?? true;
+        const selective = entryEl.querySelector('.lorebook-selective-checkbox')?.checked ?? false;
+        const constant = entryEl.querySelector('.lorebook-constant-checkbox')?.checked ?? false;
+        const order = entryEl.querySelector('.lorebook-order-input')?.value ?? idx;
+        const priority = entryEl.querySelector('.lorebook-priority-input')?.value ?? 10;
+        
+        entries.push({ name, keys, secondaryKeys, content, enabled, selective, constant, order, priority });
+    });
+    
+    // Build entries HTML
+    let entriesHtml = '';
+    entries.forEach((entry, idx) => {
+        entriesHtml += buildExpandedLorebookEntryHtml(entry, idx);
+    });
+    
+    const modalHtml = `
+        <div id="lorebookExpandModal" class="modal-overlay">
+            <div class="modal-glass section-expand-modal lorebook-expand-modal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-book"></i> Edit Lorebook</h2>
+                    <div class="modal-controls">
+                        <button id="lorebookModalSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply All</button>
+                        <button class="close-btn" id="lorebookModalClose">&times;</button>
+                    </div>
+                </div>
+                <div class="section-expand-body">
+                    <div class="expanded-lorebook-header">
+                        <span id="expandedLorebookCount">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</span>
+                        <button type="button" id="addExpandedLorebookEntryBtn" class="action-btn secondary small">
+                            <i class="fa-solid fa-plus"></i> Add Entry
+                        </button>
+                    </div>
+                    <div id="expandedLorebookContainer" class="expanded-lorebook-list">
+                        ${entriesHtml || '<div class="no-lorebook-entries">No lorebook entries yet. Click "Add Entry" to create one.</div>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('lorebookExpandModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById('lorebookExpandModal');
+    
+    // Close handlers
+    const closeModal = () => modal.remove();
+    
+    document.getElementById('lorebookModalClose').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    
+    // Escape key handler
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    document.addEventListener('keydown', handleKeydown);
+    
+    // Add entry handler
+    document.getElementById('addExpandedLorebookEntryBtn').onclick = () => {
+        const container = document.getElementById('expandedLorebookContainer');
+        
+        // Remove "no entries" message if present
+        const noEntriesMsg = container.querySelector('.no-lorebook-entries');
+        if (noEntriesMsg) noEntriesMsg.remove();
+        
+        const idx = container.querySelectorAll('.expanded-lorebook-entry').length;
+        const newEntry = { name: '', keys: '', secondaryKeys: '', content: '', enabled: true, selective: false, constant: false, order: idx, priority: 10 };
+        const newEntryHtml = buildExpandedLorebookEntryHtml(newEntry, idx);
+        container.insertAdjacentHTML('beforeend', newEntryHtml);
+        
+        // Setup handlers for new entry
+        const newEntryEl = container.lastElementChild;
+        setupExpandedLorebookEntryHandlers(newEntryEl);
+        updateExpandedLorebookCount();
+        
+        // Focus the name input
+        const nameInput = newEntryEl.querySelector('.expanded-lorebook-name');
+        nameInput.focus();
+    };
+    
+    // Setup handlers for existing entries
+    modal.querySelectorAll('.expanded-lorebook-entry').forEach(setupExpandedLorebookEntryHandlers);
+    
+    // Save/Apply handler
+    document.getElementById('lorebookModalSave').onclick = () => {
+        const expandedContainer = document.getElementById('expandedLorebookContainer');
+        const newEntries = [];
+        
+        expandedContainer.querySelectorAll('.expanded-lorebook-entry').forEach((entryEl, idx) => {
+            newEntries.push({
+                name: entryEl.querySelector('.expanded-lorebook-name')?.value || '',
+                keys: entryEl.querySelector('.expanded-lorebook-keys')?.value || '',
+                secondaryKeys: entryEl.querySelector('.expanded-lorebook-secondary-keys')?.value || '',
+                content: entryEl.querySelector('.expanded-lorebook-content')?.value || '',
+                enabled: entryEl.querySelector('.expanded-lorebook-enabled')?.checked ?? true,
+                selective: entryEl.querySelector('.expanded-lorebook-selective')?.checked ?? false,
+                constant: entryEl.querySelector('.expanded-lorebook-constant')?.checked ?? false,
+                order: parseInt(entryEl.querySelector('.expanded-lorebook-order')?.value) || idx,
+                priority: parseInt(entryEl.querySelector('.expanded-lorebook-priority')?.value) || 10
+            });
+        });
+        
+        // Clear and repopulate lorebook container in main edit form
+        lorebookContainer.innerHTML = '';
+        newEntries.forEach((entry, idx) => {
+            addLorebookEntryField(lorebookContainer, {
+                comment: entry.name,
+                keys: entry.keys.split(',').map(k => k.trim()).filter(k => k),
+                secondary_keys: entry.secondaryKeys.split(',').map(k => k.trim()).filter(k => k),
+                content: entry.content,
+                enabled: entry.enabled,
+                selective: entry.selective,
+                constant: entry.constant,
+                order: entry.order,
+                priority: entry.priority
+            }, idx);
+        });
+        
+        updateLorebookCount();
+        closeModal();
+        document.removeEventListener('keydown', handleKeydown);
+        showToast('Lorebook updated', 'success');
+    };
+}
+
+function buildExpandedLorebookEntryHtml(entry, idx) {
+    return `
+        <div class="expanded-lorebook-entry${entry.enabled ? '' : ' disabled'}" data-index="${idx}">
+            <div class="expanded-lorebook-entry-header">
+                <input type="text" class="glass-input expanded-lorebook-name" placeholder="Entry name/comment" value="${escapeHtml(entry.name)}">
+                <div class="expanded-lorebook-entry-controls">
+                    <label class="expanded-lorebook-toggle ${entry.enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
+                        <input type="checkbox" class="expanded-lorebook-enabled" ${entry.enabled ? 'checked' : ''} style="display: none;">
+                        ${entry.enabled ? '✓ On' : '✗ Off'}
+                    </label>
+                    <button type="button" class="expanded-lorebook-delete" title="Delete entry">
+                        <i class="fa-solid fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="expanded-lorebook-entry-body">
+                <div class="expanded-lorebook-row">
+                    <div class="form-group flex-1">
+                        <label>Keys <span class="label-hint">(comma-separated)</span></label>
+                        <input type="text" class="glass-input expanded-lorebook-keys" placeholder="keyword1, keyword2" value="${escapeHtml(entry.keys)}">
+                    </div>
+                </div>
+                <div class="expanded-lorebook-row">
+                    <div class="form-group flex-1">
+                        <label>Secondary Keys <span class="label-hint">(optional, for selective)</span></label>
+                        <input type="text" class="glass-input expanded-lorebook-secondary-keys" placeholder="secondary1, secondary2" value="${escapeHtml(entry.secondaryKeys)}">
+                    </div>
+                </div>
+                <div class="expanded-lorebook-row">
+                    <div class="form-group flex-1">
+                        <label>Content</label>
+                        <textarea class="glass-input expanded-lorebook-content" rows="5" placeholder="Lore content...">${escapeHtml(entry.content)}</textarea>
+                    </div>
+                </div>
+                <div class="expanded-lorebook-options">
+                    <label>
+                        <input type="checkbox" class="expanded-lorebook-selective" ${entry.selective ? 'checked' : ''}>
+                        <span>Selective</span>
+                    </label>
+                    <label>
+                        <input type="checkbox" class="expanded-lorebook-constant" ${entry.constant ? 'checked' : ''}>
+                        <span>Constant</span>
+                    </label>
+                    <div class="expanded-lorebook-number">
+                        <label>Order:</label>
+                        <input type="number" class="glass-input expanded-lorebook-order" value="${entry.order}">
+                    </div>
+                    <div class="expanded-lorebook-number">
+                        <label>Priority:</label>
+                        <input type="number" class="glass-input expanded-lorebook-priority" value="${entry.priority}">
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function setupExpandedLorebookEntryHandlers(entryEl) {
+    // Toggle enabled handler
+    const toggleLabel = entryEl.querySelector('.expanded-lorebook-toggle');
+    const enabledCheckbox = entryEl.querySelector('.expanded-lorebook-enabled');
+    
+    toggleLabel.onclick = () => {
+        const isEnabled = enabledCheckbox.checked;
+        enabledCheckbox.checked = !isEnabled;
+        toggleLabel.className = `expanded-lorebook-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
+        entryEl.classList.toggle('disabled', isEnabled);
+    };
+    
+    // Delete handler
+    const deleteBtn = entryEl.querySelector('.expanded-lorebook-delete');
+    deleteBtn.onclick = () => {
+        entryEl.remove();
+        renumberExpandedLorebookEntries();
+        updateExpandedLorebookCount();
+    };
+}
+
+function renumberExpandedLorebookEntries() {
+    const container = document.getElementById('expandedLorebookContainer');
+    if (!container) return;
+    
+    const entries = container.querySelectorAll('.expanded-lorebook-entry');
+    entries.forEach((entry, idx) => {
+        entry.dataset.index = idx;
+    });
+    
+    // Show "no entries" message if empty
+    if (entries.length === 0) {
+        container.innerHTML = '<div class="no-lorebook-entries">No lorebook entries yet. Click "Add Entry" to create one.</div>';
+    }
+}
+
+function updateExpandedLorebookCount() {
+    const container = document.getElementById('expandedLorebookContainer');
+    const countEl = document.getElementById('expandedLorebookCount');
+    if (!container || !countEl) return;
+    
+    const count = container.querySelectorAll('.expanded-lorebook-entry').length;
+    countEl.textContent = `${count} ${count === 1 ? 'entry' : 'entries'}`;
+}
+
+/**
+ * Open expanded editor modal for a text field
+ */
+function openExpandedFieldEditor(fieldId, fieldLabel) {
+    const originalField = document.getElementById(fieldId);
+    if (!originalField) {
+        showToast('Field not found', 'error');
+        return;
+    }
+    
+    const currentValue = originalField.value;
+    
+    // Create expand modal
+    const expandModalHtml = `
+        <div id="expandFieldModal" class="modal-overlay">
+            <div class="modal-glass expand-field-modal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-expand"></i> ${escapeHtml(fieldLabel)}</h2>
+                    <div class="modal-controls">
+                        <button id="expandFieldSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply</button>
+                        <button class="close-btn" id="expandFieldClose">&times;</button>
+                    </div>
+                </div>
+                <div class="expand-field-body">
+                    <textarea id="expandFieldTextarea" class="glass-input expand-field-textarea" placeholder="Enter ${escapeHtml(fieldLabel.toLowerCase())}...">${escapeHtml(currentValue)}</textarea>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('expandFieldModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', expandModalHtml);
+    
+    const expandModal = document.getElementById('expandFieldModal');
+    const expandTextarea = document.getElementById('expandFieldTextarea');
+    
+    // Focus textarea and move cursor to end
+    setTimeout(() => {
+        expandTextarea.focus();
+        expandTextarea.setSelectionRange(expandTextarea.value.length, expandTextarea.value.length);
+    }, 50);
+    
+    // Close handlers
+    const closeExpandModal = () => {
+        expandModal.remove();
+    };
+    
+    document.getElementById('expandFieldClose').onclick = closeExpandModal;
+    expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
+    
+    // Handle Escape key
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeExpandModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    document.addEventListener('keydown', handleKeydown);
+    
+    // Save/Apply handler
+    document.getElementById('expandFieldSave').onclick = () => {
+        const newValue = expandTextarea.value;
+        originalField.value = newValue;
+        
+        // Trigger input event so any listeners know the value changed
+        originalField.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        closeExpandModal();
+        document.removeEventListener('keydown', handleKeydown);
+        showToast('Changes applied to field', 'success');
+    };
+}
+
+/**
+ * Open expanded editor modal for a textarea element (for dynamically created fields like lorebook)
+ */
+function openExpandedFieldEditorForElement(textareaElement, fieldLabel) {
+    if (!textareaElement) {
+        showToast('Field not found', 'error');
+        return;
+    }
+    
+    const currentValue = textareaElement.value;
+    
+    // Create expand modal
+    const expandModalHtml = `
+        <div id="expandFieldModal" class="modal-overlay">
+            <div class="modal-glass expand-field-modal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-expand"></i> ${escapeHtml(fieldLabel)}</h2>
+                    <div class="modal-controls">
+                        <button id="expandFieldSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply</button>
+                        <button class="close-btn" id="expandFieldClose">&times;</button>
+                    </div>
+                </div>
+                <div class="expand-field-body">
+                    <textarea id="expandFieldTextarea" class="glass-input expand-field-textarea" placeholder="Enter content...">${escapeHtml(currentValue)}</textarea>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('expandFieldModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', expandModalHtml);
+    
+    const expandModal = document.getElementById('expandFieldModal');
+    const expandTextarea = document.getElementById('expandFieldTextarea');
+    
+    // Focus textarea and move cursor to end
+    setTimeout(() => {
+        expandTextarea.focus();
+        expandTextarea.setSelectionRange(expandTextarea.value.length, expandTextarea.value.length);
+    }, 50);
+    
+    // Close handlers
+    const closeExpandModal = () => {
+        expandModal.remove();
+    };
+    
+    document.getElementById('expandFieldClose').onclick = closeExpandModal;
+    expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
+    
+    // Handle Escape key
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeExpandModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    document.addEventListener('keydown', handleKeydown);
+    
+    // Save/Apply handler
+    document.getElementById('expandFieldSave').onclick = () => {
+        const newValue = expandTextarea.value;
+        textareaElement.value = newValue;
+        
+        // Trigger input event so any listeners know the value changed
+        textareaElement.dispatchEvent(new Event('input', { bubbles: true }));
+        
+        closeExpandModal();
+        document.removeEventListener('keydown', handleKeydown);
+        showToast('Changes applied to field', 'success');
+    };
+}
 
 // Chats Functions
 async function fetchCharacterChats(char) {
@@ -7502,6 +8277,12 @@ function renderFlatChats(chats) {
             e.stopPropagation();
             deleteChatFromView(chat);
         });
+        
+        // Character name click to open details modal
+        card.querySelector('.clickable-char-name')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openCharacterDetailsFromChats(chat.character);
+        });
     });
 }
 
@@ -7561,7 +8342,7 @@ function renderGroupedChats(chats) {
                 <div class="chat-group-header">
                     ${avatarHtml}
                     <div class="chat-group-info">
-                        <div class="chat-group-name">${escapeHtml(char.name)}</div>
+                        <div class="chat-group-name clickable-char-name" data-char-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</div>
                         <div class="chat-group-count">${group.chats.length} chat${group.chats.length !== 1 ? 's' : ''}</div>
                     </div>
                     <i class="fa-solid fa-chevron-down chat-group-toggle"></i>
@@ -7575,8 +8356,18 @@ function renderGroupedChats(chats) {
     
     // Add event listeners for groups
     groupedView.querySelectorAll('.chat-group-header').forEach(header => {
-        header.addEventListener('click', () => {
+        header.addEventListener('click', (e) => {
+            // Don't toggle if clicking on character name
+            if (e.target.closest('.clickable-char-name')) return;
             header.closest('.chat-group').classList.toggle('collapsed');
+        });
+        
+        // Character name click to open details modal
+        header.querySelector('.clickable-char-name')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const charAvatar = header.closest('.chat-group').dataset.charAvatar;
+            const char = allCharacters.find(c => c.avatar === charAvatar);
+            if (char) openCharacterDetailsFromChats(char);
         });
     });
     
@@ -7630,7 +8421,7 @@ function createChatCard(chat) {
             <div class="chat-card-header">
                 ${avatarHtml}
                 <div class="chat-card-char-info">
-                    <div class="chat-card-char-name">${escapeHtml(char.name)}</div>
+                    <div class="chat-card-char-name clickable-char-name" data-char-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</div>
                     <div class="chat-card-chat-name">${escapeHtml(chatName)}</div>
                 </div>
             </div>
@@ -7712,6 +8503,13 @@ async function openChatPreview(chat) {
     avatarImg.src = avatarUrl;
     title.textContent = chatName;
     charName.textContent = chat.character.name;
+    charName.className = 'clickable-char-name';
+    charName.title = 'View character details';
+    charName.style.cursor = 'pointer';
+    charName.onclick = (e) => {
+        e.preventDefault();
+        openCharacterDetailsFromChats(chat.character);
+    };
     messageCount.textContent = chat.chat_items || chat.mes_count || '?';
     date.textContent = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     
@@ -7763,6 +8561,9 @@ async function openChatPreview(chat) {
     }
 }
 
+// Store current messages for editing
+let currentChatMessages = [];
+
 function renderChatMessages(messages, character) {
     const container = document.getElementById('chatPreviewMessages');
     
@@ -7774,39 +8575,78 @@ function renderChatMessages(messages, character) {
                 <p>This chat has no messages.</p>
             </div>
         `;
+        currentChatMessages = [];
         return;
     }
     
+    // Store messages for editing
+    currentChatMessages = messages;
+    
     const avatarUrl = character.avatar ? `/characters/${encodeURIComponent(character.avatar)}` : '/img/ai4.png';
     
-    container.innerHTML = messages.map(msg => {
+    container.innerHTML = messages.map((msg, index) => {
         const isUser = msg.is_user;
         const isSystem = msg.is_system;
         const name = msg.name || (isUser ? 'User' : character.name);
         const text = msg.mes || '';
         const time = msg.send_date ? new Date(msg.send_date).toLocaleString() : '';
         
+        // Skip rendering metadata-only messages (chat header)
+        if (index === 0 && msg.chat_metadata && !msg.mes) {
+            return ''; // Don't render the metadata header as a message
+        }
+        
+        // Action buttons for edit/delete (hide for metadata entries)
+        const isMetadata = msg.chat_metadata !== undefined;
+        const actionButtons = isMetadata ? '' : `
+            <div class="chat-message-actions">
+                <button class="chat-msg-action-btn" data-action="edit" data-index="${index}" title="Edit message">
+                    <i class="fa-solid fa-pen"></i>
+                </button>
+                <button class="chat-msg-action-btn danger" data-action="delete" data-index="${index}" title="Delete message">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        `;
+        
         if (isSystem) {
             return `
-                <div class="chat-message system">
+                <div class="chat-message system" data-msg-index="${index}">
                     <div class="chat-message-content">
                         <div class="chat-message-text">${escapeHtml(text)}</div>
                     </div>
+                    ${actionButtons}
                 </div>
             `;
         }
         
         return `
-            <div class="chat-message ${isUser ? 'user' : 'assistant'}">
+            <div class="chat-message ${isUser ? 'user' : 'assistant'}" data-msg-index="${index}">
                 ${!isUser ? `<img src="${avatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
                 <div class="chat-message-content">
                     <div class="chat-message-name">${escapeHtml(name)}</div>
-                    <div class="chat-message-text">${escapeHtml(text).substring(0, 1000)}${text.length > 1000 ? '...' : ''}</div>
+                    <div class="chat-message-text">${escapeHtml(text)}</div>
                     ${time ? `<div class="chat-message-time">${time}</div>` : ''}
                 </div>
+                ${actionButtons}
             </div>
         `;
     }).join('');
+    
+    // Add event listeners for message actions
+    container.querySelectorAll('.chat-msg-action-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = btn.dataset.action;
+            const index = parseInt(btn.dataset.index, 10);
+            
+            if (action === 'edit') {
+                editChatMessage(index);
+            } else if (action === 'delete') {
+                deleteChatMessage(index);
+            }
+        });
+    });
     
     // Scroll to bottom
     container.scrollTop = container.scrollHeight;
@@ -7856,6 +8696,190 @@ async function deleteChatFromView(chat) {
         }
     } catch (e) {
         showToast('Error: ' + e.message, 'error');
+    }
+}
+
+/**
+ * Open character details modal from the Chats view
+ * This opens the modal without switching away from chats view
+ */
+function openCharacterDetailsFromChats(char) {
+    if (!char) return;
+    openModal(char);
+}
+
+/**
+ * Edit a specific message in the current chat
+ */
+async function editChatMessage(messageIndex) {
+    if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
+        showToast('Message not found', 'error');
+        return;
+    }
+    
+    const msg = currentChatMessages[messageIndex];
+    const currentText = msg.mes || '';
+    
+    // Create edit modal
+    const editModalHtml = `
+        <div id="editMessageModal" class="modal-overlay">
+            <div class="modal-glass" style="max-width: 600px; width: 90%;">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-pen"></i> Edit Message</h2>
+                    <button class="close-btn" id="editMessageClose">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <div class="edit-message-info" style="margin-bottom: 15px; font-size: 0.85rem; color: var(--text-secondary);">
+                        <span><strong>${escapeHtml(msg.name || (msg.is_user ? 'User' : currentPreviewChar?.name || 'Character'))}</strong></span>
+                        ${msg.send_date ? `<span> • ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
+                    </div>
+                    <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;">${escapeHtml(currentText)}</textarea>
+                    <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;">
+                        <button id="editMessageCancel" class="action-btn secondary">Cancel</button>
+                        <button id="editMessageSave" class="action-btn primary"><i class="fa-solid fa-save"></i> Save</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Add modal to DOM
+    const existingModal = document.getElementById('editMessageModal');
+    if (existingModal) existingModal.remove();
+    document.body.insertAdjacentHTML('beforeend', editModalHtml);
+    
+    const editModal = document.getElementById('editMessageModal');
+    const textarea = document.getElementById('editMessageText');
+    
+    // Focus textarea
+    setTimeout(() => textarea.focus(), 50);
+    
+    // Close handlers
+    const closeEditModal = () => editModal.remove();
+    
+    document.getElementById('editMessageClose').onclick = closeEditModal;
+    document.getElementById('editMessageCancel').onclick = closeEditModal;
+    editModal.onclick = (e) => { if (e.target === editModal) closeEditModal(); };
+    
+    // Save handler
+    document.getElementById('editMessageSave').onclick = async () => {
+        const newText = textarea.value;
+        if (newText === currentText) {
+            closeEditModal();
+            return;
+        }
+        
+        try {
+            // Update the message in local array
+            currentChatMessages[messageIndex].mes = newText;
+            
+            // Save the entire chat
+            const success = await saveChatToServer(currentPreviewChat, currentChatMessages);
+            
+            if (success) {
+                showToast('Message updated', 'success');
+                closeEditModal();
+                renderChatMessages(currentChatMessages, currentPreviewChat.character);
+                clearChatCache();
+            } else {
+                // Revert local change on failure
+                currentChatMessages[messageIndex].mes = currentText;
+                showToast('Failed to save changes', 'error');
+            }
+        } catch (e) {
+            // Revert local change on error
+            currentChatMessages[messageIndex].mes = currentText;
+            showToast('Error: ' + e.message, 'error');
+        }
+    };
+}
+
+/**
+ * Delete a specific message from the current chat
+ */
+async function deleteChatMessage(messageIndex) {
+    if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
+        showToast('Message not found', 'error');
+        return;
+    }
+    
+    // Prevent deleting the first message (chat metadata header)
+    if (messageIndex === 0 && currentChatMessages[0]?.chat_metadata) {
+        showToast('Cannot delete chat metadata header', 'error');
+        return;
+    }
+    
+    const msg = currentChatMessages[messageIndex];
+    const previewText = (msg.mes || '').substring(0, 100) + (msg.mes?.length > 100 ? '...' : '');
+    
+    if (!confirm(`Delete this message?\n\n"${previewText}"\n\nThis cannot be undone!`)) {
+        return;
+    }
+    
+    try {
+        // Store the message in case we need to restore
+        const deletedMsg = currentChatMessages[messageIndex];
+        
+        // Remove from local array
+        currentChatMessages.splice(messageIndex, 1);
+        
+        // Save the entire chat
+        const success = await saveChatToServer(currentPreviewChat, currentChatMessages);
+        
+        if (success) {
+            showToast('Message deleted', 'success');
+            renderChatMessages(currentChatMessages, currentPreviewChat.character);
+            
+            // Update message count in preview
+            const countEl = document.getElementById('chatPreviewMessageCount');
+            if (countEl) {
+                countEl.textContent = currentChatMessages.length;
+            }
+            
+            clearChatCache();
+        } else {
+            // Restore the message on failure
+            currentChatMessages.splice(messageIndex, 0, deletedMsg);
+            showToast('Failed to delete message', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+/**
+ * Save the entire chat array to the server
+ */
+async function saveChatToServer(chat, messages) {
+    try {
+        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
+        const chatFileName = (chat.file_name || '').replace('.jsonl', '');
+        
+        const response = await fetch(`${API_BASE}/chats/save`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({
+                ch_name: chat.character.name,
+                file_name: chatFileName,
+                avatar_url: chat.character.avatar,
+                chat: messages
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            return result.ok === true;
+        } else {
+            const err = await response.text();
+            console.error('Failed to save chat:', err);
+            return false;
+        }
+    } catch (e) {
+        console.error('Error saving chat:', e);
+        return false;
     }
 }
 
