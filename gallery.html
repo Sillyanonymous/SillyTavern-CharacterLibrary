@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=32">
+    <link rel="stylesheet" href="gallery.css?v=40">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -153,6 +153,7 @@
                         <optgroup label="Discovery">
                             <option value="newest">🆕 Newest</option>
                             <option value="updated">🔄 Recently Updated</option>
+                            <option value="recent_hits">🌟 Recent Hits</option>
                             <option value="random">🎲 Random</option>
                         </optgroup>
                     </select>
@@ -248,6 +249,12 @@
                             <span>Showing characters by <strong id="chubAuthorBannerName">Author</strong></span>
                         </div>
                         <div class="chub-author-banner-actions">
+                            <select id="chubAuthorSortSelect" class="glass-select" title="Sort author's characters">
+                                <option value="id" selected>🆕 Newest Created</option>
+                                <option value="last_activity_at">🔄 Recently Updated</option>
+                                <option value="download_count">📥 Most Downloaded</option>
+                                <option value="star_count">⭐ Top Rated</option>
+                            </select>
                             <button id="chubFollowAuthorBtn" class="glass-btn" title="Follow this author on ChubAI">
                                 <i class="fa-solid fa-heart"></i> <span>Follow</span>
                             </button>
@@ -273,8 +280,21 @@
                 <!-- Timeline Section (hidden by default) -->
                 <div id="chubTimelineSection" class="chub-section hidden">
                     <div class="chub-timeline-header">
-                        <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
-                        <p>New characters from authors you follow</p>
+                        <div class="chub-timeline-header-left">
+                            <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
+                            <p>New characters from authors you follow</p>
+                        </div>
+                        <div class="chub-timeline-header-right">
+                            <select id="chubTimelineSortSelect" class="glass-select" title="Sort timeline">
+                                <option value="newest">🆕 Newest Created</option>
+                                <option value="updated">🔄 Recently Updated</option>
+                                <option value="oldest">🕐 Oldest First</option>
+                                <option value="name_asc">📝 Name A-Z</option>
+                                <option value="name_desc">📝 Name Z-A</option>
+                                <option value="downloads">📥 Most Downloads</option>
+                                <option value="rating">⭐ Top Rated</option>
+                            </select>
+                        </div>
                     </div>
                     <div id="chubTimelineGrid" class="chub-grid">
                         <!-- Timeline cards will be injected here -->
@@ -398,10 +418,10 @@
                 </div>
                 <div class="modal-controls">
                     <a id="chubOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on ChubAI">
-                        <i class="fa-solid fa-external-link"></i>
+                        <i class="fa-solid fa-external-link"></i> Open
                     </a>
-                    <button id="chubDownloadBtn" class="action-btn primary">
-                        <i class="fa-solid fa-download"></i> Download to SillyTavern
+                    <button id="chubDownloadBtn" class="action-btn primary" title="Download to SillyTavern">
+                        <i class="fa-solid fa-download"></i> Import
                     </button>
                     <button class="close-btn" id="chubCharClose">&times;</button>
                 </div>

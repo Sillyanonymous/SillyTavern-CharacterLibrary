@@ -8951,8 +8951,9 @@ const CHUB_DISCOVERY_PRESETS = {
     'popular_all':   { sort: 'download_count', days: 0 },
     'rated_week':    { sort: 'star_count', days: 7 },
     'rated_all':     { sort: 'star_count', days: 0 },
-    'newest':        { sort: 'created_at', days: 30 }, // Last 30 days of new chars
-    'updated':       { sort: 'id', days: 0 },
+    'newest':        { sort: 'id', days: 30 }, // Last 30 days of new chars (id = creation order)
+    'updated':       { sort: 'last_activity_at', days: 0 }, // Recently updated characters
+    'recent_hits':   { sort: 'default', days: 0, special_mode: 'newcomer' }, // Recent hits - new characters getting lots of activity
     'random':        { sort: 'random', days: 0 }
 };
 
@@ -8967,9 +8968,12 @@ let chubFilterFavorites = false;
 // ChubAI View mode and author filter
 let chubViewMode = 'browse'; // 'browse' or 'timeline'
 let chubAuthorFilter = null; // Username to filter by
+let chubAuthorSort = 'id'; // Sort for author view (id = newest)
 let chubTimelineCharacters = [];
 let chubTimelinePage = 1;
+let chubTimelineCursor = null; // Cursor for pagination
 let chubTimelineHasMore = true;
+let chubTimelineSort = 'newest'; // Sort for timeline view (client-side)
 let chubFollowedAuthors = []; // Cache of followed author usernames
 let chubCurrentUsername = null; // Current logged-in username
 
@@ -9388,10 +9392,12 @@ function initChubView() {
         toggleFollowAuthor();
     });
     
-    // Timeline load more button
+    // Timeline load more button (uses cursor-based pagination)
     document.getElementById('chubTimelineLoadMoreBtn')?.addEventListener('click', () => {
-        chubTimelinePage++;
-        loadChubTimeline();
+        if (chubTimelineCursor) {
+            chubTimelinePage++;
+            loadChubTimeline(false);
+        }
     });
     
     // Search handlers
@@ -9471,22 +9477,53 @@ function initChubView() {
     document.getElementById('chubNsfwToggle')?.addEventListener('click', () => {
         chubNsfwEnabled = !chubNsfwEnabled;
         updateNsfwToggleState();
-        chubCharacters = [];
-        chubCurrentPage = 1;
-        loadChubCharacters();
+        
+        // Refresh the appropriate view based on current mode
+        if (chubViewMode === 'timeline') {
+            chubTimelineCharacters = [];
+            chubTimelinePage = 1;
+            chubTimelineCursor = null;
+            loadChubTimeline(true);
+        } else {
+            chubCharacters = [];
+            chubCurrentPage = 1;
+            loadChubCharacters();
+        }
     });
     
-    // Refresh button
+    // Refresh button - works for both Browse and Timeline modes
     document.getElementById('refreshChubBtn')?.addEventListener('click', () => {
-        chubCharacters = [];
-        chubCurrentPage = 1;
-        loadChubCharacters(true);
+        if (chubViewMode === 'timeline') {
+            chubTimelineCharacters = [];
+            chubTimelinePage = 1;
+            chubTimelineCursor = null;
+            loadChubTimeline(true);
+        } else {
+            chubCharacters = [];
+            chubCurrentPage = 1;
+            loadChubCharacters(true);
+        }
     });
     
     // Load more button
     document.getElementById('chubLoadMoreBtn')?.addEventListener('click', () => {
         chubCurrentPage++;
         loadChubCharacters();
+    });
+    
+    // Timeline sort dropdown
+    document.getElementById('chubTimelineSortSelect')?.addEventListener('change', (e) => {
+        chubTimelineSort = e.target.value;
+        console.log('[ChubTimeline] Sort changed to:', chubTimelineSort);
+        renderChubTimeline(); // Re-render with new sort (client-side sorting)
+    });
+    
+    // Author sort dropdown
+    document.getElementById('chubAuthorSortSelect')?.addEventListener('change', (e) => {
+        chubAuthorSort = e.target.value;
+        chubCharacters = [];
+        chubCurrentPage = 1;
+        loadChubCharacters(); // Reload with new sort (server-side sorting)
     });
     
     // Character modal handlers
@@ -9716,7 +9753,6 @@ function extractChubTagsFromResults(characters) {
     if (sortedTags.length > 0) {
         chubPopularTags = sortedTags;
         renderChubPopularTags();
-        console.log('[ChubAI] Extracted popular tags:', sortedTags.slice(0, 10));
     }
 }
 
@@ -9874,27 +9910,36 @@ async function loadChubTimeline(forceRefresh = false) {
     const grid = document.getElementById('chubTimelineGrid');
     const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
     
-    if (chubTimelinePage === 1 || forceRefresh) {
+    if (forceRefresh || (!chubTimelineCursor && chubTimelineCharacters.length === 0)) {
         grid.innerHTML = '<div class="chub-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading timeline...</div>';
         if (forceRefresh) {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
+            chubTimelineCursor = null;
         }
     }
     
     try {
         // Use the dedicated timeline endpoint which returns updates from followed authors
+        // This API uses cursor-based pagination, not page-based
         const params = new URLSearchParams();
-        params.set('page', chubTimelinePage.toString());
+        params.set('first', '50'); // Request more items per page
         params.set('nsfw', chubNsfwEnabled.toString());
-        params.set('nsfl', 'false');
+        params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
+        params.set('count', 'true'); // Request total count for better pagination info
+        
+        // Use cursor for pagination if we have one (for loading more)
+        if (chubTimelineCursor) {
+            params.set('cursor', chubTimelineCursor);
+            console.log('[ChubTimeline] Loading next page with cursor');
+        }
         
         const headers = {
             'Accept': 'application/json',
             'Authorization': `Bearer ${chubToken}`
         };
         
-        console.log('[ChubTimeline] Loading from /api/timeline/v1, page', chubTimelinePage);
+        console.log('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
         
         const response = await fetch(`${CHUB_API_BASE}/api/timeline/v1?${params.toString()}`, {
             method: 'GET',
@@ -9913,21 +9958,25 @@ async function loadChubTimeline(forceRefresh = false) {
         }
         
         const data = await response.json();
-        console.log('[ChubTimeline] Raw response:', data);
+        
+        // Extract response data (may be nested under 'data')
+        const responseData = data.data || data;
+        
+        // Extract total count if available
+        const totalCount = responseData.count ?? null;
+        
+        // Extract cursor for next page
+        const nextCursor = responseData.cursor || null;
         
         // Extract nodes from response
         let nodes = [];
-        if (data.nodes) {
-            nodes = data.nodes;
-        } else if (data.data?.nodes) {
-            nodes = data.data.nodes;
-        } else if (Array.isArray(data.data)) {
-            nodes = data.data;
-        } else if (Array.isArray(data)) {
-            nodes = data;
+        if (responseData.nodes) {
+            nodes = responseData.nodes;
+        } else if (Array.isArray(responseData)) {
+            nodes = responseData;
         }
         
-        console.log('[ChubTimeline] Got', nodes.length, 'total items from timeline');
+        console.log('[ChubTimeline] Got', nodes.length, 'items from API');
         
         // Filter to only include characters (not lorebooks, posts, etc.)
         // Timeline API returns paths without "characters/" prefix, so check for:
@@ -9938,46 +9987,91 @@ async function loadChubTimeline(forceRefresh = false) {
             
             // Skip if explicitly a lorebook or post
             if (fullPath.startsWith('lorebooks/') || fullPath.startsWith('posts/')) {
-                console.log('[ChubTimeline] Skipping lorebook/post:', fullPath);
                 return false;
             }
             
             // If it has entries array, it's a lorebook
             if (node.entries && Array.isArray(node.entries)) {
-                console.log('[ChubTimeline] Skipping lorebook (has entries):', fullPath);
                 return false;
             }
+            
+            // Check for character-specific properties that indicate this is a character
+            // Characters have: tagline, first_mes/definition, topics, etc.
+            const hasCharacterProperties = node.tagline !== undefined || 
+                                          node.definition !== undefined ||
+                                          node.first_mes !== undefined ||
+                                          node.topics !== undefined ||
+                                          (node.labels && Array.isArray(node.labels));
             
             // If fullPath has format "characters/user/slug" or "user/slug" it's likely a character
             // Also accept if it has character-like properties
             const hasCharPath = fullPath.startsWith('characters/') || 
                                (fullPath.includes('/') && !fullPath.startsWith('lorebooks/') && !fullPath.startsWith('posts/'));
             
-            return hasCharPath;
+            const isCharacter = hasCharPath || hasCharacterProperties;
+            
+            return isCharacter;
         });
         
-        console.log('[ChubTimeline] Filtered to', characterNodes.length, 'characters');
-        
-        if (chubTimelinePage === 1) {
+        // Add new characters (dedupe by fullPath)
+        if (chubTimelineCharacters.length === 0) {
             chubTimelineCharacters = characterNodes;
         } else {
-            // Dedupe by fullPath
             const existingPaths = new Set(chubTimelineCharacters.map(c => c.fullPath || c.full_path));
             const newChars = characterNodes.filter(c => !existingPaths.has(c.fullPath || c.full_path));
             chubTimelineCharacters = [...chubTimelineCharacters, ...newChars];
         }
         
-        // Determine if there's more
-        // If we got items (even non-characters), there might be more pages with characters
-        const gotItems = nodes.length > 0;
-        chubTimelineHasMore = gotItems;
+        console.log('[ChubTimeline] Total characters:', chubTimelineCharacters.length);
         
-        // If we filtered out everything but got items, auto-load next page
-        if (characterNodes.length === 0 && gotItems && chubTimelinePage < 10) {
-            console.log('[ChubTimeline] No characters on this page, trying next...');
+        // Update cursor for next page
+        chubTimelineCursor = nextCursor;
+        
+        // Determine if there's more data available
+        const gotItems = nodes.length > 0;
+        chubTimelineHasMore = gotItems && nextCursor;
+        
+        // Check how recent the oldest item in this batch is
+        let oldestInBatch = null;
+        if (nodes.length > 0) {
+            const lastNode = nodes[nodes.length - 1];
+            oldestInBatch = lastNode.createdAt || lastNode.created_at;
+        }
+        
+        // Auto-load more pages to get recent content
+        // Keep loading if we have a cursor and:
+        // 1. We filtered out all items (lorebooks etc)
+        // 2. Or we want more characters (up to 96 for good coverage)
+        // 3. The oldest item is still recent (less than 14 days old)
+        let shouldAutoLoad = false;
+        if (nextCursor) {
+            if (characterNodes.length === 0) {
+                shouldAutoLoad = true; // All filtered out
+            } else if (chubTimelineCharacters.length < 96) {
+                // Check age of oldest item - keep loading if less than 14 days old
+                if (oldestInBatch) {
+                    const oldestDate = new Date(oldestInBatch);
+                    const daysSinceOldest = (Date.now() - oldestDate.getTime()) / (1000 * 60 * 60 * 24);
+                    shouldAutoLoad = daysSinceOldest < 14;
+                } else {
+                    shouldAutoLoad = true;
+                }
+            }
+        }
+        
+        // Limit auto-loading to prevent infinite loops (max 15 pages)
+        if (shouldAutoLoad && chubTimelinePage < 15) {
+            console.log('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
             chubTimelinePage++;
             await loadChubTimeline(false);
             return;
+        }
+        
+        // Timeline API is unreliable - supplement with direct author fetches
+        // Only do this on first load (no cursor yet used)
+        if (!chubTimelineCursor && chubTimelinePage === 1) {
+            console.log('[ChubTimeline] Supplementing with direct author fetches...');
+            await supplementTimelineWithAuthorFetches();
         }
         
         if (chubTimelineCharacters.length === 0) {
@@ -10003,6 +10097,250 @@ async function loadChubTimeline(forceRefresh = false) {
                 </button>
             </div>
         `;
+    }
+}
+
+/**
+ * Debug function to test fetching a specific character or author
+ * Call from console: debugChubFetch('AdventureTales')
+ * Or: debugChubFetch('AdventureTales', 'a-yandere-s-love-755554160743')
+ */
+window.debugChubFetch = async function(author, charSlug = null) {
+    console.log('=== DEBUG CHUB FETCH ===');
+    console.log('Author:', author, 'Slug:', charSlug);
+    console.log('NSFW enabled:', chubNsfwEnabled);
+    console.log('Token present:', !!chubToken);
+    
+    try {
+        // If slug provided, try to fetch the specific character
+        if (charSlug) {
+            const fullPath = `${author}/${charSlug}`;
+            console.log('Fetching specific character:', fullPath);
+            
+            const charUrl = `${CHUB_API_BASE}/api/characters/${fullPath}`;
+            console.log('URL:', charUrl);
+            
+            const charResp = await fetch(charUrl, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': chubToken ? `Bearer ${chubToken}` : ''
+                }
+            });
+            
+            console.log('Response status:', charResp.status);
+            const charData = await charResp.json();
+            console.log('Character data:', charData);
+            
+            // Data is nested under 'node'
+            const node = charData.node || charData.data?.node || charData;
+            
+            // Check for visibility/nsfw settings
+            if (node) {
+                console.log('--- Character Details ---');
+                console.log('Name:', node.name);
+                console.log('ID:', node.id);
+                console.log('NSFW:', node.nsfw);
+                console.log('NSFL:', node.nsfl);
+                console.log('Public:', node.public);
+                console.log('Unlisted:', node.unlisted);  // THIS IS THE KEY!
+                console.log('Private:', node.private);
+                console.log('Created:', node.createdAt || node.created_at);
+                console.log('Full node:', node);
+            }
+        }
+        
+        // Also search for the author's characters
+        console.log('\n--- Searching author characters ---');
+        const params = new URLSearchParams();
+        params.set('username', author);
+        params.set('first', '50'); // Get more to see full list
+        params.set('sort', 'id');
+        params.set('nsfw', 'true'); // Force true to see all
+        params.set('nsfl', 'true'); // Force true to see all
+        params.set('include_forks', 'true'); // Include forked characters
+        
+        const searchUrl = `${CHUB_API_BASE}/search?${params.toString()}`;
+        console.log('Search URL:', searchUrl);
+        
+        const searchResp = await fetch(searchUrl, {
+            headers: {
+                'Accept': 'application/json',
+                'Authorization': chubToken ? `Bearer ${chubToken}` : ''
+            }
+        });
+        
+        console.log('Search status:', searchResp.status);
+        const searchData = await searchResp.json();
+        console.log('Total count:', searchData.count || searchData.data?.count);
+        
+        const nodes = searchData.nodes || searchData.data?.nodes || [];
+        console.log('Returned nodes:', nodes.length);
+        
+        // List all characters
+        console.log('\nAll characters from', author + ':');
+        nodes.forEach((n, i) => {
+            console.log(`  ${i}: "${n.name}" id=${n.id} path=${n.fullPath} created=${n.createdAt || n.created_at}`);
+        });
+        
+        // Check if the specific character is in the list
+        if (charSlug) {
+            const found = nodes.find(n => (n.fullPath || '').toLowerCase().includes(charSlug.toLowerCase()));
+            console.log('\nTarget character in search results:', found ? 'YES' : 'NO');
+            if (found) console.log('Found:', found);
+        }
+        
+    } catch (e) {
+        console.error('Debug fetch error:', e);
+    }
+};
+
+/**
+ * Debug function to test different timeline API parameters
+ * Call from console: debugTimelineAPI()
+ */
+window.debugTimelineAPI = async function() {
+    console.log('=== DEBUG TIMELINE API ===');
+    console.log('Token present:', !!chubToken);
+    
+    if (!chubToken) {
+        console.log('No token - cannot test authenticated endpoints');
+        return;
+    }
+    
+    // Test different endpoints and parameters
+    const tests = [
+        { name: 'timeline/v1 default', url: '/api/timeline/v1?first=50&nsfw=true&count=true' },
+        { name: 'timeline/v1 with unlisted', url: '/api/timeline/v1?first=50&nsfw=true&include_unlisted=true&count=true' },
+        { name: 'timeline/v1 with visibility', url: '/api/timeline/v1?first=50&nsfw=true&visibility=all&count=true' },
+        { name: 'feed endpoint', url: '/api/feed?first=50&nsfw=true' },
+        { name: 'notifications', url: '/api/notifications?first=50' },
+        { name: 'activity', url: '/api/activity?first=50' },
+    ];
+    
+    for (const test of tests) {
+        console.log(`\n--- Testing: ${test.name} ---`);
+        console.log('URL:', CHUB_API_BASE + test.url);
+        
+        try {
+            const resp = await fetch(CHUB_API_BASE + test.url, {
+                headers: {
+                    'Accept': 'application/json',
+                    'Authorization': `Bearer ${chubToken}`
+                }
+            });
+            
+            console.log('Status:', resp.status);
+            
+            if (resp.ok) {
+                const data = await resp.json();
+                console.log('Response:', data);
+                
+                const nodes = data.nodes || data.data?.nodes || [];
+                console.log('Nodes count:', nodes.length);
+                
+                // Check if our target character is in there
+                const hasYandere = nodes.some(n => 
+                    (n.name || '').toLowerCase().includes('yandere') ||
+                    (n.fullPath || '').toLowerCase().includes('yandere')
+                );
+                console.log('Contains "Yandere" character:', hasYandere ? 'YES!' : 'no');
+                
+                if (hasYandere) {
+                    const yandere = nodes.find(n => 
+                        (n.name || '').toLowerCase().includes('yandere') ||
+                        (n.fullPath || '').toLowerCase().includes('yandere')
+                    );
+                    console.log('Found:', yandere);
+                }
+            } else {
+                const text = await resp.text();
+                console.log('Error response:', text.substring(0, 200));
+            }
+        } catch (e) {
+            console.log('Error:', e.message);
+        }
+    }
+};
+
+/**
+ * Supplement timeline with direct fetches from followed authors
+ * This works around the broken timeline API that doesn't return all items
+ */
+async function supplementTimelineWithAuthorFetches() {
+    try {
+        // Get list of followed authors
+        const followedAuthors = await fetchMyFollowsList();
+        if (!followedAuthors || followedAuthors.size === 0) {
+            console.log('[ChubTimeline] No followed authors to fetch from');
+            return;
+        }
+        
+        console.log('[ChubTimeline] Fetching recent chars from', followedAuthors.size, 'followed authors');
+        
+        // Get existing paths to avoid duplicates
+        const existingPaths = new Set(chubTimelineCharacters.map(c => 
+            (c.fullPath || c.full_path || '').toLowerCase()
+        ));
+        
+        // Fetch recent characters from each author (limit to first 10 authors to avoid rate limits)
+        const authorsToFetch = [...followedAuthors].slice(0, 15);
+        
+        // Fetch in parallel with small batches
+        const batchSize = 5;
+        for (let i = 0; i < authorsToFetch.length; i += batchSize) {
+            const batch = authorsToFetch.slice(i, i + batchSize);
+            
+            const promises = batch.map(async (author) => {
+                try {
+                    const params = new URLSearchParams();
+                    params.set('username', author);
+                    params.set('first', '12'); // Get 12 most recent from each author
+                    params.set('sort', 'id'); // Use 'id' for most recent (higher id = newer)
+                    params.set('nsfw', chubNsfwEnabled.toString());
+                    params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
+                    params.set('include_forks', 'true'); // Include forked characters
+                    
+                    const url = `${CHUB_API_BASE}/search?${params.toString()}`;
+                    
+                    const response = await fetch(url, {
+                        headers: {
+                            'Accept': 'application/json',
+                            'Authorization': `Bearer ${chubToken}`
+                        }
+                    });
+                    
+                    if (!response.ok) {
+                        console.log(`[ChubTimeline] Error from ${author}: ${response.status}`);
+                        return [];
+                    }
+                    
+                    const data = await response.json();
+                    const nodes = data.nodes || data.data?.nodes || [];
+                    return nodes;
+                } catch (e) {
+                    console.log(`[ChubTimeline] Error fetching from ${author}:`, e.message);
+                    return [];
+                }
+            });
+            
+            const results = await Promise.all(promises);
+            
+            // Merge results, avoiding duplicates
+            for (const authorChars of results) {
+                for (const char of authorChars) {
+                    const path = (char.fullPath || char.full_path || '').toLowerCase();
+                    if (path && !existingPaths.has(path)) {
+                        existingPaths.add(path);
+                        chubTimelineCharacters.push(char);
+                    }
+                }
+            }
+        }
+        
+        console.log('[ChubTimeline] After supplement, have', chubTimelineCharacters.length, 'total characters');
+        
+    } catch (e) {
+        console.error('[ChubTimeline] Error supplementing timeline:', e);
     }
 }
 
@@ -10045,15 +10383,86 @@ function renderTimelineEmpty(reason) {
     }
 }
 
+/**
+ * Sort timeline characters based on the current sort option (client-side)
+ */
+function sortTimelineCharacters(characters) {
+    switch (chubTimelineSort) {
+        case 'newest':
+            // Sort by created_at or id descending (newest first)
+            return characters.sort((a, b) => {
+                const dateA = a.createdAt || a.created_at || a.id || 0;
+                const dateB = b.createdAt || b.created_at || b.id || 0;
+                if (typeof dateA === 'string' && typeof dateB === 'string') {
+                    return new Date(dateB) - new Date(dateA);
+                }
+                return dateB - dateA;
+            });
+        case 'updated':
+            // Sort by last_activity_at or updated_at descending (recently updated first)
+            return characters.sort((a, b) => {
+                const dateA = a.lastActivityAt || a.last_activity_at || a.updatedAt || a.updated_at || a.createdAt || a.created_at || 0;
+                const dateB = b.lastActivityAt || b.last_activity_at || b.updatedAt || b.updated_at || b.createdAt || b.created_at || 0;
+                if (typeof dateA === 'string' && typeof dateB === 'string') {
+                    return new Date(dateB) - new Date(dateA);
+                }
+                return dateB - dateA;
+            });
+        case 'oldest':
+            // Sort by created_at or id ascending (oldest first)
+            return characters.sort((a, b) => {
+                const dateA = a.createdAt || a.created_at || a.id || 0;
+                const dateB = b.createdAt || b.created_at || b.id || 0;
+                if (typeof dateA === 'string' && typeof dateB === 'string') {
+                    return new Date(dateA) - new Date(dateB);
+                }
+                return dateA - dateB;
+            });
+        case 'name_asc':
+            // Sort by name A-Z
+            return characters.sort((a, b) => {
+                const nameA = (a.name || '').toLowerCase();
+                const nameB = (b.name || '').toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+        case 'name_desc':
+            // Sort by name Z-A
+            return characters.sort((a, b) => {
+                const nameA = (a.name || '').toLowerCase();
+                const nameB = (b.name || '').toLowerCase();
+                return nameB.localeCompare(nameA);
+            });
+        case 'downloads':
+            // Sort by download count descending
+            return characters.sort((a, b) => {
+                const dlA = a.nDownloads || a.n_downloads || a.downloadCount || a.download_count || 0;
+                const dlB = b.nDownloads || b.n_downloads || b.downloadCount || b.download_count || 0;
+                return dlB - dlA;
+            });
+        case 'rating':
+            // Sort by star count descending
+            return characters.sort((a, b) => {
+                const starsA = a.starCount || a.star_count || a.nStars || a.n_stars || 0;
+                const starsB = b.starCount || b.star_count || b.nStars || b.n_stars || 0;
+                return starsB - starsA;
+            });
+        default:
+            return characters;
+    }
+}
+
 function renderChubTimeline() {
     const grid = document.getElementById('chubTimelineGrid');
     
-    grid.innerHTML = chubTimelineCharacters.map(char => createChubCard(char, true)).join('');
+    // Sort the characters based on chubTimelineSort
+    const sortedCharacters = sortTimelineCharacters([...chubTimelineCharacters]);
+    
+    grid.innerHTML = sortedCharacters.map(char => createChubCard(char, true)).join('');
     
     // Add click handlers
     grid.querySelectorAll('.chub-card').forEach(card => {
         const fullPath = card.dataset.fullPath;
-        const char = chubTimelineCharacters.find(c => c.fullPath === fullPath);
+        const char = sortedCharacters.find(c => c.fullPath === fullPath);
         
         card.addEventListener('click', (e) => {
             // Don't open preview if clicking on author link
@@ -10096,8 +10505,6 @@ function performChubCreatorSearch() {
 }
 
 function filterByAuthor(authorName) {
-    console.log('[ChubAI] Filtering by author:', authorName);
-    
     // Switch to browse mode
     if (chubViewMode !== 'browse') {
         switchChubViewMode('browse');
@@ -10105,6 +10512,11 @@ function filterByAuthor(authorName) {
     
     // Set author filter
     chubAuthorFilter = authorName;
+    
+    // Reset author sort to newest (most useful default when viewing an author)
+    chubAuthorSort = 'id'; // 'id' gives newest/most recently updated
+    const sortSelect = document.getElementById('chubAuthorSortSelect');
+    if (sortSelect) sortSelect.value = 'id';
     
     // Show author banner
     const banner = document.getElementById('chubAuthorBanner');
@@ -10154,14 +10566,15 @@ async function fetchMyFollowsList(forceRefresh = false) {
         }
         
         const accountData = await accountResp.json();
-        const myUsername = accountData.username || accountData.user?.username || accountData.data?.username;
+        
+        // API returns user_name (with underscore), not username
+        const myUsername = accountData.user_name || accountData.name || accountData.username || 
+                          accountData.data?.user_name || accountData.data?.name;
         
         if (!myUsername) {
-            console.log('[ChubFollow] No username in account data');
+            console.log('[ChubFollow] No username found in account data');
             return [];
         }
-        
-        console.log('[ChubFollow] My username:', myUsername);
         
         // Now get who we follow
         const followsResp = await fetch(`${CHUB_API_BASE}/api/follows/${myUsername}?page=1`, {
@@ -10177,15 +10590,16 @@ async function fetchMyFollowsList(forceRefresh = false) {
         }
         
         const followsData = await followsResp.json();
-        console.log('[ChubFollow] Follows response:', followsData);
         
         // Extract usernames from the follows list
-        const nodes = followsData.nodes || followsData.data?.nodes || [];
+        // API returns "follows" array, not "nodes"
+        const followsList = followsData.follows || followsData.nodes || followsData.data?.follows || followsData.data?.nodes || [];
         const followedUsernames = new Set();
         
-        for (const node of nodes) {
+        for (const node of followsList) {
             // The node might be a user object or have username in different places
-            const username = node.username || node.name || node.user?.username;
+            // API uses user_name (with underscore)
+            const username = node.user_name || node.username || node.name || node.user?.user_name || node.user?.username;
             if (username) {
                 followedUsernames.add(username.toLowerCase());
             }
@@ -10205,12 +10619,12 @@ async function fetchMyFollowsList(forceRefresh = false) {
             if (!moreResp.ok) break;
             
             const moreData = await moreResp.json();
-            const moreNodes = moreData.nodes || moreData.data?.nodes || [];
+            const moreFollows = moreData.follows || moreData.nodes || moreData.data?.follows || [];
             
-            if (moreNodes.length === 0) break;
+            if (moreFollows.length === 0) break;
             
-            for (const node of moreNodes) {
-                const username = node.username || node.name || node.user?.username;
+            for (const node of moreFollows) {
+                const username = node.user_name || node.username || node.name || node.user?.user_name;
                 if (username) {
                     followedUsernames.add(username.toLowerCase());
                 }
@@ -10391,9 +10805,9 @@ async function loadChubCharacters(forceRefresh = false) {
         const preset = CHUB_DISCOVERY_PRESETS[chubDiscoveryPreset] || CHUB_DISCOVERY_PRESETS['popular_week'];
         
         params.set('page', chubCurrentPage.toString());
-        params.set('sort', preset.sort);
         params.set('nsfw', chubNsfwEnabled.toString());
-        params.set('nsfl', 'false');
+        params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
+        params.set('include_forks', 'true'); // Include forked characters
         params.set('venus', 'false');
         params.set('min_tokens', '50');
         
@@ -10404,14 +10818,22 @@ async function loadChubCharacters(forceRefresh = false) {
         // Author filter - use 'username' parameter
         if (chubAuthorFilter) {
             params.set('username', chubAuthorFilter);
-            console.log('[ChubAI] Filtering by author:', chubAuthorFilter, '- skipping time period filter');
+            // Use author-specific sort instead of preset sort
+            params.set('sort', chubAuthorSort);
             // Don't apply time period filter when viewing an author's profile
             // We want to see all their characters, not just recent ones
         } else {
+            // Use preset sort for general browsing
+            if (preset.sort !== 'default') {
+                params.set('sort', preset.sort);
+            }
+            // Add special_mode filter if preset has one (e.g., newcomer for recent hits)
+            if (preset.special_mode) {
+                params.set('special_mode', preset.special_mode);
+            }
             // Add time period filter from preset (max_days_ago) only for general browsing
             if (preset.days > 0) {
                 params.set('max_days_ago', preset.days.toString());
-                console.log('[ChubAI] Applying time period filter:', preset.days, 'days');
             }
         }
         
@@ -10436,10 +10858,7 @@ async function loadChubCharacters(forceRefresh = false) {
         // API uses 'my_favorites' parameter per OpenAPI spec
         if (chubFilterFavorites && chubToken) {
             params.set('my_favorites', 'true');
-            console.log('Favorites filter enabled with token');
         }
-        
-        console.log('[ChubAI] Discovery preset:', chubDiscoveryPreset, '-> sort:', preset.sort, 'days:', preset.days);
         
         const headers = {
             'Accept': 'application/json',
@@ -10449,10 +10868,7 @@ async function loadChubCharacters(forceRefresh = false) {
         // Add Authorization header if token available (URQL_TOKEN from chub.ai)
         if (chubToken) {
             headers['Authorization'] = `Bearer ${chubToken}`;
-            console.log('Authorization header added');
         }
-        
-        console.log('ChubAI search params:', params.toString());
         
         const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
             method: 'GET',
@@ -10466,7 +10882,6 @@ async function loadChubCharacters(forceRefresh = false) {
         }
         
         const data = await response.json();
-        console.log('ChubAI response data:', data);
         
         // Handle different response formats
         let nodes = [];
@@ -10590,9 +11005,9 @@ function createChubCard(char, isTimeline = false) {
         badges.push('<span class="chub-feature-badge verified" title="Verified"><i class="fa-solid fa-check-circle"></i></span>');
     }
     
-    // Timeline cards show when the character was created
+    // Show date on cards - createdAt for all cards
     const createdDate = char.createdAt ? new Date(char.createdAt).toLocaleDateString() : '';
-    const timelineInfo = isTimeline && createdDate ? `<span class="chub-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
+    const dateInfo = createdDate ? `<span class="chub-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
     
     // Add "in library" class to card for potential styling
     const cardClass = inLibrary ? 'chub-card in-library' : 'chub-card';
@@ -10617,7 +11032,7 @@ function createChubCard(char, isTimeline = false) {
             <div class="chub-card-footer">
                 <span class="chub-card-stat"><i class="fa-solid fa-star"></i> ${rating}</span>
                 <span class="chub-card-stat"><i class="fa-solid fa-download"></i> ${downloads}</span>
-                ${timelineInfo}
+                ${dateInfo}
             </div>
         </div>
     `;

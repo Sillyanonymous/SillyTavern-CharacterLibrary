@@ -4028,16 +4028,29 @@ textarea.glass-input {
 
 /* Timeline Header */
 .chub-timeline-header {
-    text-align: center;
-    padding: 30px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
     background: rgba(255, 255, 255, 0.03);
     border-radius: 12px;
     border: 1px solid var(--glass-border);
+    margin-bottom: 16px;
+}
+
+.chub-timeline-header-left {
+    text-align: left;
+}
+
+.chub-timeline-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .chub-timeline-header h3 {
     font-size: 1.4rem;
-    margin: 0 0 8px 0;
+    margin: 0 0 4px 0;
     color: var(--text-primary);
 }
 
@@ -4049,7 +4062,12 @@ textarea.glass-input {
 .chub-timeline-header p {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.95rem;
+    font-size: 0.9rem;
+}
+
+#chubTimelineSortSelect {
+    min-width: 150px;
+    font-size: 0.85rem;
 }
 
 /* Timeline Empty/Login Required State */
@@ -4123,6 +4141,12 @@ textarea.glass-input {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+#chubAuthorSortSelect {
+    min-width: 150px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
 }
 
 #chubFollowAuthorBtn {
@@ -4686,6 +4710,25 @@ textarea.glass-input {
     max-height: 85vh;
     display: flex;
     flex-direction: column;
+}
+
+/* Compact action buttons for ChubAI modal */
+.chub-char-modal .modal-controls {
+    gap: 8px;
+}
+
+.chub-char-modal .action-btn {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    gap: 6px;
+}
+
+.chub-char-modal .action-btn.primary {
+    padding: 6px 14px;
+}
+
+.chub-char-modal .action-btn.secondary {
+    padding: 6px 10px;
 }
 
 .chub-char-header-info {
