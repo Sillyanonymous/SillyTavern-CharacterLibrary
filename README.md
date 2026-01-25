@@ -6,13 +6,19 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 
 ## Screenshots
 
-![Main Gallery View](docs/images/Main.jpg)
+![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](docs/images/Details.jpg)
+![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.jpg)
 *View and edit character details, chats, media, and related characters*
 
-![ChubAI Integration](docs/images/ChubAI.jpg)
+![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/Gallery.jpg)
+*Download embedded character media*
+
+![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Related.png)
+*Find potentially related characters*
+
+![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/ChubAI.jpg)
 *Browse and download characters directly from ChubAI*
 
 ## Installation
