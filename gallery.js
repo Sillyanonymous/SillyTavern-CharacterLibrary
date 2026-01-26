@@ -38,6 +38,10 @@ const DEFAULT_SETTINGS = {
     richCreatorNotes: true,
     // Highlight/accent color (CSS color value)
     highlightColor: '#4a9eff',
+    // Media Localization: Replace remote URLs with local files on-the-fly
+    mediaLocalizationEnabled: false,
+    // Per-character overrides for media localization (avatar -> boolean)
+    mediaLocalizationPerChar: {},
 };
 
 // In-memory settings cache
@@ -185,6 +189,9 @@ function setupSettingsModal() {
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
     
+    // Media Localization
+    const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
+    
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     
@@ -209,6 +216,11 @@ function setupSettingsModal() {
         
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
+        
+        // Media Localization
+        if (mediaLocalizationCheckbox) {
+            mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') || false;
+        }
         
         // Appearance
         if (highlightColorInput) {
@@ -259,7 +271,11 @@ function setupSettingsModal() {
             defaultSort: defaultSortSelect.value,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             highlightColor: newHighlightColor,
+            mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
         });
+        
+        // Clear media localization cache when setting changes
+        clearAllMediaLocalizationCache();
         
         // Apply highlight color
         applyHighlightColor(newHighlightColor);
@@ -296,9 +312,15 @@ function setupSettingsModal() {
         if (highlightColorInput) {
             highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
         }
+        if (mediaLocalizationCheckbox) {
+            mediaLocalizationCheckbox.checked = DEFAULT_SETTINGS.mediaLocalizationEnabled;
+        }
         
         // Apply default highlight color immediately
         applyHighlightColor(DEFAULT_SETTINGS.highlightColor);
+        
+        // Clear caches
+        clearAllMediaLocalizationCache();
         
         // Save defaults to storage (preserving token if "remember" was checked)
         const preserveToken = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
@@ -1261,6 +1283,29 @@ function openModal(char) {
     
     // Update favorite button state
     updateFavoriteButtonUI(isCharacterFavorite(char));
+    
+    // Update per-character media localization toggle with override indicator
+    const charLocalizeToggle = document.getElementById('charLocalizeToggle');
+    const localizeToggleLabel = document.querySelector('.localize-toggle');
+    if (charLocalizeToggle && char.avatar) {
+        const status = getMediaLocalizationStatus(char.avatar);
+        charLocalizeToggle.checked = status.isEnabled;
+        
+        // Update visual indicator for override status
+        if (localizeToggleLabel) {
+            localizeToggleLabel.classList.toggle('has-override', status.hasOverride);
+            
+            // Update tooltip to explain the status
+            if (status.hasOverride) {
+                const overrideType = status.isEnabled ? 'ENABLED' : 'DISABLED';
+                const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
+                localizeToggleLabel.title = `Override: ${overrideType} for this character (global is ${globalStatus})`;
+            } else {
+                const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
+                localizeToggleLabel.title = `Using global setting (${globalStatus})`;
+            }
+        }
+    }
 
     // ... existing date logic ...
     // Dates/Tokens
@@ -1310,7 +1355,7 @@ function openModal(char) {
     const desc = char.description || (char.data ? char.data.description : "") || "";
     const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
     
-    // Details tab uses rich HTML rendering
+    // Details tab uses rich HTML rendering (initially without localization for instant display)
     document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
     document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
 
@@ -1330,6 +1375,10 @@ function openModal(char) {
             altBox.style.display = 'none';
         }
     }
+    
+    // Apply media localization asynchronously (if enabled)
+    // This updates the already-rendered content with localized URLs
+    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes);
     
     // Embedded Lorebook
     const characterBook = char.character_book || (char.data ? char.data.character_book : null);
@@ -4834,7 +4883,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         if (hasStyleTagAtStart) {
             // Only convert markdown images (safe - won't be in CSS)
             processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
-                if (!src.match(/^https?:\/\//i)) return match;
+                // Allow http/https URLs and local paths (starting with /)
+                if (!src.match(/^(https?:\/\/|\/)/i)) return match;
                 const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
                 return `<img src="${src}"${altAttr} class="embedded-image" loading="lazy">`;
             });
@@ -4865,7 +4915,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         
         // Convert linked images: [![alt](img-url)](link-url)
         processedText = processedText.replace(/\[\!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
-            if (!imgSrc.match(/^https?:\/\//i)) return match;
+            // Allow http/https URLs and local paths (starting with /)
+            if (!imgSrc.match(/^(https?:\/\/|\/)/i)) return match;
             const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
             const safeLink = linkHref.match(/^https?:\/\//i) ? linkHref : '#';
             return `<a href="${safeLink}" target="_blank" rel="noopener"><img src="${imgSrc}"${altAttr} class="embedded-image" loading="lazy"></a>`;
@@ -4873,7 +4924,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         
         // Convert standalone markdown images: ![alt](url) or ![alt](url =WxH) or ![alt](url "title")
         processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
-            if (!src.match(/^https?:\/\//i)) return match;
+            // Allow http/https URLs and local paths (starting with /)
+            if (!src.match(/^(https?:\/\/|\/)/i)) return match;
             const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
             return `<img src="${src}"${altAttr} class="embedded-image" loading="lazy">`;
         });
@@ -4933,14 +4985,15 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         return placeholder;
     };
     
-    // 1. Preserve existing HTML img tags (only allow http/https src)
-    processedText = processedText.replace(/<img\s+[^>]*src=["'](https?:\/\/[^"']+)["'][^>]*\/?>/gi, (match, src) => {
+    // 1. Preserve existing HTML img tags (allow http/https and local paths)
+    processedText = processedText.replace(/<img\s+[^>]*src=["']((?:https?:\/\/|\/)[^"']+)["'][^>]*\/?>/gi, (match, src) => {
         return addPlaceholder(`<img src="${src}" class="embedded-image" loading="lazy">`);
     });
     
     // 2. Convert linked images: [![alt](img-url)](link-url)
     processedText = processedText.replace(/\[\!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
-        if (!imgSrc.match(/^https?:\/\//i)) return match; // Only allow http/https
+        // Allow http/https URLs and local paths (starting with /)
+        if (!imgSrc.match(/^(https?:\/\/|\/)/i)) return match;
         const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
         const safeLink = linkHref.match(/^https?:\/\//i) ? linkHref : '#';
         return addPlaceholder(`<a href="${safeLink}" target="_blank" rel="noopener"><img src="${imgSrc}"${altAttr} class="embedded-image" loading="lazy"></a>`);
@@ -4948,7 +5001,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     
     // 3. Convert standalone markdown images: ![alt](url) or ![alt](url "title")
     processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
-        if (!src.match(/^https?:\/\//i)) return match; // Only allow http/https
+        // Allow http/https URLs and local paths (starting with /)
+        if (!src.match(/^(https?:\/\/|\/)/i)) return match;
         const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
         return addPlaceholder(`<img src="${src}"${altAttr} class="embedded-image" loading="lazy">`);
     });
@@ -6129,6 +6183,59 @@ const localizeProgressFill = document.getElementById('localizeProgressFill');
 const localizeLog = document.getElementById('localizeLog');
 const localizeMediaBtn = document.getElementById('localizeMediaBtn');
 
+// Per-character media localization toggle
+const charLocalizeToggle = document.getElementById('charLocalizeToggle');
+
+// Setup per-character localization toggle
+charLocalizeToggle?.addEventListener('change', async () => {
+    if (!activeChar?.avatar) return;
+    
+    const isChecked = charLocalizeToggle.checked;
+    const globalEnabled = getSetting('mediaLocalizationEnabled');
+    const localizeToggleLabel = document.querySelector('.localize-toggle');
+    
+    // If the toggle matches global setting, remove the per-char override (use global)
+    // Otherwise, set a per-char override
+    if (isChecked === globalEnabled) {
+        setCharacterMediaLocalization(activeChar.avatar, null); // Use global
+    } else {
+        setCharacterMediaLocalization(activeChar.avatar, isChecked);
+    }
+    
+    // Update visual indicator for override status
+    const status = getMediaLocalizationStatus(activeChar.avatar);
+    if (localizeToggleLabel) {
+        localizeToggleLabel.classList.toggle('has-override', status.hasOverride);
+        
+        if (status.hasOverride) {
+            const overrideType = status.isEnabled ? 'ENABLED' : 'DISABLED';
+            const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
+            localizeToggleLabel.title = `Override: ${overrideType} for this character (global is ${globalStatus})`;
+        } else {
+            const globalStatus = status.globalEnabled ? 'enabled' : 'disabled';
+            localizeToggleLabel.title = `Using global setting (${globalStatus})`;
+        }
+    }
+    
+    // Clear cache to force re-evaluation
+    clearMediaLocalizationCache(activeChar.avatar);
+    
+    // Re-apply localization to the currently displayed content
+    if (isChecked) {
+        const desc = activeChar.description || (activeChar.data ? activeChar.data.description : "") || "";
+        const firstMes = activeChar.first_mes || (activeChar.data ? activeChar.data.first_mes : "") || "";
+        const altGreetings = activeChar.alternate_greetings || (activeChar.data ? activeChar.data.alternate_greetings : []) || [];
+        const creatorNotes = activeChar.creator_notes || (activeChar.data ? activeChar.data.creator_notes : "") || "";
+        
+        await applyMediaLocalizationToModal(activeChar, desc, firstMes, altGreetings, creatorNotes);
+        showToast('Media localization enabled for this character', 'success');
+    } else {
+        // Refresh without localization - reload the modal content
+        openModal(activeChar);
+        showToast('Media localization disabled for this character', 'info');
+    }
+});
+
 // Close localize modal handlers
 closeLocalizeModal?.addEventListener('click', () => {
     localizeModal.classList.add('hidden');
@@ -6251,6 +6358,11 @@ localizeMediaBtn?.addEventListener('click', async () => {
     if (successCount > 0) {
         showToast(`Downloaded ${successCount} new media file(s)`, 'success');
         
+        // Clear the localization cache for this character so new files are picked up
+        if (activeChar?.avatar) {
+            clearMediaLocalizationCache(activeChar.avatar);
+        }
+        
         // Refresh the sprites grid to show new images
         if (activeChar) {
             fetchCharacterImages(activeChar.name || activeChar.data?.name);
@@ -6261,6 +6373,355 @@ localizeMediaBtn?.addEventListener('click', async () => {
         showToast('Some downloads failed', 'error');
     }
 });
+
+// ==============================================
+// On-the-fly Media Localization (URL Replacement)
+// ==============================================
+
+/**
+ * Cache for URL→LocalPath mappings per character
+ * Structure: { charAvatar: { remoteUrl: localPath, ... } }
+ */
+const mediaLocalizationCache = {};
+
+/**
+ * Sanitize a filename the same way downloadAndSaveMedia does
+ * This ensures we can match remote URLs to their saved local files
+ */
+function sanitizeMediaFilename(filename) {
+    // Remove extension if present
+    const nameWithoutExt = filename.includes('.') 
+        ? filename.substring(0, filename.lastIndexOf('.'))
+        : filename;
+    // Same sanitization as saveMediaFromMemory
+    return nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+}
+
+/**
+ * Extract the filename from a remote URL
+ */
+function extractFilenameFromUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathParts = urlObj.pathname.split('/');
+        return pathParts[pathParts.length - 1] || '';
+    } catch (e) {
+        // Fallback for malformed URLs
+        const parts = url.split('/');
+        return parts[parts.length - 1]?.split('?')[0] || '';
+    }
+}
+
+/**
+ * Check if media localization is enabled for a character
+ * @param {string} avatar - Character avatar filename (e.g., "Rory.png")
+ * @returns {boolean} Whether localization is enabled
+ */
+function isMediaLocalizationEnabled(avatar) {
+    const globalEnabled = getSetting('mediaLocalizationEnabled');
+    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
+    
+    // Check per-character override first
+    if (avatar && avatar in perCharSettings) {
+        return perCharSettings[avatar];
+    }
+    
+    // Fall back to global setting
+    return globalEnabled;
+}
+
+/**
+ * Check if a character has a per-character override (not using global setting)
+ * @param {string} avatar - Character avatar filename
+ * @returns {object} { hasOverride: boolean, isEnabled: boolean, globalEnabled: boolean }
+ */
+function getMediaLocalizationStatus(avatar) {
+    const globalEnabled = getSetting('mediaLocalizationEnabled') || false;
+    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
+    const hasOverride = avatar && avatar in perCharSettings;
+    const isEnabled = hasOverride ? perCharSettings[avatar] : globalEnabled;
+    
+    return { hasOverride, isEnabled, globalEnabled };
+}
+
+/**
+ * Set per-character media localization setting
+ * @param {string} avatar - Character avatar filename
+ * @param {boolean|null} enabled - true/false to override, null to use global
+ */
+function setCharacterMediaLocalization(avatar, enabled) {
+    const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
+    
+    if (enabled === null) {
+        // Remove override, use global
+        delete perCharSettings[avatar];
+    } else {
+        perCharSettings[avatar] = enabled;
+    }
+    
+    setSetting('mediaLocalizationPerChar', perCharSettings);
+}
+
+/**
+ * Build URL→LocalPath mapping for a character by scanning their gallery folder
+ * @param {string} characterName - Character name (folder name)
+ * @param {string} avatar - Character avatar filename (for cache key)
+ * @param {boolean} forceRefresh - Force rebuild cache even if exists
+ * @returns {Promise<Object>} Map of { remoteUrl: localPath }
+ */
+async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = false) {
+    // Check cache first
+    if (!forceRefresh && avatar && mediaLocalizationCache[avatar]) {
+        return mediaLocalizationCache[avatar];
+    }
+    
+    const urlMap = {};
+    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
+    const safeFolderName = sanitizeFolderName(characterName);
+    
+    try {
+        // Get list of files in character's gallery (all media types = 7)
+        const response = await fetch(`${API_BASE}/images/list`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ folder: characterName, type: 7 })
+        });
+        
+        if (!response.ok) {
+            console.log('[MediaLocalize] Could not list gallery files');
+            return urlMap;
+        }
+        
+        const files = await response.json();
+        if (!files || files.length === 0) {
+            return urlMap;
+        }
+        
+        // Parse localized_media files to build reverse mapping
+        // Format: localized_media_{index}_{sanitizedOriginalName}.{ext}
+        const localizedPattern = /^localized_media_\d+_(.+)\.[^.]+$/;
+        
+        for (const file of files) {
+            const fileName = (typeof file === 'string') ? file : file.name;
+            if (!fileName) continue;
+            
+            const match = fileName.match(localizedPattern);
+            if (match) {
+                const sanitizedName = match[1]; // The sanitized original filename
+                const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+                
+                // Store by sanitized name for lookup
+                // When we see a remote URL, we'll sanitize its filename and look it up
+                urlMap[`__sanitized__${sanitizedName}`] = localPath;
+            }
+        }
+        
+        // Cache the mapping
+        if (avatar) {
+            mediaLocalizationCache[avatar] = urlMap;
+        }
+        
+        console.log(`[MediaLocalize] Built map for ${characterName}: ${Object.keys(urlMap).length} localized files`);
+        return urlMap;
+        
+    } catch (error) {
+        console.error('[MediaLocalize] Error building localization map:', error);
+        return urlMap;
+    }
+}
+
+/**
+ * Look up a remote URL in the localization map and return local path if found
+ * @param {Object} urlMap - The localization map from buildMediaLocalizationMap
+ * @param {string} remoteUrl - The remote URL to look up
+ * @returns {string|null} Local path if found, null otherwise
+ */
+function lookupLocalizedMedia(urlMap, remoteUrl) {
+    if (!urlMap || !remoteUrl) return null;
+    
+    // Extract filename from URL and sanitize it
+    const filename = extractFilenameFromUrl(remoteUrl);
+    if (!filename) return null;
+    
+    const sanitizedName = sanitizeMediaFilename(filename);
+    
+    // Look up by sanitized name
+    const localPath = urlMap[`__sanitized__${sanitizedName}`];
+    
+    return localPath || null;
+}
+
+/**
+ * Replace remote media URLs in text with local paths
+ * @param {string} text - Text containing media URLs (markdown/HTML)
+ * @param {Object} urlMap - The localization map
+ * @returns {string} Text with URLs replaced
+ */
+function replaceMediaUrlsInText(text, urlMap) {
+    if (!text || !urlMap || Object.keys(urlMap).length === 0) return text;
+    
+    let result = text;
+    
+    // Replace markdown images: ![alt](url)
+    result = result.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, url) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `![${alt}](${localPath})`;
+        }
+        return match;
+    });
+    
+    // Replace HTML img src: <img src="url">
+    result = result.replace(/<img([^>]+)src=["']([^"']+)["']([^>]*)>/gi, (match, before, url, after) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `<img${before}src="${localPath}"${after}>`;
+        }
+        return match;
+    });
+    
+    // Replace video sources: <video src="url"> or <source src="url">
+    result = result.replace(/<(video|source)([^>]+)src=["']([^"']+)["']([^>]*)>/gi, (match, tag, before, url, after) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `<${tag}${before}src="${localPath}"${after}>`;
+        }
+        return match;
+    });
+    
+    // Replace audio sources: <audio src="url">
+    result = result.replace(/<audio([^>]+)src=["']([^"']+)["']([^>]*)>/gi, (match, before, url, after) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `<audio${before}src="${localPath}"${after}>`;
+        }
+        return match;
+    });
+    
+    return result;
+}
+
+/**
+ * Process text content for a character, optionally applying media localization
+ * then formatting with formatRichText
+ * @param {string} text - Raw text content
+ * @param {Object} char - Character object with name, avatar properties
+ * @param {boolean} preserveHtml - Whether to preserve HTML (for creator notes)
+ * @param {Object} urlMap - Optional pre-built URL map (for batch processing)
+ * @returns {Promise<string>} Formatted HTML
+ */
+async function formatTextWithLocalization(text, char, preserveHtml = false, urlMap = null) {
+    if (!text) return "";
+    
+    const charName = char?.name || char?.data?.name || '';
+    const avatar = char?.avatar;
+    
+    // Check if localization is enabled for this character
+    if (avatar && isMediaLocalizationEnabled(avatar)) {
+        // Build or use provided URL map
+        if (!urlMap) {
+            urlMap = await buildMediaLocalizationMap(charName, avatar);
+        }
+        
+        // Replace URLs before formatting
+        if (Object.keys(urlMap).length > 0) {
+            text = replaceMediaUrlsInText(text, urlMap);
+        }
+    }
+    
+    return formatRichText(text, charName, preserveHtml);
+}
+
+/**
+ * Apply media localization to already-rendered modal content
+ * Called asynchronously after modal opens to update URLs without blocking
+ * @param {Object} char - Character object
+ * @param {string} desc - Original description
+ * @param {string} firstMes - Original first message
+ * @param {Array} altGreetings - Original alternate greetings
+ * @param {string} creatorNotes - Original creator notes
+ */
+async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes) {
+    const avatar = char?.avatar;
+    const charName = char?.name || char?.data?.name || '';
+    
+    // Check if localization is enabled
+    if (!avatar || !isMediaLocalizationEnabled(avatar)) {
+        return;
+    }
+    
+    // Build the URL map
+    const urlMap = await buildMediaLocalizationMap(charName, avatar);
+    
+    if (Object.keys(urlMap).length === 0) {
+        return; // No localized files, nothing to replace
+    }
+    
+    console.log(`[MediaLocalize] Applying localization to modal for ${charName}`);
+    
+    // Update Description
+    if (desc) {
+        const localizedDesc = replaceMediaUrlsInText(desc, urlMap);
+        if (localizedDesc !== desc) {
+            document.getElementById('modalDescription').innerHTML = formatRichText(localizedDesc, charName);
+        }
+    }
+    
+    // Update First Message
+    if (firstMes) {
+        const localizedFirstMes = replaceMediaUrlsInText(firstMes, urlMap);
+        if (localizedFirstMes !== firstMes) {
+            document.getElementById('modalFirstMes').innerHTML = formatRichText(localizedFirstMes, charName);
+        }
+    }
+    
+    // Update Alternate Greetings
+    if (altGreetings && altGreetings.length > 0) {
+        let anyChanged = false;
+        const listHTML = altGreetings.map((g, i) => {
+            const original = (g || '').trim();
+            const localized = replaceMediaUrlsInText(original, urlMap);
+            if (localized !== original) anyChanged = true;
+            return `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText(localized, charName)}</span></div>`;
+        }).join('');
+        
+        if (anyChanged) {
+            document.getElementById('modalAltGreetings').innerHTML = listHTML;
+        }
+    }
+    
+    // Update Creator Notes (re-render if content changed)
+    if (creatorNotes) {
+        const localizedNotes = replaceMediaUrlsInText(creatorNotes, urlMap);
+        if (localizedNotes !== creatorNotes) {
+            const notesContainer = document.getElementById('modalCreatorNotes');
+            if (notesContainer) {
+                renderCreatorNotesSecure(localizedNotes, charName, notesContainer);
+            }
+        }
+    }
+}
+
+/**
+ * Clear the media localization cache for a character (call after downloading new media)
+ */
+function clearMediaLocalizationCache(avatar) {
+    if (avatar && mediaLocalizationCache[avatar]) {
+        delete mediaLocalizationCache[avatar];
+        console.log(`[MediaLocalize] Cleared cache for ${avatar}`);
+    }
+}
+
+/**
+ * Clear entire media localization cache
+ */
+function clearAllMediaLocalizationCache() {
+    Object.keys(mediaLocalizationCache).forEach(key => delete mediaLocalizationCache[key]);
+    console.log('[MediaLocalize] Cleared all cache');
+}
 
 // ==============================================
 // Duplicate Detection Feature
@@ -10099,168 +10560,6 @@ async function loadChubTimeline(forceRefresh = false) {
         `;
     }
 }
-
-/**
- * Debug function to test fetching a specific character or author
- * Call from console: debugChubFetch('AdventureTales')
- * Or: debugChubFetch('AdventureTales', 'a-yandere-s-love-755554160743')
- */
-window.debugChubFetch = async function(author, charSlug = null) {
-    console.log('=== DEBUG CHUB FETCH ===');
-    console.log('Author:', author, 'Slug:', charSlug);
-    console.log('NSFW enabled:', chubNsfwEnabled);
-    console.log('Token present:', !!chubToken);
-    
-    try {
-        // If slug provided, try to fetch the specific character
-        if (charSlug) {
-            const fullPath = `${author}/${charSlug}`;
-            console.log('Fetching specific character:', fullPath);
-            
-            const charUrl = `${CHUB_API_BASE}/api/characters/${fullPath}`;
-            console.log('URL:', charUrl);
-            
-            const charResp = await fetch(charUrl, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Authorization': chubToken ? `Bearer ${chubToken}` : ''
-                }
-            });
-            
-            console.log('Response status:', charResp.status);
-            const charData = await charResp.json();
-            console.log('Character data:', charData);
-            
-            // Data is nested under 'node'
-            const node = charData.node || charData.data?.node || charData;
-            
-            // Check for visibility/nsfw settings
-            if (node) {
-                console.log('--- Character Details ---');
-                console.log('Name:', node.name);
-                console.log('ID:', node.id);
-                console.log('NSFW:', node.nsfw);
-                console.log('NSFL:', node.nsfl);
-                console.log('Public:', node.public);
-                console.log('Unlisted:', node.unlisted);  // THIS IS THE KEY!
-                console.log('Private:', node.private);
-                console.log('Created:', node.createdAt || node.created_at);
-                console.log('Full node:', node);
-            }
-        }
-        
-        // Also search for the author's characters
-        console.log('\n--- Searching author characters ---');
-        const params = new URLSearchParams();
-        params.set('username', author);
-        params.set('first', '50'); // Get more to see full list
-        params.set('sort', 'id');
-        params.set('nsfw', 'true'); // Force true to see all
-        params.set('nsfl', 'true'); // Force true to see all
-        params.set('include_forks', 'true'); // Include forked characters
-        
-        const searchUrl = `${CHUB_API_BASE}/search?${params.toString()}`;
-        console.log('Search URL:', searchUrl);
-        
-        const searchResp = await fetch(searchUrl, {
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': chubToken ? `Bearer ${chubToken}` : ''
-            }
-        });
-        
-        console.log('Search status:', searchResp.status);
-        const searchData = await searchResp.json();
-        console.log('Total count:', searchData.count || searchData.data?.count);
-        
-        const nodes = searchData.nodes || searchData.data?.nodes || [];
-        console.log('Returned nodes:', nodes.length);
-        
-        // List all characters
-        console.log('\nAll characters from', author + ':');
-        nodes.forEach((n, i) => {
-            console.log(`  ${i}: "${n.name}" id=${n.id} path=${n.fullPath} created=${n.createdAt || n.created_at}`);
-        });
-        
-        // Check if the specific character is in the list
-        if (charSlug) {
-            const found = nodes.find(n => (n.fullPath || '').toLowerCase().includes(charSlug.toLowerCase()));
-            console.log('\nTarget character in search results:', found ? 'YES' : 'NO');
-            if (found) console.log('Found:', found);
-        }
-        
-    } catch (e) {
-        console.error('Debug fetch error:', e);
-    }
-};
-
-/**
- * Debug function to test different timeline API parameters
- * Call from console: debugTimelineAPI()
- */
-window.debugTimelineAPI = async function() {
-    console.log('=== DEBUG TIMELINE API ===');
-    console.log('Token present:', !!chubToken);
-    
-    if (!chubToken) {
-        console.log('No token - cannot test authenticated endpoints');
-        return;
-    }
-    
-    // Test different endpoints and parameters
-    const tests = [
-        { name: 'timeline/v1 default', url: '/api/timeline/v1?first=50&nsfw=true&count=true' },
-        { name: 'timeline/v1 with unlisted', url: '/api/timeline/v1?first=50&nsfw=true&include_unlisted=true&count=true' },
-        { name: 'timeline/v1 with visibility', url: '/api/timeline/v1?first=50&nsfw=true&visibility=all&count=true' },
-        { name: 'feed endpoint', url: '/api/feed?first=50&nsfw=true' },
-        { name: 'notifications', url: '/api/notifications?first=50' },
-        { name: 'activity', url: '/api/activity?first=50' },
-    ];
-    
-    for (const test of tests) {
-        console.log(`\n--- Testing: ${test.name} ---`);
-        console.log('URL:', CHUB_API_BASE + test.url);
-        
-        try {
-            const resp = await fetch(CHUB_API_BASE + test.url, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Authorization': `Bearer ${chubToken}`
-                }
-            });
-            
-            console.log('Status:', resp.status);
-            
-            if (resp.ok) {
-                const data = await resp.json();
-                console.log('Response:', data);
-                
-                const nodes = data.nodes || data.data?.nodes || [];
-                console.log('Nodes count:', nodes.length);
-                
-                // Check if our target character is in there
-                const hasYandere = nodes.some(n => 
-                    (n.name || '').toLowerCase().includes('yandere') ||
-                    (n.fullPath || '').toLowerCase().includes('yandere')
-                );
-                console.log('Contains "Yandere" character:', hasYandere ? 'YES!' : 'no');
-                
-                if (hasYandere) {
-                    const yandere = nodes.find(n => 
-                        (n.name || '').toLowerCase().includes('yandere') ||
-                        (n.fullPath || '').toLowerCase().includes('yandere')
-                    );
-                    console.log('Found:', yandere);
-                }
-            } else {
-                const text = await resp.text();
-                console.log('Error response:', text.substring(0, 200));
-            }
-        } catch (e) {
-            console.log('Error:', e.message);
-        }
-    }
-};
 
 /**
  * Supplement timeline with direct fetches from followed authors

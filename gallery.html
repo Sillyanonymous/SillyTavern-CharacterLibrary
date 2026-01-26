@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=40">
+    <link rel="stylesheet" href="gallery.css?v=41">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -744,6 +744,10 @@
                                 <button id="localizeMediaBtn" class="action-btn secondary small" title="Download remote images from character card">
                                     <i class="fa-solid fa-download"></i> Download Media
                                 </button>
+                                <label class="localize-toggle" title="Replace remote URLs with local files when viewing this character">
+                                    <input type="checkbox" id="charLocalizeToggle">
+                                    <span class="localize-toggle-label"><i class="fa-solid fa-link-slash"></i> Use Local Media</span>
+                                </label>
                             </div>
                         </div>
                         <div class="gallery-sprites-grid" id="spritesGrid">
@@ -1042,6 +1046,20 @@ https://chub.ai/characters/author/another-character
                         <span class="settings-hint">Uses sandboxed iframe to render creator notes with full CSS/HTML support. May cause issues with some characters that use unusual formatting.</span>
                     </div>
                 </div>
+                
+                <!-- Media Localization Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-link-slash"></i> Media Localization</h4>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsMediaLocalization"> Replace remote media URLs with localized files
+                        </label>
+                        <span class="settings-hint">When viewing characters, automatically replace embedded remote URLs (images/video/audio) with local files from the character's gallery. Files must first be downloaded using "Localize Media". Works in Gallery and SillyTavern chat.</span>
+                    </div>
+                    <div class="settings-row settings-sub-note">
+                        <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
+                    </div>
+                </div>
             </div>
             <div class="confirm-modal-footer">
                 <button id="resetSettingsBtn" class="action-btn secondary"><i class="fa-solid fa-undo"></i> Restore Defaults</button>
@@ -1051,6 +1069,6 @@ https://chub.ai/characters/author/another-character
     </div>
 
     <!-- Scripts -->
-    <script src="gallery.js?v=60"></script>
+    <script src="gallery.js?v=64"></script>
 </body>
 </html>

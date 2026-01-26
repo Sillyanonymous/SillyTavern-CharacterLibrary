@@ -46,8 +46,6 @@ async function openGallery() {
 }
 
 jQuery(async () => {
-    console.log(`${EXTENSION_NAME}: Initializing...`);
-    
     // add a delay to ensure the UI is loaded
     await new Promise(resolve => setTimeout(resolve, 2000));
     
@@ -132,5 +130,340 @@ jQuery(async () => {
         }));
     }
     
+    // ==============================================
+    // Media Localization in SillyTavern Chat
+    // ==============================================
+    
+    // Initialize media localization for chat messages
+    initMediaLocalizationInChat();
+    
     console.log(`${EXTENSION_NAME}: Loaded successfully.`);
 });
+
+// ==============================================
+// Media Localization Functions for SillyTavern Chat
+// ==============================================
+
+const SETTINGS_KEY = 'SillyTavernCharacterGallery';
+
+// Cache for URL→LocalPath mappings per character avatar
+const chatMediaLocalizationCache = {};
+
+/**
+ * Get our extension settings from SillyTavern's context
+ */
+function getExtensionSettings() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (context?.extensionSettings?.[SETTINGS_KEY]) {
+            return context.extensionSettings[SETTINGS_KEY];
+        }
+    } catch (e) {
+        console.warn('[CharLib] Could not access extension settings:', e);
+    }
+    return {};
+}
+
+/**
+ * Check if media localization is enabled for a character
+ */
+function isMediaLocalizationEnabledForChat(avatar) {
+    const settings = getExtensionSettings();
+    const globalEnabled = settings.mediaLocalizationEnabled || false;
+    const perCharSettings = settings.mediaLocalizationPerChar || {};
+    
+    // Check per-character override first
+    if (avatar && avatar in perCharSettings) {
+        return perCharSettings[avatar];
+    }
+    
+    return globalEnabled;
+}
+
+/**
+ * Sanitize folder name to match SillyTavern's folder naming convention
+ */
+function sanitizeFolderName(name) {
+    if (!name) return '';
+    return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+}
+
+/**
+ * Sanitize media filename the same way gallery.js does
+ */
+function sanitizeMediaFilename(filename) {
+    const nameWithoutExt = filename.includes('.') 
+        ? filename.substring(0, filename.lastIndexOf('.'))
+        : filename;
+    return nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+}
+
+/**
+ * Extract filename from URL
+ */
+function extractFilenameFromUrl(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathParts = urlObj.pathname.split('/');
+        return pathParts[pathParts.length - 1] || '';
+    } catch (e) {
+        const parts = url.split('/');
+        return parts[parts.length - 1]?.split('?')[0] || '';
+    }
+}
+
+/**
+ * Build URL→LocalPath mapping for a character by scanning their gallery folder
+ */
+async function buildChatMediaLocalizationMap(characterName, avatar) {
+    // Check cache first
+    if (avatar && chatMediaLocalizationCache[avatar]) {
+        return chatMediaLocalizationCache[avatar];
+    }
+    
+    const urlMap = {};
+    const safeFolderName = sanitizeFolderName(characterName);
+    
+    try {
+        // Get CSRF token properly
+        const csrfToken = await getCsrfToken();
+        
+        // Get list of files in character's gallery
+        const response = await fetch('/api/images/list', {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ folder: characterName, type: 7 }) // 7 = all media types
+        });
+        
+        if (!response.ok) {
+            return urlMap;
+        }
+        
+        const files = await response.json();
+        if (!files || files.length === 0) {
+            return urlMap;
+        }
+        
+        // Parse localized_media files
+        const localizedPattern = /^localized_media_\d+_(.+)\.[^.]+$/;
+        let localizedCount = 0;
+        
+        for (const file of files) {
+            const fileName = (typeof file === 'string') ? file : file.name;
+            if (!fileName) continue;
+            
+            const match = fileName.match(localizedPattern);
+            if (match) {
+                const sanitizedName = match[1];
+                const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+                urlMap[`__sanitized__${sanitizedName}`] = localPath;
+                localizedCount++;
+            }
+        }
+        
+        // Cache the mapping
+        if (avatar) {
+            chatMediaLocalizationCache[avatar] = urlMap;
+        }
+        
+        return urlMap;
+        
+    } catch (error) {
+        console.error('[CharLib] Error building localization map:', error);
+        return urlMap;
+    }
+}
+
+/**
+ * Look up a remote URL and return local path if found
+ */
+function lookupLocalizedMediaForChat(urlMap, remoteUrl) {
+    if (!urlMap || !remoteUrl) return null;
+    
+    const filename = extractFilenameFromUrl(remoteUrl);
+    if (!filename) return null;
+    
+    const sanitizedName = sanitizeMediaFilename(filename);
+    return urlMap[`__sanitized__${sanitizedName}`] || null;
+}
+
+/**
+ * Apply media localization to a rendered message element
+ */
+async function localizeMediaInMessage(messageElement, character) {
+    if (!character?.avatar || !messageElement) return;
+    
+    // Check if localization is enabled
+    if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
+    
+    const characterName = character.name;
+    const urlMap = await buildChatMediaLocalizationMap(characterName, character.avatar);
+    
+    if (Object.keys(urlMap).length === 0) return; // No localized files
+    
+    // Find all media elements with remote URLs
+    const mediaSelectors = 'img[src^="http"], video source[src^="http"], audio source[src^="http"], video[src^="http"], audio[src^="http"]';
+    const mediaElements = messageElement.querySelectorAll(mediaSelectors);
+    
+    let replacedCount = 0;
+    
+    for (const el of mediaElements) {
+        const src = el.getAttribute('src');
+        if (!src) continue;
+        
+        const localPath = lookupLocalizedMediaForChat(urlMap, src);
+        if (localPath) {
+            el.setAttribute('src', localPath);
+            replacedCount++;
+        }
+    }
+}
+
+/**
+ * Initialize media localization hooks for SillyTavern chat
+ */
+function initMediaLocalizationInChat() {
+    try {
+        // Check if SillyTavern global is available
+        if (typeof SillyTavern === 'undefined') {
+            setTimeout(initMediaLocalizationInChat, 1000);
+            return;
+        }
+        
+        const context = SillyTavern.getContext?.();
+        if (!context || !context.eventSource || !context.event_types) {
+            setTimeout(initMediaLocalizationInChat, 1000);
+            return;
+        }
+        
+        const { eventSource, event_types } = context;
+        
+        // Listen for character messages being rendered
+        eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, async (messageId) => {
+            try {
+                // Get fresh context each time (characterId may have changed)
+                const currentContext = SillyTavern.getContext();
+                
+                // Get the message element
+                const messageElement = document.querySelector(`.mes[mesid="${messageId}"]`);
+                if (!messageElement) return;
+                
+                // Get current character
+                const charId = currentContext.characterId;
+                if (charId === undefined || charId === null) return;
+                
+                const character = currentContext.characters[charId];
+                if (!character) return;
+                
+                // Apply localization
+                await localizeMediaInMessage(messageElement.querySelector('.mes_text'), character);
+            } catch (e) {
+                console.error('[CharLib] Error in CHARACTER_MESSAGE_RENDERED handler:', e);
+            }
+        });
+        
+        // Also listen for user messages (in case they contain media)
+        eventSource.on(event_types.USER_MESSAGE_RENDERED, async (messageId) => {
+            try {
+                const currentContext = SillyTavern.getContext();
+                
+                const messageElement = document.querySelector(`.mes[mesid="${messageId}"]`);
+                if (!messageElement) return;
+                
+                const charId = currentContext.characterId;
+                if (charId === undefined || charId === null) return;
+                
+                const character = currentContext.characters[charId];
+                if (!character) return;
+                
+                await localizeMediaInMessage(messageElement.querySelector('.mes_text'), character);
+            } catch (e) {
+                console.error('[CharLib] Error in USER_MESSAGE_RENDERED handler:', e);
+            }
+        });
+        
+        // Listen for chat changes to clear cache
+        eventSource.on(event_types.CHAT_CHANGED, () => {
+            // Clear cache when switching chats/characters
+            Object.keys(chatMediaLocalizationCache).forEach(key => delete chatMediaLocalizationCache[key]);
+            
+            // Also localize creator's notes and other character info when chat changes
+            setTimeout(() => localizeCharacterInfoPanels(), 500);
+        });
+        
+        // Listen for character selected event to localize info panels
+        if (event_types.CHARACTER_EDITED) {
+            eventSource.on(event_types.CHARACTER_EDITED, () => {
+                setTimeout(() => localizeCharacterInfoPanels(), 300);
+            });
+        }
+        
+    } catch (e) {
+        console.error('[CharLib] Failed to initialize media localization:', e);
+    }
+}
+
+/**
+ * Localize media in character info panels (creator's notes, description, etc.)
+ * These are displayed outside of chat messages in various UI panels
+ */
+async function localizeCharacterInfoPanels() {
+    try {
+        const context = SillyTavern.getContext?.();
+        if (!context) return;
+        
+        const charId = context.characterId;
+        if (charId === undefined || charId === null) return;
+        
+        const character = context.characters?.[charId];
+        if (!character?.avatar) return;
+        
+        // Check if localization is enabled for this character
+        if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
+        
+        // Build the URL map
+        const urlMap = await buildChatMediaLocalizationMap(character.name, character.avatar);
+        if (Object.keys(urlMap).length === 0) return;
+        
+        // Selectors for various ST panels that might contain character info with images
+        const panelSelectors = [
+            '.inline-drawer-content',     // Main content drawers (creator's notes, etc.)
+            '#description_div',           // Character description
+            '#creator_notes_div',         // Creator's notes panel
+            '#character_popup',           // Character popup/modal
+            '#char_notes',                // Character notes
+            '#firstmessage_div',          // First message display
+            '.character_description',     // Generic description class
+            '.creator_notes',             // Generic creator notes class
+            '#mes_example_div',           // Example messages
+            '.mes_narration',             // Narration blocks
+        ];
+        
+        for (const selector of panelSelectors) {
+            const panels = document.querySelectorAll(selector);
+            for (const panel of panels) {
+                if (!panel) continue;
+                
+                // Find all remote media in this panel
+                const mediaElements = panel.querySelectorAll(
+                    'img[src^="http"], video source[src^="http"], audio source[src^="http"], video[src^="http"], audio[src^="http"]'
+                );
+                
+                for (const el of mediaElements) {
+                    const src = el.getAttribute('src');
+                    if (!src) continue;
+                    
+                    const localPath = lookupLocalizedMediaForChat(urlMap, src);
+                    if (localPath) {
+                        el.setAttribute('src', localPath);
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error('[CharLib] Error localizing character info panels:', e);
+    }
+}

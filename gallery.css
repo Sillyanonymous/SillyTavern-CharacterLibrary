@@ -2150,6 +2150,70 @@ textarea.glass-input {
 .gallery-actions {
     display: flex;
     gap: 8px;
+    align-items: center;
+}
+
+/* Media Localization Toggle */
+.localize-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    user-select: none;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+}
+
+.localize-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: var(--accent);
+}
+
+.localize-toggle input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: var(--accent);
+}
+
+.localize-toggle-label {
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.localize-toggle input:checked + .localize-toggle-label {
+    color: var(--accent);
+}
+
+.localize-toggle input:checked + .localize-toggle-label i {
+    color: #2ecc71;
+}
+
+/* Override indicator - when character has per-character setting different from global */
+.localize-toggle.has-override {
+    border-color: #f39c12;
+    background: rgba(243, 156, 18, 0.15);
+}
+
+.localize-toggle.has-override::after {
+    content: "⚡";
+    font-size: 0.75rem;
+    margin-left: 4px;
+}
+
+.localize-toggle.has-override .localize-toggle-label {
+    color: #f39c12;
+}
+
+.localize-toggle.has-override:hover {
+    background: rgba(243, 156, 18, 0.25);
+    border-color: #e67e22;
 }
 
 /* Chub Gallery Info Modal */
