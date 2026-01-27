@@ -1,4 +1,4 @@
-// SillyTavern Character Library Logic
+﻿// SillyTavern Character Library Logic
 
 const API_BASE = '/api'; 
 let allCharacters = [];
@@ -369,6 +369,247 @@ function getQueryParam(name) {
     return urlParams.get(name);
 }
 
+/**
+ * Get CSRF token from URL param or cookie
+ * @returns {string} The CSRF token
+ */
+function getCSRFToken() {
+    return getQueryParam('csrf') || getCookie('X-CSRF-Token');
+}
+
+// ========================================
+// CORE HELPER FUNCTIONS
+// Reusable utilities to reduce code duplication
+// ========================================
+
+/**
+ * Make an API request with CSRF token automatically included
+ * @param {string} endpoint - API endpoint (e.g., '/characters/get')
+ * @param {string} method - HTTP method (default: 'GET')
+ * @param {object|null} data - Request body data (will be JSON stringified)
+ * @param {object} options - Additional fetch options
+ * @returns {Promise<Response>} Fetch response
+ */
+async function apiRequest(endpoint, method = 'GET', data = null, options = {}) {
+    const csrfToken = getCSRFToken();
+    const config = {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken,
+            ...options.headers
+        },
+        ...options
+    };
+    if (data !== null) {
+        config.body = JSON.stringify(data);
+    }
+    return fetch(`${API_BASE}${endpoint}`, config);
+}
+
+/**
+ * Shorthand event listener registration
+ * @param {string} id - Element ID
+ * @param {string} event - Event type (e.g., 'click')
+ * @param {Function} handler - Event handler function
+ * @returns {boolean} True if listener was attached
+ */
+function on(id, event, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener(event, handler);
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Show an element by removing 'hidden' class
+ * @param {string} id - Element ID
+ */
+function show(id) {
+    document.getElementById(id)?.classList.remove('hidden');
+}
+
+/**
+ * Hide an element by adding 'hidden' class
+ * @param {string} id - Element ID
+ */
+function hide(id) {
+    document.getElementById(id)?.classList.add('hidden');
+}
+
+/**
+ * Wrap an async operation with loading state on a button
+ * @param {HTMLElement} button - Button element to show loading state
+ * @param {string} loadingText - Text to show while loading
+ * @param {Function} operation - Async function to execute
+ * @returns {Promise<*>} Result of the operation
+ */
+async function withLoadingState(button, loadingText, operation) {
+    if (!button) return operation();
+    const originalHtml = button.innerHTML;
+    const wasDisabled = button.disabled;
+    button.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${loadingText}`;
+    button.disabled = true;
+    try {
+        return await operation();
+    } finally {
+        button.innerHTML = originalHtml;
+        button.disabled = wasDisabled;
+    }
+}
+
+/**
+ * Log error and show toast notification
+ * @param {string} operation - Name of the operation that failed
+ * @param {Error|string} error - Error object or message
+ */
+function showError(operation, error) {
+    console.error(`[${operation}]`, error);
+    showToast(`${operation} failed: ${error.message || error}`, 'error');
+}
+
+/**
+ * Render a loading spinner in a container
+ * @param {HTMLElement|string} container - Container element or ID
+ * @param {string} message - Loading message to display
+ * @param {string} className - Optional custom class (default: 'loading-spinner')
+ */
+function renderLoadingState(container, message, className = 'loading-spinner') {
+    const el = typeof container === 'string' ? document.getElementById(container) : container;
+    if (el) {
+        el.innerHTML = `<div class="${className}"><i class="fa-solid fa-spinner fa-spin"></i> ${escapeHtml(message)}</div>`;
+    }
+}
+
+/**
+ * Render a simple empty state with just a message
+ * @param {HTMLElement|string} container - Container element or ID
+ * @param {string} message - Message to display
+ * @param {string} className - Optional custom class (default: 'empty-state')
+ */
+function renderSimpleEmpty(container, message, className = 'empty-state') {
+    const el = typeof container === 'string' ? document.getElementById(container) : container;
+    if (el) {
+        el.innerHTML = `<div class="${className}">${escapeHtml(message)}</div>`;
+    }
+}
+
+/**
+ * Render an empty state message in a container
+ * @param {HTMLElement} container - Container element
+ * @param {object} config - Empty state configuration
+ */
+function renderEmptyState(container, { icon, title, message, action, actionIcon, actionText }) {
+    container.innerHTML = `
+        <div class="empty-state">
+            <i class="fa-solid ${icon}"></i>
+            <h3>${escapeHtml(title)}</h3>
+            <p>${escapeHtml(message)}</p>
+            ${action ? `<button class="action-btn primary" onclick="${action}">
+                <i class="fa-solid ${actionIcon}"></i> ${escapeHtml(actionText)}
+            </button>` : ''}
+        </div>
+    `;
+}
+
+/**
+ * Setup standard modal close handlers (close button, backdrop click, Escape key)
+ * @param {HTMLElement} modal - Modal overlay element
+ * @param {string} closeButtonId - ID of the close button
+ * @param {Function} onClose - Optional callback when modal closes
+ * @returns {Function} Close function that can be called programmatically
+ */
+function setupModalCloseHandlers(modal, closeButtonId, onClose = null) {
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') doClose();
+    };
+    
+    const doClose = () => {
+        onClose?.();
+        modal.remove();
+        document.removeEventListener('keydown', handleKeydown);
+    };
+    
+    const closeBtn = document.getElementById(closeButtonId);
+    if (closeBtn) closeBtn.onclick = doClose;
+    modal.onclick = (e) => { if (e.target === modal) doClose(); };
+    document.addEventListener('keydown', handleKeydown);
+    
+    return doClose;
+}
+
+/**
+ * Get ChubAI API headers with optional authentication
+ * @param {boolean} includeAuth - Whether to include Bearer token
+ * @returns {object} Headers object
+ */
+function getChubHeaders(includeAuth = true) {
+    const headers = { 'Accept': 'application/json' };
+    const token = getSetting('chubToken');
+    if (includeAuth && token) {
+        headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+}
+
+/**
+ * DOMPurify sanitization with preset configs
+ */
+const SANITIZE_CONFIGS = {
+    basic: {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'a'],
+        ALLOWED_ATTR: ['href', 'title', 'class'],
+        ALLOW_DATA_ATTR: false
+    },
+    rich: {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'code', 'img', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'width', 'height'],
+        ALLOW_DATA_ATTR: true
+    },
+    strict: {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em'],
+        ALLOWED_ATTR: [],
+        ALLOW_DATA_ATTR: false
+    }
+};
+
+/**
+ * Sanitize HTML content with preset configuration
+ * @param {string} content - HTML content to sanitize
+ * @param {string} configType - Config type: 'basic', 'rich', or 'strict'
+ * @returns {string} Sanitized HTML
+ */
+function sanitizeHtml(content, configType = 'basic') {
+    if (typeof DOMPurify === 'undefined') return escapeHtml(content);
+    return DOMPurify.sanitize(content, SANITIZE_CONFIGS[configType] || SANITIZE_CONFIGS.basic);
+}
+
+// ========================================
+// API ENDPOINTS - Centralized path constants
+// ========================================
+const ENDPOINTS = {
+    CHARACTERS_GET: '/characters/get',
+    CHARACTERS_ALL: '/characters/all',
+    CHARACTERS_CREATE: '/characters/create',
+    CHARACTERS_EDIT: '/characters/edit-attribute',
+    CHARACTERS_DELETE: '/characters/delete',
+    CHARACTERS_CHATS: '/characters/chats',
+    CHATS_GET: '/chats/get',
+    CHATS_SAVE: '/chats/save',
+    CHATS_DELETE: '/chats/delete',
+    CHATS_EXPORT: '/chats/export',
+    CHATS_GROUP_EXPORT: '/chats/group/export',
+    IMAGES_LIST: '/images/list',
+    IMAGES_DELETE: '/images/delete',
+    IMAGES_UPLOAD: '/images/upload'
+};
+
+// ChubAI endpoints
+const CHUB_API_BASE = 'https://api.chub.ai';
+const CHUB_AVATAR_BASE = 'https://avatars.charhub.io/avatars/';
+
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
     // Load settings first to ensure defaults are available
@@ -617,51 +858,30 @@ async function fetchCharacters(forceRefresh = false) {
             }
         }
 
-        // Method 2: Fallback to API Fetch
-        let csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        
-        const headers = { 
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': csrfToken
-        };
-
+        // Method 2: Fallback to API Fetch with multiple endpoint attempts
         // Try standard endpoint
-        let url = `${API_BASE}/characters`;
-        console.log(`Fetching characters from: ${url}`);
+        let url = '/characters';
+        console.log(`Fetching characters from: ${API_BASE}${url}`);
 
-        let response = await fetch(url, {
-            method: 'GET', 
-            headers: headers
-        });
+        let response = await apiRequest(url, 'GET');
         
         // Fallbacks
         if (response.status === 404 || response.status === 405) {
             console.log("GET failed, trying POST...");
-            response = await fetch(url, {
-                method: 'POST', 
-                headers: headers,
-                body: JSON.stringify({}) 
-            });
+            response = await apiRequest(url, 'POST', {});
         }
 
         // Second fallback: try /api/characters/all (some forks/versions)
         if (response.status === 404) {
             console.log("POST failed, trying /api/characters/all...");
-            url = `${API_BASE}/characters/all`;
-            response = await fetch(url, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify({})
-            });
+            url = '/characters/all';
+            response = await apiRequest(url, 'POST', {});
         }
         
         // Third fallback: try GET /api/characters/all
         if (response.status === 404 || response.status === 405) {
              console.log("POST /all failed, trying GET /api/characters/all...");
-             response = await fetch(url, {
-                 method: 'GET',
-                 headers: headers
-             });
+             response = await apiRequest(url, 'GET');
         }
         
         if (!response.ok) {
@@ -909,7 +1129,7 @@ function renderGrid(chars) {
     if (existingSentinel) existingSentinel.remove();
     
     if (chars.length === 0) {
-        grid.innerHTML = '<div class="empty-state">No characters found</div>';
+        renderSimpleEmpty(grid, 'No characters found');
         grid.style.minHeight = '';
         grid.style.paddingTop = '';
         return;
@@ -1054,7 +1274,7 @@ function preloadImages(startIndex, endIndex) {
         const char = currentCharsList[i];
         if (char && char.avatar) {
             const img = new Image();
-            img.src = `/characters/${encodeURIComponent(char.avatar)}`;
+            img.src = getCharacterAvatarUrl(char.avatar);
         }
     }
 }
@@ -1112,10 +1332,9 @@ function createCharacterCard(char) {
         card.classList.add('is-favorite');
     }
     
-    const name = char.name || "Unknown";
+    const name = getCharacterName(char);
     char.name = name; 
-    const avatar = char.avatar; 
-    const imgPath = `/characters/${encodeURIComponent(avatar)}`;
+    const imgPath = getCharacterAvatarUrl(char.avatar);
     const tags = getTags(char);
     
     const tagHtml = tags.slice(0, 3).map(t => `<span class="card-tag">${escapeHtml(t)}</span>`).join('');
@@ -1151,7 +1370,7 @@ let activeChar = null;
 // Fetch User Images for Character
 async function fetchCharacterImages(charName) {
     const grid = document.getElementById('spritesGrid');
-    grid.innerHTML = '<div class="loading-spinner"><i class="fa-solid fa-spinner fa-spin"></i> Loading Media...</div>';
+    renderLoadingState(grid, 'Loading Media...');
     
     // The user's images are stored in /user/images/CharacterName/...
     // We can list files in that directory using the /api/files/list endpoint or similar if it exists.
@@ -1162,27 +1381,18 @@ async function fetchCharacterImages(charName) {
     // data/default-user/user/images/<Name> mapped to /user/images/<Name> in URL
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        
-        const response = await fetch(`${API_BASE}/images/list`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ folder: charName, type: 7 })
-        });
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: charName, type: 7 });
 
         if (response.ok) {
             const files = await response.json();
             renderGalleryImages(files, charName);
         } else {
              console.warn(`[Gallery] Failed to list images: ${response.status}`);
-             grid.innerHTML = '<div class="empty-state">No user images found for this character.</div>';
+             renderSimpleEmpty(grid, 'No user images found for this character.');
         }
     } catch (e) {
         console.error("Error fetching images:", e);
-        grid.innerHTML = '<div class="empty-state">Error loading media.</div>';
+        renderSimpleEmpty(grid, 'Error loading media.');
     }
 }
 
@@ -1193,7 +1403,7 @@ function renderGalleryImages(files, folderName) {
     grid.className = 'gallery-media-container';
     
     if (!files || files.length === 0) {
-        grid.innerHTML = '<div class="empty-state">No media found.</div>';
+        renderSimpleEmpty(grid, 'No media found.');
         return;
     }
 
@@ -1276,14 +1486,14 @@ function renderGalleryImages(files, folderName) {
     
     // Show empty state if no media at all
     if (imageFiles.length === 0 && audioFiles.length === 0) {
-        grid.innerHTML = '<div class="empty-state">No media found.</div>';
+        renderSimpleEmpty(grid, 'No media found.');
     }
 }
 
 function openModal(char) {
     activeChar = char;
     // ... existing ... 
-    const imgPath = `/characters/${encodeURIComponent(char.avatar)}`;
+    const imgPath = getCharacterAvatarUrl(char.avatar);
     
     document.getElementById('modalImage').src = imgPath;
     document.getElementById('modalTitle').innerText = char.name;
@@ -1418,15 +1628,7 @@ function openModal(char) {
     if (lorebookBox) {
         if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
             document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-            const lorebookHTML = characterBook.entries.map((entry, i) => {
-                const keys = entry.keys || entry.key || [];
-                const keyStr = Array.isArray(keys) ? keys.join(', ') : keys;
-                const content = entry.content || '';
-                const name = entry.comment || entry.name || `Entry ${i + 1}`;
-                const enabled = entry.enabled !== false;
-                
-                return `<div class="lorebook-entry" style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid ${enabled ? 'var(--accent)' : '#666'};"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><strong style="color: ${enabled ? 'var(--accent)' : '#888'};">${escapeHtml(name.trim())}</strong><span style="font-size: 0.8em; color: ${enabled ? '#8f8' : '#f88'};">${enabled ? '✓ Enabled' : '✗ Disabled'}</span></div><div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;"><i class="fa-solid fa-key"></i> ${escapeHtml(keyStr) || '(no keys)'}</div><div style="font-size: 0.9em; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">${escapeHtml(content.trim().substring(0, 300))}${content.length > 300 ? '...' : ''}</div></div>`;
-            }).join('');
+            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
             document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
             lorebookBox.style.display = 'block';
         } else {
@@ -1604,7 +1806,7 @@ function extractContentKeywords(text) {
         /\b(naruto|konoha|chakra|shinobi|hokage)\b/gi,
         /\b(one piece|straw hat|devil fruit|pirate king)\b/gi,
         /\b(dragon ball|saiyan|kamehameha|capsule corp)\b/gi,
-        /\b(pokemon|pokémon|trainer|gym leader|paldea|kanto)\b/gi,
+        /\b(pokemon|pokÃ©mon|trainer|gym leader|paldea|kanto)\b/gi,
         /\b(attack on titan|aot|titan shifter|survey corps|marley)\b/gi,
         /\b(jujutsu kaisen|cursed energy|sorcerer)\b/gi,
         /\b(demon slayer|hashira|breathing style)\b/gi,
@@ -1948,7 +2150,7 @@ function renderRelatedCards(related) {
         const char = r.char;
         const name = getCharField(char, 'name') || 'Unknown';
         const creator = getCharField(char, 'creator') || '';
-        const avatarPath = `/characters/${encodeURIComponent(char.avatar)}`;
+        const avatarPath = getCharacterAvatarUrl(char.avatar);
         
         // Build score breakdown pills - show tag count and rarity info
         const pills = [];
@@ -1958,10 +2160,10 @@ function renderRelatedCards(related) {
             const hasRareTags = r.breakdown.topTags?.some(t => t.count <= 5);
             const tagClass = hasRareTags ? 'tags rare' : 'tags';
             const topTagNames = r.breakdown.topTags?.slice(0, 2).map(t => t.tag).join(', ') || '';
-            pills.push(`<span class="related-pill ${tagClass}" title="${tagCount} shared tags: ${topTagNames}"><i class="fa-solid fa-tags"></i> ${tagCount}${hasRareTags ? '★' : ''}</span>`);
+            pills.push(`<span class="related-pill ${tagClass}" title="${tagCount} shared tags: ${topTagNames}"><i class="fa-solid fa-tags"></i> ${tagCount}${hasRareTags ? 'â˜…' : ''}</span>`);
         }
-        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator"><i class="fa-solid fa-user-pen"></i> ✓</span>`);
-        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content"><i class="fa-solid fa-file-lines"></i> ✓</span>`);
+        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator"><i class="fa-solid fa-user-pen"></i> âœ“</span>`);
+        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content"><i class="fa-solid fa-file-lines"></i> âœ“</span>`);
         
         return `
             <div class="related-card" onclick="openRelatedCharacter('${escapeHtml(char.avatar)}')" title="${escapeHtml(r.matchReasons.join('\\n'))}">
@@ -1970,7 +2172,7 @@ function renderRelatedCards(related) {
                 <div class="related-card-info">
                     <div class="related-card-name">${escapeHtml(name)}</div>
                     ${creator ? `<div class="related-card-creator">by ${escapeHtml(creator)}</div>` : ''}
-                    <div class="related-card-reasons">${r.matchReasons.slice(0, 2).join(' • ')}</div>
+                    <div class="related-card-reasons">${r.matchReasons.slice(0, 2).join(' â€¢ ')}</div>
                 </div>
                 <div class="related-card-score">
                     <div class="related-score-value">${r.score}</div>
@@ -2010,7 +2212,7 @@ window.openRelatedCharacter = openRelatedCharacter;
 // ==================== DELETE CHARACTER ====================
 
 function showDeleteConfirmation(char) {
-    const charName = char.name || char.data?.name || 'Unknown';
+    const charName = getCharacterName(char);
     const avatar = char.avatar || '';
     
     // Create delete confirmation modal
@@ -2028,7 +2230,7 @@ function showDeleteConfirmation(char) {
             </div>
             <div class="confirm-modal-body" style="text-align: center;">
                 <div style="margin-bottom: 20px;">
-                    <img src="/characters/${encodeURIComponent(avatar)}" 
+                    <img src="${getCharacterAvatarUrl(avatar)}" 
                          alt="${escapeHtml(charName)}" 
                          style="width: 100px; height: 100px; object-fit: cover; border-radius: 12px; border: 3px solid rgba(231, 76, 60, 0.5); margin-bottom: 15px;"
                          onerror="this.src='/img/ai4.png'">
@@ -2094,25 +2296,16 @@ function showDeleteConfirmation(char) {
 
 async function deleteCharacter(char, deleteChats = false) {
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
         const avatar = char.avatar || '';
         const charName = getCharField(char, 'name') || avatar;
         
         console.log('[Delete] Starting deletion for:', charName, 'avatar:', avatar);
         
         // Delete character via SillyTavern API
-        const response = await fetch('/api/characters/delete', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                avatar_url: avatar,
-                delete_chats: deleteChats
-            }),
-            cache: 'no-cache'
-        });
+        const response = await apiRequest(ENDPOINTS.CHARACTERS_DELETE, 'POST', {
+            avatar_url: avatar,
+            delete_chats: deleteChats
+        }, { cache: 'no-cache' });
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -2499,7 +2692,7 @@ function showSaveConfirmation() {
         <div class="diff-item">
             <div class="diff-item-label">${escapeHtml(change.field)}</div>
             <div class="diff-old">${change.oldHtml || escapeHtml(change.old)}</div>
-            <div class="diff-arrow">↓</div>
+            <div class="diff-arrow">â†“</div>
             <div class="diff-new">${change.newHtml || escapeHtml(change.new)}</div>
         </div>
     `).join('');
@@ -2513,15 +2706,7 @@ async function performSave() {
     if (!activeChar || !pendingPayload) return;
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        const response = await fetch(`${API_BASE}/characters/merge-attributes`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify(pendingPayload)
-        });
+        const response = await apiRequest('/characters/merge-attributes', 'POST', pendingPayload);
         
         if (response.ok) {
             showToast("Character saved successfully!", "success");
@@ -2695,15 +2880,7 @@ function refreshModalDisplay() {
     if (lorebookBox) {
         if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
             document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-            const lorebookHTML = characterBook.entries.map((entry, i) => {
-                const keys = entry.keys || entry.key || [];
-                const keyStr = Array.isArray(keys) ? keys.join(', ') : keys;
-                const content = entry.content || '';
-                const name = entry.comment || entry.name || `Entry ${i + 1}`;
-                const enabled = entry.enabled !== false;
-                
-                return `<div class="lorebook-entry" style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid ${enabled ? 'var(--accent)' : '#666'};"><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><strong style="color: ${enabled ? 'var(--accent)' : '#888'};">${escapeHtml(name.trim())}</strong><span style="font-size: 0.8em; color: ${enabled ? '#8f8' : '#f88'};">${enabled ? '✓ Enabled' : '✗ Disabled'}</span></div><div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;"><i class="fa-solid fa-key"></i> ${escapeHtml(keyStr) || '(no keys)'}</div><div style="font-size: 0.9em; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">${escapeHtml(content.trim().substring(0, 300))}${content.length > 300 ? '...' : ''}</div></div>`;
-            }).join('');
+            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
             document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
             lorebookBox.style.display = 'block';
         } else {
@@ -2886,22 +3063,14 @@ async function toggleCharacterFavorite(char) {
     const newFavStatus = !currentFavStatus;
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        const response = await fetch(`${API_BASE}/characters/merge-attributes`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                avatar: char.avatar,
-                fav: newFavStatus,
-                data: {
-                    extensions: {
-                        fav: newFavStatus
-                    }
+        const response = await apiRequest('/characters/merge-attributes', 'POST', {
+            avatar: char.avatar,
+            fav: newFavStatus,
+            data: {
+                extensions: {
+                    fav: newFavStatus
                 }
-            })
+            }
         });
         
         if (response.ok) {
@@ -3629,7 +3798,7 @@ function buildExpandedLorebookEntryHtml(entry, idx) {
                 <div class="expanded-lorebook-entry-controls">
                     <label class="expanded-lorebook-toggle ${entry.enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                         <input type="checkbox" class="expanded-lorebook-enabled" ${entry.enabled ? 'checked' : ''} style="display: none;">
-                        ${entry.enabled ? '✓ On' : '✗ Off'}
+                        ${entry.enabled ? 'âœ“ On' : 'âœ— Off'}
                     </label>
                     <button type="button" class="expanded-lorebook-delete" title="Delete entry">
                         <i class="fa-solid fa-trash"></i>
@@ -3687,7 +3856,7 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `expanded-lorebook-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? 'âœ“ On' : 'âœ— Off'}`;
         entryEl.classList.toggle('disabled', isEnabled);
     };
     
@@ -3800,97 +3969,17 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
     };
 }
 
-/**
- * Open expanded editor modal for a textarea element (for dynamically created fields like lorebook)
- */
-function openExpandedFieldEditorForElement(textareaElement, fieldLabel) {
-    if (!textareaElement) {
-        showToast('Field not found', 'error');
-        return;
-    }
-    
-    const currentValue = textareaElement.value;
-    
-    // Create expand modal
-    const expandModalHtml = `
-        <div id="expandFieldModal" class="modal-overlay">
-            <div class="modal-glass expand-field-modal">
-                <div class="modal-header">
-                    <h2><i class="fa-solid fa-expand"></i> ${escapeHtml(fieldLabel)}</h2>
-                    <div class="modal-controls">
-                        <button id="expandFieldSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply</button>
-                        <button class="close-btn" id="expandFieldClose">&times;</button>
-                    </div>
-                </div>
-                <div class="expand-field-body">
-                    <textarea id="expandFieldTextarea" class="glass-input expand-field-textarea" placeholder="Enter content...">${escapeHtml(currentValue)}</textarea>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Remove existing modal if any
-    const existingModal = document.getElementById('expandFieldModal');
-    if (existingModal) existingModal.remove();
-    
-    document.body.insertAdjacentHTML('beforeend', expandModalHtml);
-    
-    const expandModal = document.getElementById('expandFieldModal');
-    const expandTextarea = document.getElementById('expandFieldTextarea');
-    
-    // Focus textarea and move cursor to end
-    setTimeout(() => {
-        expandTextarea.focus();
-        expandTextarea.setSelectionRange(expandTextarea.value.length, expandTextarea.value.length);
-    }, 50);
-    
-    // Close handlers
-    const closeExpandModal = () => {
-        expandModal.remove();
-    };
-    
-    document.getElementById('expandFieldClose').onclick = closeExpandModal;
-    expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
-    
-    // Handle Escape key
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') {
-            closeExpandModal();
-            document.removeEventListener('keydown', handleKeydown);
-        }
-    };
-    document.addEventListener('keydown', handleKeydown);
-    
-    // Save/Apply handler
-    document.getElementById('expandFieldSave').onclick = () => {
-        const newValue = expandTextarea.value;
-        textareaElement.value = newValue;
-        
-        // Trigger input event so any listeners know the value changed
-        textareaElement.dispatchEvent(new Event('input', { bubbles: true }));
-        
-        closeExpandModal();
-        document.removeEventListener('keydown', handleKeydown);
-        showToast('Changes applied to field', 'success');
-    };
-}
-
 // Chats Functions
 async function fetchCharacterChats(char) {
     const chatsList = document.getElementById('chatsList');
     if (!chatsList) return;
     
-    chatsList.innerHTML = '<div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading chats...</div>';
+    renderLoadingState(chatsList, 'Loading chats...', 'chats-loading');
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        const response = await fetch(`${API_BASE}/characters/chats`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ avatar_url: char.avatar, metadata: true })
+        const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { 
+            avatar_url: char.avatar, 
+            metadata: true 
         });
         
         if (!response.ok) {
@@ -3984,7 +4073,7 @@ async function openChat(char, chatFile) {
         showToast("Opening chat...", "success");
         
         // Close any open modals
-        document.getElementById('chatPreviewModal')?.classList.add('hidden');
+        hide('chatPreviewModal');
         document.querySelector('.modal-overlay')?.classList.add('hidden');
         
         if (window.opener && !window.opener.closed) {
@@ -4045,17 +4134,9 @@ async function deleteChat(char, chatFile) {
     }
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        const response = await fetch(`${API_BASE}/chats/delete`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                chatfile: chatFile,
-                avatar_url: char.avatar
-            })
+        const response = await apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
+            chatfile: chatFile,
+            avatar_url: char.avatar
         });
         
         if (response.ok) {
@@ -4228,13 +4309,11 @@ function filterLocalByCreator(creatorName) {
 
 // Event Listeners
 function setupEventListeners() {
-    const searchInput = document.getElementById('searchInput');
-    searchInput.addEventListener('input', performSearch);
+    on('searchInput', 'input', performSearch);
 
     // Filter Checkboxes
     ['searchName', 'searchTags', 'searchAuthor', 'searchNotes'].forEach(id => {
-        const el = document.getElementById(id);
-        if(el) el.addEventListener('change', performSearch);
+        on(id, 'change', performSearch);
     });
 
     // Tag Filter Toggle
@@ -4335,8 +4414,7 @@ function setupEventListeners() {
     }
 
     // Sort - updates currentCharacters to keep filter/sort state in sync
-    const sortSelect = document.getElementById('sortSelect');
-    sortSelect.addEventListener('change', (e) => {
+    on('sortSelect', 'change', (e) => {
         const type = e.target.value;
         currentCharacters.sort((a, b) => {
             if (type === 'name_asc') return a.name.localeCompare(b.name);
@@ -4349,10 +4427,7 @@ function setupEventListeners() {
     });
     
     // Favorites Filter Toggle
-    const favoritesFilterBtn = document.getElementById('favoritesFilterBtn');
-    if (favoritesFilterBtn) {
-        favoritesFilterBtn.addEventListener('click', toggleFavoritesFilter);
-    }
+    on('favoritesFilterBtn', 'click', toggleFavoritesFilter);
     
     // Favorite Character Button in Modal
     const favoriteCharBtn = document.getElementById('favoriteCharBtn');
@@ -4365,7 +4440,7 @@ function setupEventListeners() {
     }
 
     // Refresh - preserves current filters and search
-    document.getElementById('refreshBtn').addEventListener('click', async () => {
+    on('refreshBtn', 'click', async () => {
         // Don't reset filters - just refresh the data
         document.getElementById('characterGrid').innerHTML = '';
         document.getElementById('loading').style.display = 'block';
@@ -4385,7 +4460,7 @@ function setupEventListeners() {
     }
 
     // Close Modal
-    document.getElementById('modalClose').addEventListener('click', closeModal);
+    on('modalClose', 'click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
     });
@@ -4668,7 +4743,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
             <div class="lorebook-entry-controls">
                 <label class="lorebook-entry-toggle ${enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                     <input type="checkbox" class="lorebook-enabled-checkbox" ${enabled ? 'checked' : ''} style="display: none;">
-                    ${enabled ? '✓ On' : '✗ Off'}
+                    ${enabled ? 'âœ“ On' : 'âœ— Off'}
                 </label>
                 <span class="lorebook-entry-delete" title="Delete entry">
                     <i class="fa-solid fa-trash"></i>
@@ -4732,7 +4807,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `lorebook-entry-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? 'âœ“ On' : 'âœ— Off'}`;
         wrapper.classList.toggle('disabled', isEnabled);
     });
     
@@ -4827,7 +4902,85 @@ function getCharacterBookFromEditor() {
     };
 }
 
-// Utils
+// ==============================================
+// Utility Functions
+// ==============================================
+
+/**
+ * Get character name with fallbacks
+ * @param {Object} char - Character object
+ * @param {string} fallback - Default value if no name found
+ * @returns {string} Character name
+ */
+function getCharacterName(char, fallback = 'Unknown') {
+    if (!char) return fallback;
+    return char.name || char.data?.name || char.definition?.name || fallback;
+}
+
+/**
+ * Get character avatar URL
+ * @param {string} avatar - Avatar filename
+ * @returns {string} Full avatar URL path
+ */
+function getCharacterAvatarUrl(avatar) {
+    if (!avatar) return '';
+    return `/characters/${encodeURIComponent(avatar)}`;
+}
+
+/**
+ * Render a lorebook entry as HTML
+ * @param {Object} entry - Lorebook entry object
+ * @param {number} index - Entry index
+ * @returns {string} HTML string
+ */
+function renderLorebookEntryHtml(entry, index) {
+    const keys = entry.keys || entry.key || [];
+    const keyStr = Array.isArray(keys) ? keys.join(', ') : keys;
+    const content = entry.content || '';
+    const name = entry.comment || entry.name || `Entry ${index + 1}`;
+    const enabled = entry.enabled !== false;
+    
+    return `<div class="lorebook-entry" style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid ${enabled ? 'var(--accent)' : '#666'};">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <strong style="color: ${enabled ? 'var(--accent)' : '#888'};">${escapeHtml(name.trim())}</strong>
+            <span style="font-size: 0.8em; color: ${enabled ? '#8f8' : '#f88'};">${enabled ? '✓ Enabled' : '✗ Disabled'}</span>
+        </div>
+        <div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;">
+            <i class="fa-solid fa-key"></i> ${escapeHtml(keyStr) || '(no keys)'}
+        </div>
+        <div style="font-size: 0.9em; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">
+            ${escapeHtml(content.trim().substring(0, 300))}${content.length > 300 ? '...' : ''}
+        </div>
+    </div>`;
+}
+
+/**
+ * Render lorebook entries for modal display
+ * @param {Array} entries - Array of lorebook entries
+ * @returns {string} HTML string
+ */
+function renderLorebookEntriesHtml(entries) {
+    if (!entries || !entries.length) return '';
+    return entries.map((entry, i) => renderLorebookEntryHtml(entry, i)).join('');
+}
+
+/**
+ * Show a modal by ID
+ * @param {string} modalId - Modal element ID
+ */
+function showModal(modalId) {
+    document.getElementById(modalId)?.classList.remove('hidden');
+}
+
+/**
+ * Hide a modal by ID
+ * @param {string} modalId - Modal element ID
+ */
+function hideModal(modalId) {
+    document.getElementById(modalId)?.classList.add('hidden');
+}
+
+// Escape HTML characters
 function escapeHtml(text) {
     if (!text) return "";
     return text
@@ -5036,6 +5189,21 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         return addPlaceholder(`<img src="${src}" class="embedded-image" loading="lazy">`);
     });
     
+    // 1b. Preserve existing HTML audio tags
+    processedText = processedText.replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, (match) => {
+        // Ensure it has our styling class
+        if (!match.includes('audio-player')) {
+            match = match.replace(/<audio/, '<audio class="audio-player embedded-audio"');
+        }
+        return addPlaceholder(match);
+    });
+    
+    // 1c. Convert audio source tags to full audio players
+    processedText = processedText.replace(/<source\s+[^>]*src=["']((?:https?:\/\/|\/)[^"']+\.(?:mp3|wav|ogg|m4a|flac|aac))["'][^>]*\/?>/gi, (match, src) => {
+        const ext = src.split('.').pop().toLowerCase();
+        return addPlaceholder(`<audio controls class="audio-player embedded-audio" preload="metadata"><source src="${src}" type="audio/${ext}">Your browser does not support audio.</audio>`);
+    });
+    
     // 2. Convert linked images: [![alt](img-url)](link-url)
     processedText = processedText.replace(/\[\!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
         // Allow http/https URLs and local paths (starting with /)
@@ -5051,6 +5219,12 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         if (!src.match(/^(https?:\/\/|\/)/i)) return match;
         const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
         return addPlaceholder(`<img src="${src}"${altAttr} class="embedded-image" loading="lazy">`);
+    });
+    
+    // 3b. Convert markdown audio links: [any text](url.mp3) or [🔊](url.mp3)
+    processedText = processedText.replace(/\[([^\]]*)\]\(((?:https?:\/\/|\/)[^)\s]+\.(?:mp3|wav|ogg|m4a|flac|aac))(?:\s+"[^"]*)?\)/gi, (match, text, src) => {
+        const ext = src.split('.').pop().toLowerCase();
+        return addPlaceholder(`<audio controls class="audio-player embedded-audio" preload="metadata" title="${escapeHtml(text || 'Audio')}"><source src="${src}" type="audio/${ext}">Your browser does not support audio.</audio>`);
     });
     
     // 4. Convert markdown links: [text](url)
@@ -5113,7 +5287,6 @@ async function uploadImages(files) {
         return;
     }
     
-    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
     let uploadedCount = 0;
     let errorCount = 0;
     
@@ -5128,18 +5301,11 @@ async function uploadImages(files) {
             const nameOnly = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
             const ext = file.name.includes('.') ? file.name.split('.').pop() : 'png';
             
-            const res = await fetch('/api/images/upload', {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrfToken
-                },
-                body: JSON.stringify({
-                    image: base64,
-                    filename: nameOnly,
-                    format: ext,
-                    ch_name: activeChar.name
-                })
+            const res = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+                image: base64,
+                filename: nameOnly,
+                format: ext,
+                ch_name: activeChar.name
             });
             
             if (res.ok) {
@@ -5244,16 +5410,6 @@ async function fetchChubMetadata(fullPath) {
     } catch (error) {
         return null;
     }
-}
-
-// Convert ArrayBuffer to Base64
-function arrayBufferToBase64(buffer) {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
 }
 
 // Calculate CRC32 for PNG chunks
@@ -5493,7 +5649,7 @@ async function importChubCharacter(fullPath) {
         formData.append('file_type', 'png');
         
         // Get CSRF token
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
+        const csrfToken = getCSRFToken();
         
         // Import to SillyTavern
         const importResponse = await fetch('/api/characters/import', {
@@ -5542,31 +5698,47 @@ async function importChubCharacter(fullPath) {
     }
 }
 
-// Add log entry
-function addImportLogEntry(message, status = 'pending') {
-    const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-times-circle',
-        pending: 'fa-spinner fa-spin'
-    };
-    
+// Shared log entry icons
+const LOG_ICONS = {
+    success: 'fa-check-circle',
+    error: 'fa-times-circle',
+    pending: 'fa-spinner fa-spin'
+};
+
+/**
+ * Add an entry to a log container
+ * @param {HTMLElement} container - The log container element
+ * @param {string} message - The message to display
+ * @param {string} status - Status: 'success', 'error', or 'pending'
+ * @returns {HTMLElement} The created log entry element
+ */
+function addLogEntry(container, message, status = 'pending') {
     const entry = document.createElement('div');
     entry.className = `import-log-entry ${status}`;
-    entry.innerHTML = `<i class="fa-solid ${icons[status]}"></i>${escapeHtml(message)}`;
-    importLog.appendChild(entry);
-    importLog.scrollTop = importLog.scrollHeight;
+    entry.innerHTML = `<i class="fa-solid ${LOG_ICONS[status]}"></i>${escapeHtml(message)}`;
+    container.appendChild(entry);
+    container.scrollTop = container.scrollHeight;
     return entry;
 }
 
-// Update log entry status
-function updateLogEntry(entry, message, status) {
-    const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-times-circle',
-        pending: 'fa-spinner fa-spin'
-    };
+/**
+ * Update an existing log entry
+ * @param {HTMLElement} entry - The log entry element to update
+ * @param {string} message - The new message
+ * @param {string} status - The new status
+ */
+function updateLogEntryStatus(entry, message, status) {
     entry.className = `import-log-entry ${status}`;
-    entry.innerHTML = `<i class="fa-solid ${icons[status]}"></i>${escapeHtml(message)}`;
+    entry.innerHTML = `<i class="fa-solid ${LOG_ICONS[status]}"></i>${escapeHtml(message)}`;
+}
+
+// Convenience wrappers for specific logs
+function addImportLogEntry(message, status = 'pending') {
+    return addLogEntry(importLog, message, status);
+}
+
+function updateLogEntry(entry, message, status) {
+    updateLogEntryStatus(entry, message, status);
 }
 
 // Start import process
@@ -5760,18 +5932,18 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
 }
 
 // Import Summary Modal Event Listeners
-document.getElementById('closeImportSummaryModal')?.addEventListener('click', () => {
-    document.getElementById('importSummaryModal').classList.add('hidden');
+on('closeImportSummaryModal', 'click', () => {
+    hideModal('importSummaryModal');
     pendingMediaCharacters = [];
 });
 
-document.getElementById('closeImportSummaryBtn')?.addEventListener('click', () => {
-    document.getElementById('importSummaryModal').classList.add('hidden');
+on('closeImportSummaryBtn', 'click', () => {
+    hideModal('importSummaryModal');
     pendingMediaCharacters = [];
 });
 
 // Download embedded media button
-document.getElementById('importSummaryDownloadBtn')?.addEventListener('click', async () => {
+on('importSummaryDownloadBtn', 'click', async () => {
     const btn = document.getElementById('importSummaryDownloadBtn');
     
     if (pendingMediaCharacters.length === 0) {
@@ -5825,14 +5997,14 @@ document.getElementById('importSummaryDownloadBtn')?.addEventListener('click', a
  * @returns {Promise<{success: number, skipped: number, errors: number}>}
  */
 async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
     
     let successCount = 0;
     let errorCount = 0;
     let skippedCount = 0;
     
     if (!mediaUrls || mediaUrls.length === 0) {
-        return { success: 0, skipped: 0, errors: 0 };
+        return { success: 0, skipped: 0, errors: 0, aborted: false };
     }
     
     // Get existing files and their hashes to check for duplicates BEFORE downloading
@@ -5842,6 +6014,11 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
     let startIndex = Date.now(); // Use timestamp as start index for unique filenames
     
     for (let i = 0; i < mediaUrls.length; i++) {
+        // Check for abort signal
+        if (shouldAbort && shouldAbort()) {
+            return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: true };
+        }
+        
         const url = mediaUrls[i];
         const fileIndex = startIndex + i;
         
@@ -5849,8 +6026,8 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
         const logEntry = onLog ? onLog(`Checking ${displayUrl}...`, 'pending') : null;
         
-        // Download to memory first to check hash
-        const downloadResult = await downloadMediaToMemory(url);
+        // Download to memory first to check hash (with 30s timeout)
+        const downloadResult = await downloadMediaToMemory(url, 30000);
         
         if (!downloadResult.success) {
             errorCount++;
@@ -5887,7 +6064,7 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         if (onProgress) onProgress(i + 1, mediaUrls.length);
     }
     
-    return { success: successCount, skipped: skippedCount, errors: errorCount };
+    return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: false };
 }
 
 /**
@@ -5898,8 +6075,9 @@ function extractMediaUrls(text) {
     
     const urls = [];
     
-    // Match ![](url) markdown format
-    const markdownPattern = /!\[.*?\]\((https?:\/\/[^\)]+)\)/g;
+    // Match ![](url) markdown format - stop at whitespace or ) to exclude sizing params
+    // Supports: ![alt](url), ![alt](url =WxH), ![alt](url "title")
+    const markdownPattern = /!\[.*?\]\((https?:\/\/[^\s\)]+)/g;
     let match;
     while ((match = markdownPattern.exec(text)) !== null) {
         urls.push(match[1]);
@@ -5913,8 +6091,16 @@ function extractMediaUrls(text) {
         }
     }
     
+    // Match <audio src="url"> and <source src="url"> HTML format
+    const audioPattern = /<(?:audio|source)[^>]+src=["']([^"']+)["'][^>]*>/g;
+    while ((match = audioPattern.exec(text)) !== null) {
+        if (match[1].startsWith('http')) {
+            urls.push(match[1]);
+        }
+    }
+    
     // Match raw URLs for media files
-    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg))/gi;
+    const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))/gi;
     while ((match = urlPattern.exec(text)) !== null) {
         urls.push(match[1]);
     }
@@ -5981,18 +6167,10 @@ function findCharacterMediaUrls(character) {
  */
 async function getExistingFileHashes(characterName) {
     const hashes = new Set();
-    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
     
     try {
         // Request all media types: IMAGE=1, VIDEO=2, AUDIO=4, so 7 = all
-        const response = await fetch(`${API_BASE}/images/list`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ folder: characterName, type: 7 })
-        });
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: characterName, type: 7 });
         
         if (!response.ok) {
             console.log('[Localize] Could not list existing files');
@@ -6039,32 +6217,41 @@ async function getExistingFileHashes(characterName) {
 /**
  * Download a media file to memory (ArrayBuffer) without saving
  */
-async function downloadMediaToMemory(url) {
+async function downloadMediaToMemory(url, timeoutMs = 30000) {
     try {
         let response;
         let usedProxy = false;
         
-        // Try direct fetch first
+        // Create abort controller for timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        
         try {
-            response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-        } catch (directError) {
-            // Direct fetch failed (likely CORS), try proxy
-            usedProxy = true;
-            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
-            response = await fetch(proxyUrl);
-            
-            if (!response.ok) {
-                if (response.status === 404) {
-                    const text = await response.text();
-                    if (text.includes('CORS proxy is disabled')) {
-                        throw new Error('CORS blocked and proxy is disabled');
-                    }
+            // Try direct fetch first
+            try {
+                response = await fetch(url, { signal: controller.signal });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
                 }
-                throw new Error(`Proxy HTTP ${response.status}`);
+            } catch (directError) {
+                if (directError.name === 'AbortError') throw directError;
+                // Direct fetch failed (likely CORS), try proxy
+                usedProxy = true;
+                const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+                response = await fetch(proxyUrl, { signal: controller.signal });
+                
+                if (!response.ok) {
+                    if (response.status === 404) {
+                        const text = await response.text();
+                        if (text.includes('CORS proxy is disabled')) {
+                            throw new Error('CORS blocked and proxy is disabled');
+                        }
+                    }
+                    throw new Error(`Proxy HTTP ${response.status}`);
+                }
             }
+        } finally {
+            clearTimeout(timeoutId);
         }
         
         const arrayBuffer = await response.arrayBuffer();
@@ -6144,21 +6331,12 @@ async function saveMediaFromMemory(downloadResult, url, characterName, index) {
         });
         
         // Get CSRF token
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        
         // Save file
-        const saveResponse = await fetch('/api/images/upload', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                image: base64Data,
-                filename: filenameBase,
-                format: extension,
-                ch_name: characterName
-            })
+        const saveResponse = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+            image: base64Data,
+            filename: filenameBase,
+            format: extension,
+            ch_name: characterName
         });
         
         if (!saveResponse.ok) {
@@ -6186,180 +6364,14 @@ async function saveMediaFromMemory(downloadResult, url, characterName, index) {
     }
 }
 
-/**
- * Download a media file and save it to character's gallery
- * Tries direct fetch first, falls back to CORS proxy if blocked
- */
-async function downloadAndSaveMedia(url, characterName, index) {
-    try {
-        console.log(`[Localize] Downloading: ${url}`);
-        
-        let response;
-        let usedProxy = false;
-        
-        // Try direct fetch first
-        try {
-            response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}`);
-            }
-        } catch (directError) {
-            // Direct fetch failed (likely CORS), try proxy
-            console.log(`[Localize] Direct fetch failed, trying CORS proxy...`);
-            usedProxy = true;
-            
-            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
-            response = await fetch(proxyUrl);
-            
-            if (!response.ok) {
-                // Check if proxy is disabled
-                if (response.status === 404) {
-                    const text = await response.text();
-                    if (text.includes('CORS proxy is disabled')) {
-                        throw new Error('CORS blocked and proxy is disabled. Enable corsProxy in config.yaml');
-                    }
-                }
-                throw new Error(`Proxy HTTP ${response.status}: ${response.statusText}`);
-            }
-        }
-        
-        if (usedProxy) {
-            console.log(`[Localize] Successfully fetched via proxy`);
-        }
-        
-        const blob = await response.blob();
-        
-        // Determine file extension from blob type or URL
-        let extension = 'jpg';
-        if (blob.type) {
-            const mimeToExt = {
-                'image/png': 'png',
-                'image/jpeg': 'jpg',
-                'image/jpg': 'jpg',
-                'image/gif': 'gif',
-                'image/webp': 'webp',
-                'image/svg+xml': 'svg',
-                'video/mp4': 'mp4',
-                'video/webm': 'webm',
-                'video/quicktime': 'mov',
-                'audio/mpeg': 'mp3',
-                'audio/wav': 'wav',
-                'audio/ogg': 'ogg'
-            };
-            extension = mimeToExt[blob.type] || extension;
-        } else {
-            // Fallback to URL extension
-            const urlMatch = url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-            if (urlMatch) {
-                extension = urlMatch[1].toLowerCase();
-            }
-        }
-        
-        // Extract original filename from URL
-        const urlObj = new URL(url);
-        const pathParts = urlObj.pathname.split('/');
-        const originalFilename = pathParts[pathParts.length - 1] || 'media';
-        const originalNameWithoutExt = originalFilename.includes('.') 
-            ? originalFilename.substring(0, originalFilename.lastIndexOf('.'))
-            : originalFilename;
-        
-        // Sanitize filename
-        const sanitizedName = originalNameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
-        
-        // Generate local filename
-        const filenameBase = `localized_media_${index}_${sanitizedName}`;
-        
-        // Convert blob to base64
-        const base64Data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const result = reader.result;
-                const base64 = result.includes(',') ? result.split(',')[1] : result;
-                resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
-        
-        // Get CSRF token
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        
-        // Save file using SillyTavern's /api/images/upload endpoint
-        console.log(`[Localize] Saving: ${filenameBase}.${extension}`);
-        const saveResponse = await fetch('/api/images/upload', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                image: base64Data,
-                filename: filenameBase,
-                format: extension,
-                ch_name: characterName
-            })
-        });
-        
-        if (!saveResponse.ok) {
-            const errorText = await saveResponse.text();
-            throw new Error(`Upload failed: ${errorText}`);
-        }
-        
-        const saveResult = await saveResponse.json();
-        
-        if (!saveResult || !saveResult.path) {
-            throw new Error('No path returned from upload');
-        }
-        
-        console.log(`[Localize] Saved successfully: ${saveResult.path}`);
-        
-        return {
-            success: true,
-            url: url,
-            localPath: saveResult.path,
-            filename: `${filenameBase}.${extension}`
-        };
-        
-    } catch (error) {
-        console.error(`[Localize] Failed to download: ${url}`, error);
-        return {
-            success: false,
-            url: url,
-            error: error.message || String(error)
-        };
-    }
-}
-
-/**
- * Add entry to localize log
- */
+// Convenience wrappers for localize log
 function addLocalizeLogEntry(message, status = 'pending') {
     const localizeLog = document.getElementById('localizeLog');
-    const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-times-circle',
-        pending: 'fa-spinner fa-spin'
-    };
-    
-    const entry = document.createElement('div');
-    entry.className = `import-log-entry ${status}`;
-    entry.innerHTML = `<i class="fa-solid ${icons[status]}"></i>${escapeHtml(message)}`;
-    localizeLog.appendChild(entry);
-    localizeLog.scrollTop = localizeLog.scrollHeight;
-    return entry;
+    return addLogEntry(localizeLog, message, status);
 }
 
-/**
- * Update a localize log entry
- */
 function updateLocalizeLogEntry(entry, message, status) {
-    const icons = {
-        success: 'fa-check-circle',
-        error: 'fa-times-circle',
-        pending: 'fa-spinner fa-spin'
-    };
-    entry.className = `import-log-entry ${status}`;
-    entry.innerHTML = `<i class="fa-solid ${icons[status]}"></i>${escapeHtml(message)}`;
+    updateLogEntryStatus(entry, message, status);
 }
 
 // Localize Media Modal Elements
@@ -6450,7 +6462,7 @@ localizeMediaBtn?.addEventListener('click', async () => {
     localizeProgressCount.textContent = '0/0';
     
     // Get character name for folder
-    const characterName = activeChar.name || activeChar.data?.name || 'unknown';
+    const characterName = getCharacterName(activeChar, 'unknown');
     
     // Find all media URLs
     const mediaUrls = findCharacterMediaUrls(activeChar);
@@ -6499,12 +6511,438 @@ localizeMediaBtn?.addEventListener('click', async () => {
         
         // Refresh the sprites grid to show new images
         if (activeChar) {
-            fetchCharacterImages(activeChar.name || activeChar.data?.name);
+            fetchCharacterImages(getCharacterName(activeChar));
         }
     } else if (result.skipped > 0 && result.errors === 0) {
         showToast('All files already exist', 'info');
     } else if (result.errors > 0) {
         showToast('Some downloads failed', 'error');
+    }
+    
+    // Mark character as complete for bulk localization if no errors
+    if (result.errors === 0 && activeChar?.avatar) {
+        markMediaLocalizationComplete(activeChar.avatar);
+    }
+});
+
+// ==============================================
+// Bulk Media Localization
+// ==============================================
+
+// Bulk Localize Modal Elements
+const bulkLocalizeModal = document.getElementById('bulkLocalizeModal');
+const closeBulkLocalizeModal = document.getElementById('closeBulkLocalizeModal');
+const cancelBulkLocalizeBtn = document.getElementById('cancelBulkLocalizeBtn');
+const bulkLocalizeCharAvatar = document.getElementById('bulkLocalizeCharAvatar');
+const bulkLocalizeCharName = document.getElementById('bulkLocalizeCharName');
+const bulkLocalizeStatus = document.getElementById('bulkLocalizeStatus');
+const bulkLocalizeProgressCount = document.getElementById('bulkLocalizeProgressCount');
+const bulkLocalizeProgressFill = document.getElementById('bulkLocalizeProgressFill');
+const bulkLocalizeFileCount = document.getElementById('bulkLocalizeFileCount');
+const bulkLocalizeFileFill = document.getElementById('bulkLocalizeFileFill');
+const bulkStatDownloaded = document.getElementById('bulkStatDownloaded');
+const bulkStatSkipped = document.getElementById('bulkStatSkipped');
+const bulkStatErrors = document.getElementById('bulkStatErrors');
+
+// Bulk Summary Modal Elements
+const bulkSummaryModal = document.getElementById('bulkLocalizeSummaryModal');
+const closeBulkSummaryModal = document.getElementById('closeBulkSummaryModal');
+const closeBulkSummaryBtn = document.getElementById('closeBulkSummaryBtn');
+const bulkSummaryOverview = document.getElementById('bulkSummaryOverview');
+const bulkSummaryFilterSelect = document.getElementById('bulkSummaryFilterSelect');
+const bulkSummarySearch = document.getElementById('bulkSummarySearch');
+const bulkSummaryList = document.getElementById('bulkSummaryList');
+const bulkSummaryPrevBtn = document.getElementById('bulkSummaryPrevBtn');
+const bulkSummaryNextBtn = document.getElementById('bulkSummaryNextBtn');
+const bulkSummaryPageInfo = document.getElementById('bulkSummaryPageInfo');
+
+// Bulk localization state
+let bulkLocalizeAborted = false;
+let bulkLocalizeResults = [];
+let bulkSummaryCurrentPage = 1;
+const BULK_SUMMARY_PAGE_SIZE = 50;
+
+// Close bulk localize modal
+closeBulkLocalizeModal?.addEventListener('click', () => {
+    bulkLocalizeAborted = true;
+    bulkLocalizeModal.classList.add('hidden');
+});
+
+cancelBulkLocalizeBtn?.addEventListener('click', () => {
+    bulkLocalizeAborted = true;
+    cancelBulkLocalizeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Stopping...';
+    cancelBulkLocalizeBtn.disabled = true;
+});
+
+// Close summary modal
+closeBulkSummaryModal?.addEventListener('click', () => {
+    bulkSummaryModal.classList.add('hidden');
+});
+
+closeBulkSummaryBtn?.addEventListener('click', () => {
+    bulkSummaryModal.classList.add('hidden');
+});
+
+// Summary filter and search handlers
+bulkSummaryFilterSelect?.addEventListener('change', () => {
+    bulkSummaryCurrentPage = 1;
+    renderBulkSummaryList();
+});
+
+bulkSummarySearch?.addEventListener('input', () => {
+    bulkSummaryCurrentPage = 1;
+    renderBulkSummaryList();
+});
+
+bulkSummaryPrevBtn?.addEventListener('click', () => {
+    if (bulkSummaryCurrentPage > 1) {
+        bulkSummaryCurrentPage--;
+        renderBulkSummaryList();
+    }
+});
+
+bulkSummaryNextBtn?.addEventListener('click', () => {
+    bulkSummaryCurrentPage++;
+    renderBulkSummaryList();
+});
+
+/**
+ * Filter bulk summary results based on current filter and search
+ */
+function getFilteredBulkResults() {
+    const filter = bulkSummaryFilterSelect?.value || 'all';
+    const search = (bulkSummarySearch?.value || '').toLowerCase().trim();
+    
+    return bulkLocalizeResults.filter(r => {
+        // Apply filter
+        if (filter === 'downloaded' && r.downloaded === 0) return false;
+        if (filter === 'skipped' && r.skipped === 0) return false;
+        if (filter === 'errors' && r.errors === 0) return false;
+        if (filter === 'incomplete' && !r.incomplete) return false;
+        if (filter === 'none' && r.totalUrls > 0) return false;
+        
+        // Apply search
+        if (search && !r.name.toLowerCase().includes(search)) return false;
+        
+        return true;
+    });
+}
+
+/**
+ * Render the bulk summary list with pagination
+ */
+function renderBulkSummaryList() {
+    const filtered = getFilteredBulkResults();
+    const totalPages = Math.max(1, Math.ceil(filtered.length / BULK_SUMMARY_PAGE_SIZE));
+    
+    // Clamp current page
+    if (bulkSummaryCurrentPage > totalPages) bulkSummaryCurrentPage = totalPages;
+    
+    const startIdx = (bulkSummaryCurrentPage - 1) * BULK_SUMMARY_PAGE_SIZE;
+    const pageResults = filtered.slice(startIdx, startIdx + BULK_SUMMARY_PAGE_SIZE);
+    
+    if (pageResults.length === 0) {
+        bulkSummaryList.innerHTML = '<div class="bulk-summary-empty"><i class="fa-solid fa-filter-circle-xmark"></i><br>No characters match the current filter</div>';
+    } else {
+        bulkSummaryList.innerHTML = pageResults.map(r => `
+            <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
+                <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                <span class="char-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+                <div class="char-stats">
+                    ${r.totalUrls === 0 
+                        ? '<span class="none"><i class="fa-solid fa-minus"></i> No remote media</span>'
+                        : `
+                            ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
+                            ${r.downloaded > 0 ? `<span class="downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
+                            ${r.skipped > 0 ? `<span class="skipped"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
+                            ${r.errors > 0 ? `<span class="errors"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
+                        `
+                    }
+                </div>
+            </div>
+        `).join('');
+    }
+    
+    // Update pagination
+    bulkSummaryPageInfo.textContent = `Page ${bulkSummaryCurrentPage} of ${totalPages}`;
+    bulkSummaryPrevBtn.disabled = bulkSummaryCurrentPage <= 1;
+    bulkSummaryNextBtn.disabled = bulkSummaryCurrentPage >= totalPages;
+}
+
+/**
+ * Show the bulk summary modal with results
+ */
+function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
+    // Calculate totals
+    const totals = bulkLocalizeResults.reduce((acc, r) => {
+        acc.characters++;
+        acc.downloaded += r.downloaded;
+        acc.skipped += r.skipped;
+        acc.errors += r.errors;
+        if (r.totalUrls > 0) acc.withMedia++;
+        if (r.incomplete) acc.incomplete++;
+        return acc;
+    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, withMedia: 0, incomplete: 0 });
+    
+    // Render overview
+    bulkSummaryOverview.innerHTML = `
+        <div class="bulk-summary-stat">
+            <span class="stat-value">${totals.characters}</span>
+            <span class="stat-label">${wasAborted ? 'Processed' : 'Characters'}</span>
+        </div>
+        ${skippedCompleted > 0 ? `
+        <div class="bulk-summary-stat previously-done">
+            <span class="stat-value">${skippedCompleted}</span>
+            <span class="stat-label">Previously Done</span>
+        </div>
+        ` : ''}
+        <div class="bulk-summary-stat downloaded">
+            <span class="stat-value">${totals.downloaded}</span>
+            <span class="stat-label">Downloaded</span>
+        </div>
+        <div class="bulk-summary-stat skipped">
+            <span class="stat-value">${totals.skipped}</span>
+            <span class="stat-label">Already Local</span>
+        </div>
+        <div class="bulk-summary-stat errors">
+            <span class="stat-value">${totals.errors}</span>
+            <span class="stat-label">Errors</span>
+        </div>
+        ${totals.incomplete > 0 ? `
+        <div class="bulk-summary-stat incomplete">
+            <span class="stat-value">${totals.incomplete}</span>
+            <span class="stat-label">Incomplete</span>
+        </div>
+        ` : ''}
+    `;
+    
+    // Reset filters
+    bulkSummaryFilterSelect.value = 'all';
+    bulkSummarySearch.value = '';
+    bulkSummaryCurrentPage = 1;
+    
+    // Render list
+    renderBulkSummaryList();
+    
+    // Show modal
+    bulkSummaryModal.classList.remove('hidden');
+}
+
+/**
+ * Get Set of character avatars that have completed media localization
+ * @returns {Set<string>} Set of avatar filenames
+ */
+function getCompletedMediaLocalizations() {
+    const stored = getSetting('completedMediaLocalizations') || [];
+    return new Set(stored);
+}
+
+/**
+ * Mark a character as having completed media localization
+ * @param {string} avatar - The character's avatar filename
+ */
+function markMediaLocalizationComplete(avatar) {
+    if (!avatar) return;
+    const completed = getCompletedMediaLocalizations();
+    completed.add(avatar);
+    setSetting('completedMediaLocalizations', [...completed]);
+}
+
+/**
+ * Clear all completed media localization records
+ */
+function clearCompletedMediaLocalizations() {
+    setSetting('completedMediaLocalizations', []);
+}
+
+/**
+ * Run bulk media localization across all characters
+ */
+async function runBulkLocalization() {
+    bulkLocalizeAborted = false;
+    bulkLocalizeResults = [];
+    
+    // Get previously completed characters
+    const completedAvatars = getCompletedMediaLocalizations();
+    
+    // Reset UI
+    bulkLocalizeModal.classList.remove('hidden');
+    bulkLocalizeCharAvatar.src = '';
+    bulkLocalizeCharName.textContent = 'Preparing...';
+    bulkLocalizeStatus.textContent = 'Scanning library...';
+    bulkLocalizeProgressFill.style.width = '0%';
+    bulkLocalizeFileFill.style.width = '0%';
+    bulkLocalizeProgressCount.textContent = '0/0 characters';
+    bulkLocalizeFileCount.textContent = '0/0 files';
+    bulkStatDownloaded.textContent = '0';
+    bulkStatSkipped.textContent = '0';
+    bulkStatErrors.textContent = '0';
+    cancelBulkLocalizeBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+    cancelBulkLocalizeBtn.disabled = false;
+    
+    let totalDownloaded = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    
+    const characters = [...allCharacters];
+    const totalChars = characters.length;
+    
+    bulkLocalizeStatus.textContent = `Processing ${totalChars} characters...`;
+    
+    let skippedCompleted = 0;
+    
+    for (let i = 0; i < characters.length; i++) {
+        if (bulkLocalizeAborted) {
+            bulkLocalizeStatus.textContent = 'Stopping...';
+            break;
+        }
+        
+        const char = characters[i];
+        const charName = getCharacterName(char, 'Unknown');
+        
+        // Skip characters that already completed successfully in previous runs
+        if (char.avatar && completedAvatars.has(char.avatar)) {
+            skippedCompleted++;
+            bulkLocalizeProgressCount.textContent = `${i + 1}/${totalChars} characters (${skippedCompleted} previously done)`;
+            bulkLocalizeProgressFill.style.width = `${((i + 1) / totalChars) * 100}%`;
+            continue;
+        }
+        
+        // Update current character display
+        bulkLocalizeCharAvatar.src = getCharacterAvatarUrl(char.avatar);
+        bulkLocalizeCharName.textContent = charName;
+        bulkLocalizeProgressCount.textContent = `${i + 1}/${totalChars} characters`;
+        bulkLocalizeProgressFill.style.width = `${((i + 1) / totalChars) * 100}%`;
+        
+        // Find media URLs for this character
+        const mediaUrls = findCharacterMediaUrls(char);
+        
+        const result = {
+            name: charName,
+            avatar: char.avatar,
+            totalUrls: mediaUrls.length,
+            downloaded: 0,
+            skipped: 0,
+            errors: 0,
+            incomplete: false
+        };
+        
+        if (mediaUrls.length > 0) {
+            bulkLocalizeFileCount.textContent = `0/${mediaUrls.length} files`;
+            bulkLocalizeFileFill.style.width = '0%';
+            
+            // Download media for this character with abort support
+            const downloadResult = await downloadEmbeddedMediaForCharacter(charName, mediaUrls, {
+                onProgress: (current, total) => {
+                    if (!bulkLocalizeAborted) {
+                        bulkLocalizeFileCount.textContent = `${current}/${total} files`;
+                        bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
+                    }
+                },
+                shouldAbort: () => bulkLocalizeAborted
+            });
+            
+            result.downloaded = downloadResult.success;
+            result.skipped = downloadResult.skipped;
+            result.errors = downloadResult.errors;
+            
+            // Mark as incomplete if aborted mid-character or had errors
+            if (downloadResult.aborted || downloadResult.errors > 0) {
+                result.incomplete = true;
+            }
+            
+            totalDownloaded += downloadResult.success;
+            totalSkipped += downloadResult.skipped;
+            totalErrors += downloadResult.errors;
+            
+            // Update stats
+            bulkStatDownloaded.textContent = totalDownloaded;
+            bulkStatSkipped.textContent = totalSkipped;
+            bulkStatErrors.textContent = totalErrors;
+            
+            // Clear cache for this character if we downloaded anything
+            if (downloadResult.success > 0 && char.avatar) {
+                clearMediaLocalizationCache(char.avatar);
+            }
+            
+            // Mark as complete in persistent storage if no errors and not aborted
+            if (!downloadResult.aborted && downloadResult.errors === 0 && char.avatar) {
+                markMediaLocalizationComplete(char.avatar);
+            }
+            
+            // If download was aborted, stop the loop
+            if (downloadResult.aborted) {
+                bulkLocalizeResults.push(result);
+                break;
+            }
+        } else {
+            bulkLocalizeFileCount.textContent = 'No remote media';
+            bulkLocalizeFileFill.style.width = '100%';
+            // Character has no remote media, mark as complete
+            if (char.avatar) {
+                markMediaLocalizationComplete(char.avatar);
+            }
+        }
+        
+        bulkLocalizeResults.push(result);
+        
+        // Small delay to prevent UI lockup and allow abort to be processed
+        await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    
+    // Hide progress modal and show summary
+    bulkLocalizeModal.classList.add('hidden');
+    showBulkSummary(bulkLocalizeAborted, skippedCompleted);
+    
+    // Show toast
+    if (bulkLocalizeAborted) {
+        showToast(`Bulk localization stopped. Downloaded ${totalDownloaded} files.`, 'info');
+    } else {
+        showToast(`Bulk localization complete. Downloaded ${totalDownloaded} files.`, 'success');
+    }
+}
+
+// Bulk Localize button in settings
+document.getElementById('bulkLocalizeBtn')?.addEventListener('click', () => {
+    // Close settings modal
+    document.getElementById('gallerySettingsModal')?.classList.add('hidden');
+    
+    // Confirm with user
+    if (allCharacters.length === 0) {
+        showToast('No characters loaded', 'error');
+        return;
+    }
+    
+    // Check how many have already been completed
+    const completedAvatars = getCompletedMediaLocalizations();
+    const alreadyDone = allCharacters.filter(c => c.avatar && completedAvatars.has(c.avatar)).length;
+    const remaining = allCharacters.length - alreadyDone;
+    
+    let confirmMsg;
+    if (alreadyDone > 0) {
+        confirmMsg = `${alreadyDone} of ${allCharacters.length} characters were previously processed and will be skipped.\n\n${remaining} characters will be scanned for remote media.\n\nContinue?`;
+    } else {
+        confirmMsg = `This will scan ${allCharacters.length} characters for remote media and download any new files.\n\nThis may take a while for large libraries. Continue?`;
+    }
+    
+    if (confirm(confirmMsg)) {
+        runBulkLocalization();
+    }
+});
+
+// Clear bulk localize history button
+document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click', () => {
+    const completedAvatars = getCompletedMediaLocalizations();
+    const count = completedAvatars.size;
+    
+    if (count === 0) {
+        showToast('No processed history to clear', 'info');
+        return;
+    }
+    
+    if (confirm(`This will clear the history of ${count} processed characters.\\n\\nThe next bulk localize will scan all characters again. Continue?`)) {
+        clearCompletedMediaLocalizations();
+        showToast(`Cleared history of ${count} processed characters`, 'success');
     }
 });
 
@@ -6513,13 +6951,13 @@ localizeMediaBtn?.addEventListener('click', async () => {
 // ==============================================
 
 /**
- * Cache for URL→LocalPath mappings per character
+ * Cache for URLâ†’LocalPath mappings per character
  * Structure: { charAvatar: { remoteUrl: localPath, ... } }
  */
 const mediaLocalizationCache = {};
 
 /**
- * Sanitize a filename the same way downloadAndSaveMedia does
+ * Sanitize a filename the same way saveMediaFromMemory does
  * This ensures we can match remote URLs to their saved local files
  */
 function sanitizeMediaFilename(filename) {
@@ -6597,7 +7035,7 @@ function setCharacterMediaLocalization(avatar, enabled) {
 }
 
 /**
- * Build URL→LocalPath mapping for a character by scanning their gallery folder
+ * Build URLâ†’LocalPath mapping for a character by scanning their gallery folder
  * @param {string} characterName - Character name (folder name)
  * @param {string} avatar - Character avatar filename (for cache key)
  * @param {boolean} forceRefresh - Force rebuild cache even if exists
@@ -6610,19 +7048,11 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
     }
     
     const urlMap = {};
-    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
     const safeFolderName = sanitizeFolderName(characterName);
     
     try {
         // Get list of files in character's gallery (all media types = 7)
-        const response = await fetch(`${API_BASE}/images/list`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ folder: characterName, type: 7 })
-        });
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: characterName, type: 7 });
         
         if (!response.ok) {
             console.log('[MediaLocalize] Could not list gallery files');
@@ -6708,6 +7138,15 @@ function replaceMediaUrlsInText(text, urlMap) {
         return match;
     });
     
+    // Replace markdown links to media: [text](url.ext)
+    result = result.replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))(?:\s+"[^"]*)?\)/gi, (match, text, url) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `[${text}](${localPath})`;
+        }
+        return match;
+    });
+    
     // Replace HTML img src: <img src="url">
     result = result.replace(/<img([^>]+)src=["']([^"']+)["']([^>]*)>/gi, (match, before, url, after) => {
         const localPath = lookupLocalizedMedia(urlMap, url);
@@ -6734,6 +7173,32 @@ function replaceMediaUrlsInText(text, urlMap) {
         }
         return match;
     });
+    
+    // Replace raw media URLs (not already in markdown or HTML tags)
+    // This handles URLs that appear as plain text
+    result = result.replace(/(^|[^"'(])((https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)))(?=[)\s<"']|$)/gi, (match, prefix, url) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return prefix + localPath;
+        }
+        return match;
+    });
+    
+    // Final fallback: Direct string replacement for any remaining URLs
+    // This catches URLs in any format the regex patterns might have missed
+    // Build list of all remote URLs we have local versions for
+    for (const [key, localPath] of Object.entries(urlMap)) {
+        if (!key.startsWith('__sanitized__')) continue;
+        const sanitizedName = key.replace('__sanitized__', '');
+        
+        // Find any remaining remote URLs with this filename and replace them
+        // Match the filename in any imageshack/catbox/etc URL pattern
+        const filenamePattern = new RegExp(
+            `(https?://[^\\s"'<>]+[/=])${sanitizedName}(\\.[a-z0-9]+)`,
+            'gi'
+        );
+        result = result.replace(filenamePattern, () => localPath);
+    }
     
     return result;
 }
@@ -6883,264 +7348,6 @@ async function calculateHash(arrayBuffer) {
     // Fallback to simple hash for HTTP contexts
     return simpleHash(arrayBuffer);
 }
-
-/**
- * Fetch a file and calculate its hash
- */
-async function getFileHash(url) {
-    try {
-        const response = await fetch(url);
-        if (!response.ok) return null;
-        const buffer = await response.arrayBuffer();
-        return await calculateHash(buffer);
-    } catch (error) {
-        console.error(`[Duplicates] Error hashing ${url}:`, error);
-        return null;
-    }
-}
-
-/**
- * Check for duplicate files in the character's gallery
- */
-async function checkForDuplicates(characterName) {
-    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-    
-    try {
-        // Get list of all files in the gallery (all media types)
-        const response = await fetch(`${API_BASE}/images/list`, {
-            method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({ folder: characterName, type: 7 })
-        });
-        
-        if (!response.ok) {
-            console.log('[Duplicates] Could not list media files');
-            return;
-        }
-        
-        const files = await response.json();
-        if (!files || files.length < 2) {
-            console.log('[Duplicates] Not enough files to check for duplicates');
-            localizeStatus.textContent += ' No duplicates found.';
-            return;
-        }
-        
-        localizeStatus.textContent = `Checking ${files.length} files for duplicates...`;
-        
-        // Filter for media files (images and audio)
-        const mediaFiles = files
-            .map(f => typeof f === 'string' ? f : f.name)
-            .filter(f => f && f.match(/\.(png|jpg|jpeg|webp|gif|bmp|mp3|wav|ogg|m4a|flac|aac)$/i));
-        
-        if (mediaFiles.length < 2) {
-            localizeStatus.textContent += ' No duplicates found.';
-            return;
-        }
-        
-        // Calculate hash for each file
-        const fileHashes = [];
-        const safeFolderName = sanitizeFolderName(characterName);
-        
-        for (let i = 0; i < mediaFiles.length; i++) {
-            const fileName = mediaFiles[i];
-            const fileUrl = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
-            
-            localizeStatus.textContent = `Hashing file ${i + 1}/${mediaFiles.length}...`;
-            
-            const hash = await getFileHash(fileUrl);
-            if (hash) {
-                fileHashes.push({
-                    filename: fileName,
-                    url: fileUrl,
-                    hash: hash
-                });
-            }
-        }
-        
-        // Find duplicates (same hash)
-        const hashGroups = {};
-        fileHashes.forEach(file => {
-            if (!hashGroups[file.hash]) {
-                hashGroups[file.hash] = [];
-            }
-            hashGroups[file.hash].push(file);
-        });
-        
-        // Get duplicate groups (more than one file with same hash)
-        const duplicateGroups = Object.values(hashGroups).filter(group => group.length > 1);
-        
-        if (duplicateGroups.length === 0) {
-            localizeStatus.textContent += ' No duplicates found.';
-            console.log('[Duplicates] No duplicates found');
-            return;
-        }
-        
-        console.log(`[Duplicates] Found ${duplicateGroups.length} duplicate group(s)`);
-        
-        // Show duplicates modal
-        showDuplicatesModal(duplicateGroups, characterName);
-        
-    } catch (error) {
-        console.error('[Duplicates] Error checking duplicates:', error);
-        localizeStatus.textContent += ' Error checking duplicates.';
-    }
-}
-
-/**
- * Show the duplicates modal with found duplicates
- */
-function showDuplicatesModal(duplicateGroups, characterName) {
-    const duplicatesModal = document.getElementById('duplicatesModal');
-    const duplicatesList = document.getElementById('duplicatesList');
-    const duplicatesStatus = document.getElementById('duplicatesStatus');
-    
-    // Count total duplicates
-    let totalDuplicates = 0;
-    duplicateGroups.forEach(group => totalDuplicates += group.length - 1);
-    
-    duplicatesStatus.textContent = `Found ${totalDuplicates} duplicate file(s) in ${duplicateGroups.length} group(s). Select files to delete:`;
-    
-    duplicatesList.innerHTML = '';
-    
-    duplicateGroups.forEach((group, groupIdx) => {
-        // Sort by filename to determine which is "newer" (localized files have specific naming)
-        // Files with "localized_media_" are newer downloads
-        const sorted = [...group].sort((a, b) => {
-            const aIsLocalized = a.filename.includes('localized_media_');
-            const bIsLocalized = b.filename.includes('localized_media_');
-            if (aIsLocalized && !bIsLocalized) return 1; // a is newer
-            if (!aIsLocalized && bIsLocalized) return -1; // b is newer
-            return a.filename.localeCompare(b.filename);
-        });
-        
-        const older = sorted[0];
-        const newer = sorted.slice(1); // Could be multiple newer duplicates
-        
-        newer.forEach((newerFile, newerIdx) => {
-            const item = document.createElement('div');
-            item.className = 'duplicate-item';
-            item.dataset.filename = newerFile.filename;
-            item.dataset.folder = characterName;
-            
-            item.innerHTML = `
-                <input type="checkbox" class="duplicate-checkbox" checked>
-                <div class="duplicate-images">
-                    <div class="duplicate-img-container older">
-                        <img src="${older.url}" alt="Original" loading="lazy">
-                        <span class="duplicate-img-label older">Keep</span>
-                    </div>
-                    <i class="fa-solid fa-equals duplicate-arrow"></i>
-                    <div class="duplicate-img-container newer">
-                        <img src="${newerFile.url}" alt="Duplicate" loading="lazy">
-                        <span class="duplicate-img-label newer">Delete</span>
-                    </div>
-                </div>
-                <div class="duplicate-info">
-                    <div class="duplicate-filename">${escapeHtml(newerFile.filename)}</div>
-                    <div class="duplicate-meta">Duplicate of: ${escapeHtml(older.filename)}</div>
-                    <div class="duplicate-hash">SHA-256: ${newerFile.hash.substring(0, 16)}...</div>
-                </div>
-            `;
-            
-            // Toggle selection on checkbox change
-            const checkbox = item.querySelector('.duplicate-checkbox');
-            checkbox.addEventListener('change', () => {
-                item.classList.toggle('selected', checkbox.checked);
-            });
-            item.classList.add('selected'); // Initially selected
-            
-            duplicatesList.appendChild(item);
-        });
-    });
-    
-    duplicatesModal.classList.remove('hidden');
-    
-    // Update localize status
-    localizeStatus.textContent = `Found ${totalDuplicates} duplicate(s). Review in popup.`;
-}
-
-/**
- * Delete selected duplicate files
- */
-async function deleteSelectedDuplicates() {
-    const duplicatesList = document.getElementById('duplicatesList');
-    const selectedItems = duplicatesList.querySelectorAll('.duplicate-item.selected');
-    
-    if (selectedItems.length === 0) {
-        showToast('No duplicates selected', 'info');
-        return;
-    }
-    
-    const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-    let deleted = 0;
-    let failed = 0;
-    
-    for (const item of selectedItems) {
-        const filename = item.dataset.filename;
-        const folder = item.dataset.folder;
-        // Build the path as expected by the API: user/images/CharacterName/filename.ext
-        const imagePath = `user/images/${folder}/${filename}`;
-        
-        try {
-            // Use SillyTavern's image delete API - expects 'path' parameter
-            const response = await fetch(`${API_BASE}/images/delete`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-CSRF-Token': csrfToken
-                },
-                body: JSON.stringify({
-                    path: imagePath
-                })
-            });
-            
-            if (response.ok) {
-                deleted++;
-                item.remove();
-            } else {
-                failed++;
-                console.error(`[Duplicates] Failed to delete ${filename}: ${response.status}`);
-            }
-        } catch (error) {
-            failed++;
-            console.error(`[Duplicates] Error deleting ${filename}:`, error);
-        }
-    }
-    
-    if (deleted > 0) {
-        showToast(`Deleted ${deleted} duplicate(s)${failed > 0 ? `, ${failed} failed` : ''}`, 'success');
-        
-        // Refresh gallery
-        if (activeChar) {
-            fetchCharacterImages(activeChar.name || activeChar.data?.name);
-        }
-    } else {
-        showToast(`Failed to delete duplicates`, 'error');
-    }
-    
-    // Close modal if all deleted
-    const remaining = duplicatesList.querySelectorAll('.duplicate-item');
-    if (remaining.length === 0) {
-        document.getElementById('duplicatesModal').classList.add('hidden');
-    }
-}
-
-// Duplicates Modal Event Listeners
-document.getElementById('closeDuplicatesModal')?.addEventListener('click', () => {
-    document.getElementById('duplicatesModal').classList.add('hidden');
-});
-
-document.getElementById('keepAllDuplicatesBtn')?.addEventListener('click', () => {
-    document.getElementById('duplicatesModal').classList.add('hidden');
-    showToast('Keeping all files', 'info');
-});
-
-document.getElementById('deleteSelectedDuplicatesBtn')?.addEventListener('click', () => {
-    deleteSelectedDuplicates();
-});
 
 // ========================================
 // CHARACTER DUPLICATE DETECTION SYSTEM
@@ -7875,7 +8082,7 @@ function compareCharacterDifferences(refChar, dupChar) {
 function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const name = getCharField(char, 'name') || 'Unknown';
     const creator = getCharField(char, 'creator') || 'Unknown creator';
-    const avatarPath = `/characters/${encodeURIComponent(char.avatar)}`;
+    const avatarPath = getCharacterAvatarUrl(char.avatar);
     const tokens = estimateTokens(char);
     
     // Date
@@ -7968,7 +8175,7 @@ function renderDuplicateGroups(groups) {
     groups.forEach((group, idx) => {
         const ref = group.reference;
         const refName = getCharField(ref, 'name') || 'Unknown';
-        const refAvatar = `/characters/${encodeURIComponent(ref.avatar)}`;
+        const refAvatar = getCharacterAvatarUrl(ref.avatar);
         const maxScore = Math.max(...group.duplicates.map(d => d.score || 0));
         
         html += `
@@ -7980,7 +8187,7 @@ function renderDuplicateGroups(groups) {
                         <div class="char-dup-group-name">${escapeHtml(refName)}</div>
                         <div class="char-dup-group-meta">
                             <span>${group.duplicates.length} potential duplicate(s)</span>
-                            <span style="opacity: 0.7;">• Score: ${maxScore} pts</span>
+                            <span style="opacity: 0.7;">â€¢ Score: ${maxScore} pts</span>
                         </div>
                     </div>
                     <div class="char-dup-group-confidence ${group.confidence}">${group.confidence}</div>
@@ -8006,7 +8213,7 @@ function renderDuplicateGroups(groups) {
                 if (dup.breakdown.personality) parts.push(`Pers: ${dup.breakdown.personality}`);
                 if (dup.breakdown.scenario) parts.push(`Scen: ${dup.breakdown.scenario}`);
                 if (parts.length > 0) {
-                    scoreBreakdown = `<div style="font-size: 0.6rem; color: var(--text-secondary); margin-top: 3px;">${parts.join(' • ')}</div>`;
+                    scoreBreakdown = `<div style="font-size: 0.6rem; color: var(--text-secondary); margin-top: 3px;">${parts.join(' â€¢ ')}</div>`;
                 }
             }
             
@@ -8195,17 +8402,11 @@ async function openCharDuplicatesModal(useCache = true) {
 }
 
 // Character Duplicates Modal Event Listeners
-document.getElementById('checkDuplicatesBtn')?.addEventListener('click', () => {
-    openCharDuplicatesModal();
-});
+on('checkDuplicatesBtn', 'click', () => openCharDuplicatesModal());
 
-document.getElementById('closeCharDuplicatesModal')?.addEventListener('click', () => {
-    document.getElementById('charDuplicatesModal').classList.add('hidden');
-});
+on('closeCharDuplicatesModal', 'click', () => hideModal('charDuplicatesModal'));
 
-document.getElementById('closeCharDuplicatesModalBtn')?.addEventListener('click', () => {
-    document.getElementById('charDuplicatesModal').classList.add('hidden');
-});
+on('closeCharDuplicatesModalBtn', 'click', () => hideModal('charDuplicatesModal'));
 
 // ========================================
 // PRE-IMPORT DUPLICATE CHECK
@@ -8249,7 +8450,7 @@ function showPreImportDuplicateWarning(newCharInfo, matches) {
             const existingChar = match.char;
             const existingName = getCharField(existingChar, 'name');
             const existingCreator = getCharField(existingChar, 'creator');
-            const existingAvatar = `/characters/${encodeURIComponent(existingChar.avatar)}`;
+            const existingAvatar = getCharacterAvatarUrl(existingChar.avatar);
             const tokens = estimateTokens(existingChar);
             
             matchesHtml += `
@@ -8298,21 +8499,13 @@ function resolvePreImportChoice(choice) {
 }
 
 // Pre-Import Modal Event Listeners
-document.getElementById('closePreImportDuplicateModal')?.addEventListener('click', () => {
-    resolvePreImportChoice('skip');
-});
+on('closePreImportDuplicateModal', 'click', () => resolvePreImportChoice('skip'));
 
-document.getElementById('preImportSkipBtn')?.addEventListener('click', () => {
-    resolvePreImportChoice('skip');
-});
+on('preImportSkipBtn', 'click', () => resolvePreImportChoice('skip'));
 
-document.getElementById('preImportAnyway')?.addEventListener('click', () => {
-    resolvePreImportChoice('import');
-});
+on('preImportAnyway', 'click', () => resolvePreImportChoice('import'));
 
-document.getElementById('preImportReplaceBtn')?.addEventListener('click', () => {
-    resolvePreImportChoice('replace');
-});
+on('preImportReplaceBtn', 'click', () => resolvePreImportChoice('replace'));
 
 // ========================================
 // CHATS VIEW - Global Chats Browser
@@ -8338,7 +8531,7 @@ function initChatsView() {
     });
     
     // Chats Sort Select
-    document.getElementById('chatsSortSelect')?.addEventListener('change', (e) => {
+    on('chatsSortSelect', 'change', (e) => {
         currentChatSort = e.target.value;
         renderChats();
     });
@@ -8355,33 +8548,31 @@ function initChatsView() {
     });
     
     // Refresh Chats Button - force full refresh
-    document.getElementById('refreshChatsViewBtn')?.addEventListener('click', () => {
+    on('refreshChatsViewBtn', 'click', () => {
         clearChatCache();
         allChats = [];
         loadAllChats(true); // Force refresh
     });
     
     // Chat Preview Modal handlers
-    document.getElementById('chatPreviewClose')?.addEventListener('click', () => {
-        document.getElementById('chatPreviewModal').classList.add('hidden');
-    });
+    on('chatPreviewClose', 'click', () => hideModal('chatPreviewModal'));
     
-    document.getElementById('chatPreviewOpenBtn')?.addEventListener('click', () => {
+    on('chatPreviewOpenBtn', 'click', () => {
         if (currentPreviewChat) {
             openChatInST(currentPreviewChat);
         }
     });
     
-    document.getElementById('chatPreviewDeleteBtn')?.addEventListener('click', () => {
+    on('chatPreviewDeleteBtn', 'click', () => {
         if (currentPreviewChat) {
             deleteChatFromView(currentPreviewChat);
         }
     });
     
     // Close modal on overlay click
-    document.getElementById('chatPreviewModal')?.addEventListener('click', (e) => {
+    on('chatPreviewModal', 'click', (e) => {
         if (e.target.id === 'chatPreviewModal') {
-            document.getElementById('chatPreviewModal').classList.add('hidden');
+            hideModal('chatPreviewModal');
         }
     });
     
@@ -8425,9 +8616,9 @@ function switchView(view) {
     const mainSearch = document.querySelector('.search-area');
     
     // Hide all views first
-    document.getElementById('characterGrid')?.classList.add('hidden');
-    document.getElementById('chatsView')?.classList.add('hidden');
-    document.getElementById('chubView')?.classList.add('hidden');
+    hide('characterGrid');
+    hide('chatsView');
+    hide('chubView');
     
     // Reset scroll position when switching views
     const scrollContainer = document.querySelector('.gallery-content');
@@ -8449,7 +8640,7 @@ function switchView(view) {
             mainSearch.style.visibility = 'visible';
             mainSearch.style.pointerEvents = '';
         }
-        document.getElementById('characterGrid')?.classList.remove('hidden');
+        show('characterGrid');
         
         // Re-apply current filters and sort when returning to characters view
         performSearch();
@@ -8462,7 +8653,7 @@ function switchView(view) {
             mainSearch.style.visibility = 'visible';
             mainSearch.style.pointerEvents = '';
         }
-        document.getElementById('chatsView')?.classList.remove('hidden');
+        show('chatsView');
         
         // Load chats if not loaded
         if (allChats.length === 0) {
@@ -8477,7 +8668,7 @@ function switchView(view) {
             mainSearch.style.visibility = 'hidden';
             mainSearch.style.pointerEvents = 'none';
         }
-        document.getElementById('chubView')?.classList.remove('hidden');
+        show('chubView');
         
         // Load ChubAI characters if not loaded
         if (chubCharacters.length === 0) {
@@ -8568,7 +8759,7 @@ async function loadAllChats(forceRefresh = false) {
     }
     
     // No cache or force refresh - do full load
-    chatsGrid.innerHTML = '<div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading all chats...</div>';
+    renderLoadingState(chatsGrid, 'Loading all chats...', 'chats-loading');
     await fetchFreshChats(false);
 }
 
@@ -8591,19 +8782,14 @@ async function fetchFreshChats(isBackground = false) {
     const chatsGrid = document.getElementById('chatsGrid');
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
         const newChats = [];
         
         // Get chats for each character that has chats
         for (const char of allCharacters) {
             try {
-                const response = await fetch(`${API_BASE}/characters/chats`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({ avatar_url: char.avatar, metadata: true })
+                const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { 
+                    avatar_url: char.avatar, 
+                    metadata: true 
                 });
                 
                 if (response.ok) {
@@ -8657,7 +8843,7 @@ async function fetchFreshChats(isBackground = false) {
         console.log(`[ChatsCache] ${chatsNeedingPreviews.length} of ${allChats.length} chats need preview loading`);
         
         if (chatsNeedingPreviews.length > 0) {
-            await loadChatPreviews(csrfToken, chatsNeedingPreviews);
+            await loadChatPreviews(chatsNeedingPreviews);
         }
         
         // Save to cache
@@ -8678,7 +8864,7 @@ async function fetchFreshChats(isBackground = false) {
 }
 
 // Fetch chat previews in parallel batches
-async function loadChatPreviews(csrfToken, chatsToLoad = null) {
+async function loadChatPreviews(chatsToLoad = null) {
     const BATCH_SIZE = 5; // Fetch 5 at a time to avoid overwhelming the server
     const targetChats = chatsToLoad || allChats;
     console.log(`[ChatPreviews] Starting to load previews for ${targetChats.length} chats`);
@@ -8692,17 +8878,10 @@ async function loadChatPreviews(csrfToken, chatsToLoad = null) {
                 // Try the file_name without .jsonl extension
                 const chatFileName = chat.file_name.replace('.jsonl', '');
                 
-                const response = await fetch(`${API_BASE}/chats/get`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': csrfToken
-                    },
-                    body: JSON.stringify({
-                        ch_name: chat.character.name,
-                        file_name: chatFileName,
-                        avatar_url: chat.character.avatar
-                    })
+                const response = await apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
+                    ch_name: chat.character.name,
+                    file_name: chatFileName,
+                    avatar_url: chat.character.avatar
                 });
                 
                 console.log(`[ChatPreviews] ${chat.file_name}: response status ${response.status}`);
@@ -8927,7 +9106,7 @@ function renderGroupedChats(chats) {
     groupedView.innerHTML = groupKeys.map(key => {
         const group = groups[key];
         const char = group.character;
-        const avatarUrl = char.avatar ? `/characters/${encodeURIComponent(char.avatar)}` : '';
+        const avatarUrl = getCharacterAvatarUrl(char.avatar);
         
         // Avatar with fallback
         const avatarHtml = avatarUrl 
@@ -8992,7 +9171,7 @@ function renderGroupedChats(chats) {
 
 function createChatCard(chat) {
     const char = chat.character;
-    const avatarUrl = char.avatar ? `/characters/${encodeURIComponent(char.avatar)}` : '';
+    const avatarUrl = getCharacterAvatarUrl(char.avatar);
     const chatName = (chat.file_name || '').replace('.jsonl', '');
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
@@ -9095,7 +9274,7 @@ async function openChatPreview(chat) {
     const messagesContainer = document.getElementById('chatPreviewMessages');
     
     const chatName = (chat.file_name || '').replace('.jsonl', '');
-    const avatarUrl = chat.character.avatar ? `/characters/${encodeURIComponent(chat.character.avatar)}` : '/img/ai4.png';
+    const avatarUrl = getCharacterAvatarUrl(chat.character.avatar) || '/img/ai4.png';
     
     avatarImg.src = avatarUrl;
     title.textContent = chatName;
@@ -9110,28 +9289,20 @@ async function openChatPreview(chat) {
     messageCount.textContent = chat.chat_items || chat.mes_count || '?';
     date.textContent = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     
-    messagesContainer.innerHTML = '<div class="chats-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading messages...</div>';
+    renderLoadingState(messagesContainer, 'Loading messages...', 'chats-loading');
     
     modal.classList.remove('hidden');
     
     // Load chat content
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
         
         console.log(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
         
-        const response = await fetch(`${API_BASE}/chats/get`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                ch_name: chat.character.name,
-                file_name: chatFileName,
-                avatar_url: chat.character.avatar
-            })
+        const response = await apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
+            ch_name: chat.character.name,
+            file_name: chatFileName,
+            avatar_url: chat.character.avatar
         });
         
         console.log(`[ChatPreview] Response status: ${response.status}`);
@@ -9179,7 +9350,7 @@ function renderChatMessages(messages, character) {
     // Store messages for editing
     currentChatMessages = messages;
     
-    const avatarUrl = character.avatar ? `/characters/${encodeURIComponent(character.avatar)}` : '/img/ai4.png';
+    const avatarUrl = getCharacterAvatarUrl(character.avatar) || '/img/ai4.png';
     
     container.innerHTML = messages.map((msg, index) => {
         const isUser = msg.is_user;
@@ -9259,17 +9430,9 @@ async function deleteChatFromView(chat) {
     }
     
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
-        const response = await fetch(`${API_BASE}/chats/delete`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                chatfile: chat.file_name,
-                avatar_url: chat.character.avatar
-            })
+        const response = await apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
+            chatfile: chat.file_name,
+            avatar_url: chat.character.avatar
         });
         
         if (response.ok) {
@@ -9328,7 +9491,7 @@ async function editChatMessage(messageIndex) {
                 <div style="padding: 20px;">
                     <div class="edit-message-info" style="margin-bottom: 15px; font-size: 0.85rem; color: var(--text-secondary);">
                         <span><strong>${escapeHtml(msg.name || (msg.is_user ? 'User' : currentPreviewChar?.name || 'Character'))}</strong></span>
-                        ${msg.send_date ? `<span> • ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
+                        ${msg.send_date ? `<span> â€¢ ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
                     </div>
                     <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;">${escapeHtml(currentText)}</textarea>
                     <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;">
@@ -9449,21 +9612,13 @@ async function deleteChatMessage(messageIndex) {
  */
 async function saveChatToServer(chat, messages) {
     try {
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
         
-        const response = await fetch(`${API_BASE}/chats/save`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken
-            },
-            body: JSON.stringify({
-                ch_name: chat.character.name,
-                file_name: chatFileName,
-                avatar_url: chat.character.avatar,
-                chat: messages
-            })
+        const response = await apiRequest(ENDPOINTS.CHATS_SAVE, 'POST', {
+            ch_name: chat.character.name,
+            file_name: chatFileName,
+            avatar_url: chat.character.avatar,
+            chat: messages
         });
         
         if (response.ok) {
@@ -9494,7 +9649,7 @@ if (searchInputForChats) {
 // CHUBAI BROWSER
 // ========================================
 
-const CHUB_API_BASE = 'https://api.chub.ai';
+// CHUB_API_BASE and CHUB_AVATAR_BASE defined in CORE HELPER FUNCTIONS section
 const CHUB_CACHE_KEY = 'st_gallery_chub_cache';
 const CHUB_TOKEN_KEY = 'st_gallery_chub_urql_token';
 
@@ -9858,6 +10013,25 @@ function getCreatorNotesBaseStyles() {
             }
             
             .embedded-link { color: #4a9eff; }
+            
+            .audio-player,
+            .embedded-audio {
+                width: 100%;
+                max-width: 400px;
+                height: 40px;
+                margin: 10px 0;
+                display: block;
+                border-radius: 8px;
+                background: rgba(0, 0, 0, 0.3);
+            }
+            .audio-player::-webkit-media-controls-panel {
+                background: rgba(255, 255, 255, 0.1);
+            }
+            .audio-player::-webkit-media-controls-play-button,
+            .audio-player::-webkit-media-controls-mute-button {
+                filter: invert(1);
+            }
+            
             .placeholder-user { color: #2ecc71; font-weight: bold; }
             .placeholder-char { color: #e74c3c; font-weight: bold; }
             
@@ -10087,7 +10261,7 @@ function openCreatorNotesFullscreen(content, charName, urlMap) {
     iframe.srcdoc = iframeDoc;
     
     // Size control handlers - just toggle class on modal
-    document.getElementById('sizeControlBtns').addEventListener('click', (e) => {
+    on('sizeControlBtns', 'click', (e) => {
         const btn = e.target.closest('.display-control-btn[data-size]');
         if (!btn) return;
         
@@ -10214,7 +10388,7 @@ function openContentFullscreen(content, title, icon, charName, urlMap) {
     const modalInner = document.getElementById('contentFullscreenInner');
     
     // Size control handlers
-    document.getElementById('contentSizeControlBtns').addEventListener('click', (e) => {
+    on('contentSizeControlBtns', 'click', (e) => {
         const btn = e.target.closest('.display-control-btn[data-size]');
         if (!btn) return;
         
@@ -10345,7 +10519,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
     }
     
     // Size control handlers
-    document.getElementById('altGreetingsSizeControlBtns').addEventListener('click', (e) => {
+    on('altGreetingsSizeControlBtns', 'click', (e) => {
         const btn = e.target.closest('.display-control-btn[data-size]');
         if (!btn) return;
         
@@ -10439,17 +10613,17 @@ function initChubView() {
     });
     
     // Author filter clear button
-    document.getElementById('chubClearAuthorBtn')?.addEventListener('click', () => {
+    on('chubClearAuthorBtn', 'click', () => {
         clearAuthorFilter();
     });
     
     // Follow author button
-    document.getElementById('chubFollowAuthorBtn')?.addEventListener('click', () => {
+    on('chubFollowAuthorBtn', 'click', () => {
         toggleFollowAuthor();
     });
     
     // Timeline load more button (uses cursor-based pagination)
-    document.getElementById('chubTimelineLoadMoreBtn')?.addEventListener('click', () => {
+    on('chubTimelineLoadMoreBtn', 'click', () => {
         if (chubTimelineCursor) {
             chubTimelinePage++;
             loadChubTimeline(false);
@@ -10457,29 +10631,25 @@ function initChubView() {
     });
     
     // Search handlers
-    document.getElementById('chubSearchInput')?.addEventListener('keypress', (e) => {
+    on('chubSearchInput', 'keypress', (e) => {
         if (e.key === 'Enter') {
             performChubSearch();
         }
     });
     
-    document.getElementById('chubSearchBtn')?.addEventListener('click', () => {
-        performChubSearch();
-    });
+    on('chubSearchBtn', 'click', () => performChubSearch());
     
     // Creator search handlers
-    document.getElementById('chubCreatorSearchInput')?.addEventListener('keypress', (e) => {
+    on('chubCreatorSearchInput', 'keypress', (e) => {
         if (e.key === 'Enter') {
             performChubCreatorSearch();
         }
     });
     
-    document.getElementById('chubCreatorSearchBtn')?.addEventListener('click', () => {
-        performChubCreatorSearch();
-    });
+    on('chubCreatorSearchBtn', 'click', () => performChubCreatorSearch());
     
     // Discovery preset select (combined sort + time)
-    document.getElementById('chubDiscoveryPreset')?.addEventListener('change', (e) => {
+    on('chubDiscoveryPreset', 'change', (e) => {
         chubDiscoveryPreset = e.target.value;
         chubCharacters = [];
         chubCurrentPage = 1;
@@ -10487,7 +10657,7 @@ function initChubView() {
     });
     
     // More filters dropdown toggle
-    document.getElementById('chubFiltersBtn')?.addEventListener('click', (e) => {
+    on('chubFiltersBtn', 'click', (e) => {
         e.stopPropagation();
         document.getElementById('chubFiltersDropdown')?.classList.toggle('hidden');
     });
@@ -10517,7 +10687,7 @@ function initChubView() {
             if (id === 'chubFilterFavorites' && e.target.checked && !chubToken) {
                 e.target.checked = false;
                 showToast('URQL token required for favorites. Click the key icon to add your ChubAI token.', 'warning');
-                document.getElementById('chubLoginModal')?.classList.remove('hidden');
+                show('chubLoginModal');
                 return;
             }
             setter(e.target.checked);
@@ -10530,7 +10700,7 @@ function initChubView() {
     });
     
     // NSFW toggle - single button toggle
-    document.getElementById('chubNsfwToggle')?.addEventListener('click', () => {
+    on('chubNsfwToggle', 'click', () => {
         chubNsfwEnabled = !chubNsfwEnabled;
         updateNsfwToggleState();
         
@@ -10548,7 +10718,7 @@ function initChubView() {
     });
     
     // Refresh button - works for both Browse and Timeline modes
-    document.getElementById('refreshChubBtn')?.addEventListener('click', () => {
+    on('refreshChubBtn', 'click', () => {
         if (chubViewMode === 'timeline') {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
@@ -10562,20 +10732,20 @@ function initChubView() {
     });
     
     // Load more button
-    document.getElementById('chubLoadMoreBtn')?.addEventListener('click', () => {
+    on('chubLoadMoreBtn', 'click', () => {
         chubCurrentPage++;
         loadChubCharacters();
     });
     
     // Timeline sort dropdown
-    document.getElementById('chubTimelineSortSelect')?.addEventListener('change', (e) => {
+    on('chubTimelineSortSelect', 'change', (e) => {
         chubTimelineSort = e.target.value;
         console.log('[ChubTimeline] Sort changed to:', chubTimelineSort);
         renderChubTimeline(); // Re-render with new sort (client-side sorting)
     });
     
     // Author sort dropdown
-    document.getElementById('chubAuthorSortSelect')?.addEventListener('change', (e) => {
+    on('chubAuthorSortSelect', 'change', (e) => {
         chubAuthorSort = e.target.value;
         chubCharacters = [];
         chubCurrentPage = 1;
@@ -10583,36 +10753,28 @@ function initChubView() {
     });
     
     // Character modal handlers
-    document.getElementById('chubCharClose')?.addEventListener('click', () => {
-        document.getElementById('chubCharModal').classList.add('hidden');
-    });
+    on('chubCharClose', 'click', () => hideModal('chubCharModal'));
     
-    document.getElementById('chubDownloadBtn')?.addEventListener('click', () => {
-        downloadChubCharacter();
-    });
+    on('chubDownloadBtn', 'click', () => downloadChubCharacter());
     
-    document.getElementById('chubCharModal')?.addEventListener('click', (e) => {
+    on('chubCharModal', 'click', (e) => {
         if (e.target.id === 'chubCharModal') {
-            document.getElementById('chubCharModal').classList.add('hidden');
+            hideModal('chubCharModal');
         }
     });
     
     // API Key modal handlers
-    document.getElementById('chubLoginBtn')?.addEventListener('click', () => {
-        openChubTokenModal();
-    });
-    document.getElementById('chubLoginClose')?.addEventListener('click', () => {
-        document.getElementById('chubLoginModal')?.classList.add('hidden');
-    });
-    document.getElementById('chubLoginModal')?.addEventListener('click', (e) => {
+    on('chubLoginBtn', 'click', () => openChubTokenModal());
+    on('chubLoginClose', 'click', () => hideModal('chubLoginModal'));
+    on('chubLoginModal', 'click', (e) => {
         if (e.target.id === 'chubLoginModal') {
-            document.getElementById('chubLoginModal')?.classList.add('hidden');
+            hideModal('chubLoginModal');
         }
     });
     
     // Token save/clear buttons
-    document.getElementById('chubSaveKeyBtn')?.addEventListener('click', saveChubToken);
-    document.getElementById('chubClearKeyBtn')?.addEventListener('click', clearChubToken);
+    on('chubSaveKeyBtn', 'click', saveChubToken);
+    on('chubClearKeyBtn', 'click', clearChubToken);
     
     // Load saved token on init
     loadChubToken();
@@ -10967,7 +11129,7 @@ async function loadChubTimeline(forceRefresh = false) {
     const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
     
     if (forceRefresh || (!chubTimelineCursor && chubTimelineCharacters.length === 0)) {
-        grid.innerHTML = '<div class="chub-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading timeline...</div>';
+        renderLoadingState(grid, 'Loading timeline...', 'chub-loading');
         if (forceRefresh) {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
@@ -11658,7 +11820,7 @@ function clearAuthorFilter() {
     chubAuthorFilter = null;
     
     // Hide banner
-    document.getElementById('chubAuthorBanner')?.classList.add('hidden');
+    hide('chubAuthorBanner');
     
     // Reload without author filter
     chubCharacters = [];
@@ -11672,7 +11834,7 @@ function performChubSearch() {
     // Clear author filter when doing a new search
     if (chubAuthorFilter) {
         chubAuthorFilter = null;
-        document.getElementById('chubAuthorBanner')?.classList.add('hidden');
+        hide('chubAuthorBanner');
     }
     chubCharacters = [];
     chubCurrentPage = 1;
@@ -11686,7 +11848,7 @@ async function loadChubCharacters(forceRefresh = false) {
     const loadMoreContainer = document.getElementById('chubLoadMore');
     
     if (chubCurrentPage === 1) {
-        grid.innerHTML = '<div class="chub-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading ChubAI characters...</div>';
+        renderLoadingState(grid, 'Loading ChubAI characters...', 'chub-loading');
     }
     
     chubIsLoading = true;
@@ -12193,7 +12355,7 @@ async function downloadChubCharacter() {
         formData.append('file_type', 'png');
         
         // Get CSRF token
-        const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
+        const csrfToken = getCSRFToken();
         
         // Import to SillyTavern (use exact same endpoint as importChubCharacter)
         const importResponse = await fetch('/api/characters/import', {

@@ -913,22 +913,81 @@ https://chub.ai/characters/author/another-character
         </div>
     </div>
 
-    <!-- Duplicates Found Modal -->
-    <div id="duplicatesModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content duplicates-modal-content">
+    <!-- Bulk Localize Media Modal -->
+    <div id="bulkLocalizeModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content import-modal-content bulk-localize-modal-content">
             <div class="confirm-modal-header">
-                <h3><i class="fa-solid fa-clone"></i> Duplicates Found</h3>
-                <button class="close-confirm-btn" id="closeDuplicatesModal">&times;</button>
+                <h3><i class="fa-solid fa-download"></i> Bulk Media Localization</h3>
+                <button class="close-confirm-btn" id="closeBulkLocalizeModal">&times;</button>
             </div>
             <div class="confirm-modal-body">
-                <p id="duplicatesStatus">The following duplicate files were detected (exact match by checksum):</p>
-                <div id="duplicatesList" class="duplicates-list">
-                    <!-- Duplicate items will be populated here -->
+                <div id="bulkLocalizeCharInfo" class="bulk-localize-char-info">
+                    <img id="bulkLocalizeCharAvatar" src="" alt="">
+                    <span id="bulkLocalizeCharName">Preparing...</span>
+                </div>
+                <p id="bulkLocalizeStatus">Scanning library...</p>
+                <div id="bulkLocalizeProgress" class="import-progress">
+                    <div class="import-progress-header">
+                        <span>Overall Progress</span>
+                        <span id="bulkLocalizeProgressCount">0/0 characters</span>
+                    </div>
+                    <div class="import-progress-bar">
+                        <div id="bulkLocalizeProgressFill" class="import-progress-fill"></div>
+                    </div>
+                    <div class="import-progress-header" style="margin-top: 10px;">
+                        <span>Current Character</span>
+                        <span id="bulkLocalizeFileCount">0/0 files</span>
+                    </div>
+                    <div class="import-progress-bar">
+                        <div id="bulkLocalizeFileFill" class="import-progress-fill"></div>
+                    </div>
+                </div>
+                <div id="bulkLocalizeStats" class="bulk-localize-stats">
+                    <div class="stat-item"><i class="fa-solid fa-download"></i> <span id="bulkStatDownloaded">0</span> downloaded</div>
+                    <div class="stat-item"><i class="fa-solid fa-forward"></i> <span id="bulkStatSkipped">0</span> skipped</div>
+                    <div class="stat-item"><i class="fa-solid fa-xmark"></i> <span id="bulkStatErrors">0</span> errors</div>
                 </div>
             </div>
             <div class="confirm-modal-footer">
-                <button id="keepAllDuplicatesBtn" class="action-btn secondary"><i class="fa-solid fa-check"></i> Keep All</button>
-                <button id="deleteSelectedDuplicatesBtn" class="action-btn primary"><i class="fa-solid fa-trash"></i> Delete Selected</button>
+                <button id="cancelBulkLocalizeBtn" class="action-btn secondary"><i class="fa-solid fa-stop"></i> Stop</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Localize Summary Modal -->
+    <div id="bulkLocalizeSummaryModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content bulk-summary-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-chart-bar"></i> Bulk Localization Complete</h3>
+                <button class="close-confirm-btn" id="closeBulkSummaryModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <div id="bulkSummaryOverview" class="bulk-summary-overview">
+                    <!-- Overview stats go here -->
+                </div>
+                <div id="bulkSummaryFilter" class="bulk-summary-filter">
+                    <label>Show:</label>
+                    <select id="bulkSummaryFilterSelect" class="glass-select">
+                        <option value="all">All Characters</option>
+                        <option value="downloaded">With Downloads</option>
+                        <option value="skipped">With Skipped</option>
+                        <option value="errors">With Errors</option>
+                        <option value="incomplete">Incomplete (Errors/Stopped)</option>
+                        <option value="none">No Remote Media</option>
+                    </select>
+                    <input type="text" id="bulkSummarySearch" class="glass-input" placeholder="Search character...">
+                </div>
+                <div id="bulkSummaryList" class="bulk-summary-list">
+                    <!-- Per-character results go here -->
+                </div>
+                <div id="bulkSummaryPagination" class="bulk-summary-pagination">
+                    <button id="bulkSummaryPrevBtn" class="glass-btn"><i class="fa-solid fa-chevron-left"></i></button>
+                    <span id="bulkSummaryPageInfo">Page 1 of 1</span>
+                    <button id="bulkSummaryNextBtn" class="glass-btn"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="closeBulkSummaryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Done</button>
             </div>
         </div>
     </div>
@@ -1096,6 +1155,18 @@ https://chub.ai/characters/author/another-character
                     </div>
                     <div class="settings-row settings-sub-note">
                         <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
+                    </div>
+                    <div class="settings-row">
+                        <button id="bulkLocalizeBtn" class="action-btn secondary" style="margin-top: 10px;">
+                            <i class="fa-solid fa-download"></i> Bulk Localize All Characters
+                        </button>
+                        <span class="settings-hint">Scan and download remote media for ALL characters in your library. Previously processed characters are skipped.</span>
+                    </div>
+                    <div class="settings-row">
+                        <button id="clearBulkLocalizeHistoryBtn" class="action-btn secondary" style="margin-top: 5px;">
+                            <i class="fa-solid fa-eraser"></i> Clear Processed History
+                        </button>
+                        <span class="settings-hint">Reset the list of processed characters so bulk localize will scan everyone again.</span>
                     </div>
                 </div>
                 
