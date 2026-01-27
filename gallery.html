@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=41">
+    <link rel="stylesheet" href="gallery.css?v=46">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -552,8 +552,14 @@
                         </p>
                         
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
-                            <details class="creator-notes-details" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
-                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent);"><i class="fa-solid fa-feather-pointed"></i> Creator's Notes</summary>
+                            <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 8px;">
+                                    <i class="fa-solid fa-feather-pointed"></i> 
+                                    <span style="flex: 1;">Creator's Notes</span>
+                                    <button type="button" class="creator-notes-expand-btn" id="creatorNotesExpandBtn" title="View full screen">
+                                        <i class="fa-solid fa-expand"></i>
+                                    </button>
+                                </summary>
                                 <div id="modalCreatorNotes" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
                         </div>
@@ -563,13 +569,23 @@
                             <div id="modalDescription" class="scrolling-text"></div>
                         </div>
                         <div class="first-mes-box">
-                            <h3>First Message</h3>
+                            <div class="content-header">
+                                <h3>First Message</h3>
+                                <button type="button" class="content-expand-btn" id="firstMesExpandBtn" title="Expand">
+                                    <i class="fa-solid fa-expand"></i>
+                                </button>
+                            </div>
                             <div id="modalFirstMes" class="scrolling-text"></div>
                         </div>
 
                         <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 20px;">
-                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
-                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent);">Alternate Greetings (<span id="altGreetingsCount">0</span>)</summary>
+                            <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                                <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 10px;">
+                                    <span style="flex: 1;">Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
+                                    <button type="button" class="content-expand-btn" id="altGreetingsExpandBtn" title="Expand">
+                                        <i class="fa-solid fa-expand"></i>
+                                    </button>
+                                </summary>
                                 <div id="modalAltGreetings" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
                         </div>
@@ -792,25 +808,47 @@
 
     <div id="toastContainer" class="toast-container"></div>
 
-    <!-- Chub Gallery Info Modal -->
-    <div id="chubGalleryModal" class="confirm-modal hidden">
+    <!-- Import Summary Modal -->
+    <div id="importSummaryModal" class="confirm-modal hidden">
         <div class="confirm-modal-content chub-gallery-modal-content">
             <div class="confirm-modal-header">
-                <h3><i class="fa-solid fa-images"></i> Gallery Images Available</h3>
-                <button class="close-confirm-btn" id="closeChubGalleryModal">&times;</button>
+                <h3><i class="fa-solid fa-circle-info"></i> Additional Content Available</h3>
+                <button class="close-confirm-btn" id="closeImportSummaryModal">&times;</button>
             </div>
             <div class="confirm-modal-body">
-                <p>The following imported characters have additional gallery images on ChubAI that are not included in the character card:</p>
-                <div id="chubGalleryList" class="chub-gallery-list">
-                    <!-- Gallery items will be populated here -->
-                </div>
-                <div class="import-info">
-                    <i class="fa-solid fa-info-circle"></i>
-                    <span>Gallery images contain additional artwork for these characters. Visit ChubAI to view and download them.</span>
+                <p>The imported character(s) have additional content:</p>
+                <div id="importSummaryList" class="import-summary-list">
+                    <!-- Row for ChubAI Gallery -->
+                    <div id="importSummaryGalleryRow" class="import-summary-row hidden">
+                        <div class="import-summary-row-icon">
+                            <i class="fa-solid fa-images"></i>
+                        </div>
+                        <div class="import-summary-row-info">
+                            <span class="import-summary-row-title">ChubAI Gallery Images</span>
+                            <span class="import-summary-row-desc">Additional artwork available on ChubAI</span>
+                        </div>
+                        <a id="importSummaryGalleryLink" href="#" target="_blank" rel="noopener noreferrer" class="action-btn secondary">
+                            <i class="fa-solid fa-external-link-alt"></i> View Gallery
+                        </a>
+                    </div>
+                    
+                    <!-- Row for Embedded Media -->
+                    <div id="importSummaryMediaRow" class="import-summary-row hidden">
+                        <div class="import-summary-row-icon">
+                            <i class="fa-solid fa-photo-film"></i>
+                        </div>
+                        <div class="import-summary-row-info">
+                            <span class="import-summary-row-title">Embedded Remote Media</span>
+                            <span id="importSummaryMediaDesc" class="import-summary-row-desc">Remote files that can be saved locally</span>
+                        </div>
+                        <button id="importSummaryDownloadBtn" class="action-btn secondary">
+                            <i class="fa-solid fa-download"></i> Download
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="confirm-modal-footer">
-                <button id="closeChubGalleryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Got it</button>
+                <button id="closeImportSummaryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Got it</button>
             </div>
         </div>
     </div>
@@ -1060,6 +1098,17 @@ https://chub.ai/characters/author/another-character
                         <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
                     </div>
                 </div>
+                
+                <!-- Notifications Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-bell"></i> Notifications</h4>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsNotifyAdditionalContent" checked> Notify about additional content on import
+                        </label>
+                        <span class="settings-hint">Show a notification when imported characters have ChubAI gallery images or embedded remote media available.</span>
+                    </div>
+                </div>
             </div>
             <div class="confirm-modal-footer">
                 <button id="resetSettingsBtn" class="action-btn secondary"><i class="fa-solid fa-undo"></i> Restore Defaults</button>
@@ -1069,6 +1118,6 @@ https://chub.ai/characters/author/another-character
     </div>
 
     <!-- Scripts -->
-    <script src="gallery.js?v=65"></script>
+    <script src="gallery.js?v=71"></script>
 </body>
 </html>

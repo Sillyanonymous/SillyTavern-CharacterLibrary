@@ -42,6 +42,8 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationEnabled: false,
     // Per-character overrides for media localization (avatar -> boolean)
     mediaLocalizationPerChar: {},
+    // Show notification when imported chars have additional content (gallery/embedded media)
+    notifyAdditionalContent: true,
 };
 
 // In-memory settings cache
@@ -192,6 +194,9 @@ function setupSettingsModal() {
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
     
+    // Notifications
+    const notifyAdditionalContentCheckbox = document.getElementById('settingsNotifyAdditionalContent');
+    
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     
@@ -220,6 +225,11 @@ function setupSettingsModal() {
         // Media Localization
         if (mediaLocalizationCheckbox) {
             mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') || false;
+        }
+        
+        // Notifications
+        if (notifyAdditionalContentCheckbox) {
+            notifyAdditionalContentCheckbox.checked = getSetting('notifyAdditionalContent') !== false; // Default true
         }
         
         // Appearance
@@ -272,6 +282,7 @@ function setupSettingsModal() {
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
+            notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
         });
         
         // Clear media localization cache when setting changes
@@ -1341,15 +1352,33 @@ function openModal(char) {
 
     if (creatorNotes && notesBox && notesContainer) {
         notesBox.style.display = 'block';
+        // Store raw content for fullscreen expand feature
+        window.currentCreatorNotesContent = creatorNotes;
         // Use the shared secure rendering function
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
+        // Initialize handlers for this modal instance
+        initCreatorNotesHandlers();
+        // Show/hide expand button based on content length
+        const expandBtn = document.getElementById('creatorNotesExpandBtn');
+        if (expandBtn) {
+            const lineCount = (creatorNotes.match(/\n/g) || []).length + 1;
+            const charCount = creatorNotes.length;
+            const showExpand = lineCount >= CreatorNotesConfig.MIN_LINES_FOR_EXPAND || 
+                               charCount >= CreatorNotesConfig.MIN_CHARS_FOR_EXPAND;
+            expandBtn.style.display = showExpand ? 'flex' : 'none';
+        }
     } else if (notesBox) {
         notesBox.style.display = 'none';
+        window.currentCreatorNotesContent = null;
     }
 
     // Description/First Message
     const desc = char.description || (char.data ? char.data.description : "") || "";
     const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+    
+    // Store raw content for fullscreen expand feature
+    window.currentDescriptionContent = desc || null;
+    window.currentFirstMesContent = firstMes || null;
     
     // Details tab uses rich HTML rendering (initially without localization for instant display)
     document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
@@ -1358,6 +1387,9 @@ function openModal(char) {
     // Alternate Greetings
     const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
     const altBox = document.getElementById('modalAltGreetingsBox');
+    
+    // Store raw content for fullscreen expand feature
+    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
     
     if (altBox) {
         if (altGreetings && altGreetings.length > 0) {
@@ -1371,6 +1403,9 @@ function openModal(char) {
             altBox.style.display = 'none';
         }
     }
+    
+    // Initialize content expand handlers
+    initContentExpandHandlers();
     
     // Apply media localization asynchronously (if enabled)
     // This updates the already-rendered content with localized URLs
@@ -2601,20 +2636,43 @@ function refreshModalDisplay() {
     const notesContainer = document.getElementById('modalCreatorNotes');
     if (creatorNotes && notesBox && notesContainer) {
         notesBox.style.display = 'block';
+        // Store raw content for fullscreen expand feature
+        window.currentCreatorNotesContent = creatorNotes;
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
+        // Initialize handlers for this modal instance
+        initCreatorNotesHandlers();
+        // Show/hide expand button based on content length
+        const expandBtn = document.getElementById('creatorNotesExpandBtn');
+        if (expandBtn) {
+            const lineCount = (creatorNotes.match(/\n/g) || []).length + 1;
+            const charCount = creatorNotes.length;
+            const showExpand = lineCount >= CreatorNotesConfig.MIN_LINES_FOR_EXPAND || 
+                               charCount >= CreatorNotesConfig.MIN_CHARS_FOR_EXPAND;
+            expandBtn.style.display = showExpand ? 'flex' : 'none';
+        }
     } else if (notesBox) {
         notesBox.style.display = 'none';
+        window.currentCreatorNotesContent = null;
     }
     
     // Update Description/First Message
     const desc = char.description || (char.data ? char.data.description : "") || "";
     const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+    
+    // Store raw content for fullscreen expand feature
+    window.currentDescriptionContent = desc || null;
+    window.currentFirstMesContent = firstMes || null;
+    
     document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
     document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
     
     // Update Alternate Greetings
     const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
     const altBox = document.getElementById('modalAltGreetingsBox');
+    
+    // Store raw content for fullscreen expand feature
+    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
+    
     if (altBox) {
         if (altGreetings && altGreetings.length > 0) {
             document.getElementById('altGreetingsCount').innerText = altGreetings.length;
@@ -2627,6 +2685,9 @@ function refreshModalDisplay() {
             altBox.style.display = 'none';
         }
     }
+    
+    // Initialize content expand handlers
+    initContentExpandHandlers();
     
     // Update Embedded Lorebook
     const characterBook = char.character_book || (char.data ? char.data.character_book : null);
@@ -5462,12 +5523,17 @@ async function importChubCharacter(fullPath) {
             throw new Error('Import failed: Server returned error');
         }
         
+        // Check for embedded media URLs in the character card
+        const mediaUrls = findCharacterMediaUrls(characterCard);
+        
         return { 
             success: true, 
             fileName: result.file_name || fileName,
             hasGallery: hasGallery,
             characterName: characterName,
-            fullPath: fullPath
+            fullPath: fullPath,
+            avatarUrl: avatarUrl,
+            embeddedMediaUrls: mediaUrls
         };
         
     } catch (error) {
@@ -5542,6 +5608,7 @@ startImportBtn?.addEventListener('click', async () => {
     let successCount = 0;
     let errorCount = 0;
     const charactersWithGallery = [];
+    const charactersWithEmbeddedMedia = [];
     
     for (let i = 0; i < validUrls.length; i++) {
         const { url, fullPath } = validUrls[i];
@@ -5561,6 +5628,15 @@ startImportBtn?.addEventListener('click', async () => {
                     name: result.characterName,
                     fullPath: result.fullPath,
                     url: `https://chub.ai/characters/${result.fullPath}`
+                });
+            }
+            
+            // Track characters with embedded media
+            if (result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
+                charactersWithEmbeddedMedia.push({
+                    name: result.characterName,
+                    avatar: result.avatarUrl,
+                    mediaUrls: result.embeddedMediaUrls
                 });
             }
         } else {
@@ -5601,9 +5677,15 @@ startImportBtn?.addEventListener('click', async () => {
         // Refresh the gallery (force API fetch since we just imported)
         fetchCharacters(true);
         
-        // Show gallery info modal if any characters have galleries
-        if (charactersWithGallery.length > 0) {
-            showChubGalleryModal(charactersWithGallery);
+        // Show import summary modal if there's anything to report (and setting enabled)
+        const hasGalleryChars = charactersWithGallery.length > 0;
+        const hasMediaChars = charactersWithEmbeddedMedia.length > 0;
+        
+        if ((hasGalleryChars || hasMediaChars) && getSetting('notifyAdditionalContent') !== false) {
+            showImportSummaryModal({
+                galleryCharacters: charactersWithGallery,
+                mediaCharacters: charactersWithEmbeddedMedia
+            });
         }
     } else {
         showToast(`Import failed: ${errorCount} error${errorCount > 1 ? 's' : ''}`, 'error');
@@ -5611,62 +5693,202 @@ startImportBtn?.addEventListener('click', async () => {
 });
 
 // ==============================================
-// Chub Gallery Info Feature
+// Import Summary Modal
 // ==============================================
 
+// Store pending media characters for download
+let pendingMediaCharacters = [];
+
 /**
- * Show modal with information about characters that have galleries on Chub
+ * Show import summary modal with 2 rows: gallery and/or embedded media
+ * @param {Object} options
+ * @param {Array<{name: string, fullPath: string, url: string}>} options.galleryCharacters - Characters with ChubAI galleries
+ * @param {Array<{name: string, avatar: string, mediaUrls: string[]}>} options.mediaCharacters - Characters with embedded media
  */
-function showChubGalleryModal(characters) {
-    const modal = document.getElementById('chubGalleryModal');
-    const list = document.getElementById('chubGalleryList');
+function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }) {
+    const modal = document.getElementById('importSummaryModal');
+    const galleryRow = document.getElementById('importSummaryGalleryRow');
+    const galleryLink = document.getElementById('importSummaryGalleryLink');
+    const mediaRow = document.getElementById('importSummaryMediaRow');
+    const mediaDesc = document.getElementById('importSummaryMediaDesc');
+    const downloadBtn = document.getElementById('importSummaryDownloadBtn');
     
-    if (!modal || !list) return;
+    if (!modal) return;
     
-    list.innerHTML = '';
+    // Store media characters for download
+    pendingMediaCharacters = mediaCharacters;
     
-    characters.forEach(char => {
-        // Support both {name, fullPath, url} and {characterName, fullPath} formats
-        const charName = char.name || char.characterName || 'Unknown';
-        const charFullPath = char.fullPath || '';
-        const charUrl = char.url || (charFullPath ? `https://chub.ai/characters/${charFullPath}` : '');
+    // Reset rows
+    galleryRow?.classList.add('hidden');
+    mediaRow?.classList.add('hidden');
+    
+    // Show gallery row if there are gallery characters
+    if (galleryCharacters.length > 0 && galleryRow && galleryLink) {
+        // Use first character's URL, or if multiple, link to chub.ai
+        if (galleryCharacters.length === 1) {
+            const char = galleryCharacters[0];
+            const charFullPath = char.fullPath || '';
+            galleryLink.href = char.url || `https://chub.ai/characters/${charFullPath}`;
+        } else {
+            // Multiple characters - just link to chub.ai
+            galleryLink.href = 'https://chub.ai';
+        }
+        galleryRow.classList.remove('hidden');
+    }
+    
+    // Show media row if there are media characters with actual files
+    if (mediaCharacters.length > 0 && mediaRow && downloadBtn) {
+        // Calculate total file count
+        const totalFiles = mediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
         
-        // Extract creator from fullPath (format: "creator/character-name")
-        const creatorName = charFullPath.split('/')[0] || '';
-        
-        // Avatar URL
-        const avatarUrl = charFullPath ? `https://avatars.charhub.io/avatars/${charFullPath}/avatar.webp` : '';
-        
-        const item = document.createElement('div');
-        item.className = 'chub-gallery-item';
-        item.innerHTML = `
-            ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(charName)}" class="chub-gallery-item-avatar" onerror="this.style.display='none'">` : ''}
-            <div class="chub-gallery-item-info">
-                <span class="chub-gallery-item-name">${escapeHtml(charName)}</span>
-                ${creatorName ? `<span class="chub-gallery-item-creator">by ${escapeHtml(creatorName)}</span>` : ''}
-            </div>
-            <a href="${charUrl}" target="_blank" rel="noopener noreferrer" class="action-btn secondary chub-gallery-link">
-                <i class="fa-solid fa-external-link-alt"></i> View Gallery
-            </a>
-        `;
-        list.appendChild(item);
-    });
+        // Only show if there are actually files to download
+        if (totalFiles > 0) {
+            if (mediaDesc) {
+                mediaDesc.textContent = `${totalFiles} remote file${totalFiles > 1 ? 's' : ''} that can be saved locally`;
+            }
+            
+            // Reset download button
+            downloadBtn.disabled = false;
+            downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+            downloadBtn.classList.remove('success');
+            
+            mediaRow.classList.remove('hidden');
+        }
+    }
     
     modal.classList.remove('hidden');
 }
 
-// Chub Gallery Modal Event Listeners
-document.getElementById('closeChubGalleryModal')?.addEventListener('click', () => {
-    document.getElementById('chubGalleryModal').classList.add('hidden');
+// Import Summary Modal Event Listeners
+document.getElementById('closeImportSummaryModal')?.addEventListener('click', () => {
+    document.getElementById('importSummaryModal').classList.add('hidden');
+    pendingMediaCharacters = [];
 });
 
-document.getElementById('closeChubGalleryBtn')?.addEventListener('click', () => {
-    document.getElementById('chubGalleryModal').classList.add('hidden');
+document.getElementById('closeImportSummaryBtn')?.addEventListener('click', () => {
+    document.getElementById('importSummaryModal').classList.add('hidden');
+    pendingMediaCharacters = [];
+});
+
+// Download embedded media button
+document.getElementById('importSummaryDownloadBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('importSummaryDownloadBtn');
+    
+    if (pendingMediaCharacters.length === 0) {
+        showToast('No files to download', 'info');
+        return;
+    }
+    
+    // Disable and show loading
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
+    
+    let totalSuccess = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    
+    for (const charInfo of pendingMediaCharacters) {
+        const characterName = charInfo.name;
+        const mediaUrls = charInfo.mediaUrls || [];
+        
+        const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls);
+        totalSuccess += result.success;
+        totalSkipped += result.skipped;
+        totalErrors += result.errors;
+    }
+    
+    // Show result
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
+    btn.classList.add('success');
+    
+    if (totalSuccess > 0) {
+        showToast(`Downloaded ${totalSuccess} file${totalSuccess > 1 ? 's' : ''}`, 'success');
+        fetchCharacters(true);
+    } else if (totalSkipped > 0) {
+        showToast('All files already exist', 'info');
+    } else {
+        showToast('No new files to download', 'info');
+    }
+    
+    pendingMediaCharacters = [];
 });
 
 // ==============================================
 // Media Localization Feature
 // ==============================================
+
+/**
+ * Download embedded media for a character (core function used by both localize button and import summary)
+ * @param {string} characterName - The character's name (used for folder)
+ * @param {string[]} mediaUrls - Array of URLs to download
+ * @param {Object} options - Optional callbacks for progress/logging
+ * @returns {Promise<{success: number, skipped: number, errors: number}>}
+ */
+async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, options = {}) {
+    const { onProgress, onLog, onLogUpdate } = options;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    let skippedCount = 0;
+    
+    if (!mediaUrls || mediaUrls.length === 0) {
+        return { success: 0, skipped: 0, errors: 0 };
+    }
+    
+    // Get existing files and their hashes to check for duplicates BEFORE downloading
+    const existingHashes = await getExistingFileHashes(characterName);
+    console.log(`[EmbeddedMedia] Found ${existingHashes.size} existing file hashes for ${characterName}`);
+    
+    let startIndex = Date.now(); // Use timestamp as start index for unique filenames
+    
+    for (let i = 0; i < mediaUrls.length; i++) {
+        const url = mediaUrls[i];
+        const fileIndex = startIndex + i;
+        
+        // Truncate URL for display
+        const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
+        const logEntry = onLog ? onLog(`Checking ${displayUrl}...`, 'pending') : null;
+        
+        // Download to memory first to check hash
+        const downloadResult = await downloadMediaToMemory(url);
+        
+        if (!downloadResult.success) {
+            errorCount++;
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
+            if (onProgress) onProgress(i + 1, mediaUrls.length);
+            continue;
+        }
+        
+        // Calculate hash of downloaded content
+        const contentHash = await calculateHash(downloadResult.arrayBuffer);
+        
+        // Check if this file already exists
+        if (existingHashes.has(contentHash)) {
+            skippedCount++;
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
+            console.log(`[EmbeddedMedia] Skipping duplicate: ${url}`);
+            if (onProgress) onProgress(i + 1, mediaUrls.length);
+            continue;
+        }
+        
+        // Not a duplicate, save the file
+        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saving ${displayUrl}...`, 'pending');
+        const result = await saveMediaFromMemory(downloadResult, url, characterName, fileIndex);
+        
+        if (result.success) {
+            successCount++;
+            existingHashes.add(contentHash); // Add to known hashes to avoid downloading same file twice
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved: ${result.filename}`, 'success');
+        } else {
+            errorCount++;
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed: ${displayUrl} - ${result.error}`, 'error');
+        }
+        
+        if (onProgress) onProgress(i + 1, mediaUrls.length);
+    }
+    
+    return { success: successCount, skipped: skippedCount, errors: errorCount };
+}
 
 /**
  * Extract image/media URLs from text content
@@ -6239,92 +6461,36 @@ localizeMediaBtn?.addEventListener('click', async () => {
         return;
     }
     
-    localizeStatus.textContent = `Found ${mediaUrls.length} remote media file(s). Checking for existing files...`;
-    
-    // Get existing files and their hashes to check for duplicates BEFORE downloading
-    const existingHashes = await getExistingFileHashes(characterName);
-    console.log(`[Localize] Found ${existingHashes.size} existing file hashes`);
-    
     localizeStatus.textContent = `Found ${mediaUrls.length} remote media file(s). Downloading new files...`;
     localizeProgressCount.textContent = `0/${mediaUrls.length}`;
     
-    // Download each media file
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
-    let startIndex = Date.now(); // Use timestamp as start index for unique filenames
-    
-    for (let i = 0; i < mediaUrls.length; i++) {
-        const url = mediaUrls[i];
-        const fileIndex = startIndex + i;
-        
-        // Truncate URL for display
-        const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
-        const logEntry = addLocalizeLogEntry(`Checking ${displayUrl}...`, 'pending');
-        
-        // Download to memory first to check hash
-        const downloadResult = await downloadMediaToMemory(url);
-        
-        if (!downloadResult.success) {
-            errorCount++;
-            updateLocalizeLogEntry(logEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
-            // Update progress
-            const progress = ((i + 1) / mediaUrls.length) * 100;
+    // Use shared download function with UI callbacks
+    const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
+        onProgress: (current, total) => {
+            const progress = (current / total) * 100;
             localizeProgressFill.style.width = `${progress}%`;
-            localizeProgressCount.textContent = `${i + 1}/${mediaUrls.length}`;
-            continue;
-        }
-        
-        // Calculate hash of downloaded content
-        const contentHash = await calculateHash(downloadResult.arrayBuffer);
-        
-        // Check if this file already exists
-        if (existingHashes.has(contentHash)) {
-            skippedCount++;
-            updateLocalizeLogEntry(logEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
-            console.log(`[Localize] Skipping duplicate: ${url}`);
-            // Update progress
-            const progress = ((i + 1) / mediaUrls.length) * 100;
-            localizeProgressFill.style.width = `${progress}%`;
-            localizeProgressCount.textContent = `${i + 1}/${mediaUrls.length}`;
-            continue;
-        }
-        
-        // Not a duplicate, save the file
-        updateLocalizeLogEntry(logEntry, `Saving ${displayUrl}...`, 'pending');
-        const result = await saveMediaFromMemory(downloadResult, url, characterName, fileIndex);
-        
-        if (result.success) {
-            successCount++;
-            existingHashes.add(contentHash); // Add to known hashes to avoid downloading same file twice
-            updateLocalizeLogEntry(logEntry, `Saved: ${result.filename}`, 'success');
-        } else {
-            errorCount++;
-            updateLocalizeLogEntry(logEntry, `Failed: ${displayUrl} - ${result.error}`, 'error');
-        }
-        
-        // Update progress
-        const progress = ((i + 1) / mediaUrls.length) * 100;
-        localizeProgressFill.style.width = `${progress}%`;
-        localizeProgressCount.textContent = `${i + 1}/${mediaUrls.length}`;
-    }
+            localizeProgressCount.textContent = `${current}/${total}`;
+        },
+        onLog: (message, status) => addLocalizeLogEntry(message, status),
+        onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
+    });
     
-    // Done
+    // Done - show status
     let statusMsg = '';
-    if (successCount > 0) {
-        statusMsg = `Downloaded ${successCount} new file(s)`;
+    if (result.success > 0) {
+        statusMsg = `Downloaded ${result.success} new file(s)`;
     }
-    if (skippedCount > 0) {
-        statusMsg += (statusMsg ? ', ' : '') + `${skippedCount} already existed`;
+    if (result.skipped > 0) {
+        statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} already existed`;
     }
-    if (errorCount > 0) {
-        statusMsg += (statusMsg ? ', ' : '') + `${errorCount} failed`;
+    if (result.errors > 0) {
+        statusMsg += (statusMsg ? ', ' : '') + `${result.errors} failed`;
     }
     
     localizeStatus.textContent = statusMsg || 'No new files to download.';
     
-    if (successCount > 0) {
-        showToast(`Downloaded ${successCount} new media file(s)`, 'success');
+    if (result.success > 0) {
+        showToast(`Downloaded ${result.success} new media file(s)`, 'success');
         
         // Clear the localization cache for this character so new files are picked up
         if (activeChar?.avatar) {
@@ -6335,9 +6501,9 @@ localizeMediaBtn?.addEventListener('click', async () => {
         if (activeChar) {
             fetchCharacterImages(activeChar.name || activeChar.data?.name);
         }
-    } else if (skippedCount > 0 && errorCount === 0) {
+    } else if (result.skipped > 0 && result.errors === 0) {
         showToast('All files already exist', 'info');
-    } else if (errorCount > 0) {
+    } else if (result.errors > 0) {
         showToast('Some downloads failed', 'error');
     }
 });
@@ -9493,98 +9659,112 @@ function renderCreatorNotesSimple(content, charName, container) {
     container.innerHTML = sanitizedNotes;
 }
 
+// ============================================================================
+// CREATOR NOTES MODULE - Secure iframe-based rich content rendering
+// ============================================================================
+
 /**
- * Render creator notes in a sandboxed iframe with full CSS support
- * This is used for both local and ChubAI character modals
- * @param {string} content - The creator notes content
- * @param {string} charName - Character name for placeholder replacement
- * @param {HTMLElement} container - Container element to render into
+ * Configuration for Creator Notes rendering
  */
-function renderCreatorNotesSecure(content, charName, container) {
-    if (!content || !container) return;
+const CreatorNotesConfig = {
+    MIN_HEIGHT: 50,
+    MAX_HEIGHT: 600,  // Height before scrollbar kicks in
+    MIN_LINES_FOR_EXPAND: 10, // Show expand button when content has at least this many lines
+    MIN_CHARS_FOR_EXPAND: 500, // Or when content exceeds this character count
+    BODY_PADDING: 10, // 5px top + 5px bottom
+    RESIZE_DEBOUNCE: 16, // ~60fps
+};
+
+/**
+ * Sanitize CSS content to remove dangerous patterns
+ * @param {string} content - Raw CSS/HTML content
+ * @returns {string} - Sanitized content
+ */
+function sanitizeCreatorNotesCSS(content) {
+    const dangerousPatterns = [
+        /position\s*:\s*(fixed|sticky)/gi,
+        /z-index\s*:\s*(\d{4,}|[5-9]\d{2})/gi,
+        /-moz-binding\s*:/gi,
+        /behavior\s*:/gi,
+        /expression\s*\(/gi,
+        /@import\s+(?!url\s*\()/gi,
+        /javascript\s*:/gi,
+        /vbscript\s*:/gi,
+    ];
     
-    // Check if rich rendering is enabled
-    const useRichRendering = getSetting('richCreatorNotes') || false;
-    
-    if (!useRichRendering) {
-        // Use simple sanitized HTML rendering
-        renderCreatorNotesSimple(content, charName, container);
-        return;
+    let sanitized = content;
+    dangerousPatterns.forEach(pattern => {
+        sanitized = sanitized.replace(pattern, '/* blocked */ ');
+    });
+    return sanitized;
+}
+
+/**
+ * Sanitize HTML content with DOMPurify (permissive for rich styling)
+ * @param {string} content - Raw HTML content
+ * @returns {string} - Sanitized HTML
+ */
+function sanitizeCreatorNotesHTML(content) {
+    if (typeof DOMPurify === 'undefined') {
+        return escapeHtml(content);
     }
     
-    // Rich rendering path - use sandboxed iframe with full CSS support
-    // Process creator notes - convert markdown images to HTML
-    const formattedNotes = formatRichText(content, charName, true);
-    
-    // Sanitize with DOMPurify (defense in depth) - permissive for creator styling
-    const sanitizedNotes = typeof DOMPurify !== 'undefined' 
-        ? DOMPurify.sanitize(formattedNotes, {
-            ALLOWED_TAGS: [
-                'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'div', 'span',
-                'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 'ins', 'mark',
-                'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
-                'table', 'tr', 'td', 'th', 'thead', 'tbody', 'tfoot', 'caption', 'colgroup', 'col',
-                'center', 'font', 'sub', 'sup', 'small', 'big',
-                'details', 'summary', 'abbr', 'cite', 'q', 'dl', 'dt', 'dd',
-                'figure', 'figcaption', 'article', 'section', 'aside', 'header', 'footer', 'nav', 'main',
-                'address', 'time', 'ruby', 'rt', 'rp', 'bdi', 'bdo', 'wbr',
-                'style'
-            ],
-            ALLOWED_ATTR: [
-                'href', 'src', 'alt', 'title', 'class', 'id', 'style', 'target',
-                'width', 'height', 'align', 'valign', 'border', 'cellpadding', 'cellspacing',
-                'colspan', 'rowspan', 'color', 'face', 'size', 'name', 'rel',
-                'bgcolor', 'background', 'start', 'type', 'value', 'reversed',
-                'dir', 'lang', 'translate', 'hidden', 'tabindex', 'accesskey',
-                'data-*'
-            ],
-            ADD_ATTR: ['target'],
-            FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'meta', 'link', 'base', 'noscript'],
-            FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover', 'onmouseout', 'onmousedown', 'onmouseup', 'onfocus', 'onblur', 'onchange', 'onsubmit', 'onkeydown', 'onkeyup', 'onkeypress'],
-            ALLOW_DATA_ATTR: true,
-            ALLOW_UNKNOWN_PROTOCOLS: false,
-            KEEP_CONTENT: true
-        })
-        : escapeHtml(formattedNotes);
-    
-    // CSS Sanitization
-    const sanitizeCSS = (content) => {
-        const dangerousPatterns = [
-            /position\s*:\s*(fixed|sticky)/gi,
-            /z-index\s*:\s*(\d{4,}|[5-9]\d{2})/gi,
-            /-moz-binding\s*:/gi,
-            /behavior\s*:/gi,
-            /expression\s*\(/gi,
-            // Allow @import for fonts/CSS but block others - only block @import without url()
-            /@import\s+(?!url\s*\()/gi,
-            /javascript\s*:/gi,
-            /vbscript\s*:/gi,
-        ];
-        
-        let sanitized = content;
-        dangerousPatterns.forEach(pattern => {
-            sanitized = sanitized.replace(pattern, '/* blocked */ ');
-        });
-        return sanitized;
-    };
-    
-    // Add referrer policy for privacy
-    const hardenImages = (content) => {
-        return content
-            .replace(/<img\s/gi, '<img referrerpolicy="no-referrer" ')
-            .replace(/<video\s/gi, '<video referrerpolicy="no-referrer" ')
-            .replace(/<audio\s/gi, '<audio referrerpolicy="no-referrer" ');
-    };
-    
-    const hardenedNotes = hardenImages(sanitizeCSS(sanitizedNotes));
-    
-    // Build the sandboxed iframe content
-    const iframeStyles = `
+    return DOMPurify.sanitize(content, {
+        ALLOWED_TAGS: [
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'div', 'span',
+            'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 'ins', 'mark',
+            'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+            'table', 'tr', 'td', 'th', 'thead', 'tbody', 'tfoot', 'caption', 'colgroup', 'col',
+            'center', 'font', 'sub', 'sup', 'small', 'big',
+            'details', 'summary', 'abbr', 'cite', 'q', 'dl', 'dt', 'dd',
+            'figure', 'figcaption', 'article', 'section', 'aside', 'header', 'footer', 'nav', 'main',
+            'address', 'time', 'ruby', 'rt', 'rp', 'bdi', 'bdo', 'wbr',
+            'style'
+        ],
+        ALLOWED_ATTR: [
+            'href', 'src', 'alt', 'title', 'class', 'id', 'style', 'target',
+            'width', 'height', 'align', 'valign', 'border', 'cellpadding', 'cellspacing',
+            'colspan', 'rowspan', 'color', 'face', 'size', 'name', 'rel',
+            'bgcolor', 'background', 'start', 'type', 'value', 'reversed',
+            'dir', 'lang', 'translate', 'hidden', 'tabindex', 'accesskey',
+            'data-*'
+        ],
+        ADD_ATTR: ['target'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'meta', 'link', 'base', 'noscript'],
+        FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover', 'onmouseout', 'onmousedown', 'onmouseup', 'onfocus', 'onblur', 'onchange', 'onsubmit', 'onkeydown', 'onkeyup', 'onkeypress'],
+        ALLOW_DATA_ATTR: true,
+        ALLOW_UNKNOWN_PROTOCOLS: false,
+        KEEP_CONTENT: true
+    });
+}
+
+/**
+ * Add referrer policy to media elements for privacy
+ * @param {string} content - HTML content
+ * @returns {string} - Hardened HTML
+ */
+function hardenCreatorNotesMedia(content) {
+    return content
+        .replace(/<img\s/gi, '<img referrerpolicy="no-referrer" ')
+        .replace(/<video\s/gi, '<video referrerpolicy="no-referrer" ')
+        .replace(/<audio\s/gi, '<audio referrerpolicy="no-referrer" ');
+}
+
+/**
+ * Generate the base CSS styles for iframe content
+ * @returns {string} - CSS style block
+ */
+function getCreatorNotesBaseStyles() {
+    return `
         <style>
             * { box-sizing: border-box; }
-            html, body {
+            html {
                 margin: 0;
                 padding: 0;
+            }
+            body {
+                margin: 0;
+                padding: 5px;
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 color: #e0e0e0;
                 background: transparent;
@@ -9593,7 +9773,10 @@ function renderCreatorNotesSecure(content, charName, container) {
                 word-wrap: break-word;
                 font-size: 14px;
             }
-            body { padding: 5px; }
+            #content-wrapper {
+                display: block;
+                width: 100%;
+            }
             
             img, video, canvas, svg {
                 max-width: 100% !important;
@@ -9663,10 +9846,7 @@ function renderCreatorNotesSecure(content, charName, container) {
                 margin: 15px 0;
             }
             
-            ul, ol { 
-                padding-left: 25px; 
-                margin: 8px 0;
-            }
+            ul, ol { padding-left: 25px; margin: 8px 0; }
             li { margin: 4px 0; }
             
             .embedded-image {
@@ -9678,10 +9858,10 @@ function renderCreatorNotesSecure(content, charName, container) {
             }
             
             .embedded-link { color: #4a9eff; }
-            
             .placeholder-user { color: #2ecc71; font-weight: bold; }
             .placeholder-char { color: #e74c3c; font-weight: bold; }
             
+            /* Neutralize dangerous positioning from user CSS */
             [style*="position: fixed"], [style*="position:fixed"],
             [style*="position: sticky"], [style*="position:sticky"] {
                 position: static !important;
@@ -9691,118 +9871,550 @@ function renderCreatorNotesSecure(content, charName, container) {
             }
         </style>
     `;
+}
+
+/**
+ * Build complete iframe HTML document
+ * @param {string} content - Sanitized content
+ * @returns {string} - Complete HTML document
+ */
+function buildCreatorNotesIframeDoc(content) {
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
+    const styles = getCreatorNotesBaseStyles();
     
-    const cspMeta = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
-    
-    const iframeContent = `<!DOCTYPE html><html><head><meta charset="UTF-8">${cspMeta}${iframeStyles}</head><body>${hardenedNotes}</body></html>`;
-    
-    // Create sandboxed iframe
-    container.innerHTML = '';
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8">${csp}${styles}</head><body><div id="content-wrapper">${content}</div></body></html>`;
+}
+
+/**
+ * Create and configure the sandboxed iframe
+ * @param {string} srcdoc - The iframe document content
+ * @returns {HTMLIFrameElement} - Configured iframe element
+ */
+function createCreatorNotesIframe(srcdoc) {
     const iframe = document.createElement('iframe');
     iframe.sandbox = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
-    // Start with a small fixed height - we'll resize once content is ready
-    iframe.style.cssText = 'width: 100%; height: 150px; min-height: 50px; border: none; background: transparent; border-radius: 8px;';
-    iframe.srcdoc = iframeContent;
-    
-    // Auto-resize iframe to fit content
+    iframe.style.cssText = `
+        width: 100%;
+        height: ${CreatorNotesConfig.MIN_HEIGHT}px;
+        min-height: ${CreatorNotesConfig.MIN_HEIGHT}px;
+        max-height: none;
+        border: none;
+        background: transparent;
+        border-radius: 8px;
+        display: block;
+    `;
+    iframe.srcdoc = srcdoc;
+    return iframe;
+}
+
+/**
+ * Setup auto-resize behavior for creator notes iframe
+ * Handles both short content (auto-fit) and long content (scrollable)
+ * @param {HTMLIFrameElement} iframe - The iframe element
+ */
+function setupCreatorNotesResize(iframe) {
     iframe.onload = () => {
         try {
-            let stableHeight = 0;
-            let stableCount = 0;
-            let resizeAttempts = 0;
-            const maxAttempts = 25;
-            // Max reasonable height - anything above this is likely a measurement error
-            const maxReasonableHeight = Math.max(window.innerHeight * 3, 4000);
+            const doc = iframe.contentDocument;
+            const wrapper = doc?.getElementById('content-wrapper');
             
-            const resizeIframe = () => {
-                if (!iframe.contentDocument || !iframe.contentDocument.body) return;
-                if (resizeAttempts >= maxAttempts) return;
-                resizeAttempts++;
-                
-                const body = iframe.contentDocument.body;
-                const docEl = iframe.contentDocument.documentElement;
-                
-                // Force layout recalculation
-                void body.offsetHeight;
-                
-                // Get multiple height measurements
-                const scrollH = body.scrollHeight || 0;
-                const offsetH = body.offsetHeight || 0;
-                const clientH = body.clientHeight || 0;
-                
-                // Use the MINIMUM of reasonable values (avoid bogus large values)
-                // Filter out zero values and unreasonably large values
-                const heights = [scrollH, offsetH, clientH].filter(h => h > 50 && h < maxReasonableHeight);
-                
-                if (heights.length === 0) {
-                    // No valid measurements yet, try again later
-                    return;
-                }
-                
-                // Take the minimum valid height (bogus values tend to be too large)
-                const measuredHeight = Math.min(...heights);
-                
-                // Check if height has stabilized (same value twice in a row)
-                if (Math.abs(measuredHeight - stableHeight) < 10) {
-                    stableCount++;
-                } else {
-                    stableHeight = measuredHeight;
-                    stableCount = 1;
-                }
-                
-                // Only apply height if it seems stable or we're past several attempts
-                if (stableCount >= 2 || resizeAttempts >= 5) {
-                    const finalHeight = Math.max(stableHeight, 50);
-                    iframe.style.height = finalHeight + 'px';
-                    
-                    // Lock overflow after stable height is set
-                    if (stableCount >= 2) {
-                        body.style.overflow = 'hidden';
-                    }
-                }
-            };
-            
-            // Use requestAnimationFrame for timing after paint
-            const rafResize = () => {
-                requestAnimationFrame(resizeIframe);
-            };
-            
-            // Staggered resize attempts - more frequent at start, then taper off
-            setTimeout(rafResize, 10);
-            setTimeout(rafResize, 50);
-            setTimeout(rafResize, 100);
-            setTimeout(rafResize, 200);
-            setTimeout(rafResize, 350);
-            setTimeout(rafResize, 500);
-            setTimeout(rafResize, 750);
-            setTimeout(rafResize, 1000);
-            setTimeout(rafResize, 1500);
-            setTimeout(rafResize, 2000);
-            
-            // Handle image loading - images can change height significantly
-            if (iframe.contentDocument) {
-                const images = iframe.contentDocument.querySelectorAll('img');
-                images.forEach(img => {
-                    const onImageReady = () => {
-                        // Reset stability check when images load
-                        stableCount = 0;
-                        setTimeout(rafResize, 10);
-                        setTimeout(rafResize, 100);
-                    };
-                    if (img.complete) {
-                        onImageReady();
-                    } else {
-                        img.addEventListener('load', onImageReady);
-                        img.addEventListener('error', onImageReady);
-                    }
-                });
+            if (!doc || !wrapper) {
+                iframe.style.height = '200px';
+                return;
             }
+            
+            let currentHeight = 0;
+            let resizeObserver = null;
+            
+            const measureAndApply = () => {
+                if (!wrapper) return;
+                
+                const rect = wrapper.getBoundingClientRect();
+                const contentHeight = Math.ceil(rect.height) + CreatorNotesConfig.BODY_PADDING;
+                
+                // If content fits within max height, show it all (no scroll)
+                // If content exceeds max height, cap at max and enable scrolling
+                const needsScroll = contentHeight > CreatorNotesConfig.MAX_HEIGHT;
+                const targetHeight = needsScroll 
+                    ? CreatorNotesConfig.MAX_HEIGHT 
+                    : Math.max(CreatorNotesConfig.MIN_HEIGHT, contentHeight);
+                
+                // Apply overflow based on whether we need scrolling
+                doc.body.style.overflowY = needsScroll ? 'auto' : 'hidden';
+                doc.body.style.overflowX = 'hidden';
+                
+                // Only update if changed significantly
+                if (Math.abs(targetHeight - currentHeight) > 3) {
+                    currentHeight = targetHeight;
+                    iframe.style.height = targetHeight + 'px';
+                }
+            };
+            
+            // Use ResizeObserver for dynamic content
+            if (typeof ResizeObserver !== 'undefined') {
+                resizeObserver = new ResizeObserver(measureAndApply);
+                resizeObserver.observe(wrapper);
+            }
+            
+            // Handle lazy-loaded images
+            doc.querySelectorAll('img').forEach(img => {
+                if (!img.complete) {
+                    img.addEventListener('load', measureAndApply);
+                    img.addEventListener('error', measureAndApply);
+                }
+            });
+            
+            // Initial measurements with delays for CSS parsing
+            measureAndApply();
+            setTimeout(measureAndApply, 50);
+            setTimeout(measureAndApply, 150);
+            setTimeout(measureAndApply, 400);
+            
         } catch (e) {
+            console.error('Creator notes resize error:', e);
             iframe.style.height = '200px';
         }
     };
+}
+
+/**
+ * Render creator notes in a sandboxed iframe with full CSS support
+ * Main entry point for rich creator notes rendering
+ * @param {string} content - The creator notes content
+ * @param {string} charName - Character name for placeholder replacement
+ * @param {HTMLElement} container - Container element to render into
+ */
+function renderCreatorNotesSecure(content, charName, container) {
+    if (!content || !container) return;
     
+    // Check if rich rendering is enabled
+    if (!getSetting('richCreatorNotes')) {
+        renderCreatorNotesSimple(content, charName, container);
+        return;
+    }
+    
+    // Process pipeline: format -> sanitize HTML -> sanitize CSS -> harden media
+    const formatted = formatRichText(content, charName, true);
+    const sanitizedHTML = sanitizeCreatorNotesHTML(formatted);
+    const sanitizedCSS = sanitizeCreatorNotesCSS(sanitizedHTML);
+    const hardened = hardenCreatorNotesMedia(sanitizedCSS);
+    
+    // Build and insert iframe
+    const iframeDoc = buildCreatorNotesIframeDoc(hardened);
+    const iframe = createCreatorNotesIframe(iframeDoc);
+    
+    container.innerHTML = '';
     container.appendChild(iframe);
+    
+    // Setup resize behavior
+    setupCreatorNotesResize(iframe);
+}
+
+/**
+ * Open creator notes in a fullscreen modal
+ * Shows content with more vertical space for reading
+ * @param {string} content - The creator notes content  
+ * @param {string} charName - Character name for placeholder replacement
+ * @param {Object} [urlMap] - Pre-built localization map (optional)
+ */
+function openCreatorNotesFullscreen(content, charName, urlMap) {
+    if (!content) {
+        showToast('No creator notes to display', 'warning');
+        return;
+    }
+    
+    // Apply media localization if urlMap is provided
+    let localizedContent = content;
+    if (urlMap && Object.keys(urlMap).length > 0) {
+        localizedContent = replaceMediaUrlsInText(content, urlMap);
+    }
+    
+    // Process content through the same pipeline
+    const formatted = formatRichText(localizedContent, charName, true);
+    const sanitizedHTML = sanitizeCreatorNotesHTML(formatted);
+    const sanitizedCSS = sanitizeCreatorNotesCSS(sanitizedHTML);
+    const hardened = hardenCreatorNotesMedia(sanitizedCSS);
+    
+    // Build simple iframe document - content fills width naturally
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
+    const styles = getCreatorNotesBaseStyles();
+    const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${csp}${styles}</head><body style="overflow-y: auto; overflow-x: hidden; height: 100%; padding: 15px;"><div id="content-wrapper">${hardened}</div></body></html>`;
+    
+    // Build simple fullscreen modal - just size buttons
+    const modalHtml = `
+        <div id="creatorNotesFullscreenModal" class="modal-overlay">
+            <div class="modal-glass creator-notes-fullscreen-modal" id="creatorNotesFullscreenInner" data-size="normal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-feather-pointed"></i> Creator's Notes</h2>
+                    <div class="creator-notes-display-controls">
+                        <div class="display-control-btns" id="sizeControlBtns">
+                            <button type="button" class="display-control-btn" data-size="compact" title="Compact">
+                                <i class="fa-solid fa-compress"></i>
+                            </button>
+                            <button type="button" class="display-control-btn active" data-size="normal" title="Normal">
+                                <i class="fa-regular fa-window-maximize"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-size="wide" title="Wide">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-controls">
+                        <button class="close-btn" id="creatorNotesFullscreenClose">&times;</button>
+                    </div>
+                </div>
+                <div class="creator-notes-fullscreen-body">
+                    <iframe 
+                        id="creatorNotesFullscreenIframe"
+                        sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+                    ></iframe>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('creatorNotesFullscreenModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById('creatorNotesFullscreenModal');
+    const modalInner = document.getElementById('creatorNotesFullscreenInner');
+    const iframe = document.getElementById('creatorNotesFullscreenIframe');
+    
+    // Set iframe content
+    iframe.srcdoc = iframeDoc;
+    
+    // Size control handlers - just toggle class on modal
+    document.getElementById('sizeControlBtns').addEventListener('click', (e) => {
+        const btn = e.target.closest('.display-control-btn[data-size]');
+        if (!btn) return;
+        
+        const size = btn.dataset.size;
+        document.querySelectorAll('#sizeControlBtns .display-control-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        modalInner.dataset.size = size;
+    });
+    
+    // Close handlers
+    const closeModal = () => {
+        modal.remove();
+        document.removeEventListener('keydown', handleKeydown);
+    };
+    
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    
+    document.getElementById('creatorNotesFullscreenClose').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    document.addEventListener('keydown', handleKeydown);
+}
+
+/**
+ * Initialize creator notes event handlers
+ * Call this after modal content is loaded
+ */
+function initCreatorNotesHandlers() {
+    const expandBtn = document.getElementById('creatorNotesExpandBtn');
+    
+    // Expand button opens fullscreen modal
+    if (expandBtn) {
+        expandBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation(); // Prevent toggling the details
+            
+            // Get the current creator notes content from the stored data
+            const charName = document.getElementById('modalCharName')?.textContent || 'Character';
+            
+            // We need to get the raw content - check if it's stored
+            if (window.currentCreatorNotesContent) {
+                // Build localization map if enabled for this character
+                let urlMap = null;
+                if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
+                    urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+                }
+                openCreatorNotesFullscreen(window.currentCreatorNotesContent, charName, urlMap);
+            } else {
+                showToast('Creator notes not available', 'warning');
+            }
+        });
+    }
+}
+
+/**
+ * Open content in a fullscreen modal
+ * Generic fullscreen viewer for description, first message, etc.
+ * @param {string} content - Raw content to display
+ * @param {string} title - Modal title
+ * @param {string} icon - FontAwesome icon class (e.g., 'fa-message')
+ * @param {string} charName - Character name for placeholder replacement
+ * @param {Object} [urlMap] - Pre-built localization map (optional)
+ */
+function openContentFullscreen(content, title, icon, charName, urlMap) {
+    if (!content) {
+        showToast('No content to display', 'warning');
+        return;
+    }
+    
+    // Apply media localization if urlMap is provided
+    let localizedContent = content;
+    if (urlMap && Object.keys(urlMap).length > 0) {
+        localizedContent = replaceMediaUrlsInText(content, urlMap);
+    }
+    
+    // Format and sanitize content
+    const formatted = formatRichText(localizedContent, charName);
+    const sanitized = DOMPurify.sanitize(formatted, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 
+                       'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+                       'ul', 'ol', 'li', 'a', 'img', 'span', 'div', 'hr', 'table', 
+                       'thead', 'tbody', 'tr', 'th', 'td', 'sup', 'sub', 'details', 'summary'],
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel', 'width', 'height'],
+        ALLOW_DATA_ATTR: false
+    });
+    
+    const modalHtml = `
+        <div id="contentFullscreenModal" class="modal-overlay">
+            <div class="modal-glass content-fullscreen-modal" id="contentFullscreenInner" data-size="normal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid ${icon}"></i> ${escapeHtml(title)}</h2>
+                    <div class="creator-notes-display-controls">
+                        <div class="display-control-btns" id="contentSizeControlBtns">
+                            <button type="button" class="display-control-btn" data-size="compact" title="Compact">
+                                <i class="fa-solid fa-compress"></i>
+                            </button>
+                            <button type="button" class="display-control-btn active" data-size="normal" title="Normal">
+                                <i class="fa-regular fa-window-maximize"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-size="wide" title="Wide">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-controls">
+                        <button class="close-btn" id="contentFullscreenClose">&times;</button>
+                    </div>
+                </div>
+                <div class="content-fullscreen-body">
+                    <div class="content-wrapper">${sanitized}</div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('contentFullscreenModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById('contentFullscreenModal');
+    const modalInner = document.getElementById('contentFullscreenInner');
+    
+    // Size control handlers
+    document.getElementById('contentSizeControlBtns').addEventListener('click', (e) => {
+        const btn = e.target.closest('.display-control-btn[data-size]');
+        if (!btn) return;
+        
+        const size = btn.dataset.size;
+        document.querySelectorAll('#contentSizeControlBtns .display-control-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        modalInner.dataset.size = size;
+    });
+    
+    // Close handlers
+    const closeModal = () => {
+        modal.remove();
+        document.removeEventListener('keydown', handleKeydown);
+    };
+    
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    
+    document.getElementById('contentFullscreenClose').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    document.addEventListener('keydown', handleKeydown);
+}
+
+/**
+ * Open alternate greetings in a fullscreen modal with navigation
+ * @param {Array} greetings - Array of greeting strings
+ * @param {string} charName - Character name for placeholder replacement
+ * @param {Object} [urlMap] - Pre-built localization map (optional)
+ */
+function openAltGreetingsFullscreen(greetings, charName, urlMap) {
+    if (!greetings || greetings.length === 0) {
+        showToast('No alternate greetings to display', 'warning');
+        return;
+    }
+    
+    // Format all greetings with localization
+    const formattedGreetings = greetings.map((g, i) => {
+        let content = (g || '').trim();
+        if (urlMap && Object.keys(urlMap).length > 0) {
+            content = replaceMediaUrlsInText(content, urlMap);
+        }
+        const formatted = formatRichText(content, charName);
+        const sanitized = DOMPurify.sanitize(formatted, {
+            ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 
+                           'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+                           'ul', 'ol', 'li', 'a', 'img', 'span', 'div', 'hr', 'table', 
+                           'thead', 'tbody', 'tr', 'th', 'td', 'sup', 'sub', 'details', 'summary'],
+            ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel', 'width', 'height'],
+            ALLOW_DATA_ATTR: false
+        });
+        return { index: i + 1, content: sanitized };
+    });
+    
+    // Build navigation dots
+    const navHtml = formattedGreetings.map((g, i) => 
+        `<button type="button" class="greeting-nav-btn${i === 0 ? ' active' : ''}" data-index="${i}" title="Greeting #${g.index}">${g.index}</button>`
+    ).join('');
+    
+    // Build greeting cards
+    const cardsHtml = formattedGreetings.map((g, i) => `
+        <div class="greeting-card" data-greeting-index="${i}" style="${i !== 0 ? 'display: none;' : ''}">
+            <div class="greeting-header">
+                <div class="greeting-number">${g.index}</div>
+                <div class="greeting-label">Alternate Greeting</div>
+            </div>
+            <div class="greeting-content">${g.content}</div>
+        </div>
+    `).join('');
+    
+    const modalHtml = `
+        <div id="altGreetingsFullscreenModal" class="modal-overlay">
+            <div class="modal-glass content-fullscreen-modal" id="altGreetingsFullscreenInner" data-size="normal">
+                <div class="modal-header">
+                    <h2><i class="fa-solid fa-comments"></i> Alternate Greetings <span style="color: #888; font-weight: 400; font-size: 0.9rem;">(${greetings.length})</span></h2>
+                    <div class="creator-notes-display-controls">
+                        <div class="display-control-btns" id="altGreetingsSizeControlBtns">
+                            <button type="button" class="display-control-btn" data-size="compact" title="Compact">
+                                <i class="fa-solid fa-compress"></i>
+                            </button>
+                            <button type="button" class="display-control-btn active" data-size="normal" title="Normal">
+                                <i class="fa-regular fa-window-maximize"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-size="wide" title="Wide">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-controls">
+                        <button class="close-btn" id="altGreetingsFullscreenClose">&times;</button>
+                    </div>
+                </div>
+                ${greetings.length > 1 ? `<div class="greeting-nav" id="greetingNav">${navHtml}</div>` : ''}
+                <div class="content-fullscreen-body">
+                    ${cardsHtml}
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('altGreetingsFullscreenModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    
+    const modal = document.getElementById('altGreetingsFullscreenModal');
+    const modalInner = document.getElementById('altGreetingsFullscreenInner');
+    
+    // Navigation handlers
+    const greetingNav = document.getElementById('greetingNav');
+    if (greetingNav) {
+        greetingNav.addEventListener('click', (e) => {
+            const btn = e.target.closest('.greeting-nav-btn[data-index]');
+            if (!btn) return;
+            
+            const index = parseInt(btn.dataset.index);
+            
+            // Update nav buttons
+            greetingNav.querySelectorAll('.greeting-nav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // Show selected greeting, hide others
+            modal.querySelectorAll('.greeting-card').forEach((card, i) => {
+                card.style.display = i === index ? '' : 'none';
+            });
+        });
+    }
+    
+    // Size control handlers
+    document.getElementById('altGreetingsSizeControlBtns').addEventListener('click', (e) => {
+        const btn = e.target.closest('.display-control-btn[data-size]');
+        if (!btn) return;
+        
+        const size = btn.dataset.size;
+        document.querySelectorAll('#altGreetingsSizeControlBtns .display-control-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        modalInner.dataset.size = size;
+    });
+    
+    // Close handlers
+    const closeModal = () => {
+        modal.remove();
+        document.removeEventListener('keydown', handleKeydown);
+    };
+    
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') closeModal();
+    };
+    
+    document.getElementById('altGreetingsFullscreenClose').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    document.addEventListener('keydown', handleKeydown);
+}
+
+/**
+ * Initialize content expand button handlers
+ * Call this after modal content is loaded
+ */
+function initContentExpandHandlers() {
+    const charName = document.getElementById('modalCharName')?.textContent || 'Character';
+    
+    // First Message expand button
+    const firstMesExpandBtn = document.getElementById('firstMesExpandBtn');
+    if (firstMesExpandBtn) {
+        firstMesExpandBtn.addEventListener('click', async () => {
+            const content = window.currentFirstMesContent;
+            if (!content) {
+                showToast('No first message to display', 'warning');
+                return;
+            }
+            
+            let urlMap = null;
+            if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
+                urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+            }
+            openContentFullscreen(content, 'First Message', 'fa-message', charName, urlMap);
+        });
+    }
+    
+    // Alt Greetings expand button
+    const altGreetingsExpandBtn = document.getElementById('altGreetingsExpandBtn');
+    if (altGreetingsExpandBtn) {
+        altGreetingsExpandBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation(); // Prevent toggling the details
+            
+            const greetings = window.currentAltGreetingsContent;
+            if (!greetings || greetings.length === 0) {
+                showToast('No alternate greetings to display', 'warning');
+                return;
+            }
+            
+            let urlMap = null;
+            if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
+                urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+            }
+            openAltGreetingsFullscreen(greetings, charName, urlMap);
+        });
+    }
 }
 
 function initChubView() {
@@ -11399,7 +12011,7 @@ async function openChubCharPreview(char) {
     // Tagline
     if (char.tagline && char.tagline !== char.description) {
         taglineSection.style.display = 'block';
-        taglineEl.innerHTML = formatRichText(char.tagline, char.name);
+        taglineEl.innerHTML = formatRichText(char.tagline, char.name, true);
     } else {
         taglineSection.style.display = 'none';
     }
@@ -11436,38 +12048,35 @@ async function openChubCharPreview(char) {
         if (response.ok) {
             const detailData = await response.json();
             const node = detailData.node || detailData;
-            const def = node.definition || node;
+            const def = node.definition || {};
             
             // Update Creator's Notes if node has better/different description than search result
+            // node.description is the PUBLIC listing description (Creator's Notes)
             if (node.description && node.description !== char.description) {
                 renderCreatorNotesSecure(node.description, char.name, creatorNotesEl);
             }
             
-            // Definition Description (character definition that goes into prompt)
-            if (def.description) {
-                descSection.style.display = 'block';
-                descEl.innerHTML = formatRichText(def.description, char.name);
-            }
-            
-            // Personality
+            // Character Definition (def.personality in ChubAI API = character description/definition for prompt)
+            // This is confusingly named in ChubAI's API - "personality" is actually the main character definition
             if (def.personality) {
-                personalitySection.style.display = 'block';
-                personalityEl.innerHTML = formatRichText(def.personality, char.name);
+                descSection.style.display = 'block';
+                descEl.innerHTML = formatRichText(def.personality, char.name, true);
             }
             
             // Scenario  
             if (def.scenario) {
                 scenarioSection.style.display = 'block';
-                scenarioEl.innerHTML = formatRichText(def.scenario, char.name);
+                scenarioEl.innerHTML = formatRichText(def.scenario, char.name, true);
             }
             
-            // First message preview (truncated)
-            if (def.first_mes) {
+            // First message preview (truncated) - ChubAI uses first_message, not first_mes
+            const firstMsg = def.first_message || def.first_mes;
+            if (firstMsg) {
                 firstMsgSection.style.display = 'block';
-                const truncatedMsg = def.first_mes.length > 800 
-                    ? def.first_mes.substring(0, 800) + '...' 
-                    : def.first_mes;
-                firstMsgEl.innerHTML = formatRichText(truncatedMsg, char.name);
+                const truncatedMsg = firstMsg.length > 800 
+                    ? firstMsg.substring(0, 800) + '...' 
+                    : firstMsg;
+                firstMsgEl.innerHTML = formatRichText(truncatedMsg, char.name, true);
             }
             
             // Update greetings count if we have better data
@@ -11618,9 +12227,6 @@ async function downloadChubCharacter() {
         // Close the character modal
         document.getElementById('chubCharModal').classList.add('hidden');
         
-        // Check if character has gallery
-        const hasGallery = metadata.hasGallery || false;
-        
         showToast(`Downloaded "${characterName}" successfully!`, 'success');
         
         // Try to refresh the main SillyTavern window's character list
@@ -11639,14 +12245,26 @@ async function downloadChubCharacter() {
         // Refresh the gallery (force API fetch since we just imported)
         fetchCharacters(true);
         
-        // Show gallery info modal if the character has a gallery
-        if (hasGallery) {
-            showChubGalleryModal([{
-                success: true,
-                characterName: characterName,
-                fullPath: fullPath,
-                hasGallery: true
-            }]);
+        // Check for embedded media
+        const mediaUrls = findCharacterMediaUrls(characterCard);
+        
+        // Show import summary modal if there's anything to report (and setting enabled)
+        const hasGallery = metadata.hasGallery || false;
+        const hasMedia = mediaUrls.length > 0;
+        
+        if ((hasGallery || hasMedia) && getSetting('notifyAdditionalContent') !== false) {
+            showImportSummaryModal({
+                galleryCharacters: hasGallery ? [{
+                    name: characterName,
+                    fullPath: fullPath,
+                    url: `https://chub.ai/characters/${fullPath}`
+                }] : [],
+                mediaCharacters: hasMedia ? [{
+                    name: characterName,
+                    avatar: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
+                    mediaUrls: mediaUrls
+                }] : []
+            });
         }
         
     } catch (e) {
