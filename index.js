@@ -394,6 +394,39 @@ function initMediaLocalizationInChat() {
             setTimeout(() => localizeCharacterInfoPanels(), 500);
         });
         
+        // Listen for message swipes to re-localize the swiped content
+        eventSource.on(event_types.MESSAGE_SWIPED, async (messageId) => {
+            try {
+                const currentContext = SillyTavern.getContext();
+                
+                const charId = currentContext.characterId;
+                if (charId === undefined || charId === null) return;
+                
+                const character = currentContext.characters[charId];
+                if (!character) return;
+                
+                // Function to localize the message
+                const doLocalize = async () => {
+                    // Re-query the element each time as ST may have replaced it
+                    const messageElement = document.querySelector(`.mes[mesid="${messageId}"]`);
+                    if (!messageElement) return;
+                    
+                    const mesText = messageElement.querySelector('.mes_text');
+                    if (mesText) {
+                        await localizeMediaInMessage(mesText, character);
+                    }
+                };
+                
+                // Multiple attempts with increasing delays to catch ST's re-render
+                setTimeout(doLocalize, 50);
+                setTimeout(doLocalize, 150);
+                setTimeout(doLocalize, 300);
+                setTimeout(doLocalize, 600);
+            } catch (e) {
+                console.error('[CharLib] Error in MESSAGE_SWIPED handler:', e);
+            }
+        });
+        
         // Listen for character selected event to localize info panels
         if (event_types.CHARACTER_EDITED) {
             eventSource.on(event_types.CHARACTER_EDITED, () => {
@@ -428,18 +461,22 @@ async function localizeCharacterInfoPanels() {
         const urlMap = await buildChatMediaLocalizationMap(character.name, character.avatar);
         if (Object.keys(urlMap).length === 0) return;
         
-        // Selectors for various ST panels that might contain character info with images
+        // Selectors for ST panels that might contain character info with images
         const panelSelectors = [
-            '.inline-drawer-content',     // Main content drawers (creator's notes, etc.)
-            '#description_div',           // Character description
-            '#creator_notes_div',         // Creator's notes panel
-            '#character_popup',           // Character popup/modal
-            '#char_notes',                // Character notes
-            '#firstmessage_div',          // First message display
-            '.character_description',     // Generic description class
-            '.creator_notes',             // Generic creator notes class
-            '#mes_example_div',           // Example messages
-            '.mes_narration',             // Narration blocks
+            '.inline-drawer-content',     // Content drawers (creator notes, etc.)
+            '#description_div',
+            '#creator_notes_div',
+            '#character_popup',
+            '#char_notes',
+            '#firstmessage_div',
+            '.character_description',
+            '.creator_notes',
+            '#mes_example_div',
+            '.mes_narration',
+            '.swipe_right',               // Alternate greetings swipe area
+            '#alternate_greetings',       // Alt greetings container
+            '.alternate_greeting',        // Individual alt greeting
+            '.greeting_text',             // Greeting text content
         ];
         
         for (const selector of panelSelectors) {

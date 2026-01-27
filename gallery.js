@@ -1153,9 +1153,6 @@ async function fetchCharacterImages(charName) {
     try {
         const csrfToken = getQueryParam('csrf') || getCookie('X-CSRF-Token');
         
-        console.log(`[Gallery] Fetching media via /api/images/list for folder: ${charName}`);
-        
-        // Request all media types: IMAGE=1, VIDEO=2, AUDIO=4, so 7 = all
         const response = await fetch(`${API_BASE}/images/list`, {
             method: 'POST',
             headers: { 
@@ -1167,7 +1164,6 @@ async function fetchCharacterImages(charName) {
 
         if (response.ok) {
             const files = await response.json();
-            console.log(`[Gallery] Found ${files.length} images.`);
             renderGalleryImages(files, charName);
         } else {
              console.warn(`[Gallery] Failed to list images: ${response.status}`);
@@ -4782,18 +4778,6 @@ function escapeHtml(text) {
 }
 
 /**
- * Encode a path that may contain slashes (like character names with "/" in them)
- * Encodes each path segment separately to preserve the path structure
- * @param {string} path - Path that may contain forward slashes
- * @returns {string} URL-safe path with each segment encoded
- */
-function encodePathSegments(path) {
-    if (!path) return '';
-    // Split by /, encode each segment, rejoin with /
-    return path.split('/').map(segment => encodeURIComponent(segment)).join('/');
-}
-
-/**
  * Sanitize a character name to match SillyTavern's folder naming convention
  * SillyTavern removes characters that are illegal in Windows folder names
  * @param {string} name - Character name
@@ -4941,9 +4925,10 @@ function formatRichText(text, charName = '', preserveHtml = false) {
             processedText = processedText.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
             processedText = processedText.replace(/__(.+?)__/g, '<strong>$1</strong>');
             
-            // Italic: *text* or _text_ (careful not to match inside URLs or HTML)
-            processedText = processedText.replace(/(?<![\\w*/"=])\*([^*\n]+?)\*(?![\\w*])/g, '<em>$1</em>');
-            processedText = processedText.replace(/(?<![\\w_/"=])_([^_\n]+?)_(?![\\w_])/g, '<em>$1</em>');
+            // Italic: *text* or _text_ (careful not to match inside URLs, paths, or HTML attributes)
+            // Use negative lookbehind for word chars, underscores, slashes, quotes, equals to avoid matching in URLs/paths
+            processedText = processedText.replace(/(?<![\w*/"=])\*([^*\n]+?)\*(?![\w*])/g, '<em>$1</em>');
+            processedText = processedText.replace(/(?<![\w_\/."'=])\s_([^_\n]+?)_(?![\w_])/g, ' <em>$1</em>');
             
             // Strikethrough: ~~text~~
             processedText = processedText.replace(/~~([^~]+?)~~/g, '<del>$1</del>');
@@ -5034,9 +5019,11 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/__(.+?)__/g, '<strong>$1</strong>');
     
-    // Italic: *text* or _text_ (but not inside words)
+    // Italic: *text* or _text_ (but not inside words or URLs)
+    // Skip if underscore is part of a URL path or filename pattern
+    // Require whitespace before underscore to avoid matching in file paths like localized_media_123
     formatted = formatted.replace(/(?<![\w*])\*([^*]+?)\*(?![\w*])/g, '<em>$1</em>');
-    formatted = formatted.replace(/(?<![\w_])_([^_]+?)_(?![\w_])/g, '<em>$1</em>');
+    formatted = formatted.replace(/(?:^|(?<=\s))_([^_]+?)_(?![\w_])/g, '<em>$1</em>');
     
     // Quoted text: "text"
     formatted = formatted.replace(/&quot;(.+?)&quot;/g, '<span class="quoted-text">"$1"</span>');
@@ -5069,8 +5056,6 @@ async function uploadImages(files) {
     let uploadedCount = 0;
     let errorCount = 0;
     
-    console.log(`[Gallery] Uploading ${files.length} file(s) to character: ${activeChar.name}`);
-    
     for (let file of files) {
         if (!file.type.startsWith('image/')) {
             console.warn(`[Gallery] Skipping non-image file: ${file.name}`);
@@ -5081,8 +5066,6 @@ async function uploadImages(files) {
             const base64 = await toBase64(file);
             const nameOnly = file.name.substring(0, file.name.lastIndexOf('.')) || file.name;
             const ext = file.name.includes('.') ? file.name.split('.').pop() : 'png';
-
-            console.log(`[Gallery] Uploading: ${nameOnly}.${ext}`);
             
             const res = await fetch('/api/images/upload', {
                 method: 'POST',
@@ -5100,7 +5083,6 @@ async function uploadImages(files) {
             
             if (res.ok) {
                 uploadedCount++;
-                console.log(`[Gallery] Upload success: ${nameOnly}`);
             } else {
                 const errorText = await res.text();
                 console.error(`[Gallery] Upload error for ${nameOnly}:`, res.status, errorText);
@@ -5194,25 +5176,11 @@ async function fetchChubMetadata(fullPath) {
             headers: { 'Accept': 'application/json' }
         });
         if (!response.ok) {
-            console.warn('[Chub] Metadata fetch failed:', response.status);
             return null;
         }
         const data = await response.json();
-        
-        // Debug logging
-        if (data.node) {
-            console.log('[Chub] Metadata received:', {
-                name: data.node.name,
-                hasDefinition: !!data.node.definition,
-                first_message_length: data.node.definition?.first_message?.length,
-                alternate_greetings_count: data.node.definition?.alternate_greetings?.length,
-                personality_length: data.node.definition?.personality?.length
-            });
-        }
-        
         return data.node || null;
     } catch (error) {
-        console.warn(`[Chub] Could not fetch metadata for ${fullPath}:`, error);
         return null;
     }
 }
@@ -6602,37 +6570,6 @@ function replaceMediaUrlsInText(text, urlMap) {
     });
     
     return result;
-}
-
-/**
- * Process text content for a character, optionally applying media localization
- * then formatting with formatRichText
- * @param {string} text - Raw text content
- * @param {Object} char - Character object with name, avatar properties
- * @param {boolean} preserveHtml - Whether to preserve HTML (for creator notes)
- * @param {Object} urlMap - Optional pre-built URL map (for batch processing)
- * @returns {Promise<string>} Formatted HTML
- */
-async function formatTextWithLocalization(text, char, preserveHtml = false, urlMap = null) {
-    if (!text) return "";
-    
-    const charName = char?.name || char?.data?.name || '';
-    const avatar = char?.avatar;
-    
-    // Check if localization is enabled for this character
-    if (avatar && isMediaLocalizationEnabled(avatar)) {
-        // Build or use provided URL map
-        if (!urlMap) {
-            urlMap = await buildMediaLocalizationMap(charName, avatar);
-        }
-        
-        // Replace URLs before formatting
-        if (Object.keys(urlMap).length > 0) {
-            text = replaceMediaUrlsInText(text, urlMap);
-        }
-    }
-    
-    return formatRichText(text, charName, preserveHtml);
 }
 
 /**
@@ -9521,32 +9458,6 @@ const CHUB_FALLBACK_TAGS = [
     'romance', 'adventure', 'sci-fi', 'game', 'cute', 'monster'
 ];
 
-// Helper function to format text with basic markdown and {{char}} placeholders
-function formatTextWithBasicMarkdown(text, charName = 'Character') {
-    if (!text) return '';
-    
-    // Escape HTML first
-    let formatted = escapeHtml(text);
-    
-    // Replace {{char}} and {{user}} placeholders
-    formatted = formatted.replace(/\{\{char\}\}/gi, `<span class="char-placeholder">${escapeHtml(charName)}</span>`);
-    formatted = formatted.replace(/\{\{user\}\}/gi, '<span class="user-placeholder">You</span>');
-    
-    // Basic markdown formatting
-    // Bold: **text** or __text__
-    formatted = formatted.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    formatted = formatted.replace(/__(.+?)__/g, '<strong>$1</strong>');
-    
-    // Italic: *text* or _text_
-    formatted = formatted.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-    formatted = formatted.replace(/_([^_]+)_/g, '<em>$1</em>');
-    
-    // Line breaks
-    formatted = formatted.replace(/\n/g, '<br>');
-    
-    return formatted;
-}
-
 /**
  * Render creator notes with simple sanitized HTML (no iframe, no custom CSS)
  * This is the fallback when rich rendering is disabled
@@ -9789,33 +9700,105 @@ function renderCreatorNotesSecure(content, charName, container) {
     container.innerHTML = '';
     const iframe = document.createElement('iframe');
     iframe.sandbox = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
-    // Minimal styling - iframe auto-sizes to content
-    iframe.style.cssText = 'width: 100%; min-height: 30px; border: none; background: transparent; border-radius: 8px;';
+    // Start with a small fixed height - we'll resize once content is ready
+    iframe.style.cssText = 'width: 100%; height: 150px; min-height: 50px; border: none; background: transparent; border-radius: 8px;';
     iframe.srcdoc = iframeContent;
     
-    // Auto-resize iframe to fit content exactly
+    // Auto-resize iframe to fit content
     iframe.onload = () => {
         try {
+            let stableHeight = 0;
+            let stableCount = 0;
+            let resizeAttempts = 0;
+            const maxAttempts = 25;
+            // Max reasonable height - anything above this is likely a measurement error
+            const maxReasonableHeight = Math.max(window.innerHeight * 3, 4000);
+            
             const resizeIframe = () => {
-                if (iframe.contentDocument && iframe.contentDocument.body) {
-                    // Force reflow to get accurate measurement
-                    iframe.contentDocument.body.style.overflow = 'hidden';
-                    const height = iframe.contentDocument.body.scrollHeight;
-                    // Set to exact content height with minimal padding
-                    iframe.style.height = Math.max(height, 30) + 'px';
+                if (!iframe.contentDocument || !iframe.contentDocument.body) return;
+                if (resizeAttempts >= maxAttempts) return;
+                resizeAttempts++;
+                
+                const body = iframe.contentDocument.body;
+                const docEl = iframe.contentDocument.documentElement;
+                
+                // Force layout recalculation
+                void body.offsetHeight;
+                
+                // Get multiple height measurements
+                const scrollH = body.scrollHeight || 0;
+                const offsetH = body.offsetHeight || 0;
+                const clientH = body.clientHeight || 0;
+                
+                // Use the MINIMUM of reasonable values (avoid bogus large values)
+                // Filter out zero values and unreasonably large values
+                const heights = [scrollH, offsetH, clientH].filter(h => h > 50 && h < maxReasonableHeight);
+                
+                if (heights.length === 0) {
+                    // No valid measurements yet, try again later
+                    return;
+                }
+                
+                // Take the minimum valid height (bogus values tend to be too large)
+                const measuredHeight = Math.min(...heights);
+                
+                // Check if height has stabilized (same value twice in a row)
+                if (Math.abs(measuredHeight - stableHeight) < 10) {
+                    stableCount++;
+                } else {
+                    stableHeight = measuredHeight;
+                    stableCount = 1;
+                }
+                
+                // Only apply height if it seems stable or we're past several attempts
+                if (stableCount >= 2 || resizeAttempts >= 5) {
+                    const finalHeight = Math.max(stableHeight, 50);
+                    iframe.style.height = finalHeight + 'px';
+                    
+                    // Lock overflow after stable height is set
+                    if (stableCount >= 2) {
+                        body.style.overflow = 'hidden';
+                    }
                 }
             };
-            // Small delay to ensure content is fully rendered
-            setTimeout(resizeIframe, 10);
+            
+            // Use requestAnimationFrame for timing after paint
+            const rafResize = () => {
+                requestAnimationFrame(resizeIframe);
+            };
+            
+            // Staggered resize attempts - more frequent at start, then taper off
+            setTimeout(rafResize, 10);
+            setTimeout(rafResize, 50);
+            setTimeout(rafResize, 100);
+            setTimeout(rafResize, 200);
+            setTimeout(rafResize, 350);
+            setTimeout(rafResize, 500);
+            setTimeout(rafResize, 750);
+            setTimeout(rafResize, 1000);
+            setTimeout(rafResize, 1500);
+            setTimeout(rafResize, 2000);
+            
+            // Handle image loading - images can change height significantly
             if (iframe.contentDocument) {
                 const images = iframe.contentDocument.querySelectorAll('img');
                 images.forEach(img => {
-                    img.addEventListener('load', () => setTimeout(resizeIframe, 10));
-                    img.addEventListener('error', () => setTimeout(resizeIframe, 10));
+                    const onImageReady = () => {
+                        // Reset stability check when images load
+                        stableCount = 0;
+                        setTimeout(rafResize, 10);
+                        setTimeout(rafResize, 100);
+                    };
+                    if (img.complete) {
+                        onImageReady();
+                    } else {
+                        img.addEventListener('load', onImageReady);
+                        img.addEventListener('error', onImageReady);
+                    }
                 });
             }
         } catch (e) {
-            iframe.style.height = '150px';
+            iframe.style.height = '200px';
         }
     };
     
