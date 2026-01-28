@@ -9,11 +9,14 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 ![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.jpg)
+![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.png)
 *View and edit character details, chats, media, and related characters*
 
 ![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/Gallery.jpg)
 *Download embedded character media*
+
+![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/Expanded%20fields.png)
+*Expand separate views such as Creator's notes*
 
 ![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Related.png)
 *Find potentially related characters*
