@@ -171,4 +171,5 @@ Unlock additional features:
 - Better icon placement in SillyTavern's topbar
 - Performance improvements for very large libraries
 - Thumbnail caching
-- Further improvements to how creator's notes are displayed
+- Mobile mode (still in planning/consideration phase)
+- Also download ChubAI galleries (investigating feasibility for clean implementation)

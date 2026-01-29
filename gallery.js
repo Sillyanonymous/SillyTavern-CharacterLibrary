@@ -1,4 +1,4 @@
-﻿// SillyTavern Character Library Logic
+﻿﻿// SillyTavern Character Library Logic
 
 const API_BASE = '/api'; 
 let allCharacters = [];
@@ -44,6 +44,8 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationPerChar: {},
     // Show notification when imported chars have additional content (gallery/embedded media)
     notifyAdditionalContent: true,
+    // Replace {{user}} placeholder with active persona name
+    replaceUserPlaceholder: true,
 };
 
 // In-memory settings cache
@@ -62,6 +64,27 @@ function getSTContext() {
         console.warn('[Settings] Cannot access main window context:', e);
     }
     return null;
+}
+
+/**
+ * Get the active persona name from SillyTavern
+ * @returns {string} The persona name or '{{user}}' if unavailable or disabled
+ */
+function getPersonaName() {
+    // Check if persona replacement is enabled
+    if (getSetting('replaceUserPlaceholder') === false) {
+        return '{{user}}';
+    }
+    try {
+        const context = getSTContext();
+        if (context) {
+            // ST stores the user's name in name1 or user_name
+            return context.name1 || context.user_name || '{{user}}';
+        }
+    } catch (e) {
+        console.warn('[Persona] Cannot get persona name:', e);
+    }
+    return '{{user}}';
 }
 
 /**
@@ -193,9 +216,13 @@ function setupSettingsModal() {
     
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
+    const fixFilenamesCheckbox = document.getElementById('settingsFixFilenames');
     
     // Notifications
     const notifyAdditionalContentCheckbox = document.getElementById('settingsNotifyAdditionalContent');
+    
+    // Display
+    const replaceUserPlaceholderCheckbox = document.getElementById('settingsReplaceUserPlaceholder');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
@@ -226,10 +253,18 @@ function setupSettingsModal() {
         if (mediaLocalizationCheckbox) {
             mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') || false;
         }
+        if (fixFilenamesCheckbox) {
+            fixFilenamesCheckbox.checked = getSetting('fixFilenames') || false;
+        }
         
         // Notifications
         if (notifyAdditionalContentCheckbox) {
             notifyAdditionalContentCheckbox.checked = getSetting('notifyAdditionalContent') !== false; // Default true
+        }
+        
+        // Display
+        if (replaceUserPlaceholderCheckbox) {
+            replaceUserPlaceholderCheckbox.checked = getSetting('replaceUserPlaceholder') !== false; // Default true
         }
         
         // Appearance
@@ -282,7 +317,9 @@ function setupSettingsModal() {
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
+            fixFilenames: fixFilenamesCheckbox ? fixFilenamesCheckbox.checked : false,
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
+            replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
         });
         
         // Clear media localization cache when setting changes
@@ -325,6 +362,12 @@ function setupSettingsModal() {
         }
         if (mediaLocalizationCheckbox) {
             mediaLocalizationCheckbox.checked = DEFAULT_SETTINGS.mediaLocalizationEnabled;
+        }
+        if (replaceUserPlaceholderCheckbox) {
+            replaceUserPlaceholderCheckbox.checked = DEFAULT_SETTINGS.replaceUserPlaceholder;
+        }
+        if (notifyAdditionalContentCheckbox) {
+            notifyAdditionalContentCheckbox.checked = DEFAULT_SETTINGS.notifyAdditionalContent;
         }
         
         // Apply default highlight color immediately
@@ -2162,8 +2205,8 @@ function renderRelatedCards(related) {
             const topTagNames = r.breakdown.topTags?.slice(0, 2).map(t => t.tag).join(', ') || '';
             pills.push(`<span class="related-pill ${tagClass}" title="${tagCount} shared tags: ${topTagNames}"><i class="fa-solid fa-tags"></i> ${tagCount}${hasRareTags ? 'â˜…' : ''}</span>`);
         }
-        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator"><i class="fa-solid fa-user-pen"></i> âœ“</span>`);
-        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content"><i class="fa-solid fa-file-lines"></i> âœ“</span>`);
+        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator"><i class="fa-solid fa-user-pen"></i> ✓</span>`);
+        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content"><i class="fa-solid fa-file-lines"></i> ✓</span>`);
         
         return `
             <div class="related-card" onclick="openRelatedCharacter('${escapeHtml(char.avatar)}')" title="${escapeHtml(r.matchReasons.join('\\n'))}">
@@ -2172,7 +2215,7 @@ function renderRelatedCards(related) {
                 <div class="related-card-info">
                     <div class="related-card-name">${escapeHtml(name)}</div>
                     ${creator ? `<div class="related-card-creator">by ${escapeHtml(creator)}</div>` : ''}
-                    <div class="related-card-reasons">${r.matchReasons.slice(0, 2).join(' â€¢ ')}</div>
+                    <div class="related-card-reasons">${r.matchReasons.slice(0, 2).join(' \u2022 ')}</div>
                 </div>
                 <div class="related-card-score">
                     <div class="related-score-value">${r.score}</div>
@@ -3401,6 +3444,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize section expand buttons (Greetings and Lorebook)
     initSectionExpandButtons();
+    
+    // Initialize ChubAI expand buttons
+    initChubExpandButtons();
 });
 
 // ==============================================
@@ -3472,10 +3518,15 @@ function openGreetingsModal() {
     // Build modal HTML
     let altGreetingsHtml = '';
     altGreetings.forEach((greeting, idx) => {
+        const previewText = greeting ? greeting.substring(0, 100).replace(/\n/g, ' ') + (greeting.length > 100 ? '...' : '') : 'Empty greeting';
         altGreetingsHtml += `
             <div class="expanded-greeting-item" data-index="${idx}">
                 <div class="expanded-greeting-header">
+                    <button type="button" class="expanded-greeting-collapse-btn" title="Expand/Collapse">
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </button>
                     <span class="expanded-greeting-num">#${idx + 1}</span>
+                    <span class="expanded-greeting-preview">${escapeHtml(previewText)}</span>
                     <button type="button" class="expanded-greeting-delete" title="Delete this greeting">
                         <i class="fa-solid fa-trash"></i>
                     </button>
@@ -3487,15 +3538,29 @@ function openGreetingsModal() {
     
     const modalHtml = `
         <div id="greetingsExpandModal" class="modal-overlay">
-            <div class="modal-glass section-expand-modal">
+            <div class="modal-glass section-expand-modal" id="greetingsExpandModalInner">
                 <div class="modal-header">
                     <h2><i class="fa-solid fa-comments"></i> Edit Greetings</h2>
+                    <div class="modal-header-controls">
+                        <div class="display-control-btns zoom-controls" id="greetingsZoomControls">
+                            <button type="button" class="display-control-btn" data-zoom="out" title="Zoom Out">
+                                <i class="fa-solid fa-minus"></i>
+                            </button>
+                            <span class="zoom-level" id="greetingsZoomDisplay">100%</span>
+                            <button type="button" class="display-control-btn" data-zoom="in" title="Zoom In">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-zoom="reset" title="Reset Zoom">
+                                <i class="fa-solid fa-rotate-left"></i>
+                            </button>
+                        </div>
+                    </div>
                     <div class="modal-controls">
                         <button id="greetingsModalSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply All</button>
                         <button class="close-btn" id="greetingsModalClose">&times;</button>
                     </div>
                 </div>
-                <div class="section-expand-body">
+                <div class="section-expand-body" id="greetingsExpandBody">
                     <div class="expanded-greeting-section">
                         <h3 class="expanded-section-label"><i class="fa-solid fa-message"></i> First Message</h3>
                         <textarea id="expandedFirstMes" class="glass-input expanded-greeting-textarea first-message" rows="8" placeholder="Opening message from the character...">${escapeHtml(firstMesField.value)}</textarea>
@@ -3504,9 +3569,17 @@ function openGreetingsModal() {
                     <div class="expanded-greeting-section">
                         <h3 class="expanded-section-label">
                             <i class="fa-solid fa-layer-group"></i> Alternate Greetings
-                            <button type="button" id="addExpandedGreetingBtn" class="action-btn secondary small" style="margin-left: auto;">
-                                <i class="fa-solid fa-plus"></i> Add Greeting
-                            </button>
+                            <div class="expanded-greetings-header-actions">
+                                <button type="button" id="collapseAllGreetingsBtn" class="action-btn secondary small" title="Collapse All">
+                                    <i class="fa-solid fa-compress-alt"></i>
+                                </button>
+                                <button type="button" id="expandAllGreetingsBtn" class="action-btn secondary small" title="Expand All">
+                                    <i class="fa-solid fa-expand-alt"></i>
+                                </button>
+                                <button type="button" id="addExpandedGreetingBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-plus"></i> Add Greeting
+                                </button>
+                            </div>
                         </h3>
                         <div id="expandedAltGreetingsContainer" class="expanded-greetings-list">
                             ${altGreetingsHtml || '<div class="no-alt-greetings">No alternate greetings yet. Click "Add Greeting" to create one.</div>'}
@@ -3525,9 +3598,29 @@ function openGreetingsModal() {
     
     const modal = document.getElementById('greetingsExpandModal');
     const expandedFirstMes = document.getElementById('expandedFirstMes');
+    const greetingsExpandBody = document.getElementById('greetingsExpandBody');
     
     // Focus first message textarea
     setTimeout(() => expandedFirstMes.focus(), 50);
+    
+    // Zoom controls
+    let greetingsZoom = 100;
+    const greetingsZoomDisplay = document.getElementById('greetingsZoomDisplay');
+    
+    const updateGreetingsZoom = (zoom) => {
+        greetingsZoom = Math.max(50, Math.min(200, zoom));
+        greetingsZoomDisplay.textContent = `${greetingsZoom}%`;
+        greetingsExpandBody.style.zoom = `${greetingsZoom}%`;
+    };
+    
+    document.getElementById('greetingsZoomControls').onclick = (e) => {
+        const btn = e.target.closest('.display-control-btn[data-zoom]');
+        if (!btn) return;
+        const action = btn.dataset.zoom;
+        if (action === 'in') updateGreetingsZoom(greetingsZoom + 10);
+        else if (action === 'out') updateGreetingsZoom(greetingsZoom - 10);
+        else if (action === 'reset') updateGreetingsZoom(100);
+    };
     
     // Close handlers
     const closeModal = () => modal.remove();
@@ -3556,7 +3649,11 @@ function openGreetingsModal() {
         const newGreetingHtml = `
             <div class="expanded-greeting-item" data-index="${idx}">
                 <div class="expanded-greeting-header">
+                    <button type="button" class="expanded-greeting-collapse-btn" title="Expand/Collapse">
+                        <i class="fa-solid fa-chevron-down"></i>
+                    </button>
                     <span class="expanded-greeting-num">#${idx + 1}</span>
+                    <span class="expanded-greeting-preview">Empty greeting</span>
                     <button type="button" class="expanded-greeting-delete" title="Delete this greeting">
                         <i class="fa-solid fa-trash"></i>
                     </button>
@@ -3566,22 +3663,42 @@ function openGreetingsModal() {
         `;
         container.insertAdjacentHTML('beforeend', newGreetingHtml);
         
-        // Add delete handler to new item
+        // Add handlers to new item
         const newItem = container.lastElementChild;
-        setupGreetingDeleteHandler(newItem);
+        setupGreetingItemHandlers(newItem);
         
         // Focus the new textarea
         const newTextarea = newItem.querySelector('textarea');
         newTextarea.focus();
     };
     
-    // Setup delete handlers for existing items
-    function setupGreetingDeleteHandler(item) {
+    // Setup handlers for greeting items (delete + collapse)
+    function setupGreetingItemHandlers(item) {
         const deleteBtn = item.querySelector('.expanded-greeting-delete');
         deleteBtn.onclick = () => {
             item.remove();
             renumberExpandedGreetings();
         };
+        
+        const collapseBtn = item.querySelector('.expanded-greeting-collapse-btn');
+        if (collapseBtn) {
+            collapseBtn.onclick = () => {
+                const isCollapsed = item.classList.toggle('collapsed');
+                collapseBtn.innerHTML = isCollapsed 
+                    ? '<i class="fa-solid fa-chevron-right"></i>' 
+                    : '<i class="fa-solid fa-chevron-down"></i>';
+                // Update preview when collapsing
+                if (isCollapsed) {
+                    const preview = item.querySelector('.expanded-greeting-preview');
+                    const textarea = item.querySelector('.expanded-greeting-textarea');
+                    if (preview && textarea) {
+                        const text = textarea.value;
+                        const previewText = text ? text.substring(0, 100).replace(/\n/g, ' ') + (text.length > 100 ? '...' : '') : 'Empty greeting';
+                        preview.textContent = previewText;
+                    }
+                }
+            };
+        }
     }
     
     function renumberExpandedGreetings() {
@@ -3599,8 +3716,35 @@ function openGreetingsModal() {
         }
     }
     
-    // Setup delete handlers for initial items
-    modal.querySelectorAll('.expanded-greeting-item').forEach(setupGreetingDeleteHandler);
+    // Collapse/Expand All handlers
+    document.getElementById('collapseAllGreetingsBtn').onclick = () => {
+        const container = document.getElementById('expandedAltGreetingsContainer');
+        container.querySelectorAll('.expanded-greeting-item').forEach(item => {
+            item.classList.add('collapsed');
+            const btn = item.querySelector('.expanded-greeting-collapse-btn');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+            // Update preview
+            const preview = item.querySelector('.expanded-greeting-preview');
+            const textarea = item.querySelector('.expanded-greeting-textarea');
+            if (preview && textarea) {
+                const text = textarea.value;
+                const previewText = text ? text.substring(0, 100).replace(/\n/g, ' ') + (text.length > 100 ? '...' : '') : 'Empty greeting';
+                preview.textContent = previewText;
+            }
+        });
+    };
+    
+    document.getElementById('expandAllGreetingsBtn').onclick = () => {
+        const container = document.getElementById('expandedAltGreetingsContainer');
+        container.querySelectorAll('.expanded-greeting-item').forEach(item => {
+            item.classList.remove('collapsed');
+            const btn = item.querySelector('.expanded-greeting-collapse-btn');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+        });
+    };
+    
+    // Setup handlers for initial items
+    modal.querySelectorAll('.expanded-greeting-item').forEach(setupGreetingItemHandlers);
     
     // Save/Apply handler
     document.getElementById('greetingsModalSave').onclick = () => {
@@ -3671,20 +3815,42 @@ function openLorebookModal() {
     
     const modalHtml = `
         <div id="lorebookExpandModal" class="modal-overlay">
-            <div class="modal-glass section-expand-modal lorebook-expand-modal">
+            <div class="modal-glass section-expand-modal lorebook-expand-modal" id="lorebookExpandModalInner">
                 <div class="modal-header">
                     <h2><i class="fa-solid fa-book"></i> Edit Lorebook</h2>
+                    <div class="modal-header-controls">
+                        <div class="display-control-btns zoom-controls" id="lorebookZoomControls">
+                            <button type="button" class="display-control-btn" data-zoom="out" title="Zoom Out">
+                                <i class="fa-solid fa-minus"></i>
+                            </button>
+                            <span class="zoom-level" id="lorebookZoomDisplay">100%</span>
+                            <button type="button" class="display-control-btn" data-zoom="in" title="Zoom In">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-zoom="reset" title="Reset Zoom">
+                                <i class="fa-solid fa-rotate-left"></i>
+                            </button>
+                        </div>
+                    </div>
                     <div class="modal-controls">
                         <button id="lorebookModalSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply All</button>
                         <button class="close-btn" id="lorebookModalClose">&times;</button>
                     </div>
                 </div>
-                <div class="section-expand-body">
+                <div class="section-expand-body" id="lorebookExpandBody">
                     <div class="expanded-lorebook-header">
                         <span id="expandedLorebookCount">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}</span>
-                        <button type="button" id="addExpandedLorebookEntryBtn" class="action-btn secondary small">
-                            <i class="fa-solid fa-plus"></i> Add Entry
-                        </button>
+                        <div class="expanded-lorebook-header-actions">
+                            <button type="button" id="collapseAllLorebookBtn" class="action-btn secondary small" title="Collapse All">
+                                <i class="fa-solid fa-compress-alt"></i>
+                            </button>
+                            <button type="button" id="expandAllLorebookBtn" class="action-btn secondary small" title="Expand All">
+                                <i class="fa-solid fa-expand-alt"></i>
+                            </button>
+                            <button type="button" id="addExpandedLorebookEntryBtn" class="action-btn secondary small">
+                                <i class="fa-solid fa-plus"></i> Add Entry
+                            </button>
+                        </div>
                     </div>
                     <div id="expandedLorebookContainer" class="expanded-lorebook-list">
                         ${entriesHtml || '<div class="no-lorebook-entries">No lorebook entries yet. Click "Add Entry" to create one.</div>'}
@@ -3701,6 +3867,26 @@ function openLorebookModal() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
     
     const modal = document.getElementById('lorebookExpandModal');
+    const lorebookExpandBody = document.getElementById('lorebookExpandBody');
+    
+    // Zoom controls
+    let lorebookZoom = 100;
+    const lorebookZoomDisplay = document.getElementById('lorebookZoomDisplay');
+    
+    const updateLorebookZoom = (zoom) => {
+        lorebookZoom = Math.max(50, Math.min(200, zoom));
+        lorebookZoomDisplay.textContent = `${lorebookZoom}%`;
+        lorebookExpandBody.style.zoom = `${lorebookZoom}%`;
+    };
+    
+    document.getElementById('lorebookZoomControls').onclick = (e) => {
+        const btn = e.target.closest('.display-control-btn[data-zoom]');
+        if (!btn) return;
+        const action = btn.dataset.zoom;
+        if (action === 'in') updateLorebookZoom(lorebookZoom + 10);
+        else if (action === 'out') updateLorebookZoom(lorebookZoom - 10);
+        else if (action === 'reset') updateLorebookZoom(100);
+    };
     
     // Close handlers
     const closeModal = () => modal.remove();
@@ -3716,6 +3902,32 @@ function openLorebookModal() {
         }
     };
     document.addEventListener('keydown', handleKeydown);
+    
+    // Collapse/Expand All handlers
+    document.getElementById('collapseAllLorebookBtn').onclick = () => {
+        const container = document.getElementById('expandedLorebookContainer');
+        container.querySelectorAll('.expanded-lorebook-entry').forEach(entry => {
+            entry.classList.add('collapsed');
+            const btn = entry.querySelector('.expanded-lorebook-collapse-btn');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+            // Update preview with keys
+            const preview = entry.querySelector('.expanded-lorebook-preview');
+            const keys = entry.querySelector('.expanded-lorebook-keys')?.value || '';
+            if (preview) {
+                const keysPreview = keys ? keys.substring(0, 100) + (keys.length > 100 ? '...' : '') : 'No keys';
+                preview.innerHTML = `<i class="fa-solid fa-key"></i> ${keysPreview}`;
+            }
+        });
+    };
+    
+    document.getElementById('expandAllLorebookBtn').onclick = () => {
+        const container = document.getElementById('expandedLorebookContainer');
+        container.querySelectorAll('.expanded-lorebook-entry').forEach(entry => {
+            entry.classList.remove('collapsed');
+            const btn = entry.querySelector('.expanded-lorebook-collapse-btn');
+            if (btn) btn.innerHTML = '<i class="fa-solid fa-chevron-down"></i>';
+        });
+    };
     
     // Add entry handler
     document.getElementById('addExpandedLorebookEntryBtn').onclick = () => {
@@ -3791,14 +4003,19 @@ function openLorebookModal() {
 }
 
 function buildExpandedLorebookEntryHtml(entry, idx) {
+    const keysPreview = entry.keys ? entry.keys.substring(0, 100) + (entry.keys.length > 100 ? '...' : '') : 'No keys';
     return `
         <div class="expanded-lorebook-entry${entry.enabled ? '' : ' disabled'}" data-index="${idx}">
             <div class="expanded-lorebook-entry-header">
+                <button type="button" class="expanded-lorebook-collapse-btn" title="Expand/Collapse">
+                    <i class="fa-solid fa-chevron-down"></i>
+                </button>
                 <input type="text" class="glass-input expanded-lorebook-name" placeholder="Entry name/comment" value="${escapeHtml(entry.name)}">
+                <span class="expanded-lorebook-preview"><i class="fa-solid fa-key"></i> ${escapeHtml(keysPreview)}</span>
                 <div class="expanded-lorebook-entry-controls">
                     <label class="expanded-lorebook-toggle ${entry.enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                         <input type="checkbox" class="expanded-lorebook-enabled" ${entry.enabled ? 'checked' : ''} style="display: none;">
-                        ${entry.enabled ? 'âœ“ On' : 'âœ— Off'}
+                        ${entry.enabled ? '✓ On' : '✗ Off'}
                     </label>
                     <button type="button" class="expanded-lorebook-delete" title="Delete entry">
                         <i class="fa-solid fa-trash"></i>
@@ -3848,6 +4065,25 @@ function buildExpandedLorebookEntryHtml(entry, idx) {
 }
 
 function setupExpandedLorebookEntryHandlers(entryEl) {
+    // Collapse/expand handler
+    const collapseBtn = entryEl.querySelector('.expanded-lorebook-collapse-btn');
+    const entryBody = entryEl.querySelector('.expanded-lorebook-entry-body');
+    const preview = entryEl.querySelector('.expanded-lorebook-preview');
+    const nameInput = entryEl.querySelector('.expanded-lorebook-name');
+    
+    collapseBtn.onclick = () => {
+        const isCollapsed = entryEl.classList.toggle('collapsed');
+        collapseBtn.innerHTML = isCollapsed 
+            ? '<i class="fa-solid fa-chevron-right"></i>' 
+            : '<i class="fa-solid fa-chevron-down"></i>';
+        // Update preview with keys when collapsing
+        if (isCollapsed && preview) {
+            const keys = entryEl.querySelector('.expanded-lorebook-keys')?.value || '';
+            const keysPreview = keys ? keys.substring(0, 100) + (keys.length > 100 ? '...' : '') : 'No keys';
+            preview.innerHTML = `<i class="fa-solid fa-key"></i> ${keysPreview}`;
+        }
+    };
+    
     // Toggle enabled handler
     const toggleLabel = entryEl.querySelector('.expanded-lorebook-toggle');
     const enabledCheckbox = entryEl.querySelector('.expanded-lorebook-enabled');
@@ -3856,7 +4092,7 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `expanded-lorebook-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? 'âœ“ On' : 'âœ— Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
         entryEl.classList.toggle('disabled', isEnabled);
     };
     
@@ -3904,20 +4140,42 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
     }
     
     const currentValue = originalField.value;
+    const isCreatorNotes = fieldId === 'editCreatorNotes';
+    
+    // Get field-specific icon
+    const fieldIcons = {
+        'editDescription': 'fa-solid fa-user',
+        'editPersonality': 'fa-solid fa-brain',
+        'editScenario': 'fa-solid fa-map',
+        'editSystemPrompt': 'fa-solid fa-terminal',
+        'editPostHistoryInstructions': 'fa-solid fa-clock-rotate-left',
+        'editCreatorNotes': 'fa-solid fa-feather-pointed',
+        'editMesExample': 'fa-solid fa-quote-left'
+    };
+    const fieldIcon = fieldIcons[fieldId] || 'fa-solid fa-expand';
+    
+    // Preview toggle button only for Creator's Notes
+    const previewToggleHtml = isCreatorNotes ? `
+        <button id="expandFieldPreviewToggle" class="action-btn secondary" title="Toggle Preview">
+            <i class="fa-solid fa-eye"></i> Preview
+        </button>
+    ` : '';
     
     // Create expand modal
     const expandModalHtml = `
         <div id="expandFieldModal" class="modal-overlay">
             <div class="modal-glass expand-field-modal">
                 <div class="modal-header">
-                    <h2><i class="fa-solid fa-expand"></i> ${escapeHtml(fieldLabel)}</h2>
+                    <h2><i class="${fieldIcon}"></i> ${escapeHtml(fieldLabel)}</h2>
                     <div class="modal-controls">
+                        ${previewToggleHtml}
                         <button id="expandFieldSave" class="action-btn primary"><i class="fa-solid fa-check"></i> Apply</button>
                         <button class="close-btn" id="expandFieldClose">&times;</button>
                     </div>
                 </div>
-                <div class="expand-field-body">
+                <div class="expand-field-body" id="expandFieldBody">
                     <textarea id="expandFieldTextarea" class="glass-input expand-field-textarea" placeholder="Enter ${escapeHtml(fieldLabel.toLowerCase())}...">${escapeHtml(currentValue)}</textarea>
+                    ${isCreatorNotes ? '<div id="expandFieldPreview" class="expand-field-preview scrolling-text" style="display: none;"></div>' : ''}
                 </div>
             </div>
         </div>
@@ -3937,6 +4195,33 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
         expandTextarea.focus();
         expandTextarea.setSelectionRange(expandTextarea.value.length, expandTextarea.value.length);
     }, 50);
+    
+    // Preview toggle for Creator's Notes
+    if (isCreatorNotes) {
+        const previewToggle = document.getElementById('expandFieldPreviewToggle');
+        const previewDiv = document.getElementById('expandFieldPreview');
+        let isPreviewMode = false;
+        
+        previewToggle.onclick = () => {
+            isPreviewMode = !isPreviewMode;
+            
+            if (isPreviewMode) {
+                // Switch to preview mode
+                expandTextarea.style.display = 'none';
+                previewDiv.style.display = 'block';
+                previewDiv.innerHTML = formatRichText(expandTextarea.value, 'Character', true);
+                previewToggle.innerHTML = '<i class="fa-solid fa-code"></i> Edit';
+                previewToggle.title = 'Switch to Edit Mode';
+            } else {
+                // Switch to edit mode
+                expandTextarea.style.display = 'block';
+                previewDiv.style.display = 'none';
+                previewToggle.innerHTML = '<i class="fa-solid fa-eye"></i> Preview';
+                previewToggle.title = 'Toggle Preview';
+                expandTextarea.focus();
+            }
+        };
+    }
     
     // Close handlers
     const closeExpandModal = () => {
@@ -3967,6 +4252,165 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
         document.removeEventListener('keydown', handleKeydown);
         showToast('Changes applied to field', 'success');
     };
+}
+
+/**
+ * Open a read-only expanded view for ChubAI character preview sections
+ */
+function openChubExpandedView(sectionId, label, iconClass) {
+    const sectionEl = document.getElementById(sectionId);
+    if (!sectionEl) {
+        showToast('Section not found', 'error');
+        return;
+    }
+    
+    // Check if section contains an iframe (Creator's Notes uses secure iframe rendering)
+    const existingIframe = sectionEl.querySelector('iframe');
+    let content;
+    if (existingIframe && existingIframe.contentDocument?.body) {
+        // Extract content from existing iframe
+        content = existingIframe.contentDocument.body.innerHTML;
+    } else {
+        // Use innerHTML directly
+        content = sectionEl.innerHTML;
+    }
+    
+    // Build iframe document like Creator's Notes does
+    const iframeStyles = `<style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #e0e0e0;
+            background: transparent;
+            line-height: 1.7;
+            font-size: 1rem;
+            margin: 0;
+            padding: 20px;
+        }
+        a { color: #4a9eff; }
+        img, video { max-width: 100%; height: auto; border-radius: 8px; }
+        pre, code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; }
+        blockquote { border-left: 3px solid #4a9eff; margin-left: 0; padding-left: 15px; opacity: 0.9; }
+        .char-placeholder { color: #4a9eff; font-weight: 500; }
+        .user-placeholder { color: #9b59b6; font-weight: 500; }
+        iframe { max-width: 100%; border-radius: 8px; }
+    </style>`;
+    const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${iframeStyles}</head><body>${content}</body></html>`;
+    
+    // Create expanded view modal with size and zoom controls (same pattern as Creator's Notes)
+    const expandModalHtml = `
+        <div id="chubExpandModal" class="modal-overlay">
+            <div class="modal-glass chub-expand-modal" id="chubExpandModalInner" data-size="normal">
+                <div class="modal-header">
+                    <h2><i class="${iconClass}"></i> ${escapeHtml(label)}</h2>
+                    <div class="chub-expand-display-controls">
+                        <div class="display-control-btns zoom-controls" id="chubExpandZoomControls">
+                            <button type="button" class="display-control-btn" data-zoom="out" title="Zoom Out">
+                                <i class="fa-solid fa-minus"></i>
+                            </button>
+                            <span class="zoom-level" id="chubExpandZoomDisplay">100%</span>
+                            <button type="button" class="display-control-btn" data-zoom="in" title="Zoom In">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-zoom="reset" title="Reset Zoom">
+                                <i class="fa-solid fa-rotate-left"></i>
+                            </button>
+                        </div>
+                        <div class="display-control-btns" id="chubExpandSizeControls">
+                            <button type="button" class="display-control-btn" data-size="compact" title="Compact">
+                                <i class="fa-solid fa-compress"></i>
+                            </button>
+                            <button type="button" class="display-control-btn active" data-size="normal" title="Normal">
+                                <i class="fa-regular fa-window-maximize"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-size="wide" title="Wide">
+                                <i class="fa-solid fa-expand"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="modal-controls">
+                        <button class="close-btn" id="chubExpandClose">&times;</button>
+                    </div>
+                </div>
+                <div class="chub-expand-body">
+                    <iframe id="chubExpandIframe" sandbox="allow-same-origin"></iframe>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Remove existing modal if any
+    const existingModal = document.getElementById('chubExpandModal');
+    if (existingModal) existingModal.remove();
+    
+    document.body.insertAdjacentHTML('beforeend', expandModalHtml);
+    
+    const expandModal = document.getElementById('chubExpandModal');
+    const modalInner = document.getElementById('chubExpandModalInner');
+    const iframe = document.getElementById('chubExpandIframe');
+    
+    // Set iframe content
+    iframe.srcdoc = iframeDoc;
+    
+    // Size control handlers
+    document.getElementById('chubExpandSizeControls').onclick = (e) => {
+        const btn = e.target.closest('.display-control-btn[data-size]');
+        if (!btn) return;
+        
+        const size = btn.dataset.size;
+        document.querySelectorAll('#chubExpandSizeControls .display-control-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        modalInner.dataset.size = size;
+    };
+    
+    // Zoom controls - apply to iframe body (same as Creator's Notes)
+    let chubExpandZoom = 100;
+    const zoomDisplay = document.getElementById('chubExpandZoomDisplay');
+    
+    const updateZoom = (zoom) => {
+        chubExpandZoom = Math.max(50, Math.min(200, zoom));
+        zoomDisplay.textContent = `${chubExpandZoom}%`;
+        iframe.contentDocument?.body?.style.setProperty('zoom', `${chubExpandZoom}%`);
+    };
+    
+    document.getElementById('chubExpandZoomControls').onclick = (e) => {
+        const btn = e.target.closest('.display-control-btn[data-zoom]');
+        if (!btn) return;
+        const action = btn.dataset.zoom;
+        if (action === 'in') updateZoom(chubExpandZoom + 10);
+        else if (action === 'out') updateZoom(chubExpandZoom - 10);
+        else if (action === 'reset') updateZoom(100);
+    };
+    
+    // Close handlers
+    const closeExpandModal = () => expandModal.remove();
+    
+    document.getElementById('chubExpandClose').onclick = closeExpandModal;
+    expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
+    
+    // Handle Escape key
+    const handleKeydown = (e) => {
+        if (e.key === 'Escape') {
+            closeExpandModal();
+            document.removeEventListener('keydown', handleKeydown);
+        }
+    };
+    document.addEventListener('keydown', handleKeydown);
+}
+
+/**
+ * Initialize ChubAI section title clicks for expand
+ */
+function initChubExpandButtons() {
+    document.querySelectorAll('.chub-section-title').forEach(title => {
+        title.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const sectionId = title.dataset.section;
+            const label = title.dataset.label;
+            const iconClass = title.dataset.icon;
+            openChubExpandedView(sectionId, label, iconClass);
+        });
+    });
 }
 
 // Chats Functions
@@ -4743,7 +5187,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
             <div class="lorebook-entry-controls">
                 <label class="lorebook-entry-toggle ${enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                     <input type="checkbox" class="lorebook-enabled-checkbox" ${enabled ? 'checked' : ''} style="display: none;">
-                    ${enabled ? 'âœ“ On' : 'âœ— Off'}
+                    ${enabled ? '✓ On' : '✗ Off'}
                 </label>
                 <span class="lorebook-entry-delete" title="Delete entry">
                     <i class="fa-solid fa-trash"></i>
@@ -4807,7 +5251,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `lorebook-entry-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? 'âœ“ On' : 'âœ— Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
         wrapper.classList.toggle('disabled', isEnabled);
     });
     
@@ -4935,23 +5379,32 @@ function getCharacterAvatarUrl(avatar) {
  */
 function renderLorebookEntryHtml(entry, index) {
     const keys = entry.keys || entry.key || [];
-    const keyStr = Array.isArray(keys) ? keys.join(', ') : keys;
+    const keyArr = Array.isArray(keys) ? keys : (keys ? [keys] : []);
+    const secondaryKeys = entry.secondary_keys || [];
+    const secondaryKeyArr = Array.isArray(secondaryKeys) ? secondaryKeys : (secondaryKeys ? [secondaryKeys] : []);
     const content = entry.content || '';
     const name = entry.comment || entry.name || `Entry ${index + 1}`;
     const enabled = entry.enabled !== false;
+    const selective = entry.selective || entry.selectiveLogic;
+    const constant = entry.constant;
     
-    return `<div class="lorebook-entry" style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 6px; border-left: 3px solid ${enabled ? 'var(--accent)' : '#666'};">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <strong style="color: ${enabled ? 'var(--accent)' : '#888'};">${escapeHtml(name.trim())}</strong>
-            <span style="font-size: 0.8em; color: ${enabled ? '#8f8' : '#f88'};">${enabled ? '✓ Enabled' : '✗ Disabled'}</span>
-        </div>
-        <div style="font-size: 0.85em; color: #aaa; margin-bottom: 6px;">
-            <i class="fa-solid fa-key"></i> ${escapeHtml(keyStr) || '(no keys)'}
-        </div>
-        <div style="font-size: 0.9em; white-space: pre-wrap; max-height: 100px; overflow-y: auto;">
-            ${escapeHtml(content.trim().substring(0, 300))}${content.length > 300 ? '...' : ''}
-        </div>
-    </div>`;
+    // Build status indicators for expanded area (simple icon + text)
+    let statusItems = [];
+    if (selective) statusItems.push('<span class="lb-stat-sel" title="Selective: triggers only when both primary AND secondary keys match"><i class="fa-solid fa-filter"></i>Selective</span>');
+    if (constant) statusItems.push('<span class="lb-stat-const" title="Constant: always injected into context"><i class="fa-solid fa-thumbtack"></i>Constant</span>');
+    statusItems.push(`<span class="${enabled ? 'lb-stat-on' : 'lb-stat-off'}" title="${enabled ? 'Entry is active' : 'Entry is disabled'}"><i class="fa-solid fa-${enabled ? 'circle-check' : 'circle-xmark'}"></i>${enabled ? 'Active' : 'Off'}</span>`);
+    const statusRow = statusItems.join('<span style="color:#444">•</span>');
+    
+    // Build key chips
+    const keyChips = keyArr.length 
+        ? keyArr.map(k => `<span class="lb-key-chip">${escapeHtml(k.trim())}</span>`).join('')
+        : '<span class="lb-empty-keys">no keys</span>';
+    
+    const secondaryChips = secondaryKeyArr.length
+        ? secondaryKeyArr.map(k => `<span class="lb-key-chip lb-secondary">${escapeHtml(k.trim())}</span>`).join('')
+        : '';
+    
+    return `<details class="lb-entry${enabled ? '' : ' lb-disabled'}"><summary><i class="fa-solid fa-caret-right lb-arrow"></i><i class="fa-solid fa-file-lines lb-icon"></i><span class="lb-name">${escapeHtml(name.trim())}</span></summary><div class="lb-entry-body"><div class="lb-status-row">${statusRow}</div><div class="lb-section"><div class="lb-section-header"><i class="fa-solid fa-key"></i> Keys</div><div class="lb-keys-list">${keyChips}</div></div>${secondaryChips ? `<div class="lb-section"><div class="lb-section-header"><i class="fa-solid fa-key"></i> Secondary Keys</div><div class="lb-keys-list">${secondaryChips}</div></div>` : ''}<div class="lb-section"><div class="lb-section-header"><i class="fa-solid fa-align-left"></i> Content</div><div class="lb-content-box">${escapeHtml(content.trim()) || '<em>No content</em>'}</div></div></div></details>`;
 }
 
 /**
@@ -5061,6 +5514,9 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     
     let processedText = text.trim();
     
+    // Normalize line endings (Windows \r\n and old Mac \r to Unix \n)
+    processedText = processedText.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    
     // Normalize whitespace: collapse multiple blank lines into max 2, trim trailing spaces
     processedText = processedText
         .replace(/[ \t]+$/gm, '')           // Remove trailing spaces/tabs from each line
@@ -5088,7 +5544,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
             });
             
             // Replace {{user}} and {{char}} placeholders (safe)
-            processedText = processedText.replace(/\{\{user\}\}/gi, '<span class="placeholder-user">{{user}}</span>');
+            const personaName = getPersonaName();
+            processedText = processedText.replace(/\{\{user\}\}/gi, `<span class="placeholder-user">${personaName}</span>`);
             processedText = processedText.replace(/\{\{char\}\}/gi, `<span class="placeholder-char">${charName || '{{char}}'}</span>`);
             
             return processedText;
@@ -5149,7 +5606,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         }
         
         // Replace {{user}} and {{char}} placeholders
-        processedText = processedText.replace(/\{\{user\}\}/gi, '<span class="placeholder-user">{{user}}</span>');
+        const personaName = getPersonaName();
+        processedText = processedText.replace(/\{\{user\}\}/gi, `<span class="placeholder-user">${personaName}</span>`);
         processedText = processedText.replace(/\{\{char\}\}/gi, `<span class="placeholder-char">${charName || '{{char}}'}</span>`);
         
         // Newline handling based on mode
@@ -5246,7 +5704,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     });
     
     // Replace {{user}} and {{char}} placeholders
-    formatted = formatted.replace(/\{\{user\}\}/gi, '<span class="placeholder-user">{{user}}</span>');
+    const personaName = getPersonaName();
+    formatted = formatted.replace(/\{\{user\}\}/gi, `<span class="placeholder-user">${personaName}</span>`);
     formatted = formatted.replace(/\{\{char\}\}/gi, `<span class="placeholder-char">${charName || '{{char}}'}</span>`);
     
     // Convert markdown-style formatting
@@ -5264,6 +5723,8 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     formatted = formatted.replace(/&quot;(.+?)&quot;/g, '<span class="quoted-text">"$1"</span>');
     
     // Convert line breaks - use paragraph breaks for double newlines, single <br> for single
+    // Also handle literal \n (escaped backslash-n from JSON) as actual newlines
+    formatted = formatted.replace(/\\n/g, '\n');         // Convert literal \n to actual newlines first
     formatted = formatted.replace(/\n\n+/g, '</p><p>');  // Double+ newlines become paragraph breaks
     formatted = formatted.replace(/\n/g, '<br>');        // Single newlines become line breaks
     formatted = '<p>' + formatted + '</p>';              // Wrap in paragraphs
@@ -5951,9 +6412,13 @@ on('importSummaryDownloadBtn', 'click', async () => {
         return;
     }
     
-    // Disable and show loading
+    // Calculate total files for progress
+    const totalFiles = pendingMediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
+    let processedFiles = 0;
+    
+    // Disable and show loading with progress
     btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
+    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 0/${totalFiles}`;
     
     let totalSuccess = 0;
     let totalSkipped = 0;
@@ -5963,7 +6428,12 @@ on('importSummaryDownloadBtn', 'click', async () => {
         const characterName = charInfo.name;
         const mediaUrls = charInfo.mediaUrls || [];
         
-        const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls);
+        const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
+            onProgress: (current, total) => {
+                processedFiles++;
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${processedFiles}/${totalFiles}`;
+            }
+        });
         totalSuccess += result.success;
         totalSkipped += result.skipped;
         totalErrors += result.errors;
@@ -5994,29 +6464,31 @@ on('importSummaryDownloadBtn', 'click', async () => {
  * @param {string} characterName - The character's name (used for folder)
  * @param {string[]} mediaUrls - Array of URLs to download
  * @param {Object} options - Optional callbacks for progress/logging
- * @returns {Promise<{success: number, skipped: number, errors: number}>}
+ * @param {boolean} options.fixFilenames - If true, rename existing duplicates to localized_media_* format
+ * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
  */
 async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort, fixFilenames } = options;
     
     let successCount = 0;
     let errorCount = 0;
     let skippedCount = 0;
+    let renamedCount = 0;
     
     if (!mediaUrls || mediaUrls.length === 0) {
-        return { success: 0, skipped: 0, errors: 0, aborted: false };
+        return { success: 0, skipped: 0, errors: 0, renamed: 0, aborted: false };
     }
     
     // Get existing files and their hashes to check for duplicates BEFORE downloading
-    const existingHashes = await getExistingFileHashes(characterName);
-    console.log(`[EmbeddedMedia] Found ${existingHashes.size} existing file hashes for ${characterName}`);
+    const existingHashMap = await getExistingFileHashes(characterName);
+    console.log(`[EmbeddedMedia] Found ${existingHashMap.size} existing file hashes for ${characterName}`);
     
     let startIndex = Date.now(); // Use timestamp as start index for unique filenames
     
     for (let i = 0; i < mediaUrls.length; i++) {
         // Check for abort signal
         if (shouldAbort && shouldAbort()) {
-            return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: true };
+            return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, aborted: true };
         }
         
         const url = mediaUrls[i];
@@ -6040,10 +6512,24 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         const contentHash = await calculateHash(downloadResult.arrayBuffer);
         
         // Check if this file already exists
-        if (existingHashes.has(contentHash)) {
-            skippedCount++;
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
-            console.log(`[EmbeddedMedia] Skipping duplicate: ${url}`);
+        const existingFile = existingHashMap.get(contentHash);
+        if (existingFile) {
+            // File exists - check if we should rename it
+            if (fixFilenames && !existingFile.fileName.startsWith('localized_media_')) {
+                // Rename to proper localized_media_* format (pass downloadResult since we have it)
+                const renameResult = await renameToLocalizedFormat(existingFile, url, characterName, fileIndex, downloadResult);
+                if (renameResult.success) {
+                    renamedCount++;
+                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Renamed: ${existingFile.fileName} → ${renameResult.newName}`, 'success');
+                } else {
+                    skippedCount++;
+                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (rename failed): ${displayUrl}`, 'success');
+                }
+            } else {
+                skippedCount++;
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
+            }
+            console.log(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
             if (onProgress) onProgress(i + 1, mediaUrls.length);
             continue;
         }
@@ -6054,7 +6540,8 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         
         if (result.success) {
             successCount++;
-            existingHashes.add(contentHash); // Add to known hashes to avoid downloading same file twice
+            // Add to hash map to avoid downloading same file twice in this session
+            existingHashMap.set(contentHash, { fileName: result.filename, localPath: result.localPath });
             if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved: ${result.filename}`, 'success');
         } else {
             errorCount++;
@@ -6064,7 +6551,51 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         if (onProgress) onProgress(i + 1, mediaUrls.length);
     }
     
-    return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: false };
+    return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, aborted: false };
+}
+
+/**
+ * Rename an existing file to localized_media_* format
+ * Since there's no rename API, we delete old + save new (data already in memory)
+ */
+async function renameToLocalizedFormat(existingFile, originalUrl, characterName, index, downloadResult) {
+    try {
+        // Extract original filename from URL for the new name
+        const urlFilename = extractFilenameFromUrl(originalUrl);
+        const nameWithoutExt = urlFilename.includes('.') 
+            ? urlFilename.substring(0, urlFilename.lastIndexOf('.'))
+            : urlFilename;
+        const sanitizedName = nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+        
+        // Get extension from existing file
+        const ext = existingFile.fileName.includes('.') 
+            ? existingFile.fileName.substring(existingFile.fileName.lastIndexOf('.') + 1)
+            : 'png';
+        
+        const newName = `localized_media_${index}_${sanitizedName}.${ext}`;
+        
+        // Save with new name first (we have the data in downloadResult)
+        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, characterName, index);
+        
+        if (!saveResult.success) {
+            return { success: false, error: saveResult.error };
+        }
+        
+        // Delete the old file
+        const deleteResponse = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
+            ch_name: characterName,
+            img: existingFile.fileName
+        });
+        
+        if (!deleteResponse.ok) {
+            console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName}, but new file was saved`);
+        }
+        
+        return { success: true, newName: saveResult.filename };
+    } catch (error) {
+        console.error('[EmbeddedMedia] Rename error:', error);
+        return { success: false, error: error.message };
+    }
 }
 
 /**
@@ -6164,9 +6695,10 @@ function findCharacterMediaUrls(character) {
 
 /**
  * Get hashes of all existing files in a character's gallery
+ * @returns {Promise<Map<string, {fileName: string, localPath: string}>>} Map of hash -> file info
  */
 async function getExistingFileHashes(characterName) {
-    const hashes = new Set();
+    const hashMap = new Map();
     
     try {
         // Request all media types: IMAGE=1, VIDEO=2, AUDIO=4, so 7 = all
@@ -6174,12 +6706,12 @@ async function getExistingFileHashes(characterName) {
         
         if (!response.ok) {
             console.log('[Localize] Could not list existing files');
-            return hashes;
+            return hashMap;
         }
         
         const files = await response.json();
         if (!files || files.length === 0) {
-            return hashes;
+            return hashMap;
         }
         
         // Sanitize folder name to match SillyTavern's folder naming convention
@@ -6193,24 +6725,24 @@ async function getExistingFileHashes(characterName) {
             // Only check media files
             if (!fileName.match(/\.(png|jpg|jpeg|webp|gif|bmp|mp3|wav|ogg|m4a|mp4|webm)$/i)) continue;
             
-            const fileUrl = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+            const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
             
             try {
-                const fileResponse = await fetch(fileUrl);
+                const fileResponse = await fetch(localPath);
                 if (fileResponse.ok) {
                     const buffer = await fileResponse.arrayBuffer();
                     const hash = await calculateHash(buffer);
-                    hashes.add(hash);
+                    hashMap.set(hash, { fileName, localPath });
                 }
             } catch (e) {
                 console.warn(`[Localize] Could not hash existing file: ${fileName}`);
             }
         }
         
-        return hashes;
+        return hashMap;
     } catch (error) {
         console.error('[Localize] Error getting existing file hashes:', error);
-        return hashes;
+        return hashMap;
     }
 }
 
@@ -6473,11 +7005,15 @@ localizeMediaBtn?.addEventListener('click', async () => {
         return;
     }
     
-    localizeStatus.textContent = `Found ${mediaUrls.length} remote media file(s). Downloading new files...`;
+    // debug: fix filenames for images localized before current spec, rename to localized_media_* format
+    const fixFilenames = getSetting('fixFilenames') || false;
+    
+    localizeStatus.textContent = `Found ${mediaUrls.length} remote media file(s). ${fixFilenames ? 'Downloading & fixing filenames...' : 'Downloading new files...'}`;
     localizeProgressCount.textContent = `0/${mediaUrls.length}`;
     
     // Use shared download function with UI callbacks
     const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
+        fixFilenames,
         onProgress: (current, total) => {
             const progress = (current / total) * 100;
             localizeProgressFill.style.width = `${progress}%`;
@@ -6492,6 +7028,9 @@ localizeMediaBtn?.addEventListener('click', async () => {
     if (result.success > 0) {
         statusMsg = `Downloaded ${result.success} new file(s)`;
     }
+    if (result.renamed > 0) {
+        statusMsg += (statusMsg ? ', ' : '') + `renamed ${result.renamed} file(s)`;
+    }
     if (result.skipped > 0) {
         statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} already existed`;
     }
@@ -6501,8 +7040,11 @@ localizeMediaBtn?.addEventListener('click', async () => {
     
     localizeStatus.textContent = statusMsg || 'No new files to download.';
     
-    if (result.success > 0) {
-        showToast(`Downloaded ${result.success} new media file(s)`, 'success');
+    if (result.success > 0 || result.renamed > 0) {
+        const msg = result.renamed > 0 
+            ? `Downloaded ${result.success}, renamed ${result.renamed} file(s)` 
+            : `Downloaded ${result.success} new media file(s)`;
+        showToast(msg, 'success');
         
         // Clear the localization cache for this character so new files are picked up
         if (activeChar?.avatar) {
@@ -6560,6 +7102,7 @@ const bulkSummaryPageInfo = document.getElementById('bulkSummaryPageInfo');
 let bulkLocalizeAborted = false;
 let bulkLocalizeResults = [];
 let bulkSummaryCurrentPage = 1;
+let bulkSummaryShowRenamed = false;
 const BULK_SUMMARY_PAGE_SIZE = 50;
 
 // Close bulk localize modal
@@ -6650,12 +7193,13 @@ function renderBulkSummaryList() {
                 <span class="char-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
                 <div class="char-stats">
                     ${r.totalUrls === 0 
-                        ? '<span class="none"><i class="fa-solid fa-minus"></i> No remote media</span>'
+                        ? '<span class="none" title="Character has no embedded remote media URLs"><i class="fa-solid fa-minus"></i> No media</span>'
                         : `
                             ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
-                            ${r.downloaded > 0 ? `<span class="downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
-                            ${r.skipped > 0 ? `<span class="skipped"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
-                            ${r.errors > 0 ? `<span class="errors"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
+                            ${r.downloaded > 0 ? `<span class="downloaded" title="${r.downloaded} file(s) newly downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
+                            ${bulkSummaryShowRenamed && r.renamed > 0 ? `<span class="renamed" title="${r.renamed} file(s) renamed to localized format"><i class="fa-solid fa-file-pen"></i> ${r.renamed}</span>` : ''}
+                            ${r.skipped > 0 ? `<span class="skipped" title="${r.skipped} file(s) already exist locally"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
+                            ${r.errors > 0 ? `<span class="errors" title="${r.errors} file(s) failed to download"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
                         `
                     }
                 </div>
@@ -6672,46 +7216,53 @@ function renderBulkSummaryList() {
 /**
  * Show the bulk summary modal with results
  */
-function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
+function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames = false) {
     // Calculate totals
     const totals = bulkLocalizeResults.reduce((acc, r) => {
         acc.characters++;
         acc.downloaded += r.downloaded;
         acc.skipped += r.skipped;
         acc.errors += r.errors;
+        acc.renamed += r.renamed || 0;
         if (r.totalUrls > 0) acc.withMedia++;
         if (r.incomplete) acc.incomplete++;
         return acc;
-    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, withMedia: 0, incomplete: 0 });
+    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, withMedia: 0, incomplete: 0 });
     
-    // Render overview
+    // Render overview with tooltips and icons
     bulkSummaryOverview.innerHTML = `
-        <div class="bulk-summary-stat">
+        <div class="bulk-summary-stat" title="Total characters scanned in this run">
             <span class="stat-value">${totals.characters}</span>
-            <span class="stat-label">${wasAborted ? 'Processed' : 'Characters'}</span>
+            <span class="stat-label"><i class="fa-solid fa-user"></i> ${wasAborted ? 'Processed' : 'Characters'}</span>
         </div>
         ${skippedCompleted > 0 ? `
-        <div class="bulk-summary-stat previously-done">
+        <div class="bulk-summary-stat previously-done" title="Characters skipped because they were processed in a previous run">
             <span class="stat-value">${skippedCompleted}</span>
-            <span class="stat-label">Previously Done</span>
+            <span class="stat-label"><i class="fa-solid fa-check-double"></i> Previously Done</span>
         </div>
         ` : ''}
-        <div class="bulk-summary-stat downloaded">
+        <div class="bulk-summary-stat downloaded" title="Total media files newly downloaded to gallery">
             <span class="stat-value">${totals.downloaded}</span>
-            <span class="stat-label">Downloaded</span>
+            <span class="stat-label"><i class="fa-solid fa-download"></i> Downloaded</span>
         </div>
-        <div class="bulk-summary-stat skipped">
+        <div class="bulk-summary-stat skipped" title="Media files that already existed locally (matched by content hash)">
             <span class="stat-value">${totals.skipped}</span>
-            <span class="stat-label">Already Local</span>
+            <span class="stat-label"><i class="fa-solid fa-forward"></i> Already Local</span>
         </div>
-        <div class="bulk-summary-stat errors">
+        <div class="bulk-summary-stat errors" title="Media files that failed to download">
             <span class="stat-value">${totals.errors}</span>
-            <span class="stat-label">Errors</span>
+            <span class="stat-label"><i class="fa-solid fa-xmark"></i> Failed</span>
         </div>
+        ${fixFilenames ? `
+        <div class="bulk-summary-stat renamed" title="Existing files renamed to localized_media_* format">
+            <span class="stat-value">${totals.renamed}</span>
+            <span class="stat-label"><i class="fa-solid fa-file-pen"></i> Renamed</span>
+        </div>
+        ` : ''}
         ${totals.incomplete > 0 ? `
-        <div class="bulk-summary-stat incomplete">
+        <div class="bulk-summary-stat incomplete" title="Characters with download errors or that were interrupted">
             <span class="stat-value">${totals.incomplete}</span>
-            <span class="stat-label">Incomplete</span>
+            <span class="stat-label"><i class="fa-solid fa-exclamation-triangle"></i> Incomplete</span>
         </div>
         ` : ''}
     `;
@@ -6720,6 +7271,9 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     bulkSummaryFilterSelect.value = 'all';
     bulkSummarySearch.value = '';
     bulkSummaryCurrentPage = 1;
+    
+    // Store fixFilenames for list rendering
+    bulkSummaryShowRenamed = fixFilenames;
     
     // Render list
     renderBulkSummaryList();
@@ -6762,6 +7316,9 @@ async function runBulkLocalization() {
     bulkLocalizeAborted = false;
     bulkLocalizeResults = [];
     
+    // debug: fix filenames for images localized before current spec, rename to localized_media_* format
+    const fixFilenames = getSetting('fixFilenames') || false;
+    
     // Get previously completed characters
     const completedAvatars = getCompletedMediaLocalizations();
     
@@ -6783,6 +7340,7 @@ async function runBulkLocalization() {
     let totalDownloaded = 0;
     let totalSkipped = 0;
     let totalErrors = 0;
+    let totalRenamed = 0;
     
     const characters = [...allCharacters];
     const totalChars = characters.length;
@@ -6839,12 +7397,14 @@ async function runBulkLocalization() {
                         bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
                     }
                 },
-                shouldAbort: () => bulkLocalizeAborted
+                shouldAbort: () => bulkLocalizeAborted,
+                fixFilenames: fixFilenames
             });
             
             result.downloaded = downloadResult.success;
             result.skipped = downloadResult.skipped;
             result.errors = downloadResult.errors;
+            result.renamed = downloadResult.renamed || 0;
             
             // Mark as incomplete if aborted mid-character or had errors
             if (downloadResult.aborted || downloadResult.errors > 0) {
@@ -6854,6 +7414,7 @@ async function runBulkLocalization() {
             totalDownloaded += downloadResult.success;
             totalSkipped += downloadResult.skipped;
             totalErrors += downloadResult.errors;
+            totalRenamed += downloadResult.renamed || 0;
             
             // Update stats
             bulkStatDownloaded.textContent = totalDownloaded;
@@ -6892,13 +7453,14 @@ async function runBulkLocalization() {
     
     // Hide progress modal and show summary
     bulkLocalizeModal.classList.add('hidden');
-    showBulkSummary(bulkLocalizeAborted, skippedCompleted);
+    showBulkSummary(bulkLocalizeAborted, skippedCompleted, fixFilenames);
     
     // Show toast
+    const renamedMsg = totalRenamed > 0 ? `, renamed ${totalRenamed}` : '';
     if (bulkLocalizeAborted) {
-        showToast(`Bulk localization stopped. Downloaded ${totalDownloaded} files.`, 'info');
+        showToast(`Bulk localization stopped. Downloaded ${totalDownloaded} files${renamedMsg}.`, 'info');
     } else {
-        showToast(`Bulk localization complete. Downloaded ${totalDownloaded} files.`, 'success');
+        showToast(`Bulk localization complete. Downloaded ${totalDownloaded} files${renamedMsg}.`, 'success');
     }
 }
 
@@ -7072,15 +7634,25 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
             const fileName = (typeof file === 'string') ? file : file.name;
             if (!fileName) continue;
             
+            // Only process media files
+            if (!fileName.match(/\.(png|jpg|jpeg|webp|gif|bmp|svg|mp3|wav|ogg|m4a|mp4|webm)$/i)) continue;
+            
+            const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+            
+            // Method 1: Check for localized_media_* pattern
             const match = fileName.match(localizedPattern);
             if (match) {
                 const sanitizedName = match[1]; // The sanitized original filename
-                const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
-                
-                // Store by sanitized name for lookup
-                // When we see a remote URL, we'll sanitize its filename and look it up
                 urlMap[`__sanitized__${sanitizedName}`] = localPath;
             }
+            
+            // Method 2: Also map by the raw filename (without extension)
+            // This catches files that were imported with their original names
+            const nameWithoutExt = fileName.includes('.') 
+                ? fileName.substring(0, fileName.lastIndexOf('.'))
+                : fileName;
+            // Store by original filename for direct matching
+            urlMap[`__filename__${nameWithoutExt}`] = localPath;
         }
         
         // Cache the mapping
@@ -7088,7 +7660,7 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
             mediaLocalizationCache[avatar] = urlMap;
         }
         
-        console.log(`[MediaLocalize] Built map for ${characterName}: ${Object.keys(urlMap).length} localized files`);
+        console.log(`[MediaLocalize] Built map for ${characterName}: ${Object.keys(urlMap).length} entries`);
         return urlMap;
         
     } catch (error) {
@@ -7106,14 +7678,22 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
 function lookupLocalizedMedia(urlMap, remoteUrl) {
     if (!urlMap || !remoteUrl) return null;
     
-    // Extract filename from URL and sanitize it
+    // Extract filename from URL
     const filename = extractFilenameFromUrl(remoteUrl);
     if (!filename) return null;
     
-    const sanitizedName = sanitizeMediaFilename(filename);
+    // Get filename without extension for direct matching
+    const nameWithoutExt = filename.includes('.') 
+        ? filename.substring(0, filename.lastIndexOf('.'))
+        : filename;
     
-    // Look up by sanitized name
-    const localPath = urlMap[`__sanitized__${sanitizedName}`];
+    // Method 1: Try direct filename match first (most reliable)
+    let localPath = urlMap[`__filename__${nameWithoutExt}`];
+    if (localPath) return localPath;
+    
+    // Method 2: Try sanitized name match (for localized_media_* files)
+    const sanitizedName = sanitizeMediaFilename(filename);
+    localPath = urlMap[`__sanitized__${sanitizedName}`];
     
     return localPath || null;
 }
@@ -8187,7 +8767,7 @@ function renderDuplicateGroups(groups) {
                         <div class="char-dup-group-name">${escapeHtml(refName)}</div>
                         <div class="char-dup-group-meta">
                             <span>${group.duplicates.length} potential duplicate(s)</span>
-                            <span style="opacity: 0.7;">â€¢ Score: ${maxScore} pts</span>
+                            <span style="opacity: 0.7;">\u2022 Score: ${maxScore} pts</span>
                         </div>
                     </div>
                     <div class="char-dup-group-confidence ${group.confidence}">${group.confidence}</div>
@@ -8213,7 +8793,7 @@ function renderDuplicateGroups(groups) {
                 if (dup.breakdown.personality) parts.push(`Pers: ${dup.breakdown.personality}`);
                 if (dup.breakdown.scenario) parts.push(`Scen: ${dup.breakdown.scenario}`);
                 if (parts.length > 0) {
-                    scoreBreakdown = `<div style="font-size: 0.6rem; color: var(--text-secondary); margin-top: 3px;">${parts.join(' â€¢ ')}</div>`;
+                    scoreBreakdown = `<div style="font-size: 0.6rem; color: var(--text-secondary); margin-top: 3px;">${parts.join(' \u2022 ')}</div>`;
                 }
             }
             
@@ -9359,6 +9939,9 @@ function renderChatMessages(messages, character) {
         const text = msg.mes || '';
         const time = msg.send_date ? new Date(msg.send_date).toLocaleString() : '';
         
+        // Format message text with rich text (italics, bold, HTML tags, etc.)
+        const formattedText = formatRichText(text, character.name, true);
+        
         // Skip rendering metadata-only messages (chat header)
         if (index === 0 && msg.chat_metadata && !msg.mes) {
             return ''; // Don't render the metadata header as a message
@@ -9381,7 +9964,7 @@ function renderChatMessages(messages, character) {
             return `
                 <div class="chat-message system" data-msg-index="${index}">
                     <div class="chat-message-content">
-                        <div class="chat-message-text">${escapeHtml(text)}</div>
+                        <div class="chat-message-text">${formattedText}</div>
                     </div>
                     ${actionButtons}
                 </div>
@@ -9393,7 +9976,7 @@ function renderChatMessages(messages, character) {
                 ${!isUser ? `<img src="${avatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
                 <div class="chat-message-content">
                     <div class="chat-message-name">${escapeHtml(name)}</div>
-                    <div class="chat-message-text">${escapeHtml(text)}</div>
+                    <div class="chat-message-text">${formattedText}</div>
                     ${time ? `<div class="chat-message-time">${time}</div>` : ''}
                 </div>
                 ${actionButtons}
@@ -9491,7 +10074,7 @@ async function editChatMessage(messageIndex) {
                 <div style="padding: 20px;">
                     <div class="edit-message-info" style="margin-bottom: 15px; font-size: 0.85rem; color: var(--text-secondary);">
                         <span><strong>${escapeHtml(msg.name || (msg.is_user ? 'User' : currentPreviewChar?.name || 'Character'))}</strong></span>
-                        ${msg.send_date ? `<span> â€¢ ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
+                        ${msg.send_date ? `<span> \u2022 ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
                     </div>
                     <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;">${escapeHtml(currentText)}</textarea>
                     <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;">
@@ -10214,13 +10797,25 @@ function openCreatorNotesFullscreen(content, charName, urlMap) {
     const styles = getCreatorNotesBaseStyles();
     const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${csp}${styles}</head><body style="overflow-y: auto; overflow-x: hidden; height: 100%; padding: 15px;"><div id="content-wrapper">${hardened}</div></body></html>`;
     
-    // Build simple fullscreen modal - just size buttons
+    // Build simple fullscreen modal - size and zoom buttons
     const modalHtml = `
         <div id="creatorNotesFullscreenModal" class="modal-overlay">
             <div class="modal-glass creator-notes-fullscreen-modal" id="creatorNotesFullscreenInner" data-size="normal">
                 <div class="modal-header">
                     <h2><i class="fa-solid fa-feather-pointed"></i> Creator's Notes</h2>
                     <div class="creator-notes-display-controls">
+                        <div class="display-control-btns zoom-controls" id="zoomControlBtns">
+                            <button type="button" class="display-control-btn" data-zoom="out" title="Zoom Out">
+                                <i class="fa-solid fa-minus"></i>
+                            </button>
+                            <span class="zoom-level" id="zoomLevelDisplay">100%</span>
+                            <button type="button" class="display-control-btn" data-zoom="in" title="Zoom In">
+                                <i class="fa-solid fa-plus"></i>
+                            </button>
+                            <button type="button" class="display-control-btn" data-zoom="reset" title="Reset Zoom">
+                                <i class="fa-solid fa-rotate-left"></i>
+                            </button>
+                        </div>
                         <div class="display-control-btns" id="sizeControlBtns">
                             <button type="button" class="display-control-btn" data-size="compact" title="Compact">
                                 <i class="fa-solid fa-compress"></i>
@@ -10269,6 +10864,26 @@ function openCreatorNotesFullscreen(content, charName, urlMap) {
         document.querySelectorAll('#sizeControlBtns .display-control-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         modalInner.dataset.size = size;
+    });
+    
+    // Zoom control handlers for iframe content
+    let currentZoom = 100;
+    const zoomDisplay = document.getElementById('zoomLevelDisplay');
+    
+    const updateIframeZoom = (zoom) => {
+        currentZoom = Math.max(50, Math.min(200, zoom));
+        zoomDisplay.textContent = `${currentZoom}%`;
+        iframe.contentDocument?.body?.style.setProperty('zoom', `${currentZoom}%`);
+    };
+    
+    on('zoomControlBtns', 'click', (e) => {
+        const btn = e.target.closest('.display-control-btn[data-zoom]');
+        if (!btn) return;
+        
+        const action = btn.dataset.zoom;
+        if (action === 'in') updateIframeZoom(currentZoom + 10);
+        else if (action === 'out') updateIframeZoom(currentZoom - 10);
+        else if (action === 'reset') updateIframeZoom(100);
     });
     
     // Close handlers
@@ -10551,10 +11166,10 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
 function initContentExpandHandlers() {
     const charName = document.getElementById('modalCharName')?.textContent || 'Character';
     
-    // First Message expand button
-    const firstMesExpandBtn = document.getElementById('firstMesExpandBtn');
-    if (firstMesExpandBtn) {
-        firstMesExpandBtn.addEventListener('click', async () => {
+    // First Message expand - clickable title
+    const firstMesTitleExpand = document.getElementById('firstMesTitleExpand');
+    if (firstMesTitleExpand) {
+        firstMesTitleExpand.addEventListener('click', async () => {
             const content = window.currentFirstMesContent;
             if (!content) {
                 showToast('No first message to display', 'warning');

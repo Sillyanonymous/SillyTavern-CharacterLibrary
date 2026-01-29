@@ -451,7 +451,9 @@
                 
                 <!-- Creator's Notes Section (public ChubAI description) -->
                 <div class="chub-char-section">
-                    <h3><i class="fa-solid fa-sticky-note"></i> Creator's Notes</h3>
+                    <h3 class="chub-section-title" data-section="chubCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
+                        <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
+                    </h3>
                     <div id="chubCharCreatorNotes" class="scrolling-text">
                         No description available.
                     </div>
@@ -459,31 +461,41 @@
                 
                 <!-- Tagline Section -->
                 <div class="chub-char-section" id="chubCharTaglineSection" style="display: none;">
-                    <h3><i class="fa-solid fa-quote-left"></i> Tagline</h3>
+                    <h3 class="chub-section-title" data-section="chubCharTagline" data-label="Tagline" data-icon="fa-solid fa-quote-left" title="Click to expand">
+                        <i class="fa-solid fa-quote-left"></i> Tagline
+                    </h3>
                     <p id="chubCharTagline"></p>
                 </div>
                 
                 <!-- Character Definition Description Section -->
                 <div class="chub-char-section" id="chubCharDescriptionSection" style="display: none;">
-                    <h3><i class="fa-solid fa-scroll"></i> Description</h3>
+                    <h3 class="chub-section-title" data-section="chubCharDescription" data-label="Description" data-icon="fa-solid fa-scroll" title="Click to expand">
+                        <i class="fa-solid fa-scroll"></i> Description
+                    </h3>
                     <div id="chubCharDescription" class="scrolling-text"></div>
                 </div>
                 
                 <!-- Personality Section -->
                 <div class="chub-char-section" id="chubCharPersonalitySection" style="display: none;">
-                    <h3><i class="fa-solid fa-brain"></i> Personality</h3>
+                    <h3 class="chub-section-title" data-section="chubCharPersonality" data-label="Personality" data-icon="fa-solid fa-brain" title="Click to expand">
+                        <i class="fa-solid fa-brain"></i> Personality
+                    </h3>
                     <div id="chubCharPersonality" class="scrolling-text"></div>
                 </div>
                 
                 <!-- Scenario Section -->
                 <div class="chub-char-section" id="chubCharScenarioSection" style="display: none;">
-                    <h3><i class="fa-solid fa-theater-masks"></i> Scenario</h3>
+                    <h3 class="chub-section-title" data-section="chubCharScenario" data-label="Scenario" data-icon="fa-solid fa-theater-masks" title="Click to expand">
+                        <i class="fa-solid fa-theater-masks"></i> Scenario
+                    </h3>
                     <div id="chubCharScenario" class="scrolling-text"></div>
                 </div>
                 
                 <!-- First Message Section -->
                 <div class="chub-char-section" id="chubCharFirstMsgSection" style="display: none;">
-                    <h3><i class="fa-solid fa-message"></i> First Message Preview</h3>
+                    <h3 class="chub-section-title" data-section="chubCharFirstMsg" data-label="First Message" data-icon="fa-solid fa-message" title="Click to expand">
+                        <i class="fa-solid fa-message"></i> First Message
+                    </h3>
                     <div id="chubCharFirstMsg" class="scrolling-text first-message-preview"></div>
                 </div>
             </div>
@@ -565,15 +577,12 @@
                         </div>
 
                         <div class="description-box">
-                            <h3>Description</h3>
+                            <h3><i class="fa-solid fa-scroll" style="margin-right: 8px; opacity: 0.7;"></i>Description</h3>
                             <div id="modalDescription" class="scrolling-text"></div>
                         </div>
                         <div class="first-mes-box">
                             <div class="content-header">
-                                <h3>First Message</h3>
-                                <button type="button" class="content-expand-btn" id="firstMesExpandBtn" title="Expand">
-                                    <i class="fa-solid fa-expand"></i>
-                                </button>
+                                <h3 class="expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 8px; opacity: 0.7;"></i>First Message</h3>
                             </div>
                             <div id="modalFirstMes" class="scrolling-text"></div>
                         </div>
@@ -581,7 +590,7 @@
                         <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 20px;">
                             <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 10px;">
-                                    <span style="flex: 1;">Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
+                                    <span style="flex: 1;"><i class="fa-solid fa-comments" style="margin-right: 8px; opacity: 0.7;"></i>Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
                                     <button type="button" class="content-expand-btn" id="altGreetingsExpandBtn" title="Expand">
                                         <i class="fa-solid fa-expand"></i>
                                     </button>
@@ -943,9 +952,9 @@ https://chub.ai/characters/author/another-character
                     </div>
                 </div>
                 <div id="bulkLocalizeStats" class="bulk-localize-stats">
-                    <div class="stat-item"><i class="fa-solid fa-download"></i> <span id="bulkStatDownloaded">0</span> downloaded</div>
-                    <div class="stat-item"><i class="fa-solid fa-forward"></i> <span id="bulkStatSkipped">0</span> skipped</div>
-                    <div class="stat-item"><i class="fa-solid fa-xmark"></i> <span id="bulkStatErrors">0</span> errors</div>
+                    <div class="stat-item" title="New media files downloaded to gallery"><i class="fa-solid fa-download"></i> <span id="bulkStatDownloaded">0</span> downloaded</div>
+                    <div class="stat-item" title="Files already exist locally (matched by content hash)"><i class="fa-solid fa-forward"></i> <span id="bulkStatSkipped">0</span> skipped</div>
+                    <div class="stat-item" title="Downloads that failed"><i class="fa-solid fa-xmark"></i> <span id="bulkStatErrors">0</span> errors</div>
                 </div>
             </div>
             <div class="confirm-modal-footer">
@@ -1168,6 +1177,12 @@ https://chub.ai/characters/author/another-character
                         </button>
                         <span class="settings-hint">Reset the list of processed characters so bulk localize will scan everyone again.</span>
                     </div>
+                    <div class="settings-row" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <label>
+                            <input type="checkbox" id="settingsFixFilenames"> <span style="opacity: 0.6;">(Debug)</span> Fix filenames during localization
+                        </label>
+                        <span class="settings-hint">Renames existing gallery files to localized_media_* format when duplicates are detected. Use this to fix images imported before the current localization spec.</span>
+                    </div>
                 </div>
                 
                 <!-- Notifications Section -->
@@ -1178,6 +1193,17 @@ https://chub.ai/characters/author/another-character
                             <input type="checkbox" id="settingsNotifyAdditionalContent" checked> Notify about additional content on import
                         </label>
                         <span class="settings-hint">Show a notification when imported characters have ChubAI gallery images or embedded remote media available.</span>
+                    </div>
+                </div>
+                
+                <!-- Display Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-eye"></i> Display</h4>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
+                        </label>
+                        <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}} when viewing character details.</span>
                     </div>
                 </div>
             </div>
