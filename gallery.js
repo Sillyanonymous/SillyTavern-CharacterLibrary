@@ -1,4 +1,4 @@
-﻿﻿// SillyTavern Character Library Logic
+﻿// SillyTavern Character Library Logic
 
 const API_BASE = '/api'; 
 let allCharacters = [];
@@ -46,7 +46,31 @@ const DEFAULT_SETTINGS = {
     notifyAdditionalContent: true,
     // Replace {{user}} placeholder with active persona name
     replaceUserPlaceholder: true,
+    // Debug mode - enable console logging
+    debugMode: false,
 };
+
+// Debug logging helper - only logs when debug mode is enabled
+function debugLog(...args) {
+    if (getSetting('debugMode')) {
+        console.log('[Debug]', ...args);
+    }
+}
+
+function debugWarn(...args) {
+    if (getSetting('debugMode')) {
+        console.warn('[Debug]', ...args);
+    }
+}
+
+function debugError(...args) {
+    // Always log errors, but add prefix when in debug mode
+    if (getSetting('debugMode')) {
+        console.error('[Debug]', ...args);
+    } else {
+        console.error(...args);
+    }
+}
 
 // In-memory settings cache
 let gallerySettings = { ...DEFAULT_SETTINGS };
@@ -100,7 +124,7 @@ function loadGallerySettings() {
             context.extensionSettings[SETTINGS_KEY] = { ...DEFAULT_SETTINGS };
         }
         gallerySettings = { ...DEFAULT_SETTINGS, ...context.extensionSettings[SETTINGS_KEY] };
-        console.log('[Settings] Loaded from SillyTavern extensionSettings');
+        debugLog('[Settings] Loaded from SillyTavern extensionSettings');
         return;
     }
     
@@ -109,7 +133,7 @@ function loadGallerySettings() {
         const stored = localStorage.getItem(SETTINGS_KEY);
         if (stored) {
             gallerySettings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
-            console.log('[Settings] Loaded from localStorage (fallback)');
+            debugLog('[Settings] Loaded from localStorage (fallback)');
         }
     } catch (e) {
         console.warn('[Settings] Failed to load from localStorage:', e);
@@ -128,7 +152,7 @@ function saveGallerySettings() {
         // Trigger ST's debounced save to persist to disk
         if (typeof context.saveSettingsDebounced === 'function') {
             context.saveSettingsDebounced();
-            console.log('[Settings] Saved to SillyTavern extensionSettings');
+            debugLog('[Settings] Saved to SillyTavern extensionSettings');
         }
     }
     
@@ -217,12 +241,16 @@ function setupSettingsModal() {
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
     const fixFilenamesCheckbox = document.getElementById('settingsFixFilenames');
+    const includeChubGalleryCheckbox = document.getElementById('settingsIncludeChubGallery');
     
     // Notifications
     const notifyAdditionalContentCheckbox = document.getElementById('settingsNotifyAdditionalContent');
     
     // Display
     const replaceUserPlaceholderCheckbox = document.getElementById('settingsReplaceUserPlaceholder');
+    
+    // Developer
+    const debugModeCheckbox = document.getElementById('settingsDebugMode');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
@@ -256,6 +284,9 @@ function setupSettingsModal() {
         if (fixFilenamesCheckbox) {
             fixFilenamesCheckbox.checked = getSetting('fixFilenames') || false;
         }
+        if (includeChubGalleryCheckbox) {
+            includeChubGalleryCheckbox.checked = getSetting('includeChubGallery') || false;
+        }
         
         // Notifications
         if (notifyAdditionalContentCheckbox) {
@@ -265,6 +296,11 @@ function setupSettingsModal() {
         // Display
         if (replaceUserPlaceholderCheckbox) {
             replaceUserPlaceholderCheckbox.checked = getSetting('replaceUserPlaceholder') !== false; // Default true
+        }
+        
+        // Developer
+        if (debugModeCheckbox) {
+            debugModeCheckbox.checked = getSetting('debugMode') || false;
         }
         
         // Appearance
@@ -318,8 +354,10 @@ function setupSettingsModal() {
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
             fixFilenames: fixFilenamesCheckbox ? fixFilenamesCheckbox.checked : false,
+            includeChubGallery: includeChubGalleryCheckbox ? includeChubGalleryCheckbox.checked : false,
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
+            debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
         });
         
         // Clear media localization cache when setting changes
@@ -651,6 +689,7 @@ const ENDPOINTS = {
 
 // ChubAI endpoints
 const CHUB_API_BASE = 'https://api.chub.ai';
+const CHUB_GATEWAY_BASE = 'https://gateway.chub.ai';
 const CHUB_AVATAR_BASE = 'https://avatars.charhub.io/avatars/';
 
 // Init
@@ -876,15 +915,25 @@ async function loadCharInMain(charOrAvatar) {
 }
 
 // Data Fetching
-// forceRefresh: if true, skip window.opener cache and fetch directly from API
+// forceRefresh: if true, try to refresh from main window first, then fall back to API
 async function fetchCharacters(forceRefresh = false) {
     try {
         // Method 1: Try to get data directly from the opener (Main Window)
-        // Skip if forceRefresh is requested (e.g., after importing new characters)
-        if (!forceRefresh && window.opener && !window.opener.closed) {
+        // This is preferred even on refresh because it has full character data including extensions
+        if (window.opener && !window.opener.closed) {
             try {
                 console.log("Attempting to read characters from window.opener...");
                 let openerChars = null;
+                
+                // If forceRefresh, trigger a refresh in the main window first
+                if (forceRefresh && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
+                    const context = window.opener.SillyTavern.getContext();
+                    if (context && typeof context.getCharacters === 'function') {
+                        console.log("Triggering character refresh in main window...");
+                        await context.getCharacters();
+                    }
+                }
+                
                 if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                     const context = window.opener.SillyTavern.getContext();
                     if (context && context.characters) openerChars = context.characters;
@@ -1598,6 +1647,9 @@ function openModal(char) {
         authContainer.style.display = 'none';
     }
 
+    // ChubAI Link Indicator
+    updateChubLinkIndicator(char);
+
     // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe
     const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
     const notesBox = document.getElementById('modalCreatorNotesBox');
@@ -1849,7 +1901,7 @@ function extractContentKeywords(text) {
         /\b(naruto|konoha|chakra|shinobi|hokage)\b/gi,
         /\b(one piece|straw hat|devil fruit|pirate king)\b/gi,
         /\b(dragon ball|saiyan|kamehameha|capsule corp)\b/gi,
-        /\b(pokemon|pokÃ©mon|trainer|gym leader|paldea|kanto)\b/gi,
+        /\b(pokemon|pokémon|trainer|gym leader|paldea|kanto)\b/gi,
         /\b(attack on titan|aot|titan shifter|survey corps|marley)\b/gi,
         /\b(jujutsu kaisen|cursed energy|sorcerer)\b/gi,
         /\b(demon slayer|hashira|breathing style)\b/gi,
@@ -2203,10 +2255,10 @@ function renderRelatedCards(related) {
             const hasRareTags = r.breakdown.topTags?.some(t => t.count <= 5);
             const tagClass = hasRareTags ? 'tags rare' : 'tags';
             const topTagNames = r.breakdown.topTags?.slice(0, 2).map(t => t.tag).join(', ') || '';
-            pills.push(`<span class="related-pill ${tagClass}" title="${tagCount} shared tags: ${topTagNames}"><i class="fa-solid fa-tags"></i> ${tagCount}${hasRareTags ? 'â˜…' : ''}</span>`);
+            pills.push(`<span class="related-pill ${tagClass}" title="${tagCount} shared tags: ${topTagNames}"><i class="fa-solid fa-tags"></i> ${tagCount}${hasRareTags ? '★' : ''}</span>`);
         }
-        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator"><i class="fa-solid fa-user-pen"></i> ✓</span>`);
-        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content"><i class="fa-solid fa-file-lines"></i> ✓</span>`);
+        if (r.breakdown.creator > 0) pills.push(`<span class="related-pill creator" title="Same creator"><i class="fa-solid fa-user-pen"></i></span>`);
+        if (r.breakdown.content > 0) pills.push(`<span class="related-pill content" title="Similar content"><i class="fa-solid fa-file-lines"></i></span>`);
         
         return `
             <div class="related-card" onclick="openRelatedCharacter('${escapeHtml(char.avatar)}')" title="${escapeHtml(r.matchReasons.join('\\n'))}">
@@ -2342,7 +2394,7 @@ async function deleteCharacter(char, deleteChats = false) {
         const avatar = char.avatar || '';
         const charName = getCharField(char, 'name') || avatar;
         
-        console.log('[Delete] Starting deletion for:', charName, 'avatar:', avatar);
+        debugLog('[Delete] Starting deletion for:', charName, 'avatar:', avatar);
         
         // Delete character via SillyTavern API
         const response = await apiRequest(ENDPOINTS.CHARACTERS_DELETE, 'POST', {
@@ -2357,7 +2409,7 @@ async function deleteCharacter(char, deleteChats = false) {
             return false;
         }
         
-        console.log('[Delete] API call successful, triggering ST refresh...');
+        debugLog('[Delete] API call successful, triggering ST refresh...');
         
         // CRITICAL: Trigger character refresh in main SillyTavern window
         // This updates ST's in-memory character array and cleans up related data
@@ -2367,14 +2419,14 @@ async function deleteCharacter(char, deleteChats = false) {
                 if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                     const context = window.opener.SillyTavern.getContext();
                     if (context && typeof context.getCharacters === 'function') {
-                        console.log('[Delete] Triggering getCharacters() in main window...');
+                        debugLog('[Delete] Triggering getCharacters() in main window...');
                         await context.getCharacters();
                     }
                 }
                 
                 // Method 2: Try to emit the CHARACTER_DELETED event directly
                 if (window.opener.eventSource && window.opener.event_types) {
-                    console.log('[Delete] Emitting CHARACTER_DELETED event...');
+                    debugLog('[Delete] Emitting CHARACTER_DELETED event...');
                     const charIndex = window.opener.characters?.findIndex(c => c.avatar === avatar);
                     if (charIndex !== undefined && charIndex >= 0) {
                         await window.opener.eventSource.emit(
@@ -2386,7 +2438,7 @@ async function deleteCharacter(char, deleteChats = false) {
                 
                 // Method 3: Call printCharactersDebounced to refresh the UI
                 if (typeof window.opener.printCharactersDebounced === 'function') {
-                    console.log('[Delete] Calling printCharactersDebounced()...');
+                    debugLog('[Delete] Calling printCharactersDebounced()...');
                     window.opener.printCharactersDebounced();
                 }
             }
@@ -2394,7 +2446,7 @@ async function deleteCharacter(char, deleteChats = false) {
             console.warn('[Delete] Could not refresh main window (non-fatal):', e);
         }
         
-        console.log('[Delete] Character deleted successfully');
+        debugLog('[Delete] Character deleted successfully');
         return true;
         
     } catch (error) {
@@ -2735,7 +2787,7 @@ function showSaveConfirmation() {
         <div class="diff-item">
             <div class="diff-item-label">${escapeHtml(change.field)}</div>
             <div class="diff-old">${change.oldHtml || escapeHtml(change.old)}</div>
-            <div class="diff-arrow">â†“</div>
+            <div class="diff-arrow">↓</div>
             <div class="diff-new">${change.newHtml || escapeHtml(change.new)}</div>
         </div>
     `).join('');
@@ -4015,7 +4067,7 @@ function buildExpandedLorebookEntryHtml(entry, idx) {
                 <div class="expanded-lorebook-entry-controls">
                     <label class="expanded-lorebook-toggle ${entry.enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                         <input type="checkbox" class="expanded-lorebook-enabled" ${entry.enabled ? 'checked' : ''} style="display: none;">
-                        ${entry.enabled ? '✓ On' : '✗ Off'}
+                        ${entry.enabled ? '? On' : '? Off'}
                     </label>
                     <button type="button" class="expanded-lorebook-delete" title="Delete entry">
                         <i class="fa-solid fa-trash"></i>
@@ -4092,7 +4144,7 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `expanded-lorebook-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '? On' : '? Off'}`;
         entryEl.classList.toggle('disabled', isEnabled);
     };
     
@@ -4624,10 +4676,17 @@ function performSearch() {
     const filterFavoriteYes = favoriteFilter === 'yes' || favoriteFilter === 'true';
     const filterFavoriteNo = favoriteFilter === 'no' || favoriteFilter === 'false';
     
+    // Check for chub: prefix (chub:yes, chub:no, chub:linked, chub:unlinked)
+    const chubMatch = rawQuery.match(/^chub:(yes|no|true|false|linked|unlinked)$/i);
+    const chubFilter = chubMatch ? chubMatch[1].toLowerCase() : null;
+    const filterChubLinked = chubFilter === 'yes' || chubFilter === 'true' || chubFilter === 'linked';
+    const filterChubUnlinked = chubFilter === 'no' || chubFilter === 'false' || chubFilter === 'unlinked';
+    
     // Clean query: remove special prefixes
     let query = rawQuery.toLowerCase();
     if (creatorFilter) query = '';
     if (favoriteFilter !== null) query = '';
+    if (chubFilter !== null) query = '';
 
     const filtered = allCharacters.filter(c => {
         let matchesSearch = false;
@@ -4643,6 +4702,15 @@ function performSearch() {
             const isFav = isCharacterFavorite(c);
             if (filterFavoriteYes && !isFav) return false;
             if (filterFavoriteNo && isFav) return false;
+            return true;
+        }
+        
+        // Special chub: filter - filter by ChubAI link status
+        if (chubFilter !== null) {
+            const chubInfo = getChubLinkInfo(c);
+            const isLinked = chubInfo && chubInfo.fullPath;
+            if (filterChubLinked && !isLinked) return false;
+            if (filterChubUnlinked && isLinked) return false;
             return true;
         }
         
@@ -4723,7 +4791,7 @@ function performSearch() {
  * Sets the search to "creator:Name" and ensures Author filter is checked
  */
 function filterLocalByCreator(creatorName) {
-    console.log('[Gallery] Filtering local by creator:', creatorName);
+    debugLog('[Gallery] Filtering local by creator:', creatorName);
     
     // Switch to characters view if not already there
     if (currentView !== 'characters') {
@@ -5187,7 +5255,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
             <div class="lorebook-entry-controls">
                 <label class="lorebook-entry-toggle ${enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                     <input type="checkbox" class="lorebook-enabled-checkbox" ${enabled ? 'checked' : ''} style="display: none;">
-                    ${enabled ? '✓ On' : '✗ Off'}
+                    ${enabled ? '? On' : '? Off'}
                 </label>
                 <span class="lorebook-entry-delete" title="Delete entry">
                     <i class="fa-solid fa-trash"></i>
@@ -5251,7 +5319,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
         const isEnabled = enabledCheckbox.checked;
         enabledCheckbox.checked = !isEnabled;
         toggleLabel.className = `lorebook-entry-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '✓ On' : '✗ Off'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '? On' : '? Off'}`;
         wrapper.classList.toggle('disabled', isEnabled);
     });
     
@@ -5393,7 +5461,7 @@ function renderLorebookEntryHtml(entry, index) {
     if (selective) statusItems.push('<span class="lb-stat-sel" title="Selective: triggers only when both primary AND secondary keys match"><i class="fa-solid fa-filter"></i>Selective</span>');
     if (constant) statusItems.push('<span class="lb-stat-const" title="Constant: always injected into context"><i class="fa-solid fa-thumbtack"></i>Constant</span>');
     statusItems.push(`<span class="${enabled ? 'lb-stat-on' : 'lb-stat-off'}" title="${enabled ? 'Entry is active' : 'Entry is disabled'}"><i class="fa-solid fa-${enabled ? 'circle-check' : 'circle-xmark'}"></i>${enabled ? 'Active' : 'Off'}</span>`);
-    const statusRow = statusItems.join('<span style="color:#444">•</span>');
+    const statusRow = statusItems.join('<span style="color:#444">�</span>');
     
     // Build key chips
     const keyChips = keyArr.length 
@@ -5679,7 +5747,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         return addPlaceholder(`<img src="${src}"${altAttr} class="embedded-image" loading="lazy">`);
     });
     
-    // 3b. Convert markdown audio links: [any text](url.mp3) or [🔊](url.mp3)
+    // 3b. Convert markdown audio links: [any text](url.mp3) or [??](url.mp3)
     processedText = processedText.replace(/\[([^\]]*)\]\(((?:https?:\/\/|\/)[^)\s]+\.(?:mp3|wav|ogg|m4a|flac|aac))(?:\s+"[^"]*)?\)/gi, (match, text, src) => {
         const ext = src.split('.').pop().toLowerCase();
         return addPlaceholder(`<audio controls class="audio-player embedded-audio" preload="metadata" title="${escapeHtml(text || 'Audio')}"><source src="${src}" type="audio/${ext}">Your browser does not support audio.</audio>`);
@@ -5854,11 +5922,230 @@ function parseChubUrl(url) {
     }
 }
 
+/**
+ * Try to find the Chub path for a local character
+ * Uses creator and character name to construct potential path
+ * @param {Object} char - The character object
+ * @returns {string|null} The Chub path (author/character-name) or null
+ */
+function findChubPath(char) {
+    if (!char) return null;
+    
+    // Get character name
+    const name = char.name || char.data?.name || '';
+    if (!name) return null;
+    
+    // Get creator
+    const creator = char.creator || char.data?.creator || '';
+    if (!creator) return null;
+    
+    // Construct potential Chub path: creator/character-name
+    // Normalize the character name (Chub uses lowercase with dashes)
+    const normalizedName = name.toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    
+    // Creator username is usually lowercase
+    const normalizedCreator = creator.toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, '')
+        .trim();
+    
+    if (!normalizedCreator || !normalizedName) return null;
+    
+    return `${normalizedCreator}/${normalizedName}`;
+}
+
+/**
+ * Search for a character on Chub by name and creator
+ * Strategy: First get author's characters, then find matching name
+ * @param {string} charName - The character's name
+ * @param {string} creatorName - The creator's name
+ * @returns {Promise<{id: number, fullPath: string, hasGallery: boolean}|null>}
+ */
+async function searchChubForCharacter(charName, creatorName) {
+    if (!charName) return null;
+    
+    try {
+        debugLog('[ChubSearch] Searching for character:', charName, 'by', creatorName);
+        
+        // Strategy 1: If we have a creator, search their characters first
+        if (creatorName) {
+            const authorResult = await searchChubByAuthor(charName, creatorName);
+            if (authorResult) return authorResult;
+        }
+        
+        // Strategy 2: Fall back to general search with character name
+        const generalResult = await searchChubGeneral(charName, creatorName);
+        if (generalResult) return generalResult;
+        
+        debugLog('[ChubSearch] No results found');
+        return null;
+    } catch (error) {
+        console.error('[ChubSearch] Error:', error);
+        return null;
+    }
+}
+
+/**
+ * Search Chub by author's characters and find matching name
+ */
+async function searchChubByAuthor(charName, creatorName) {
+    try {
+        // Search for author's characters (no search term, just username filter)
+        const params = new URLSearchParams({
+            first: '100',  // Get more results to find the character
+            sort: 'download_count',
+            venus: 'true',
+            chub: 'true',
+            username: creatorName.toLowerCase()
+        });
+        
+        debugLog('[ChubSearch] Fetching characters by author:', creatorName);
+        
+        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!response.ok) {
+            debugLog('[ChubSearch] Author search failed:', response.status);
+            return null;
+        }
+        
+        const data = await response.json();
+        const nodes = extractNodes(data);
+        
+        if (nodes.length === 0) {
+            debugLog('[ChubSearch] No characters found for author:', creatorName);
+            return null;
+        }
+        
+        console.log(`[ChubSearch] Found ${nodes.length} characters by ${creatorName}`);
+        
+        // Find matching character name
+        const normalizedSearchName = charName.toLowerCase().trim();
+        
+        for (const node of nodes) {
+            const nodeName = (node.name || '').toLowerCase().trim();
+            
+            // Check for exact or partial name match
+            if (nodeName === normalizedSearchName || 
+                nodeName.includes(normalizedSearchName) ||
+                normalizedSearchName.includes(nodeName)) {
+                debugLog('[ChubSearch] Found match:', node.fullPath, '(name:', node.name, ')');
+                return {
+                    id: node.id,
+                    fullPath: node.fullPath,
+                    hasGallery: node.hasGallery || false
+                };
+            }
+        }
+        
+        // Try matching by slug in fullPath (e.g., "author/naomi" matches "Naomi")
+        const normalizedSlug = charName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        for (const node of nodes) {
+            const nodeSlug = (node.fullPath || '').split('/')[1]?.toLowerCase() || '';
+            if (nodeSlug === normalizedSlug || nodeSlug.includes(normalizedSlug) || normalizedSlug.includes(nodeSlug)) {
+                debugLog('[ChubSearch] Found match by slug:', node.fullPath);
+                return {
+                    id: node.id,
+                    fullPath: node.fullPath,
+                    hasGallery: node.hasGallery || false
+                };
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('[ChubSearch] Author search error:', error);
+        return null;
+    }
+}
+
+/**
+ * General search on Chub with character name
+ */
+async function searchChubGeneral(charName, creatorName) {
+    try {
+        const params = new URLSearchParams({
+            search: charName,
+            first: '24',
+            sort: 'download_count',
+            venus: 'true',
+            chub: 'true'
+        });
+        
+        debugLog('[ChubSearch] General search for:', charName);
+        
+        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+        
+        if (!response.ok) return null;
+        
+        const data = await response.json();
+        const nodes = extractNodes(data);
+        
+        if (nodes.length === 0) return null;
+        
+        const normalizedSearchName = charName.toLowerCase().trim();
+        const normalizedCreator = creatorName?.toLowerCase().trim() || '';
+        
+        for (const node of nodes) {
+            const nodeName = (node.name || '').toLowerCase().trim();
+            const nodeCreator = (node.fullPath || '').split('/')[0]?.toLowerCase() || '';
+            
+            const nameMatch = nodeName === normalizedSearchName || 
+                              nodeName.includes(normalizedSearchName) ||
+                              normalizedSearchName.includes(nodeName);
+            
+            // If we have creator info, require both to match
+            if (normalizedCreator) {
+                const creatorMatch = nodeCreator === normalizedCreator ||
+                                     nodeCreator.includes(normalizedCreator) ||
+                                     normalizedCreator.includes(nodeCreator);
+                if (nameMatch && creatorMatch) {
+                    debugLog('[ChubSearch] Found match:', node.fullPath);
+                    return {
+                        id: node.id,
+                        fullPath: node.fullPath,
+                        hasGallery: node.hasGallery || false
+                    };
+                }
+            } else if (nameMatch) {
+                debugLog('[ChubSearch] Found match (name only):', node.fullPath);
+                return {
+                    id: node.id,
+                    fullPath: node.fullPath,
+                    hasGallery: node.hasGallery || false
+                };
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('[ChubSearch] General search error:', error);
+        return null;
+    }
+}
+
+/**
+ * Extract nodes from various Chub API response formats
+ */
+function extractNodes(data) {
+    if (data.nodes) return data.nodes;
+    if (data.data?.nodes) return data.data.nodes;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data)) return data;
+    return [];
+}
+
 // Fetch character metadata from Chub API
 async function fetchChubMetadata(fullPath) {
     try {
         const url = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
-        console.log('[Chub] Fetching metadata from:', url);
+        debugLog('[Chub] Fetching metadata from:', url);
         
         const response = await fetch(url, {
             headers: { 'Accept': 'application/json' }
@@ -5870,6 +6157,214 @@ async function fetchChubMetadata(fullPath) {
         return data.node || null;
     } catch (error) {
         return null;
+    }
+}
+
+/**
+ * Fetch Chub gallery images for a character
+ * @param {number|string} characterId - The numeric character ID from Chub API (node.id)
+ * @returns {Promise<Array<{uuid: string, imageUrl: string, nsfw: boolean}>>}
+ */
+async function fetchChubGalleryImages(characterId) {
+    try {
+        const url = `${CHUB_GATEWAY_BASE}/api/gallery/project/${characterId}?limit=100&count=false`;
+        debugLog('[ChubGallery] Fetching gallery from:', url);
+        
+        const response = await fetch(url, {
+            headers: getChubHeaders(true)
+        });
+        
+        if (!response.ok) {
+            debugLog('[ChubGallery] Gallery fetch failed:', response.status);
+            return [];
+        }
+        
+        const data = await response.json();
+        
+        if (!data.nodes || !Array.isArray(data.nodes)) {
+            debugLog('[ChubGallery] No nodes in response');
+            return [];
+        }
+        
+        // Map the gallery nodes to our format
+        return data.nodes.map(node => ({
+            uuid: node.uuid,
+            imageUrl: node.primary_image_path,
+            nsfw: node.nsfw_image || false
+        }));
+    } catch (error) {
+        console.error('[ChubGallery] Error fetching gallery:', error);
+        return [];
+    }
+}
+
+/**
+ * Download Chub gallery images for a character
+ * @param {string} characterName - The character's name (used for folder)
+ * @param {number|string} characterId - The numeric character ID from Chub API
+ * @param {Object} options - Optional callbacks for progress/logging
+ * @returns {Promise<{success: number, skipped: number, errors: number}>}
+ */
+async function downloadChubGalleryForCharacter(characterName, characterId, options = {}) {
+    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
+    
+    let successCount = 0;
+    let errorCount = 0;
+    let skippedCount = 0;
+    
+    // Fetch gallery images first
+    const logEntry = onLog ? onLog('Fetching Chub gallery list...', 'pending') : null;
+    const galleryImages = await fetchChubGalleryImages(characterId);
+    
+    if (galleryImages.length === 0) {
+        if (onLogUpdate && logEntry) onLogUpdate(logEntry, 'No gallery images found', 'success');
+        return { success: 0, skipped: 0, errors: 0, aborted: false };
+    }
+    
+    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
+    
+    // Get existing files and their hashes to check for duplicates
+    const existingHashMap = await getExistingFileHashes(characterName);
+    console.log(`[ChubGallery] Found ${existingHashMap.size} existing file hashes for ${characterName}`);
+    
+    for (let i = 0; i < galleryImages.length; i++) {
+        // Check for abort signal
+        if (shouldAbort && shouldAbort()) {
+            return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: true };
+        }
+        
+        const image = galleryImages[i];
+        const displayUrl = image.imageUrl.length > 60 ? image.imageUrl.substring(0, 60) + '...' : image.imageUrl;
+        const imgLogEntry = onLog ? onLog(`Checking ${displayUrl}...`, 'pending') : null;
+        
+        // Download to memory first to check hash
+        const downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
+        
+        if (!downloadResult.success) {
+            errorCount++;
+            if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
+            if (onProgress) onProgress(i + 1, galleryImages.length);
+            continue;
+        }
+        
+        // Calculate hash of downloaded content
+        const contentHash = await calculateHash(downloadResult.arrayBuffer);
+        
+        // Check if this file already exists
+        const existingFile = existingHashMap.get(contentHash);
+        if (existingFile) {
+            skippedCount++;
+            if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
+            console.log(`[ChubGallery] Duplicate found: ${image.imageUrl} -> ${existingFile.fileName}`);
+            if (onProgress) onProgress(i + 1, galleryImages.length);
+            continue;
+        }
+        
+        // Not a duplicate, save the file with chubgallery naming convention
+        if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Saving ${displayUrl}...`, 'pending');
+        const result = await saveChubGalleryImage(downloadResult, image, characterName, contentHash);
+        
+        if (result.success) {
+            successCount++;
+            // Add to hash map to avoid downloading same file twice in this session
+            existingHashMap.set(contentHash, { fileName: result.filename, localPath: result.localPath });
+            if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Saved: ${result.filename}`, 'success');
+        } else {
+            errorCount++;
+            if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Failed: ${displayUrl} - ${result.error}`, 'error');
+        }
+        
+        if (onProgress) onProgress(i + 1, galleryImages.length);
+    }
+    
+    return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: false };
+}
+
+/**
+ * Save a Chub gallery image with the proper naming convention
+ * Naming: chubgallery_{hash}_{originalFilename}.{ext}
+ */
+async function saveChubGalleryImage(downloadResult, imageInfo, characterName, contentHash) {
+    try {
+        const { arrayBuffer, contentType } = downloadResult;
+        const blob = new Blob([arrayBuffer], { type: contentType });
+        
+        // Determine file extension
+        let extension = 'webp'; // Default for Chub gallery
+        if (contentType) {
+            const mimeToExt = {
+                'image/png': 'png',
+                'image/jpeg': 'jpg',
+                'image/webp': 'webp',
+                'image/gif': 'gif',
+                'image/bmp': 'bmp',
+                'image/svg+xml': 'svg'
+            };
+            extension = mimeToExt[contentType] || extension;
+        } else {
+            const urlMatch = imageInfo.imageUrl.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+            if (urlMatch) {
+                extension = urlMatch[1].toLowerCase();
+            }
+        }
+        
+        // Extract original filename from URL
+        const urlObj = new URL(imageInfo.imageUrl);
+        const pathParts = urlObj.pathname.split('/');
+        const originalFilename = pathParts[pathParts.length - 1] || 'gallery_image';
+        const originalNameWithoutExt = originalFilename.includes('.') 
+            ? originalFilename.substring(0, originalFilename.lastIndexOf('.'))
+            : originalFilename;
+        
+        // Sanitize filename parts
+        const sanitizedName = originalNameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+        const shortHash = (contentHash && contentHash.length >= 8) ? contentHash.substring(0, 8) : 'nohash00'; // First 8 chars of hash
+        
+        // Generate local filename: chubgallery_{hash}_{originalFilename}
+        const filenameBase = `chubgallery_${shortHash}_${sanitizedName}`;
+        
+        // Convert blob to base64
+        const base64Data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const result = reader.result;
+                const base64 = result.includes(',') ? result.split(',')[1] : result;
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+        
+        // Save file
+        const saveResponse = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+            image: base64Data,
+            filename: filenameBase,
+            format: extension,
+            ch_name: characterName
+        });
+        
+        if (!saveResponse.ok) {
+            const errorText = await saveResponse.text();
+            throw new Error(`Upload failed: ${errorText}`);
+        }
+        
+        const saveResult = await saveResponse.json();
+        
+        if (!saveResult || !saveResult.path) {
+            throw new Error('No path returned from upload');
+        }
+        
+        return {
+            success: true,
+            localPath: saveResult.path,
+            filename: `${filenameBase}.${extension}`
+        };
+        
+    } catch (error) {
+        return {
+            success: false,
+            error: error.message || String(error)
+        };
     }
 }
 
@@ -6071,7 +6566,17 @@ async function importChubCharacter(fullPath) {
         // Build the character card JSON from API data
         const characterCard = buildCharacterCardFromChub(metadata);
         
-        console.log('[Chub Import] Character card built:', {
+        // Add ChubAI link metadata to extensions (Option A: auto on import)
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        characterCard.data.extensions.chub = {
+            id: metadata.id || null,
+            fullPath: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        debugLog('[Chub Import] Character card built:', {
             name: characterCard.data.name,
             first_mes_length: characterCard.data.first_mes?.length,
             alternate_greetings_count: characterCard.data.alternate_greetings?.length,
@@ -6097,7 +6602,7 @@ async function importChubCharacter(fullPath) {
         // Embed character data into PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
-        console.log('[Chub Import] PNG embedded, size:', embeddedPng.length, 'bytes');
+        debugLog('[Chub Import] PNG embedded, size:', embeddedPng.length, 'bytes');
         
         // Create a Blob and File from the embedded PNG
         const blob = new Blob([embeddedPng], { type: 'image/png' });
@@ -6147,6 +6652,7 @@ async function importChubCharacter(fullPath) {
             success: true, 
             fileName: result.file_name || fileName,
             hasGallery: hasGallery,
+            chubId: metadata.id || null,
             characterName: characterName,
             fullPath: fullPath,
             avatarUrl: avatarUrl,
@@ -6163,20 +6669,29 @@ async function importChubCharacter(fullPath) {
 const LOG_ICONS = {
     success: 'fa-check-circle',
     error: 'fa-times-circle',
-    pending: 'fa-spinner fa-spin'
+    pending: 'fa-spinner fa-spin',
+    info: 'fa-info-circle',
+    divider: 'fa-minus'
 };
 
 /**
  * Add an entry to a log container
  * @param {HTMLElement} container - The log container element
  * @param {string} message - The message to display
- * @param {string} status - Status: 'success', 'error', or 'pending'
+ * @param {string} status - Status: 'success', 'error', 'pending', 'info', or 'divider'
  * @returns {HTMLElement} The created log entry element
  */
 function addLogEntry(container, message, status = 'pending') {
     const entry = document.createElement('div');
-    entry.className = `import-log-entry ${status}`;
-    entry.innerHTML = `<i class="fa-solid ${LOG_ICONS[status]}"></i>${escapeHtml(message)}`;
+    
+    // Handle divider specially
+    if (status === 'divider') {
+        entry.className = 'import-log-divider';
+        entry.innerHTML = '<hr>';
+    } else {
+        entry.className = `import-log-entry ${status}`;
+        entry.innerHTML = `<i class="fa-solid ${LOG_ICONS[status] || LOG_ICONS.pending}"></i>${escapeHtml(message)}`;
+    }
     container.appendChild(entry);
     container.scrollTop = container.scrollHeight;
     return entry;
@@ -6226,6 +6741,10 @@ startImportBtn?.addEventListener('click', async () => {
         return;
     }
     
+    // Get auto-download options
+    const autoDownloadGallery = document.getElementById('importAutoDownloadGallery')?.checked ?? false;
+    const autoDownloadMedia = document.getElementById('importAutoDownloadMedia')?.checked ?? false;
+    
     // Start importing
     isImporting = true;
     startImportBtn.disabled = true;
@@ -6260,6 +6779,7 @@ startImportBtn?.addEventListener('click', async () => {
                 charactersWithGallery.push({
                     name: result.characterName,
                     fullPath: result.fullPath,
+                    chubId: result.chubId,
                     url: `https://chub.ai/characters/${result.fullPath}`
                 });
             }
@@ -6271,6 +6791,32 @@ startImportBtn?.addEventListener('click', async () => {
                     avatar: result.avatarUrl,
                     mediaUrls: result.embeddedMediaUrls
                 });
+            }
+            
+            // Auto-download embedded media FIRST if enabled (takes precedence for media localization)
+            if (autoDownloadMedia && result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
+                const mediaLogEntry = addImportLogEntry(`Downloading embedded media for ${result.characterName}...`, 'pending');
+                const mediaResult = await downloadEmbeddedMediaForCharacter(result.characterName, result.embeddedMediaUrls, {});
+                if (mediaResult.success > 0) {
+                    updateLogEntry(mediaLogEntry, `Downloaded ${mediaResult.success} media file(s) for ${result.characterName}`, 'success');
+                } else if (mediaResult.skipped > 0) {
+                    updateLogEntry(mediaLogEntry, `Media files already exist for ${result.characterName}`, 'success');
+                } else {
+                    updateLogEntry(mediaLogEntry, `No media files found for ${result.characterName}`, 'success');
+                }
+            }
+            
+            // Auto-download gallery SECOND if enabled (will skip duplicates already downloaded as embedded media)
+            if (autoDownloadGallery && result.hasGallery && result.chubId) {
+                const galleryLogEntry = addImportLogEntry(`Downloading gallery for ${result.characterName}...`, 'pending');
+                const galleryResult = await downloadChubGalleryForCharacter(result.characterName, result.chubId, {});
+                if (galleryResult.success > 0) {
+                    updateLogEntry(galleryLogEntry, `Downloaded ${galleryResult.success} gallery image(s) for ${result.characterName}`, 'success');
+                } else if (galleryResult.skipped > 0) {
+                    updateLogEntry(galleryLogEntry, `Gallery images already exist for ${result.characterName}`, 'success');
+                } else {
+                    updateLogEntry(galleryLogEntry, `No gallery images found for ${result.characterName}`, 'success');
+                }
             }
         } else {
             errorCount++;
@@ -6311,13 +6857,14 @@ startImportBtn?.addEventListener('click', async () => {
         fetchCharacters(true);
         
         // Show import summary modal if there's anything to report (and setting enabled)
-        const hasGalleryChars = charactersWithGallery.length > 0;
-        const hasMediaChars = charactersWithEmbeddedMedia.length > 0;
+        // Don't show if auto-download was enabled (user already handled it)
+        const hasGalleryChars = charactersWithGallery.length > 0 && !autoDownloadGallery;
+        const hasMediaChars = charactersWithEmbeddedMedia.length > 0 && !autoDownloadMedia;
         
         if ((hasGalleryChars || hasMediaChars) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
-                galleryCharacters: charactersWithGallery,
-                mediaCharacters: charactersWithEmbeddedMedia
+                galleryCharacters: hasGalleryChars ? charactersWithGallery : [],
+                mediaCharacters: hasMediaChars ? charactersWithEmbeddedMedia : []
             });
         }
     } else {
@@ -6331,41 +6878,55 @@ startImportBtn?.addEventListener('click', async () => {
 
 // Store pending media characters for download
 let pendingMediaCharacters = [];
+// Store pending gallery characters for download
+let pendingGalleryCharacters = [];
 
 /**
  * Show import summary modal with 2 rows: gallery and/or embedded media
  * @param {Object} options
- * @param {Array<{name: string, fullPath: string, url: string}>} options.galleryCharacters - Characters with ChubAI galleries
+ * @param {Array<{name: string, fullPath: string, url: string, chubId: number}>} options.galleryCharacters - Characters with ChubAI galleries
  * @param {Array<{name: string, avatar: string, mediaUrls: string[]}>} options.mediaCharacters - Characters with embedded media
  */
 function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }) {
     const modal = document.getElementById('importSummaryModal');
     const galleryRow = document.getElementById('importSummaryGalleryRow');
-    const galleryLink = document.getElementById('importSummaryGalleryLink');
+    const galleryDesc = document.getElementById('importSummaryGalleryDesc');
+    const galleryDownloadBtn = document.getElementById('importSummaryGalleryDownloadBtn');
     const mediaRow = document.getElementById('importSummaryMediaRow');
     const mediaDesc = document.getElementById('importSummaryMediaDesc');
     const downloadBtn = document.getElementById('importSummaryDownloadBtn');
+    const downloadAllBtn = document.getElementById('importSummaryDownloadAllBtn');
     
     if (!modal) return;
     
     // Store media characters for download
     pendingMediaCharacters = mediaCharacters;
+    // Store gallery characters for download
+    pendingGalleryCharacters = galleryCharacters;
     
     // Reset rows
     galleryRow?.classList.add('hidden');
     mediaRow?.classList.add('hidden');
     
     // Show gallery row if there are gallery characters
-    if (galleryCharacters.length > 0 && galleryRow && galleryLink) {
-        // Use first character's URL, or if multiple, link to chub.ai
+    if (galleryCharacters.length > 0 && galleryRow) {
         if (galleryCharacters.length === 1) {
-            const char = galleryCharacters[0];
-            const charFullPath = char.fullPath || '';
-            galleryLink.href = char.url || `https://chub.ai/characters/${charFullPath}`;
+            if (galleryDesc) {
+                galleryDesc.textContent = 'Additional artwork available on ChubAI';
+            }
         } else {
-            // Multiple characters - just link to chub.ai
-            galleryLink.href = 'https://chub.ai';
+            if (galleryDesc) {
+                galleryDesc.textContent = `${galleryCharacters.length} characters have gallery images`;
+            }
         }
+        
+        // Reset gallery download button
+        if (galleryDownloadBtn) {
+            galleryDownloadBtn.disabled = false;
+            galleryDownloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
+            galleryDownloadBtn.classList.remove('success');
+        }
+        
         galleryRow.classList.remove('hidden');
     }
     
@@ -6389,6 +6950,13 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
         }
     }
     
+    // Reset Download All button
+    if (downloadAllBtn) {
+        downloadAllBtn.disabled = false;
+        downloadAllBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download All';
+        downloadAllBtn.classList.remove('success');
+    }
+    
     modal.classList.remove('hidden');
 }
 
@@ -6396,11 +6964,164 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
 on('closeImportSummaryModal', 'click', () => {
     hideModal('importSummaryModal');
     pendingMediaCharacters = [];
+    pendingGalleryCharacters = [];
 });
 
-on('closeImportSummaryBtn', 'click', () => {
-    hideModal('importSummaryModal');
+// Download All button - downloads both gallery and embedded media
+on('importSummaryDownloadAllBtn', 'click', async () => {
+    const btn = document.getElementById('importSummaryDownloadAllBtn');
+    const galleryBtn = document.getElementById('importSummaryGalleryDownloadBtn');
+    const mediaBtn = document.getElementById('importSummaryDownloadBtn');
+    
+    // If already done, close the modal
+    if (btn.classList.contains('success')) {
+        hideModal('importSummaryModal');
+        pendingMediaCharacters = [];
+        pendingGalleryCharacters = [];
+        return;
+    }
+    
+    const hasGallery = pendingGalleryCharacters.length > 0;
+    const hasMedia = pendingMediaCharacters.length > 0;
+    
+    if (!hasGallery && !hasMedia) {
+        showToast('Nothing to download', 'info');
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
+    
+    let totalGallerySuccess = 0;
+    let totalMediaSuccess = 0;
+    
+    // Download embedded media FIRST (takes precedence for media localization matching)
+    if (hasMedia) {
+        if (mediaBtn) {
+            mediaBtn.disabled = true;
+            mediaBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        }
+        
+        for (const charInfo of pendingMediaCharacters) {
+            const result = await downloadEmbeddedMediaForCharacter(charInfo.name, charInfo.mediaUrls || [], {});
+            totalMediaSuccess += result.success;
+        }
+        
+        if (mediaBtn) {
+            mediaBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+            mediaBtn.classList.add('success');
+        }
+    }
+    
+    // Download gallery images SECOND (will skip duplicates already downloaded as embedded media)
+    if (hasGallery) {
+        if (galleryBtn) {
+            galleryBtn.disabled = true;
+            galleryBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        }
+        
+        for (const charInfo of pendingGalleryCharacters) {
+            let chubId = charInfo.chubId;
+            if (!chubId && charInfo.fullPath) {
+                const metadata = await fetchChubMetadata(charInfo.fullPath);
+                if (metadata && metadata.id) {
+                    chubId = metadata.id;
+                }
+            }
+            if (chubId) {
+                const result = await downloadChubGalleryForCharacter(charInfo.name, chubId, {});
+                totalGallerySuccess += result.success;
+            }
+        }
+        
+        if (galleryBtn) {
+            galleryBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+            galleryBtn.classList.add('success');
+        }
+    }
+    
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
+    btn.classList.add('success');
+    
+    const totalDownloaded = totalGallerySuccess + totalMediaSuccess;
+    if (totalDownloaded > 0) {
+        showToast(`Downloaded ${totalDownloaded} file${totalDownloaded > 1 ? 's' : ''}`, 'success');
+        fetchCharacters(true);
+    } else {
+        showToast('All files already exist', 'info');
+    }
+    
+    pendingGalleryCharacters = [];
     pendingMediaCharacters = [];
+});
+
+// Download Chub gallery button
+on('importSummaryGalleryDownloadBtn', 'click', async () => {
+    const btn = document.getElementById('importSummaryGalleryDownloadBtn');
+    
+    if (pendingGalleryCharacters.length === 0) {
+        showToast('No gallery characters to download', 'info');
+        return;
+    }
+    
+    // Disable and show loading
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching...';
+    
+    let totalSuccess = 0;
+    let totalSkipped = 0;
+    let totalErrors = 0;
+    let processedChars = 0;
+    
+    for (const charInfo of pendingGalleryCharacters) {
+        const characterName = charInfo.name;
+        let chubId = charInfo.chubId;
+        
+        // If we don't have chubId, try to fetch it
+        if (!chubId && charInfo.fullPath) {
+            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${++processedChars}/${pendingGalleryCharacters.length}`;
+            const metadata = await fetchChubMetadata(charInfo.fullPath);
+            if (metadata && metadata.id) {
+                chubId = metadata.id;
+            }
+        }
+        
+        if (!chubId) {
+            console.log(`[GalleryDownload] Could not find chubId for ${characterName}`);
+            totalErrors++;
+            continue;
+        }
+        
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${characterName}...`;
+        
+        const result = await downloadChubGalleryForCharacter(characterName, chubId, {
+            onProgress: (current, total) => {
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${current}/${total}`;
+            }
+        });
+        
+        totalSuccess += result.success;
+        totalSkipped += result.skipped;
+        totalErrors += result.errors;
+    }
+    
+    // Show result
+    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+    btn.classList.add('success');
+    
+    if (totalSuccess > 0) {
+        showToast(`Downloaded ${totalSuccess} gallery image${totalSuccess > 1 ? 's' : ''}`, 'success');
+        fetchCharacters(true);
+    } else if (totalSkipped > 0) {
+        showToast('All gallery images already exist', 'info');
+    } else if (totalErrors > 0) {
+        showToast('Failed to download gallery images', 'error');
+    } else {
+        showToast('No gallery images to download', 'info');
+    }
+    
+    pendingGalleryCharacters = [];
 });
 
 // Download embedded media button
@@ -6440,7 +7161,7 @@ on('importSummaryDownloadBtn', 'click', async () => {
     }
     
     // Show result
-    btn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
+    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
     btn.classList.add('success');
     
     if (totalSuccess > 0) {
@@ -6453,6 +7174,1345 @@ on('importSummaryDownloadBtn', 'click', async () => {
     }
     
     pendingMediaCharacters = [];
+});
+
+// ==============================================
+// ChubAI Link Feature
+// ==============================================
+
+/**
+ * Get ChubAI link info from character
+ * @param {Object} char - Character object
+ * @returns {Object|null} - { id, fullPath } or null if not linked
+ */
+function getChubLinkInfo(char) {
+    if (!char) return null;
+    const extensions = char.data?.extensions || char.extensions;
+    return extensions?.chub || null;
+}
+
+/**
+ * Set ChubAI link info on character
+ * @param {Object} char - Character object
+ * @param {Object|null} chubInfo - { id, fullPath, linkedAt } or null to unlink
+ */
+function setChubLinkInfo(char, chubInfo) {
+    if (!char) return;
+    
+    // Ensure data and extensions exist
+    if (!char.data) char.data = {};
+    if (!char.data.extensions) char.data.extensions = {};
+    
+    if (chubInfo) {
+        char.data.extensions.chub = {
+            id: chubInfo.id,
+            fullPath: chubInfo.fullPath,
+            linkedAt: chubInfo.linkedAt || new Date().toISOString()
+        };
+    } else {
+        delete char.data.extensions.chub;
+    }
+}
+
+/**
+ * Update the ChubAI link indicator in the modal
+ * @param {Object} char - Character object
+ */
+function updateChubLinkIndicator(char) {
+    const indicator = document.getElementById('chubLinkIndicator');
+    if (!indicator) return;
+    
+    const chubInfo = getChubLinkInfo(char);
+    const textSpan = indicator.querySelector('.chub-link-text');
+    
+    if (chubInfo && chubInfo.fullPath) {
+        indicator.classList.add('linked');
+        indicator.title = `Linked to ChubAI: ${chubInfo.fullPath}`;
+        if (textSpan) {
+            textSpan.innerHTML = 'ChubAI <i class="fa-solid fa-check"></i>';
+        }
+    } else {
+        indicator.classList.remove('linked');
+        indicator.title = 'Click to link to ChubAI';
+        if (textSpan) {
+            textSpan.textContent = 'ChubAI';
+        }
+    }
+}
+
+/**
+ * Open the ChubAI link modal
+ */
+function openChubLinkModal() {
+    if (!activeChar) return;
+    
+    const modal = document.getElementById('chubLinkModal');
+    const linkedState = document.getElementById('chubLinkLinkedState');
+    const unlinkedState = document.getElementById('chubLinkUnlinkedState');
+    const titleEl = document.getElementById('chubLinkModalTitle');
+    const searchResults = document.getElementById('chubLinkSearchResults');
+    
+    // Populate sidebar with character info
+    const avatarEl = document.getElementById('chubLinkCharAvatar');
+    const charNameEl = document.getElementById('chubLinkCharName');
+    const charName = activeChar.name || activeChar.data?.name || 'Character';
+    
+    if (avatarEl) {
+        avatarEl.src = getCharacterAvatarUrl(activeChar.avatar);
+        avatarEl.onerror = () => { avatarEl.src = '/img/ai4.png'; };
+    }
+    if (charNameEl) {
+        charNameEl.textContent = charName;
+        charNameEl.title = charName;
+    }
+    
+    // Status icon on avatar
+    const statusIcon = document.getElementById('chubLinkStatusIcon');
+    
+    const chubInfo = getChubLinkInfo(activeChar);
+    
+    if (chubInfo && chubInfo.fullPath) {
+        // Show linked state
+        linkedState.classList.remove('hidden');
+        unlinkedState.classList.add('hidden');
+        titleEl.textContent = 'ChubAI Link';
+        
+        // Update status icon
+        if (statusIcon) {
+            statusIcon.className = 'chub-link-status-icon linked';
+            statusIcon.innerHTML = '<i class="fa-solid fa-link"></i>';
+        }
+        
+        // Update linked path
+        const pathEl = document.getElementById('chubLinkCurrentPath');
+        if (pathEl) {
+            pathEl.href = `https://chub.ai/characters/${chubInfo.fullPath}`;
+            const pathSpan = pathEl.querySelector('span');
+            if (pathSpan) pathSpan.textContent = chubInfo.fullPath;
+        }
+        
+        // Populate stats from stored chub data if available
+        const starsEl = document.getElementById('chubLinkStars');
+        const favoritesEl = document.getElementById('chubLinkFavorites');
+        const tokensEl = document.getElementById('chubLinkTokens');
+        
+        // Try to get cached info from character extensions
+        // Note: ChubAI uses starCount for downloads, n_favorites for actual favorites
+        const chubData = activeChar.data?.extensions?.chub || {};
+        if (starsEl) starsEl.textContent = chubData.downloadCount ? formatNumber(chubData.downloadCount) : '-';
+        if (favoritesEl) favoritesEl.textContent = chubData.favoritesCount ? formatNumber(chubData.favoritesCount) : '-';
+        if (tokensEl) tokensEl.textContent = chubData.tokenCount ? formatNumber(chubData.tokenCount) : '-';
+        
+        // Fetch fresh stats from ChubAI (async, updates UI when ready)
+        fetchChubLinkStats(chubInfo.fullPath);
+        
+    } else {
+        // Show unlinked state
+        linkedState.classList.add('hidden');
+        unlinkedState.classList.remove('hidden');
+        titleEl.textContent = 'Link to ChubAI';
+        
+        // Update status icon
+        if (statusIcon) {
+            statusIcon.className = 'chub-link-status-icon unlinked';
+            statusIcon.innerHTML = '<i class="fa-solid fa-link-slash"></i>';
+        }
+        
+        // Pre-fill search with character info
+        const nameInput = document.getElementById('chubLinkSearchName');
+        const creatorInput = document.getElementById('chubLinkSearchCreator');
+        const urlInput = document.getElementById('chubLinkUrlInput');
+        
+        const creator = activeChar.creator || activeChar.data?.creator || '';
+        
+        if (nameInput) nameInput.value = charName;
+        if (creatorInput) creatorInput.value = creator;
+        if (urlInput) urlInput.value = '';
+        if (searchResults) searchResults.innerHTML = '';
+    }
+    
+    modal.classList.remove('hidden');
+}
+
+/**
+ * Fetch fresh stats for linked ChubAI character
+ */
+async function fetchChubLinkStats(fullPath) {
+    try {
+        const metadata = await fetchChubMetadata(fullPath);
+        if (!metadata) return;
+        
+        const starsEl = document.getElementById('chubLinkStars');
+        const favoritesEl = document.getElementById('chubLinkFavorites');
+        const tokensEl = document.getElementById('chubLinkTokens');
+        
+        // ChubAI's weird naming: starCount is actually downloads, n_favorites is favorites
+        const downloadCount = metadata.starCount || 0;
+        const favoritesCount = metadata.n_favorites || metadata.nFavorites || 0;
+        const tokenCount = metadata.nTokens || metadata.n_tokens || 0;
+        
+        if (starsEl) starsEl.textContent = formatNumber(downloadCount);
+        if (favoritesEl) favoritesEl.textContent = formatNumber(favoritesCount);
+        if (tokensEl) tokensEl.textContent = formatNumber(tokenCount);
+        
+        // Also update the stored data on the character
+        if (activeChar && activeChar.data?.extensions?.chub) {
+            activeChar.data.extensions.chub.downloadCount = downloadCount;
+            activeChar.data.extensions.chub.favoritesCount = favoritesCount;
+            activeChar.data.extensions.chub.tokenCount = tokenCount;
+        }
+    } catch (e) {
+        debugLog('[ChubLink] Could not fetch stats:', e.message);
+    }
+}
+
+/**
+ * Search ChubAI for characters matching name/creator
+ */
+async function searchChubForLink(name, creator) {
+    const resultsContainer = document.getElementById('chubLinkSearchResults');
+    if (!resultsContainer) return;
+    
+    if (!name.trim()) {
+        resultsContainer.innerHTML = '<div class="chub-link-search-empty">Enter a character name to search</div>';
+        return;
+    }
+    
+    resultsContainer.innerHTML = '<div class="chub-link-search-loading"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
+    
+    try {
+        // Build search params (same format as other Chub searches)
+        // Note: Don't use username filter - it requires exact match and often fails
+        // Users can search by name and pick from results
+        const searchTerm = creator.trim() ? `${name.trim()} ${creator.trim()}` : name.trim();
+        
+        const params = new URLSearchParams({
+            search: searchTerm,
+            first: '24',
+            sort: 'download_count',
+            nsfw: 'true',
+            nsfl: 'true',
+            include_forks: 'true',
+            min_tokens: '50'
+        });
+        
+        // Build headers (same as Chub browser view)
+        const headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        };
+        
+        // Add Authorization if token available
+        if (chubToken) {
+            headers['Authorization'] = `Bearer ${chubToken}`;
+        }
+        
+        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+            method: 'GET',
+            headers
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Search failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const nodes = extractNodes(data);
+        
+        if (nodes.length === 0) {
+            resultsContainer.innerHTML = '<div class="chub-link-search-empty"><i class="fa-solid fa-search"></i> No characters found</div>';
+            return;
+        }
+        
+        // Render results
+        resultsContainer.innerHTML = nodes.map(node => {
+            const avatarUrl = node.avatar_url || `${CHUB_AVATAR_BASE}${node.fullPath}/avatar`;
+            const rating = node.rating ? node.rating.toFixed(1) : 'N/A';
+            const starCount = node.starCount || 0;
+            
+            return `
+                <div class="chub-link-search-result" data-fullpath="${escapeHtml(node.fullPath)}" data-id="${node.id || ''}">
+                    <img class="chub-link-search-result-avatar" src="${avatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                    <div class="chub-link-search-result-info">
+                        <div class="chub-link-search-result-name">${escapeHtml(node.name || node.fullPath.split('/').pop())}</div>
+                        <div class="chub-link-search-result-creator">by ${escapeHtml(node.fullPath.split('/')[0])}</div>
+                        <div class="chub-link-search-result-stats">
+                            <span><i class="fa-solid fa-star"></i> ${rating}</span>
+                            <span><i class="fa-solid fa-heart"></i> ${starCount}</span>
+                        </div>
+                    </div>
+                    <button class="action-btn primary small chub-link-search-result-btn" onclick="linkToChubResult(this)">
+                        <i class="fa-solid fa-link"></i> Link
+                    </button>
+                </div>
+            `;
+        }).join('');
+        
+    } catch (error) {
+        console.error('[ChubLink] Search error:', error);
+        resultsContainer.innerHTML = `<div class="chub-link-search-empty"><i class="fa-solid fa-exclamation-triangle"></i> Search failed: ${error.message}</div>`;
+    }
+}
+
+/**
+ * Link to a character from search results
+ */
+async function linkToChubResult(btn) {
+    const resultEl = btn.closest('.chub-link-search-result');
+    if (!resultEl || !activeChar) return;
+    
+    const fullPath = resultEl.dataset.fullpath;
+    let chubId = resultEl.dataset.id;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    
+    try {
+        // If we don't have the ID, fetch metadata to get it
+        if (!chubId) {
+            const metadata = await fetchChubMetadata(fullPath);
+            if (metadata && metadata.id) {
+                chubId = metadata.id;
+            }
+        }
+        
+        // Save link to character
+        await saveChubLink(activeChar, { id: chubId, fullPath });
+        
+        showToast(`Linked to ${fullPath}`, 'success');
+        
+        // Update indicator and close modal
+        updateChubLinkIndicator(activeChar);
+        hideModal('chubLinkModal');
+        
+    } catch (error) {
+        console.error('[ChubLink] Link error:', error);
+        showToast('Failed to save link', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-link"></i> Link';
+    }
+}
+
+// Make it globally accessible for onclick handlers
+window.linkToChubResult = linkToChubResult;
+
+/**
+ * Link to ChubAI using a pasted URL
+ */
+async function linkToChubUrl(url) {
+    if (!activeChar) return;
+    
+    const btn = document.getElementById('chubLinkUrlBtn');
+    
+    // Parse URL to get fullPath
+    const match = url.match(/chub\.ai\/characters\/([^\/]+\/[^\/\?#]+)/i) ||
+                  url.match(/characterhub\.org\/characters\/([^\/]+\/[^\/\?#]+)/i);
+    
+    if (!match) {
+        showToast('Invalid ChubAI URL', 'error');
+        return;
+    }
+    
+    const fullPath = match[1];
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+    
+    try {
+        // Fetch metadata to get ID
+        const metadata = await fetchChubMetadata(fullPath);
+        if (!metadata) {
+            throw new Error('Could not fetch character info');
+        }
+        
+        // Save link
+        await saveChubLink(activeChar, { id: metadata.id, fullPath });
+        
+        showToast(`Linked to ${fullPath}`, 'success');
+        
+        // Update indicator and close modal
+        updateChubLinkIndicator(activeChar);
+        hideModal('chubLinkModal');
+        
+    } catch (error) {
+        console.error('[ChubLink] URL link error:', error);
+        showToast(`Failed to link: ${error.message}`, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-link"></i> Link';
+        }
+    }
+}
+
+/**
+ * Save ChubAI link to character card
+ */
+async function saveChubLink(char, chubInfo) {
+    if (!char || !char.avatar) throw new Error('No character or avatar');
+    
+    debugLog('[ChubLink] saveChubLink called for:', char.name || char.avatar, 'with:', chubInfo);
+    
+    // Update local object
+    setChubLinkInfo(char, chubInfo);
+    
+    // Also update in allCharacters array if it's a different reference
+    const charInArray = allCharacters.find(c => c.avatar === char.avatar);
+    if (charInArray && charInArray !== char) {
+        setChubLinkInfo(charInArray, chubInfo);
+    }
+    
+    // Save to server via merge-attributes API (same as favorites)
+    const response = await apiRequest('/characters/merge-attributes', 'POST', {
+        avatar: char.avatar,
+        data: {
+            extensions: {
+                chub: chubInfo
+            }
+        }
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error('[ChubLink] Save failed:', response.status, errorText);
+        throw new Error(`Failed to save character: ${response.status}`);
+    }
+    
+    // Also update in the main window's character list if available
+    try {
+        const context = getSTContext();
+        if (context && context.characters) {
+            const mainChar = context.characters.find(c => c.avatar === char.avatar);
+            if (mainChar) {
+                setChubLinkInfo(mainChar, chubInfo);
+            }
+        }
+    } catch (e) {
+        console.warn('[ChubLink] Could not update main window:', e);
+    }
+    
+    console.log(`[ChubLink] Saved link for ${char.name || char.avatar}: ${chubInfo?.fullPath || 'unlinked'}`);
+}
+
+/**
+ * Unlink character from ChubAI
+ */
+async function unlinkFromChub() {
+    if (!activeChar) return;
+    
+    const btn = document.getElementById('chubLinkUnlinkBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+    
+    try {
+        await saveChubLink(activeChar, null);
+        
+        showToast('Unlinked from ChubAI', 'info');
+        
+        // Update indicator and switch to unlinked state
+        updateChubLinkIndicator(activeChar);
+        openChubLinkModal(); // Re-open to show unlinked state
+        
+    } catch (error) {
+        console.error('[ChubLink] Unlink error:', error);
+        showToast('Failed to unlink', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-unlink"></i> Unlink';
+        }
+    }
+}
+
+/**
+ * Open character on ChubAI (external link)
+ */
+function openOnChubExternal() {
+    if (!activeChar) return;
+    
+    const chubInfo = getChubLinkInfo(activeChar);
+    if (!chubInfo || !chubInfo.fullPath) {
+        showToast('Not linked to ChubAI', 'error');
+        return;
+    }
+    
+    window.open(`https://chub.ai/characters/${chubInfo.fullPath}`, '_blank');
+}
+
+/**
+ * View character in ChubAI browser within the gallery
+ */
+async function viewInChubGallery() {
+    if (!activeChar) {
+        debugLog('[ChubLink] viewInChubGallery: no activeChar');
+        return;
+    }
+    
+    const chubInfo = getChubLinkInfo(activeChar);
+    if (!chubInfo || !chubInfo.fullPath) {
+        showToast('Not linked to ChubAI', 'error');
+        return;
+    }
+    
+    debugLog('[ChubLink] viewInChubGallery: fetching character from Chub', chubInfo.fullPath);
+    
+    // Close the link modal and character modal
+    hideModal('chubLinkModal');
+    hideModal('charModal');
+    
+    // Switch to ChubAI view (data-view="chub")
+    document.querySelector('[data-view="chub"]')?.click();
+    
+    // Show loading toast
+    showToast('Loading character from ChubAI...', 'info');
+    
+    // Fetch the character from ChubAI and open preview
+    setTimeout(async () => {
+        try {
+            // Fetch character metadata
+            const metadata = await fetchChubMetadata(chubInfo.fullPath);
+            
+            if (!metadata) {
+                showToast('Character not found on ChubAI', 'error');
+                return;
+            }
+            
+            // Build a char object compatible with openChubCharPreview
+            // Include all fields from the metadata response
+            const chubChar = {
+                id: metadata.id,
+                fullPath: chubInfo.fullPath,
+                name: metadata.name || metadata.definition?.name,
+                description: metadata.description,
+                tagline: metadata.tagline,
+                avatar_url: `https://avatars.charhub.io/avatars/${chubInfo.fullPath}/avatar.webp`,
+                rating: metadata.rating,
+                starCount: metadata.starCount || metadata.star_count,
+                nDownloads: metadata.nDownloads || metadata.n_downloads || metadata.downloadCount,
+                nTokens: metadata.nTokens || metadata.n_tokens,
+                n_greetings: metadata.n_greetings || metadata.nGreetings,
+                has_lore: metadata.has_lore || metadata.hasLore,
+                topics: metadata.topics || [],
+                related_lorebooks: metadata.related_lorebooks || metadata.relatedLorebooks || [],
+                createdAt: metadata.createdAt || metadata.created_at,
+                lastActivityAt: metadata.lastActivityAt || metadata.last_activity_at,
+                definition: metadata.definition,
+                alternate_greetings: metadata.definition?.alternate_greetings || []
+            };
+            
+            // Open the character preview modal
+            openChubCharPreview(chubChar);
+            
+        } catch (error) {
+            console.error('[ChubLink] Failed to fetch character:', error);
+            showToast('Failed to load character from ChubAI', 'error');
+        }
+    }, 200);
+}
+
+/**
+ * Download gallery for linked character
+ */
+async function downloadLinkedGallery() {
+    if (!activeChar) return;
+    
+    const chubInfo = getChubLinkInfo(activeChar);
+    if (!chubInfo || !chubInfo.id) {
+        showToast('Not linked to ChubAI', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('chubLinkGalleryBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
+    }
+    
+    try {
+        const characterName = getCharacterName(activeChar, 'unknown');
+        const result = await downloadChubGalleryForCharacter(characterName, chubInfo.id, {});
+        
+        if (result.success > 0) {
+            showToast(`Downloaded ${result.success} gallery image${result.success > 1 ? 's' : ''}`, 'success');
+            fetchCharacterImages(characterName);
+        } else if (result.skipped > 0) {
+            showToast('All gallery images already exist', 'info');
+        } else {
+            showToast('No gallery images found', 'info');
+        }
+        
+    } catch (error) {
+        console.error('[ChubLink] Gallery download error:', error);
+        showToast('Failed to download gallery', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-images"></i> Download Gallery';
+        }
+    }
+}
+
+// ChubAI Link Modal Event Handlers
+on('chubLinkIndicator', 'click', openChubLinkModal);
+on('closeChubLinkModal', 'click', () => hideModal('chubLinkModal'));
+
+on('chubLinkSearchBtn', 'click', () => {
+    const name = document.getElementById('chubLinkSearchName')?.value || '';
+    const creator = document.getElementById('chubLinkSearchCreator')?.value || '';
+    searchChubForLink(name, creator);
+});
+
+// Allow Enter key to search
+document.getElementById('chubLinkSearchName')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('chubLinkSearchBtn')?.click();
+    }
+});
+
+document.getElementById('chubLinkSearchCreator')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('chubLinkSearchBtn')?.click();
+    }
+});
+
+on('chubLinkUrlBtn', 'click', () => {
+    const url = document.getElementById('chubLinkUrlInput')?.value || '';
+    if (url.trim()) {
+        linkToChubUrl(url.trim());
+    } else {
+        showToast('Please enter a ChubAI URL', 'info');
+    }
+});
+
+document.getElementById('chubLinkUrlInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        document.getElementById('chubLinkUrlBtn')?.click();
+    }
+});
+
+on('chubLinkViewInGalleryBtn', 'click', viewInChubGallery);
+on('chubLinkGalleryBtn', 'click', downloadLinkedGallery);
+on('chubLinkUnlinkBtn', 'click', unlinkFromChub);
+
+// ==============================================
+// Bulk ChubAI Link Feature
+// ==============================================
+
+let bulkChubLinkAborted = false;
+let bulkChubLinkResults = {
+    confident: [],   // { char, chubMatch, selected: true }
+    uncertain: [],   // { char, chubOptions: [], selectedOption: null }
+    nomatch: []      // { char }
+};
+
+/**
+ * Open the Bulk ChubAI Link modal and start scanning
+ */
+function openBulkChubLinkModal() {
+    // Hide dropdown menu
+    document.getElementById('moreOptionsMenu')?.classList.add('hidden');
+    
+    // Reset state
+    bulkChubLinkAborted = false;
+    bulkChubLinkResults = { confident: [], uncertain: [], nomatch: [] };
+    
+    // Reset UI
+    const modal = document.getElementById('bulkChubLinkModal');
+    const scanningPhase = document.getElementById('bulkChubLinkScanning');
+    const resultsPhase = document.getElementById('bulkChubLinkResults');
+    const applyBtn = document.getElementById('bulkChubLinkApplyBtn');
+    const cancelBtn = document.getElementById('bulkChubLinkCancelBtn');
+    
+    scanningPhase.classList.remove('hidden');
+    resultsPhase.classList.add('hidden');
+    applyBtn.classList.add('hidden');
+    cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+    
+    document.getElementById('bulkChubLinkScanAvatar').src = '';
+    document.getElementById('bulkChubLinkScanName').textContent = 'Preparing...';
+    document.getElementById('bulkChubLinkScanStatus').textContent = 'Scanning library for unlinked characters...';
+    document.getElementById('bulkChubLinkScanProgress').textContent = '0/0';
+    document.getElementById('bulkChubLinkScanFill').style.width = '0%';
+    document.getElementById('bulkChubLinkConfidentCount').textContent = '0';
+    document.getElementById('bulkChubLinkUncertainCount').textContent = '0';
+    document.getElementById('bulkChubLinkNoMatchCount').textContent = '0';
+    
+    modal.classList.remove('hidden');
+    
+    // Start scanning
+    runBulkChubLinkScan();
+}
+
+/**
+ * Run the bulk ChubAI link scan
+ */
+async function runBulkChubLinkScan() {
+    // Find all characters without a chub link
+    const unlinkedChars = allCharacters.filter(char => {
+        const chubInfo = getChubLinkInfo(char);
+        return !chubInfo || !chubInfo.fullPath;
+    });
+    
+    if (unlinkedChars.length === 0) {
+        document.getElementById('bulkChubLinkScanStatus').textContent = 'All characters are already linked!';
+        document.getElementById('bulkChubLinkCancelBtn').innerHTML = '<i class="fa-solid fa-check"></i> Done';
+        return;
+    }
+    
+    const total = unlinkedChars.length;
+    
+    for (let i = 0; i < unlinkedChars.length; i++) {
+        if (bulkChubLinkAborted) break;
+        
+        const char = unlinkedChars[i];
+        const charName = getCharacterName(char, 'Unknown');
+        const charCreator = (char.creator || char.data?.creator || '').trim();
+        
+        // Update UI
+        document.getElementById('bulkChubLinkScanAvatar').src = getCharacterAvatarUrl(char.avatar);
+        document.getElementById('bulkChubLinkScanName').textContent = charName;
+        document.getElementById('bulkChubLinkScanStatus').textContent = `Searching ChubAI for "${charName}"...`;
+        document.getElementById('bulkChubLinkScanProgress').textContent = `${i + 1}/${total}`;
+        document.getElementById('bulkChubLinkScanFill').style.width = `${((i + 1) / total) * 100}%`;
+        
+        // Search Chub API
+        const searchResults = await searchChubForBulkLink(charName, charCreator);
+        
+        if (searchResults.length === 0) {
+            // No match found
+            bulkChubLinkResults.nomatch.push({ char });
+            document.getElementById('bulkChubLinkNoMatchCount').textContent = bulkChubLinkResults.nomatch.length;
+        } else {
+            // Check for confident match
+            const confidentMatch = findConfidentMatch(char, searchResults);
+            
+            if (confidentMatch) {
+                // Find the index of the confident match in results
+                const confidentIdx = searchResults.findIndex(r => r.fullPath === confidentMatch.fullPath);
+                bulkChubLinkResults.confident.push({
+                    char,
+                    chubMatch: confidentMatch,
+                    chubOptions: searchResults.slice(0, 5), // Store top 5 for manual override
+                    selectedOption: confidentIdx >= 0 && confidentIdx < 5 ? confidentIdx : 0, // Pre-select the confident match
+                    selected: true
+                });
+                document.getElementById('bulkChubLinkConfidentCount').textContent = bulkChubLinkResults.confident.length;
+            } else {
+                // Multiple options, needs review
+                bulkChubLinkResults.uncertain.push({
+                    char,
+                    chubOptions: searchResults.slice(0, 5), // Top 5 options
+                    selectedOption: null
+                });
+                document.getElementById('bulkChubLinkUncertainCount').textContent = bulkChubLinkResults.uncertain.length;
+            }
+        }
+        
+        // Rate limiting - wait between requests
+        if (!bulkChubLinkAborted) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    
+    // Show results (even if aborted, show what we found so far)
+    if (bulkChubLinkResults.confident.length > 0 || bulkChubLinkResults.uncertain.length > 0 || bulkChubLinkResults.nomatch.length > 0) {
+        showBulkChubLinkResults();
+    } else {
+        // Nothing found at all
+        document.getElementById('bulkChubLinkScanStatus').textContent = bulkChubLinkAborted ? 'Scan stopped - no matches found yet' : 'Scan complete - no matches found';
+        document.getElementById('bulkChubLinkCancelBtn').innerHTML = '<i class="fa-solid fa-times"></i> Close';
+    }
+}
+
+/**
+ * Search ChubAI for bulk linking
+ */
+async function searchChubForBulkLink(name, creator) {
+    try {
+        const searchTerm = creator ? `${name} ${creator}` : name;
+        
+        const params = new URLSearchParams({
+            search: searchTerm,
+            first: '10',
+            sort: 'download_count',
+            nsfw: 'true',
+            nsfl: 'true',
+            include_forks: 'true',
+            min_tokens: '50'
+        });
+        
+        const headers = {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        };
+        
+        if (chubToken) {
+            headers['Authorization'] = `Bearer ${chubToken}`;
+        }
+        
+        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+            method: 'GET',
+            headers
+        });
+        
+        if (!response.ok) return [];
+        
+        const data = await response.json();
+        return extractNodes(data);
+    } catch (error) {
+        console.error('[BulkChubLink] Search error:', error);
+        return [];
+    }
+}
+
+/**
+ * Common/generic creators that shouldn't be trusted for matching
+ */
+const GENERIC_CREATORS = new Set([
+    'anonymous', 'anon', 'unknown', 'user', 'admin', 'test', 
+    'guest', '', 'none', 'na', 'n/a', 'character'
+]);
+
+/**
+ * Calculate word set similarity (Jaccard index) between two texts
+ */
+function calculateTextSimilarity(textA, textB) {
+    if (!textA || !textB || textA.length < 20 || textB.length < 20) return 0;
+    
+    const getWords = (text) => {
+        const words = text.toLowerCase().match(/\b\w{3,}\b/g) || [];
+        return new Set(words);
+    };
+    
+    const wordsA = getWords(textA);
+    const wordsB = getWords(textB);
+    
+    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+    
+    let intersection = 0;
+    for (const word of wordsA) {
+        if (wordsB.has(word)) intersection++;
+    }
+    
+    const union = wordsA.size + wordsB.size - intersection;
+    return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Find a confident match for a character
+ * Uses name, creator, and content similarity for matching
+ * Handles generic creators like "Anonymous" by requiring content match
+ */
+function findConfidentMatch(char, searchResults) {
+    const charName = getCharacterName(char, '').toLowerCase().trim();
+    const charCreator = (char.creator || char.data?.creator || '').toLowerCase().trim();
+    const charDescription = getCharField(char, 'description') || '';
+    const charFirstMes = getCharField(char, 'first_mes') || '';
+    const charPersonality = getCharField(char, 'personality') || '';
+    
+    // Combine content for matching
+    const charContent = `${charDescription} ${charFirstMes} ${charPersonality}`.trim();
+    
+    // Is creator generic/untrustworthy?
+    const isGenericCreator = GENERIC_CREATORS.has(charCreator);
+    
+    for (const result of searchResults) {
+        const chubName = (result.name || '').toLowerCase().trim();
+        const chubCreator = (result.fullPath || '').split('/')[0].toLowerCase().trim();
+        const chubTagline = result.tagline || '';
+        const chubDescription = result.description || result.tagline || '';
+        const chubTokens = result.nTokens || result.n_tokens || 0;
+        
+        // Exact name match is always required
+        if (chubName !== charName) continue;
+        
+        // Calculate content similarity using tagline/description from search results
+        const contentSimilarity = calculateTextSimilarity(charDescription, chubDescription);
+        const taglineSimilarity = calculateTextSimilarity(charDescription, chubTagline);
+        const bestContentSimilarity = Math.max(contentSimilarity, taglineSimilarity);
+        
+        // Case 1: Generic creator (like "Anonymous") - require content match
+        if (isGenericCreator || GENERIC_CREATORS.has(chubCreator)) {
+            // For generic creators, require significant content similarity
+            if (bestContentSimilarity >= 0.4) {
+                console.log(`[BulkChubLink] Content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}% similarity`);
+                return result;
+            }
+            // Or if it's the top result with matching generic creator and high download count
+            if (chubCreator === charCreator && searchResults.indexOf(result) === 0 && result.downloadCount > 100) {
+                console.log(`[BulkChubLink] Top popular result match for "${charName}" by generic creator`);
+                return result;
+            }
+            continue;
+        }
+        
+        // Case 2: Specific creator - creator match is sufficient
+        if (charCreator && chubCreator === charCreator) {
+            console.log(`[BulkChubLink] Creator match for "${charName}" by ${charCreator}`);
+            return result;
+        }
+        
+        // Case 3: No local creator but chub has one - use content + position
+        if (!charCreator && searchResults.indexOf(result) === 0) {
+            // Top result with good content match
+            if (bestContentSimilarity >= 0.3) {
+                console.log(`[BulkChubLink] Top result with content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}%`);
+                return result;
+            }
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Show the results phase
+ */
+function showBulkChubLinkResults() {
+    const scanningPhase = document.getElementById('bulkChubLinkScanning');
+    const resultsPhase = document.getElementById('bulkChubLinkResults');
+    const applyBtn = document.getElementById('bulkChubLinkApplyBtn');
+    const cancelBtn = document.getElementById('bulkChubLinkCancelBtn');
+    
+    scanningPhase.classList.add('hidden');
+    resultsPhase.classList.remove('hidden');
+    applyBtn.classList.remove('hidden');
+    cancelBtn.innerHTML = '<i class="fa-solid fa-times"></i> Close';
+    
+    // Update tab counts
+    document.getElementById('bulkChubLinkConfidentTabCount').textContent = bulkChubLinkResults.confident.length;
+    document.getElementById('bulkChubLinkUncertainTabCount').textContent = bulkChubLinkResults.uncertain.length;
+    document.getElementById('bulkChubLinkNoMatchTabCount').textContent = bulkChubLinkResults.nomatch.length;
+    
+    // Render lists
+    renderBulkChubLinkConfidentList();
+    renderBulkChubLinkUncertainList();
+    renderBulkChubLinkNoMatchList();
+    
+    // Update selected count
+    updateBulkChubLinkSelectedCount();
+    
+    // Show confident tab by default
+    switchBulkChubLinkTab('confident');
+}
+
+/**
+ * Render the confident matches list
+ */
+function renderBulkChubLinkConfidentList() {
+    const container = document.getElementById('bulkChubLinkConfidentList');
+    
+    if (bulkChubLinkResults.confident.length === 0) {
+        container.innerHTML = '<div class="bulk-chub-link-empty"><i class="fa-solid fa-search"></i>No confident matches found</div>';
+        return;
+    }
+    
+    container.innerHTML = bulkChubLinkResults.confident.map((item, idx) => {
+        const charName = getCharacterName(item.char, 'Unknown');
+        const charCreator = item.char.creator || item.char.data?.creator || '';
+        const selectedOpt = item.chubOptions[item.selectedOption] || item.chubMatch;
+        const selectedAvatarUrl = selectedOpt.avatar_url || `${CHUB_AVATAR_BASE}${selectedOpt.fullPath}/avatar`;
+        
+        // Build options HTML
+        let optionsHtml = item.chubOptions.map((opt, optIdx) => {
+            const optAvatarUrl = opt.avatar_url || `${CHUB_AVATAR_BASE}${opt.fullPath}/avatar`;
+            const isSelected = item.selectedOption === optIdx;
+            const isConfidentMatch = opt.fullPath === item.chubMatch.fullPath;
+            const stars = opt.starCount || 0;
+            const rating = opt.rating ? opt.rating.toFixed(1) : 'N/A';
+            
+            return `
+                <div class="bulk-chub-link-option${isSelected ? ' selected' : ''}" onclick="selectBulkChubLinkConfidentOption(${idx}, ${optIdx})">
+                    <img src="${optAvatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <div class="bulk-chub-link-option-info">
+                        <span class="bulk-chub-link-option-name">${escapeHtml(opt.name || opt.fullPath.split('/').pop())}${isConfidentMatch ? ' <span class="confident-badge">Exact Match</span>' : ''}</span>
+                        <span class="bulk-chub-link-option-path">${escapeHtml(opt.fullPath)}</span>
+                    </div>
+                    <span class="bulk-chub-link-option-stats"><i class="fa-solid fa-star"></i> ${rating} | <i class="fa-solid fa-heart"></i> ${stars}</span>
+                </div>
+            `;
+        }).join('');
+        
+        return `
+            <div class="bulk-chub-link-item bulk-chub-link-item-confident${item.selected ? ' selected' : ''}" data-type="confident" data-idx="${idx}">
+                <div class="bulk-chub-link-item-confident-header" onclick="toggleBulkChubLinkConfidentExpand(${idx})">
+                    <input type="checkbox" class="bulk-chub-link-item-checkbox" ${item.selected ? 'checked' : ''} onclick="event.stopPropagation()" onchange="toggleBulkChubLinkItem('confident', ${idx})">
+                    <div class="bulk-chub-link-item-local">
+                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <div class="bulk-chub-link-item-local-info">
+                            <span class="bulk-chub-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
+                            <span class="bulk-chub-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-arrow-right bulk-chub-link-item-arrow"></i>
+                    <div class="bulk-chub-link-item-chub">
+                        <img src="${selectedAvatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <div class="bulk-chub-link-item-chub-info">
+                            <span class="bulk-chub-link-item-chub-name">${escapeHtml(selectedOpt.name || selectedOpt.fullPath.split('/').pop())}</span>
+                            <span class="bulk-chub-link-item-chub-path">${escapeHtml(selectedOpt.fullPath)}</span>
+                        </div>
+                    </div>
+                    <span class="bulk-chub-link-item-confidence high">Exact Match</span>
+                    <i class="fa-solid fa-chevron-down expand-icon"></i>
+                </div>
+                <div class="bulk-chub-link-item-options">
+                    ${optionsHtml}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Render the uncertain matches list
+ */
+function renderBulkChubLinkUncertainList() {
+    const container = document.getElementById('bulkChubLinkUncertainList');
+    
+    if (bulkChubLinkResults.uncertain.length === 0) {
+        container.innerHTML = '<div class="bulk-chub-link-empty"><i class="fa-solid fa-check-circle"></i>No uncertain matches</div>';
+        return;
+    }
+    
+    container.innerHTML = bulkChubLinkResults.uncertain.map((item, idx) => {
+        const charName = getCharacterName(item.char, 'Unknown');
+        const charCreator = item.char.creator || item.char.data?.creator || '';
+        const hasSelection = item.selectedOption !== null;
+        
+        let optionsHtml = item.chubOptions.map((opt, optIdx) => {
+            const optAvatarUrl = opt.avatar_url || `${CHUB_AVATAR_BASE}${opt.fullPath}/avatar`;
+            const isSelected = item.selectedOption === optIdx;
+            const stars = opt.starCount || 0;
+            const rating = opt.rating ? opt.rating.toFixed(1) : 'N/A';
+            
+            return `
+                <div class="bulk-chub-link-option${isSelected ? ' selected' : ''}" onclick="selectBulkChubLinkOption(${idx}, ${optIdx})">
+                    <img src="${optAvatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <div class="bulk-chub-link-option-info">
+                        <span class="bulk-chub-link-option-name">${escapeHtml(opt.name || opt.fullPath.split('/').pop())}</span>
+                        <span class="bulk-chub-link-option-path">${escapeHtml(opt.fullPath)}</span>
+                    </div>
+                    <span class="bulk-chub-link-option-stats"><i class="fa-solid fa-star"></i> ${rating} | <i class="fa-solid fa-heart"></i> ${stars}</span>
+                </div>
+            `;
+        }).join('');
+        
+        return `
+            <div class="bulk-chub-link-item bulk-chub-link-item-uncertain${hasSelection ? ' selected' : ''}" data-type="uncertain" data-idx="${idx}">
+                <div class="bulk-chub-link-item-uncertain-header" onclick="toggleBulkChubLinkExpand(${idx})">
+                    <input type="checkbox" class="bulk-chub-link-item-checkbox" ${hasSelection ? 'checked' : ''} onclick="event.stopPropagation()" onchange="clearBulkChubLinkSelection(${idx})">
+                    <div class="bulk-chub-link-item-local">
+                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <div class="bulk-chub-link-item-local-info">
+                            <span class="bulk-chub-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
+                            <span class="bulk-chub-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-arrow-right bulk-chub-link-item-arrow"></i>
+                    <div class="bulk-chub-link-item-chub">
+                        ${hasSelection 
+                            ? `<span>${escapeHtml(item.chubOptions[item.selectedOption].fullPath)}</span>` 
+                            : `<span style="color: var(--text-muted);">${item.chubOptions.length} possible matches - click to select</span>`
+                        }
+                    </div>
+                    <span class="bulk-chub-link-item-confidence medium">${item.chubOptions.length} Options</span>
+                    <i class="fa-solid fa-chevron-down expand-icon"></i>
+                </div>
+                <div class="bulk-chub-link-item-options">
+                    ${optionsHtml}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Render the no match list
+ */
+function renderBulkChubLinkNoMatchList() {
+    const container = document.getElementById('bulkChubLinkNoMatchList');
+    
+    if (bulkChubLinkResults.nomatch.length === 0) {
+        container.innerHTML = '<div class="bulk-chub-link-empty"><i class="fa-solid fa-check-circle"></i>All characters had potential matches!</div>';
+        return;
+    }
+    
+    container.innerHTML = bulkChubLinkResults.nomatch.map((item) => {
+        const charName = getCharacterName(item.char, 'Unknown');
+        const charCreator = item.char.creator || item.char.data?.creator || '';
+        
+        return `
+            <div class="bulk-chub-link-item bulk-chub-link-item-nomatch">
+                <div class="bulk-chub-link-item-local">
+                    <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <div class="bulk-chub-link-item-local-info">
+                        <span class="bulk-chub-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
+                        <span class="bulk-chub-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
+                    </div>
+                </div>
+                <i class="fa-solid fa-arrow-right bulk-chub-link-item-arrow" style="opacity: 0.3;"></i>
+                <div class="bulk-chub-link-item-chub">
+                    <span><i class="fa-solid fa-times-circle"></i> No matches found on ChubAI</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Toggle confident item selection
+ */
+window.toggleBulkChubLinkItem = function(type, idx) {
+    if (type === 'confident') {
+        bulkChubLinkResults.confident[idx].selected = !bulkChubLinkResults.confident[idx].selected;
+        renderBulkChubLinkConfidentList();
+    }
+    updateBulkChubLinkSelectedCount();
+};
+
+/**
+ * Toggle confident item expansion
+ */
+window.toggleBulkChubLinkConfidentExpand = function(idx) {
+    const items = document.querySelectorAll('.bulk-chub-link-item-confident');
+    items[idx]?.classList.toggle('expanded');
+};
+
+/**
+ * Select an option for confident item
+ */
+window.selectBulkChubLinkConfidentOption = function(itemIdx, optionIdx) {
+    bulkChubLinkResults.confident[itemIdx].selectedOption = optionIdx;
+    bulkChubLinkResults.confident[itemIdx].selected = true;
+    renderBulkChubLinkConfidentList();
+    updateBulkChubLinkSelectedCount();
+};
+
+/**
+ * Toggle uncertain item expansion
+ */
+window.toggleBulkChubLinkExpand = function(idx) {
+    const items = document.querySelectorAll('.bulk-chub-link-item-uncertain');
+    items[idx]?.classList.toggle('expanded');
+};
+
+/**
+ * Select an option for uncertain item
+ */
+window.selectBulkChubLinkOption = function(itemIdx, optionIdx) {
+    bulkChubLinkResults.uncertain[itemIdx].selectedOption = optionIdx;
+    renderBulkChubLinkUncertainList();
+    updateBulkChubLinkSelectedCount();
+};
+
+/**
+ * Clear selection for uncertain item
+ */
+window.clearBulkChubLinkSelection = function(idx) {
+    const checkbox = event.target;
+    if (!checkbox.checked) {
+        bulkChubLinkResults.uncertain[idx].selectedOption = null;
+        renderBulkChubLinkUncertainList();
+        updateBulkChubLinkSelectedCount();
+    }
+};
+
+/**
+ * Switch between tabs
+ */
+window.switchBulkChubLinkTab = function(tabName) {
+    debugLog('[BulkChubLink] Switching to tab:', tabName);
+    
+    // Update tab buttons
+    document.querySelectorAll('.bulk-chub-link-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.tab === tabName);
+    });
+    
+    // Update lists - show only the selected one using display style
+    const confidentList = document.getElementById('bulkChubLinkConfidentList');
+    const uncertainList = document.getElementById('bulkChubLinkUncertainList');
+    const nomatchList = document.getElementById('bulkChubLinkNoMatchList');
+    
+    if (confidentList) confidentList.style.display = tabName === 'confident' ? 'flex' : 'none';
+    if (uncertainList) uncertainList.style.display = tabName === 'uncertain' ? 'flex' : 'none';
+    if (nomatchList) nomatchList.style.display = tabName === 'nomatch' ? 'flex' : 'none';
+    
+    // Show/hide actions bar (only for confident tab)
+    const actionsBar = document.getElementById('bulkChubLinkConfidentActions');
+    if (actionsBar) {
+        actionsBar.style.display = tabName === 'confident' ? 'flex' : 'none';
+    }
+};
+
+/**
+ * Select all confident matches
+ */
+window.bulkChubLinkSelectAll = function() {
+    bulkChubLinkResults.confident.forEach(item => item.selected = true);
+    renderBulkChubLinkConfidentList();
+    updateBulkChubLinkSelectedCount();
+};
+
+/**
+ * Deselect all confident matches
+ */
+window.bulkChubLinkDeselectAll = function() {
+    bulkChubLinkResults.confident.forEach(item => item.selected = false);
+    renderBulkChubLinkConfidentList();
+    updateBulkChubLinkSelectedCount();
+};
+
+/**
+ * Update selected count
+ */
+function updateBulkChubLinkSelectedCount() {
+    const confidentSelected = bulkChubLinkResults.confident.filter(i => i.selected).length;
+    const uncertainSelected = bulkChubLinkResults.uncertain.filter(i => i.selectedOption !== null).length;
+    const total = confidentSelected + uncertainSelected;
+    
+    document.getElementById('bulkChubLinkSelectedCount').textContent = total;
+    
+    // Disable apply button if nothing selected
+    const applyBtn = document.getElementById('bulkChubLinkApplyBtn');
+    applyBtn.disabled = total === 0;
+}
+
+/**
+ * Apply the selected links
+ */
+async function applyBulkChubLinks() {
+    const applyBtn = document.getElementById('bulkChubLinkApplyBtn');
+    applyBtn.disabled = true;
+    applyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Linking...';
+    
+    let successCount = 0;
+    let errorCount = 0;
+    
+    try {
+        // Process confident matches
+        for (const item of bulkChubLinkResults.confident) {
+            if (!item.selected) continue;
+            
+            // Use the selected option (which may have been changed by user)
+            const selectedChub = item.chubOptions[item.selectedOption] || item.chubMatch;
+            
+            try {
+                // Need to fetch ID if we don't have it
+                let chubId = selectedChub.id;
+                if (!chubId) {
+                    const metadata = await fetchChubMetadata(selectedChub.fullPath);
+                    chubId = metadata?.id;
+                }
+                
+                debugLog('[BulkChubLink] Linking', item.char.name, 'to', selectedChub.fullPath);
+                await saveChubLink(item.char, {
+                    id: chubId,
+                    fullPath: selectedChub.fullPath
+                });
+                successCount++;
+                debugLog('[BulkChubLink] Successfully linked', item.char.name);
+            } catch (err) {
+                console.error('[BulkChubLink] Link error for', item.char.name, ':', err);
+                errorCount++;
+            }
+            
+            // Small delay to avoid hammering the API
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        
+        // Process uncertain matches with selections
+        for (const item of bulkChubLinkResults.uncertain) {
+            if (item.selectedOption === null) continue;
+            
+            const selectedChub = item.chubOptions[item.selectedOption];
+            
+            try {
+                let chubId = selectedChub.id;
+                if (!chubId) {
+                    const metadata = await fetchChubMetadata(selectedChub.fullPath);
+                    chubId = metadata?.id;
+                }
+                
+                debugLog('[BulkChubLink] Linking', item.char.name, 'to', selectedChub.fullPath);
+                await saveChubLink(item.char, {
+                    id: chubId,
+                    fullPath: selectedChub.fullPath
+                });
+                successCount++;
+                debugLog('[BulkChubLink] Successfully linked', item.char.name);
+            } catch (err) {
+                console.error('[BulkChubLink] Link error for', item.char.name, ':', err);
+                errorCount++;
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+    } catch (outerErr) {
+        console.error('[BulkChubLink] Outer error:', outerErr);
+    }
+    
+    // Show result
+    if (errorCount > 0) {
+        showToast(`Linked ${successCount} characters (${errorCount} errors)`, 'info');
+    } else if (successCount > 0) {
+        showToast(`Successfully linked ${successCount} characters to ChubAI!`, 'success');
+    } else {
+        showToast('No characters were linked', 'info');
+    }
+    
+    // Close modal
+    document.getElementById('bulkChubLinkModal').classList.add('hidden');
+    
+    // Rebuild lookup
+    buildLocalLibraryLookup();
+    
+    // Reset button state in case modal is reopened
+    applyBtn.disabled = false;
+    applyBtn.innerHTML = '<i class="fa-solid fa-link"></i> Link Selected (<span id="bulkChubLinkSelectedCount">0</span>)';
+}
+
+// Event handlers for Bulk ChubAI Link
+document.getElementById('bulkChubLinkBtn')?.addEventListener('click', openBulkChubLinkModal);
+document.getElementById('closeBulkChubLinkModal')?.addEventListener('click', () => {
+    bulkChubLinkAborted = true;
+    document.getElementById('bulkChubLinkModal').classList.add('hidden');
+});
+document.getElementById('bulkChubLinkCancelBtn')?.addEventListener('click', () => {
+    // If we're in scanning phase, just stop (let the scan loop show results)
+    // If we're in results phase, close the modal
+    const resultsPhase = document.getElementById('bulkChubLinkResults');
+    if (resultsPhase && !resultsPhase.classList.contains('hidden')) {
+        // Results phase - close modal
+        document.getElementById('bulkChubLinkModal').classList.add('hidden');
+    } else {
+        // Scanning phase - just set abort flag, scan loop will handle showing results
+        bulkChubLinkAborted = true;
+        document.getElementById('bulkChubLinkScanStatus').textContent = 'Stopping...';
+    }
+});
+document.getElementById('bulkChubLinkApplyBtn')?.addEventListener('click', applyBulkChubLinks);
+
+// ==============================================
+// Help & Tips Modal
+// ==============================================
+
+function openGalleryInfoModal() {
+    document.getElementById('galleryInfoModal').classList.remove('hidden');
+}
+
+document.getElementById('galleryInfoBtn')?.addEventListener('click', openGalleryInfoModal);
+document.getElementById('closeGalleryInfoModal')?.addEventListener('click', () => {
+    document.getElementById('galleryInfoModal').classList.add('hidden');
+});
+document.getElementById('closeGalleryInfoModalBtn')?.addEventListener('click', () => {
+    document.getElementById('galleryInfoModal').classList.add('hidden');
 });
 
 // ==============================================
@@ -6515,12 +8575,18 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         const existingFile = existingHashMap.get(contentHash);
         if (existingFile) {
             // File exists - check if we should rename it
-            if (fixFilenames && !existingFile.fileName.startsWith('localized_media_')) {
+            // Always rename chubgallery_* files to localized_media_* (embedded takes precedence)
+            // Also rename other non-localized files if fixFilenames is enabled
+            const isChubGalleryFile = existingFile.fileName.startsWith('chubgallery_');
+            const needsRename = isChubGalleryFile || (fixFilenames && !existingFile.fileName.startsWith('localized_media_'));
+            
+            if (needsRename) {
                 // Rename to proper localized_media_* format (pass downloadResult since we have it)
                 const renameResult = await renameToLocalizedFormat(existingFile, url, characterName, fileIndex, downloadResult);
                 if (renameResult.success) {
                     renamedCount++;
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Renamed: ${existingFile.fileName} → ${renameResult.newName}`, 'success');
+                    const action = isChubGalleryFile ? 'Converted' : 'Renamed';
+                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `${action}: ${existingFile.fileName} ? ${renameResult.newName}`, 'success');
                 } else {
                     skippedCount++;
                     if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (rename failed): ${displayUrl}`, 'success');
@@ -6581,14 +8647,17 @@ async function renameToLocalizedFormat(existingFile, originalUrl, characterName,
             return { success: false, error: saveResult.error };
         }
         
-        // Delete the old file
+        // Delete the old file - API expects full relative path like "/user/images/CharName/file.png"
+        const safeFolderName = sanitizeFolderName(characterName);
+        const deletePath = `/user/images/${safeFolderName}/${existingFile.fileName}`;
         const deleteResponse = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
-            ch_name: characterName,
-            img: existingFile.fileName
+            path: deletePath
         });
         
         if (!deleteResponse.ok) {
-            console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName}, but new file was saved`);
+            console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName} (path: ${deletePath}), but new file was saved`);
+        } else {
+            console.log(`[EmbeddedMedia] Deleted old file: ${deletePath}`);
         }
         
         return { success: true, newName: saveResult.filename };
@@ -6705,7 +8774,7 @@ async function getExistingFileHashes(characterName) {
         const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: characterName, type: 7 });
         
         if (!response.ok) {
-            console.log('[Localize] Could not list existing files');
+            debugLog('[Localize] Could not list existing files');
             return hashMap;
         }
         
@@ -6979,7 +9048,7 @@ closeLocalizeBtn?.addEventListener('click', () => {
     localizeModal.classList.add('hidden');
 });
 
-// Localize Media button click handler
+// Localize Media button click handler (embedded media + linked Chub gallery)
 localizeMediaBtn?.addEventListener('click', async () => {
     if (!activeChar) {
         showToast('No character selected', 'error');
@@ -6988,7 +9057,7 @@ localizeMediaBtn?.addEventListener('click', async () => {
     
     // Show modal
     localizeModal.classList.remove('hidden');
-    localizeStatus.textContent = 'Scanning character for remote media...';
+    localizeStatus.textContent = 'Scanning character...';
     localizeLog.innerHTML = '';
     localizeProgressFill.style.width = '0%';
     localizeProgressCount.textContent = '0/0';
@@ -6999,19 +9068,26 @@ localizeMediaBtn?.addEventListener('click', async () => {
     // Find all media URLs
     const mediaUrls = findCharacterMediaUrls(activeChar);
     
-    if (mediaUrls.length === 0) {
+    // Check if character is linked to ChubAI
+    const chubInfo = getChubLinkInfo(activeChar);
+    const hasChubLink = chubInfo && chubInfo.id;
+    
+    if (mediaUrls.length === 0 && !hasChubLink) {
         localizeStatus.textContent = 'No remote media found in this character card.';
-        addLocalizeLogEntry('No remote media URLs detected', 'success');
+        addLocalizeLogEntry('No embedded media URLs detected', 'success');
+        addLocalizeLogEntry('Character not linked to ChubAI', 'info');
         return;
     }
     
     // debug: fix filenames for images localized before current spec, rename to localized_media_* format
     const fixFilenames = getSetting('fixFilenames') || false;
     
-    localizeStatus.textContent = `Found ${mediaUrls.length} remote media file(s). ${fixFilenames ? 'Downloading & fixing filenames...' : 'Downloading new files...'}`;
+    // Phase 1: Download embedded media first (takes precedence for duplicate detection)
+    localizeStatus.textContent = mediaUrls.length > 0 
+        ? `Downloading ${mediaUrls.length} embedded media file(s)...`
+        : 'No embedded media, checking ChubAI gallery...';
     localizeProgressCount.textContent = `0/${mediaUrls.length}`;
     
-    // Use shared download function with UI callbacks
     const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
         fixFilenames,
         onProgress: (current, total) => {
@@ -7059,6 +9135,54 @@ localizeMediaBtn?.addEventListener('click', async () => {
         showToast('All files already exist', 'info');
     } else if (result.errors > 0) {
         showToast('Some downloads failed', 'error');
+    }
+    
+    // Mark character as complete for bulk localization if no errors (only if no Chub gallery to process)
+    if (result.errors === 0 && !hasChubLink && activeChar?.avatar) {
+        markMediaLocalizationComplete(activeChar.avatar);
+    }
+    
+    // Phase 2: If character is linked to ChubAI, also download gallery
+    if (hasChubLink) {
+        addLocalizeLogEntry('', 'divider');
+        addLocalizeLogEntry(`Checking ChubAI gallery (${chubInfo.fullPath})...`, 'info');
+        localizeStatus.textContent = 'Downloading ChubAI gallery...';
+        
+        try {
+            const galleryResult = await downloadChubGalleryForCharacter(characterName, chubInfo.id, {
+                onLog: (message, status) => addLocalizeLogEntry(message, status),
+                onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
+            });
+            
+            // Update totals
+            result.success += galleryResult.success || 0;
+            result.skipped += galleryResult.skipped || 0;
+            result.errors += galleryResult.errors || 0;
+            
+            if (galleryResult.success > 0) {
+                addLocalizeLogEntry(`Downloaded ${galleryResult.success} gallery image(s)`, 'success');
+            } else if (galleryResult.skipped > 0) {
+                addLocalizeLogEntry(`All ${galleryResult.skipped} gallery image(s) already exist`, 'info');
+            } else {
+                addLocalizeLogEntry('No gallery images found on ChubAI', 'info');
+            }
+        } catch (error) {
+            console.error('[MediaLocalize] Chub gallery error:', error);
+            addLocalizeLogEntry(`Gallery download failed: ${error.message}`, 'error');
+            result.errors++;
+        }
+        
+        // Update final status
+        let statusMsg = '';
+        if (result.success > 0) statusMsg = `Downloaded ${result.success} file(s)`;
+        if (result.skipped > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} existed`;
+        if (result.errors > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.errors} failed`;
+        localizeStatus.textContent = statusMsg || 'Complete';
+        
+        // Refresh sprites grid
+        if (result.success > 0) {
+            fetchCharacterImages(characterName);
+        }
     }
     
     // Mark character as complete for bulk localization if no errors
@@ -7187,24 +9311,30 @@ function renderBulkSummaryList() {
     if (pageResults.length === 0) {
         bulkSummaryList.innerHTML = '<div class="bulk-summary-empty"><i class="fa-solid fa-filter-circle-xmark"></i><br>No characters match the current filter</div>';
     } else {
-        bulkSummaryList.innerHTML = pageResults.map(r => `
+        bulkSummaryList.innerHTML = pageResults.map(r => {
+            const hasChubStats = r.chubDownloaded > 0 || r.chubSkipped > 0 || r.chubErrors > 0;
+            const totalEmbedded = (r.downloaded || 0) + (r.skipped || 0) + (r.errors || 0);
+            const hasEmbeddedStats = totalEmbedded > 0;
+            
+            return `
             <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
                 <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
                 <span class="char-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
                 <div class="char-stats">
-                    ${r.totalUrls === 0 
+                    ${!hasEmbeddedStats && !hasChubStats
                         ? '<span class="none" title="Character has no embedded remote media URLs"><i class="fa-solid fa-minus"></i> No media</span>'
                         : `
                             ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
-                            ${r.downloaded > 0 ? `<span class="downloaded" title="${r.downloaded} file(s) newly downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
+                            ${r.downloaded > 0 ? `<span class="downloaded" title="${r.downloaded} embedded file(s) newly downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
                             ${bulkSummaryShowRenamed && r.renamed > 0 ? `<span class="renamed" title="${r.renamed} file(s) renamed to localized format"><i class="fa-solid fa-file-pen"></i> ${r.renamed}</span>` : ''}
-                            ${r.skipped > 0 ? `<span class="skipped" title="${r.skipped} file(s) already exist locally"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
-                            ${r.errors > 0 ? `<span class="errors" title="${r.errors} file(s) failed to download"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
+                            ${r.skipped > 0 ? `<span class="skipped" title="${r.skipped} embedded file(s) already exist locally"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
+                            ${r.errors > 0 ? `<span class="errors" title="${r.errors} embedded file(s) failed to download"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
+                            ${hasChubStats ? `<span class="chub-gallery-stats" title="ChubAI Gallery: ${r.chubDownloaded || 0} downloaded, ${r.chubSkipped || 0} already local, ${r.chubErrors || 0} failed"><i class="fa-solid fa-images"></i> ${r.chubDownloaded || 0}/${r.chubSkipped || 0}/${r.chubErrors || 0}</span>` : ''}
                         `
                     }
                 </div>
             </div>
-        `).join('');
+        `}).join('');
     }
     
     // Update pagination
@@ -7220,14 +9350,20 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames 
     // Calculate totals
     const totals = bulkLocalizeResults.reduce((acc, r) => {
         acc.characters++;
-        acc.downloaded += r.downloaded;
-        acc.skipped += r.skipped;
-        acc.errors += r.errors;
+        acc.downloaded += r.downloaded || 0;
+        acc.skipped += r.skipped || 0;
+        acc.errors += r.errors || 0;
         acc.renamed += r.renamed || 0;
+        acc.chubDownloaded += r.chubDownloaded || 0;
+        acc.chubSkipped += r.chubSkipped || 0;
+        acc.chubErrors += r.chubErrors || 0;
         if (r.totalUrls > 0) acc.withMedia++;
+        if (r.chubDownloaded > 0 || r.chubSkipped > 0 || r.chubErrors > 0) acc.withChubGallery++;
         if (r.incomplete) acc.incomplete++;
         return acc;
-    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, withMedia: 0, incomplete: 0 });
+    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, withMedia: 0, incomplete: 0, chubDownloaded: 0, chubSkipped: 0, chubErrors: 0, withChubGallery: 0 });
+    
+    const hasChubStats = totals.chubDownloaded > 0 || totals.chubSkipped > 0 || totals.chubErrors > 0;
     
     // Render overview with tooltips and icons
     bulkSummaryOverview.innerHTML = `
@@ -7241,22 +9377,28 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames 
             <span class="stat-label"><i class="fa-solid fa-check-double"></i> Previously Done</span>
         </div>
         ` : ''}
-        <div class="bulk-summary-stat downloaded" title="Total media files newly downloaded to gallery">
-            <span class="stat-value">${totals.downloaded}</span>
+        <div class="bulk-summary-stat downloaded" title="Total media files newly downloaded to gallery (embedded + Chub gallery)">
+            <span class="stat-value">${totals.downloaded + totals.chubDownloaded}</span>
             <span class="stat-label"><i class="fa-solid fa-download"></i> Downloaded</span>
         </div>
         <div class="bulk-summary-stat skipped" title="Media files that already existed locally (matched by content hash)">
-            <span class="stat-value">${totals.skipped}</span>
+            <span class="stat-value">${totals.skipped + totals.chubSkipped}</span>
             <span class="stat-label"><i class="fa-solid fa-forward"></i> Already Local</span>
         </div>
         <div class="bulk-summary-stat errors" title="Media files that failed to download">
-            <span class="stat-value">${totals.errors}</span>
+            <span class="stat-value">${totals.errors + totals.chubErrors}</span>
             <span class="stat-label"><i class="fa-solid fa-xmark"></i> Failed</span>
         </div>
         ${fixFilenames ? `
         <div class="bulk-summary-stat renamed" title="Existing files renamed to localized_media_* format">
             <span class="stat-value">${totals.renamed}</span>
             <span class="stat-label"><i class="fa-solid fa-file-pen"></i> Renamed</span>
+        </div>
+        ` : ''}
+        ${hasChubStats ? `
+        <div class="bulk-summary-stat chub-gallery" title="ChubAI gallery images processed for ${totals.withChubGallery} linked character(s)">
+            <span class="stat-value">${totals.chubDownloaded}/${totals.chubSkipped}/${totals.chubErrors}</span>
+            <span class="stat-label"><i class="fa-solid fa-images"></i> Chub Gallery</span>
         </div>
         ` : ''}
         ${totals.incomplete > 0 ? `
@@ -7318,6 +9460,8 @@ async function runBulkLocalization() {
     
     // debug: fix filenames for images localized before current spec, rename to localized_media_* format
     const fixFilenames = getSetting('fixFilenames') || false;
+    // Include Chub gallery downloads for linked characters
+    const includeChubGallery = getSetting('includeChubGallery') || false;
     
     // Get previously completed characters
     const completedAvatars = getCompletedMediaLocalizations();
@@ -7426,23 +9570,75 @@ async function runBulkLocalization() {
                 clearMediaLocalizationCache(char.avatar);
             }
             
-            // Mark as complete in persistent storage if no errors and not aborted
-            if (!downloadResult.aborted && downloadResult.errors === 0 && char.avatar) {
-                markMediaLocalizationComplete(char.avatar);
-            }
-            
             // If download was aborted, stop the loop
             if (downloadResult.aborted) {
+                result.incomplete = true;
                 bulkLocalizeResults.push(result);
                 break;
             }
         } else {
             bulkLocalizeFileCount.textContent = 'No remote media';
             bulkLocalizeFileFill.style.width = '100%';
-            // Character has no remote media, mark as complete
-            if (char.avatar) {
-                markMediaLocalizationComplete(char.avatar);
+        }
+        
+        // Phase 2: Chub gallery download (if enabled and character is linked)
+        if (includeChubGallery && !bulkLocalizeAborted) {
+            const chubData = getChubLinkInfo(char);
+            if (chubData && chubData.id) {
+                bulkLocalizeFileCount.textContent = 'Fetching Chub gallery...';
+                bulkLocalizeFileFill.style.width = '0%';
+                
+                try {
+                    const chubResult = await downloadChubGalleryForCharacter(charName, chubData.id, {
+                        onProgress: (current, total) => {
+                            if (!bulkLocalizeAborted) {
+                                bulkLocalizeFileCount.textContent = `Chub: ${current}/${total} files`;
+                                bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
+                            }
+                        },
+                        shouldAbort: () => bulkLocalizeAborted
+                    });
+                    
+                    // Add Chub gallery stats to result
+                    result.chubDownloaded = chubResult.success;
+                    result.chubSkipped = chubResult.skipped;
+                    result.chubErrors = chubResult.errors;
+                    
+                    totalDownloaded += chubResult.success;
+                    totalSkipped += chubResult.skipped;
+                    totalErrors += chubResult.errors;
+                    
+                    // Update stats
+                    bulkStatDownloaded.textContent = totalDownloaded;
+                    bulkStatSkipped.textContent = totalSkipped;
+                    bulkStatErrors.textContent = totalErrors;
+                    
+                    // Clear cache if we downloaded anything
+                    if (chubResult.success > 0 && char.avatar) {
+                        clearMediaLocalizationCache(char.avatar);
+                    }
+                    
+                    if (chubResult.aborted) {
+                        result.incomplete = true;
+                        bulkLocalizeResults.push(result);
+                        break;
+                    }
+                    
+                    if (chubResult.errors > 0) {
+                        result.incomplete = true;
+                    }
+                } catch (err) {
+                    console.error(`[BulkLocalize] Chub gallery error for ${charName}:`, err);
+                    result.chubErrors = 1;
+                    totalErrors++;
+                    bulkStatErrors.textContent = totalErrors;
+                }
             }
+        }
+        
+        // Mark as complete in persistent storage if no errors and not aborted
+        if (!result.incomplete && char.avatar) {
+            markMediaLocalizationComplete(char.avatar);
         }
         
         bulkLocalizeResults.push(result);
@@ -7513,7 +9709,7 @@ document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click'
 // ==============================================
 
 /**
- * Cache for URLâ†’LocalPath mappings per character
+ * Cache for URL→LocalPath mappings per character
  * Structure: { charAvatar: { remoteUrl: localPath, ... } }
  */
 const mediaLocalizationCache = {};
@@ -7597,7 +9793,7 @@ function setCharacterMediaLocalization(avatar, enabled) {
 }
 
 /**
- * Build URLâ†’LocalPath mapping for a character by scanning their gallery folder
+ * Build URL→LocalPath mapping for a character by scanning their gallery folder
  * @param {string} characterName - Character name (folder name)
  * @param {string} avatar - Character avatar filename (for cache key)
  * @param {boolean} forceRefresh - Force rebuild cache even if exists
@@ -7617,7 +9813,7 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
         const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: characterName, type: 7 });
         
         if (!response.ok) {
-            console.log('[MediaLocalize] Could not list gallery files');
+            debugLog('[MediaLocalize] Could not list gallery files');
             return urlMap;
         }
         
@@ -7868,7 +10064,7 @@ function clearMediaLocalizationCache(avatar) {
  */
 function clearAllMediaLocalizationCache() {
     Object.keys(mediaLocalizationCache).forEach(key => delete mediaLocalizationCache[key]);
-    console.log('[MediaLocalize] Cleared all cache');
+    debugLog('[MediaLocalize] Cleared all cache');
 }
 
 // ==============================================
@@ -7921,7 +10117,7 @@ async function calculateHash(arrayBuffer) {
             const hashArray = Array.from(new Uint8Array(hashBuffer));
             return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
         } catch (e) {
-            console.log('[Duplicates] crypto.subtle failed, using fallback hash');
+            debugLog('[Duplicates] crypto.subtle failed, using fallback hash');
         }
     }
     
@@ -8404,14 +10600,14 @@ async function findCharacterDuplicates(forceRefresh = false) {
         duplicateScanCache.groups.length > 0 &&
         duplicateScanCache.charCount === allCharacters.length &&
         (now - duplicateScanCache.timestamp) < DUPLICATE_CACHE_TTL) {
-        console.log('[Duplicates] Using cached results');
+        debugLog('[Duplicates] Using cached results');
         return duplicateScanCache.groups;
     }
     
     const statusEl = document.getElementById('charDuplicatesScanStatus');
     const totalChars = allCharacters.length;
     
-    console.log('[Duplicates] Scanning', totalChars, 'characters...');
+    debugLog('[Duplicates] Scanning', totalChars, 'characters...');
     
     // Phase 1: Build normalized data (show progress)
     if (statusEl) {
@@ -8502,7 +10698,7 @@ async function findCharacterDuplicates(forceRefresh = false) {
         normalizedData: normalizedData
     };
     
-    console.log('[Duplicates] Found', groups.length, 'potential duplicate groups');
+    debugLog('[Duplicates] Found', groups.length, 'potential duplicate groups');
     
     return groups;
 }
@@ -9167,7 +11363,7 @@ if (document.readyState === 'loading') {
 }
 
 function switchView(view) {
-    console.log('Switching to view:', view);
+    debugLog('[View] Switching to:', view);
     currentView = view;
     
     // Update toggle buttons
@@ -9329,7 +11525,7 @@ async function loadAllChats(forceRefresh = false) {
         
         // If cache is old, do background refresh
         if (cacheAge > CHATS_CACHE_MAX_AGE) {
-            console.log('[ChatsCache] Cache is stale, refreshing in background...');
+            debugLog('[ChatsCache] Cache is stale, refreshing in background...');
             showRefreshIndicator(true);
             await fetchFreshChats(true); // background mode
             showRefreshIndicator(false);
@@ -10264,8 +12460,8 @@ let chubFilterImages = false;
 let chubFilterLore = false;
 let chubFilterExpressions = false;
 let chubFilterGreetings = false;
-let chubFilterVerified = false;
 let chubFilterFavorites = false;
+let chubFilterHideOwned = false;
 
 // ChubAI View mode and author filter
 let chubViewMode = 'browse'; // 'browse' or 'timeline'
@@ -10277,6 +12473,7 @@ let chubTimelineCursor = null; // Cursor for pagination
 let chubTimelineHasMore = true;
 let chubTimelineSort = 'newest'; // Sort for timeline view (client-side)
 let chubFollowedAuthors = []; // Cache of followed author usernames
+let chubUserFavoriteIds = new Set(); // Cache of user's favorited character IDs
 let chubCurrentUsername = null; // Current logged-in username
 
 // Local library lookup for marking characters as "In Library"
@@ -10308,10 +12505,16 @@ function buildLocalLibraryLookup() {
         }
         
         // Check for ChubAI source in extensions data
-        const chubUrl = char.data?.extensions?.chub?.url || 
-                       char.data?.extensions?.chub?.full_path ||
-                       char.chub_url || 
-                       char.source_url || '';
+        const chubData = char.data?.extensions?.chub;
+        const chubPath = chubData?.fullPath || chubData?.full_path || '';
+        const chubUrl = chubData?.url || char.chub_url || char.source_url || '';
+        
+        // Direct fullPath from our link feature
+        if (chubPath) {
+            localLibraryLookup.byChubPath.add(chubPath.toLowerCase());
+        }
+        
+        // Also check URL-based sources
         if (chubUrl) {
             // Extract path from URL like "https://chub.ai/characters/username/slug"
             const match = chubUrl.match(/characters\/([^\/]+\/[^\/\?]+)/);
@@ -10324,7 +12527,7 @@ function buildLocalLibraryLookup() {
         }
     }
     
-    console.log('[LocalLibrary] Built lookup:', 
+    debugLog('[LocalLibrary] Built lookup:', 
         'names:', localLibraryLookup.byName.size,
         'name+creator:', localLibraryLookup.byNameAndCreator.size,
         'chubPaths:', localLibraryLookup.byChubPath.size);
@@ -10873,8 +13076,39 @@ function openCreatorNotesFullscreen(content, charName, urlMap) {
     const updateIframeZoom = (zoom) => {
         currentZoom = Math.max(50, Math.min(200, zoom));
         zoomDisplay.textContent = `${currentZoom}%`;
-        iframe.contentDocument?.body?.style.setProperty('zoom', `${currentZoom}%`);
+        const scale = currentZoom / 100;
+        
+        const applyZoom = () => {
+            try {
+                const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+                if (iframeDoc && iframeDoc.body) {
+                    const wrapper = iframeDoc.getElementById('content-wrapper');
+                    if (wrapper) {
+                        // Use transform on wrapper - scales everything including images
+                        wrapper.style.transform = `scale(${scale})`;
+                        // Use top center origin to keep content horizontally centered
+                        wrapper.style.transformOrigin = 'top center';
+                        // Adjust wrapper width so scaled content fits properly
+                        wrapper.style.width = scale <= 1 ? '100%' : `${100 / scale}%`;
+                        // Center the wrapper itself
+                        wrapper.style.margin = '0 auto';
+                    }
+                    // Also try CSS zoom as fallback for browsers that support it
+                    iframeDoc.body.style.zoom = scale;
+                }
+            } catch (e) {
+                console.warn('Could not apply zoom to iframe:', e);
+            }
+        };
+        
+        applyZoom();
     };
+    
+    // Apply zoom after iframe content loads
+    iframe.addEventListener('load', () => {
+        // Small delay to ensure content is fully rendered
+        setTimeout(() => updateIframeZoom(currentZoom), 50);
+    });
     
     on('zoomControlBtns', 'click', (e) => {
         const btn = e.target.closest('.display-control-btn[data-zoom]');
@@ -11207,8 +13441,23 @@ function initContentExpandHandlers() {
 }
 
 function initChubView() {
+    // Sync dropdown values with JS state (browser may cache old form values)
+    const discoveryPresetEl = document.getElementById('chubDiscoveryPreset');
+    const timelineSortEl = document.getElementById('chubTimelineSortHeader');
+    const authorSortEl = document.getElementById('chubAuthorSortSelect');
+    
+    if (discoveryPresetEl) discoveryPresetEl.value = chubDiscoveryPreset;
+    if (timelineSortEl) timelineSortEl.value = chubTimelineSort;
+    if (authorSortEl) authorSortEl.value = chubAuthorSort;
+    
+    // Also sync NSFW toggle state
+    updateNsfwToggleState();
+    
     // Render popular tags
     renderChubPopularTags();
+    
+    // Favorite button in character modal
+    on('chubCharFavoriteBtn', 'click', toggleChubCharFavorite);
     
     // View mode toggle (Browse/Timeline)
     document.querySelectorAll('.chub-view-btn').forEach(btn => {
@@ -11286,18 +13535,25 @@ function initChubView() {
         }
     });
     
-    // Filter checkboxes
+    // Filter checkboxes - with getter for syncing
     const filterCheckboxes = [
-        { id: 'chubFilterImages', setter: (v) => chubFilterImages = v },
-        { id: 'chubFilterLore', setter: (v) => chubFilterLore = v },
-        { id: 'chubFilterExpressions', setter: (v) => chubFilterExpressions = v },
-        { id: 'chubFilterGreetings', setter: (v) => chubFilterGreetings = v },
-        { id: 'chubFilterVerified', setter: (v) => chubFilterVerified = v },
-        { id: 'chubFilterFavorites', setter: (v) => chubFilterFavorites = v }
+        { id: 'chubFilterImages', setter: (v) => chubFilterImages = v, getter: () => chubFilterImages },
+        { id: 'chubFilterLore', setter: (v) => chubFilterLore = v, getter: () => chubFilterLore },
+        { id: 'chubFilterExpressions', setter: (v) => chubFilterExpressions = v, getter: () => chubFilterExpressions },
+        { id: 'chubFilterGreetings', setter: (v) => chubFilterGreetings = v, getter: () => chubFilterGreetings },
+        { id: 'chubFilterFavorites', setter: (v) => chubFilterFavorites = v, getter: () => chubFilterFavorites },
+        { id: 'chubFilterHideOwned', setter: (v) => chubFilterHideOwned = v, getter: () => chubFilterHideOwned }
     ];
     
+    // Sync checkbox states with JS variables (browser may cache old form values)
+    filterCheckboxes.forEach(({ id, getter }) => {
+        const checkbox = document.getElementById(id);
+        if (checkbox) checkbox.checked = getter();
+    });
+    updateChubFiltersButtonState();
+    
     filterCheckboxes.forEach(({ id, setter }) => {
-        document.getElementById(id)?.addEventListener('change', (e) => {
+        document.getElementById(id)?.addEventListener('change', async (e) => {
             // Special handling for favorites - requires token
             if (id === 'chubFilterFavorites' && e.target.checked && !chubToken) {
                 e.target.checked = false;
@@ -11308,9 +13564,21 @@ function initChubView() {
             setter(e.target.checked);
             console.log(`Filter ${id} set to:`, e.target.checked);
             updateChubFiltersButtonState();
-            chubCharacters = [];
-            chubCurrentPage = 1;
-            loadChubCharacters();
+            
+            // For timeline mode with favorites filter, fetch favorite IDs first
+            if (chubViewMode === 'timeline') {
+                if (id === 'chubFilterFavorites' && e.target.checked) {
+                    // Fetch favorite IDs for filtering
+                    await fetchChubUserFavoriteIds();
+                }
+                renderChubTimeline();
+            } else {
+                // For browse mode, always reload from API when changing filters
+                // This ensures we get fresh data and don't mix old results
+                chubCharacters = [];
+                chubCurrentPage = 1;
+                loadChubCharacters();
+            }
         });
     });
     
@@ -11352,11 +13620,11 @@ function initChubView() {
         loadChubCharacters();
     });
     
-    // Timeline sort dropdown
-    on('chubTimelineSortSelect', 'change', (e) => {
+    // Timeline sort dropdown (header only)
+    on('chubTimelineSortHeader', 'change', (e) => {
         chubTimelineSort = e.target.value;
-        console.log('[ChubTimeline] Sort changed to:', chubTimelineSort);
-        renderChubTimeline(); // Re-render with new sort (client-side sorting)
+        debugLog('[ChubTimeline] Sort changed to:', chubTimelineSort);
+        renderChubTimeline();
     });
     
     // Author sort dropdown
@@ -11413,7 +13681,7 @@ function loadChubToken() {
     const savedToken = getSetting('chubToken');
     if (savedToken) {
         chubToken = savedToken;
-        console.log('[ChubToken] Loaded from gallery settings');
+        debugLog('[ChubToken] Loaded from gallery settings');
         
         // Populate input field if it exists
         const tokenInput = document.getElementById('chubApiKeyInput');
@@ -11429,7 +13697,7 @@ function loadChubToken() {
     try {
         const oldToken = localStorage.getItem(CHUB_TOKEN_KEY);
         if (oldToken) {
-            console.log('[ChubToken] Migrating from localStorage to settings system');
+            debugLog('[ChubToken] Migrating from localStorage to settings system');
             chubToken = oldToken;
             setSetting('chubToken', oldToken);
             setSetting('chubRememberToken', true);
@@ -11460,7 +13728,7 @@ function saveChubToken() {
         chubToken: token,
         chubRememberToken: rememberCheckbox?.checked ?? true
     });
-    console.log('[ChubToken] Saved to gallery settings (persistent)');
+    debugLog('[ChubToken] Saved to gallery settings (persistent)');
     
     // Close modal
     const modal = document.getElementById('chubLoginModal');
@@ -11483,7 +13751,7 @@ function clearChubToken() {
         chubToken: null,
         chubRememberToken: false
     });
-    console.log('[ChubToken] Cleared from gallery settings');
+    debugLog('[ChubToken] Cleared from gallery settings');
     
     // Also clear old localStorage key if it exists
     try {
@@ -11660,13 +13928,13 @@ function updateChubFiltersButtonState() {
     
     const hasActiveFilters = chubFilterImages || chubFilterLore || 
                              chubFilterExpressions || chubFilterGreetings || 
-                             chubFilterVerified || chubFilterFavorites;
+                             chubFilterFavorites || chubFilterHideOwned;
     
     btn.classList.toggle('has-filters', hasActiveFilters);
     
     // Update button text to show active filter count
     const count = [chubFilterImages, chubFilterLore, chubFilterExpressions, 
-                   chubFilterGreetings, chubFilterVerified, chubFilterFavorites].filter(Boolean).length;
+                   chubFilterGreetings, chubFilterFavorites, chubFilterHideOwned].filter(Boolean).length;
     
     if (count > 0) {
         btn.innerHTML = `<i class="fa-solid fa-sliders"></i> Features (${count})`;
@@ -11694,7 +13962,7 @@ function updateNsfwToggleState() {
 // CHUBAI VIEW MODE SWITCHING (Browse/Timeline)
 // ============================================================================
 
-function switchChubViewMode(mode) {
+async function switchChubViewMode(mode) {
     chubViewMode = mode;
     
     // Update toggle buttons
@@ -11710,22 +13978,43 @@ function switchChubViewMode(mode) {
         browseSection?.classList.remove('hidden');
         timelineSection?.classList.add('hidden');
         
-        // Show browse-specific filters
+        // Show browse-specific filters, hide timeline sort
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
-        if (discoveryPreset) discoveryPreset.style.display = '';
-        document.getElementById('chubFiltersBtn')?.parentElement?.style.setProperty('display', '');
+        const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
+        if (discoveryPreset) discoveryPreset.classList.remove('chub-filter-hidden');
+        if (timelineSortHeader) timelineSortHeader.classList.add('chub-filter-hidden');
+        
+        // Clear the browse grid immediately and show loading state
+        const grid = document.getElementById('chubGrid');
+        if (grid) {
+            renderLoadingState(grid, 'Loading ChubAI characters...', 'chub-loading');
+        }
+        
+        // Always reload browse data when switching to it to avoid stale/mixed data
+        chubCharacters = [];
+        chubCurrentPage = 1;
+        loadChubCharacters();
     } else if (mode === 'timeline') {
         browseSection?.classList.add('hidden');
         timelineSection?.classList.remove('hidden');
         
-        // Hide browse-specific filters (not relevant for timeline)
+        // Hide browse-specific filters, show timeline sort in header
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
-        if (discoveryPreset) discoveryPreset.style.display = 'none';
-        document.getElementById('chubFiltersBtn')?.parentElement?.style.setProperty('display', 'none');
+        const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
+        if (discoveryPreset) discoveryPreset.classList.add('chub-filter-hidden');
+        if (timelineSortHeader) timelineSortHeader.classList.remove('chub-filter-hidden');
         
-        // Load timeline if not loaded
+        // If favorites filter is enabled, fetch the favorite IDs first
+        if (chubFilterFavorites && chubToken) {
+            await fetchChubUserFavoriteIds();
+        }
+        
+        // Load timeline if not loaded, otherwise just re-render with current filters
         if (chubTimelineCharacters.length === 0) {
             loadChubTimeline();
+        } else {
+            // Re-render to apply any active filters (like favorites)
+            renderChubTimeline();
         }
     }
 }
@@ -11764,7 +14053,7 @@ async function loadChubTimeline(forceRefresh = false) {
         // Use cursor for pagination if we have one (for loading more)
         if (chubTimelineCursor) {
             params.set('cursor', chubTimelineCursor);
-            console.log('[ChubTimeline] Loading next page with cursor');
+            debugLog('[ChubTimeline] Loading next page with cursor');
         }
         
         const headers = {
@@ -11772,7 +14061,7 @@ async function loadChubTimeline(forceRefresh = false) {
             'Authorization': `Bearer ${chubToken}`
         };
         
-        console.log('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
+        debugLog('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
         
         const response = await fetch(`${CHUB_API_BASE}/api/timeline/v1?${params.toString()}`, {
             method: 'GET',
@@ -11809,7 +14098,7 @@ async function loadChubTimeline(forceRefresh = false) {
             nodes = responseData;
         }
         
-        console.log('[ChubTimeline] Got', nodes.length, 'items from API');
+        debugLog('[ChubTimeline] Got', nodes.length, 'items from API');
         
         // Filter to only include characters (not lorebooks, posts, etc.)
         // Timeline API returns paths without "characters/" prefix, so check for:
@@ -11855,7 +14144,7 @@ async function loadChubTimeline(forceRefresh = false) {
             chubTimelineCharacters = [...chubTimelineCharacters, ...newChars];
         }
         
-        console.log('[ChubTimeline] Total characters:', chubTimelineCharacters.length);
+        debugLog('[ChubTimeline] Total characters:', chubTimelineCharacters.length);
         
         // Update cursor for next page
         chubTimelineCursor = nextCursor;
@@ -11894,7 +14183,7 @@ async function loadChubTimeline(forceRefresh = false) {
         
         // Limit auto-loading to prevent infinite loops (max 15 pages)
         if (shouldAutoLoad && chubTimelinePage < 15) {
-            console.log('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
+            debugLog('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
             chubTimelinePage++;
             await loadChubTimeline(false);
             return;
@@ -11903,7 +14192,7 @@ async function loadChubTimeline(forceRefresh = false) {
         // Timeline API is unreliable - supplement with direct author fetches
         // Only do this on first load (no cursor yet used)
         if (!chubTimelineCursor && chubTimelinePage === 1) {
-            console.log('[ChubTimeline] Supplementing with direct author fetches...');
+            debugLog('[ChubTimeline] Supplementing with direct author fetches...');
             await supplementTimelineWithAuthorFetches();
         }
         
@@ -11942,11 +14231,11 @@ async function supplementTimelineWithAuthorFetches() {
         // Get list of followed authors
         const followedAuthors = await fetchMyFollowsList();
         if (!followedAuthors || followedAuthors.size === 0) {
-            console.log('[ChubTimeline] No followed authors to fetch from');
+            debugLog('[ChubTimeline] No followed authors to fetch from');
             return;
         }
         
-        console.log('[ChubTimeline] Fetching recent chars from', followedAuthors.size, 'followed authors');
+        debugLog('[ChubTimeline] Fetching recent chars from', followedAuthors.size, 'followed authors');
         
         // Get existing paths to avoid duplicates
         const existingPaths = new Set(chubTimelineCharacters.map(c => 
@@ -12008,7 +14297,7 @@ async function supplementTimelineWithAuthorFetches() {
             }
         }
         
-        console.log('[ChubTimeline] After supplement, have', chubTimelineCharacters.length, 'total characters');
+        debugLog('[ChubTimeline] After supplement, have', chubTimelineCharacters.length, 'total characters');
         
     } catch (e) {
         console.error('[ChubTimeline] Error supplementing timeline:', e);
@@ -12105,17 +14394,25 @@ function sortTimelineCharacters(characters) {
             });
         case 'downloads':
             // Sort by download count descending
+            // ChubAI's weird naming: starCount is actually downloads
             return characters.sort((a, b) => {
-                const dlA = a.nDownloads || a.n_downloads || a.downloadCount || a.download_count || 0;
-                const dlB = b.nDownloads || b.n_downloads || b.downloadCount || b.download_count || 0;
+                const dlA = a.starCount || 0;
+                const dlB = b.starCount || 0;
                 return dlB - dlA;
             });
         case 'rating':
-            // Sort by star count descending
+            // Sort by rating descending (1-5 star rating)
             return characters.sort((a, b) => {
-                const starsA = a.starCount || a.star_count || a.nStars || a.n_stars || 0;
-                const starsB = b.starCount || b.star_count || b.nStars || b.n_stars || 0;
-                return starsB - starsA;
+                const ratingA = a.rating || 0;
+                const ratingB = b.rating || 0;
+                return ratingB - ratingA;
+            });
+        case 'favorites':
+            // Sort by favorites count descending (the heart/favorite count)
+            return characters.sort((a, b) => {
+                const favA = a.n_favorites || a.nFavorites || 0;
+                const favB = b.n_favorites || b.nFavorites || 0;
+                return favB - favA;
             });
         default:
             return characters;
@@ -12125,8 +14422,47 @@ function sortTimelineCharacters(characters) {
 function renderChubTimeline() {
     const grid = document.getElementById('chubTimelineGrid');
     
+    // Apply client-side filtering
+    let filteredCharacters = [...chubTimelineCharacters];
+    
+    // Feature filters (client-side for timeline)
+    if (chubFilterImages) {
+        filteredCharacters = filteredCharacters.filter(c => c.hasGallery || c.has_gallery);
+    }
+    if (chubFilterLore) {
+        filteredCharacters = filteredCharacters.filter(c => c.has_lore || c.related_lorebooks?.length > 0);
+    }
+    if (chubFilterExpressions) {
+        filteredCharacters = filteredCharacters.filter(c => c.has_expression_pack);
+    }
+    if (chubFilterGreetings) {
+        filteredCharacters = filteredCharacters.filter(c => c.alternate_greetings?.length > 0 || c.n_greetings > 1);
+    }
+    if (chubFilterHideOwned) {
+        filteredCharacters = filteredCharacters.filter(c => !isCharInLocalLibrary(c));
+    }
+    // Favorites filter - use cached favorite IDs
+    if (chubFilterFavorites && chubUserFavoriteIds.size > 0) {
+        filteredCharacters = filteredCharacters.filter(c => {
+            const charId = c.id || c.project_id;
+            return chubUserFavoriteIds.has(charId);
+        });
+    }
+    
     // Sort the characters based on chubTimelineSort
-    const sortedCharacters = sortTimelineCharacters([...chubTimelineCharacters]);
+    const sortedCharacters = sortTimelineCharacters(filteredCharacters);
+    
+    // Check if filtering resulted in no characters
+    if (sortedCharacters.length === 0 && chubTimelineCharacters.length > 0) {
+        grid.innerHTML = `
+            <div class="chub-timeline-empty">
+                <i class="fa-solid fa-filter"></i>
+                <h3>No Matching Characters</h3>
+                <p>No characters match your current filters. Try adjusting the filters.</p>
+            </div>
+        `;
+        return;
+    }
     
     grid.innerHTML = sortedCharacters.map(char => createChubCard(char, true)).join('');
     
@@ -12232,7 +14568,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         });
         
         if (!accountResp.ok) {
-            console.log('[ChubFollow] Could not get account info');
+            debugLog('[ChubFollow] Could not get account info');
             return [];
         }
         
@@ -12243,7 +14579,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
                           accountData.data?.user_name || accountData.data?.name;
         
         if (!myUsername) {
-            console.log('[ChubFollow] No username found in account data');
+            debugLog('[ChubFollow] No username found in account data');
             return [];
         }
         
@@ -12256,7 +14592,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         });
         
         if (!followsResp.ok) {
-            console.log('[ChubFollow] Could not get follows list');
+            debugLog('[ChubFollow] Could not get follows list');
             return [];
         }
         
@@ -12304,7 +14640,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         }
         
         chubMyFollowsList = followedUsernames;
-        console.log('[ChubFollow] Following', followedUsernames.size, 'users:', [...followedUsernames]);
+        debugLog('[ChubFollow] Following', followedUsernames.size, 'users:', [...followedUsernames]);
         return followedUsernames;
         
     } catch (e) {
@@ -12332,9 +14668,9 @@ async function updateFollowAuthorButton(authorName) {
     try {
         const followsList = await fetchMyFollowsList();
         chubIsFollowingCurrentAuthor = followsList && followsList.has(authorName.toLowerCase());
-        console.log('[ChubFollow] Checking if following', authorName, ':', chubIsFollowingCurrentAuthor);
+        debugLog('[ChubFollow] Checking if following', authorName, ':', chubIsFollowingCurrentAuthor);
     } catch (e) {
-        console.log('[ChubFollow] Could not check follow status:', e);
+        debugLog('[ChubFollow] Could not check follow status:', e);
         chubIsFollowingCurrentAuthor = false;
     }
     
@@ -12384,7 +14720,7 @@ async function toggleFollowAuthor() {
         }
         
         const data = await response.json();
-        console.log('[ChubFollow] Response:', data);
+        debugLog('[ChubFollow] Response:', data);
         
         // Toggle state and update cache
         chubIsFollowingCurrentAuthor = !chubIsFollowingCurrentAuthor;
@@ -12462,6 +14798,12 @@ async function loadChubCharacters(forceRefresh = false) {
     const grid = document.getElementById('chubGrid');
     const loadMoreContainer = document.getElementById('chubLoadMore');
     
+    // Special handling for favorites filter - use gateway API directly
+    if (chubFilterFavorites && chubToken) {
+        await loadChubFavorites(forceRefresh);
+        return;
+    }
+    
     if (chubCurrentPage === 1) {
         renderLoadingState(grid, 'Loading ChubAI characters...', 'chub-loading');
     }
@@ -12521,15 +14863,10 @@ async function loadChubCharacters(forceRefresh = false) {
         if (chubFilterGreetings) {
             params.set('require_alternate_greetings', 'true');
         }
-        if (chubFilterVerified) {
-            params.set('recommended_verified', 'true');
-        }
         
-        // Favorites filter (requires URQL token)
-        // API uses 'my_favorites' parameter per OpenAPI spec
-        if (chubFilterFavorites && chubToken) {
-            params.set('my_favorites', 'true');
-        }
+        // Note: Favorites filter is now handled by loadChubFavorites() using gateway API
+        
+        debugLog('[ChubAI] Search params:', params.toString());
         
         const headers = {
             'Accept': 'application/json',
@@ -12604,26 +14941,182 @@ async function loadChubCharacters(forceRefresh = false) {
     }
 }
 
+/**
+ * Fetch and cache user's favorite character IDs
+ * Used for filtering in timeline view
+ */
+async function fetchChubUserFavoriteIds() {
+    if (!chubToken) {
+        chubUserFavoriteIds = new Set();
+        return;
+    }
+    
+    try {
+        const url = `${CHUB_GATEWAY_BASE}/api/favorites?first=500`;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'samwise': chubToken,
+                'CH-API-KEY': chubToken
+            }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            const nodes = data.nodes || data.data || [];
+            chubUserFavoriteIds = new Set(nodes.map(n => n.id || n.project_id).filter(Boolean));
+            debugLog('[ChubAI] Cached', chubUserFavoriteIds.size, 'favorite IDs');
+        }
+    } catch (e) {
+        debugLog('[ChubAI] Failed to fetch favorite IDs:', e.message);
+    }
+}
+
+/**
+ * Load user's favorites from ChubAI gateway API
+ * This uses a different endpoint than the search API
+ */
+async function loadChubFavorites(forceRefresh = false) {
+    const grid = document.getElementById('chubGrid');
+    const loadMoreContainer = document.getElementById('chubLoadMore');
+    
+    if (chubCurrentPage === 1) {
+        renderLoadingState(grid, 'Loading your favorites...', 'chub-loading');
+    }
+    
+    chubIsLoading = true;
+    
+    try {
+        // Use gateway API to fetch favorites directly
+        const params = new URLSearchParams();
+        params.set('first', '100'); // Get more items per page from favorites
+        
+        if (chubCurrentPage > 1) {
+            params.set('page', chubCurrentPage.toString());
+        }
+        
+        const url = `${CHUB_GATEWAY_BASE}/api/favorites?${params.toString()}`;
+        debugLog('[ChubAI] Loading favorites from:', url);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'samwise': chubToken,
+                'CH-API-KEY': chubToken
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to load favorites: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        debugLog('[ChubAI] Favorites response:', data);
+        
+        // Extract nodes from response
+        let nodes = data.nodes || data.data || [];
+        
+        // Apply additional filters client-side
+        if (chubFilterImages) {
+            nodes = nodes.filter(c => c.hasGallery || c.has_gallery);
+        }
+        if (chubFilterLore) {
+            nodes = nodes.filter(c => c.has_lore || c.related_lorebooks?.length > 0);
+        }
+        if (chubFilterExpressions) {
+            nodes = nodes.filter(c => c.has_expression_pack);
+        }
+        if (chubFilterGreetings) {
+            nodes = nodes.filter(c => c.alternate_greetings?.length > 0 || c.n_greetings > 1);
+        }
+        if (chubFilterHideOwned) {
+            nodes = nodes.filter(c => !isCharInLocalLibrary(c));
+        }
+        
+        // Apply NSFW filter
+        if (!chubNsfwEnabled) {
+            nodes = nodes.filter(c => !c.nsfw);
+        }
+        
+        // Apply search filter if any
+        if (chubCurrentSearch) {
+            const search = chubCurrentSearch.toLowerCase();
+            nodes = nodes.filter(c => {
+                const name = (c.name || '').toLowerCase();
+                const creator = (c.fullPath?.split('/')[0] || '').toLowerCase();
+                const tagline = (c.tagline || '').toLowerCase();
+                return name.includes(search) || creator.includes(search) || tagline.includes(search);
+            });
+        }
+        
+        if (chubCurrentPage === 1) {
+            chubCharacters = nodes;
+        } else {
+            chubCharacters = [...chubCharacters, ...nodes];
+        }
+        
+        // Check if there's more data
+        chubHasMore = data.cursor !== null && nodes.length > 0;
+        
+        renderChubGrid();
+        
+        // Show/hide load more button
+        if (loadMoreContainer) {
+            loadMoreContainer.style.display = chubHasMore ? 'flex' : 'none';
+        }
+        
+    } catch (e) {
+        console.error('[ChubAI] Favorites load error:', e);
+        if (chubCurrentPage === 1) {
+            grid.innerHTML = `
+                <div class="chub-empty-state">
+                    <i class="fa-solid fa-exclamation-triangle"></i>
+                    <h3>Failed to load favorites</h3>
+                    <p>${escapeHtml(e.message)}</p>
+                    <button class="action-btn primary" onclick="loadChubCharacters(true)">
+                        <i class="fa-solid fa-refresh"></i> Retry
+                    </button>
+                </div>
+            `;
+        } else {
+            showToast('Failed to load more: ' + e.message, 'error');
+        }
+    } finally {
+        chubIsLoading = false;
+    }
+}
+
 function renderChubGrid() {
     const grid = document.getElementById('chubGrid');
     
-    if (chubCharacters.length === 0) {
+    // Apply client-side "hide owned" filter (other filters are server-side)
+    let displayCharacters = chubCharacters;
+    if (chubFilterHideOwned) {
+        displayCharacters = chubCharacters.filter(c => !isCharInLocalLibrary(c));
+    }
+    
+    if (displayCharacters.length === 0) {
+        const message = chubCharacters.length > 0 && chubFilterHideOwned
+            ? 'All characters in this view are already in your library.'
+            : 'Try a different search term or adjust your filters.';
         grid.innerHTML = `
             <div class="chub-empty">
                 <i class="fa-solid fa-search"></i>
                 <h3>No Characters Found</h3>
-                <p>Try a different search term or adjust your filters.</p>
+                <p>${message}</p>
             </div>
         `;
         return;
     }
     
-    grid.innerHTML = chubCharacters.map(char => createChubCard(char)).join('');
+    grid.innerHTML = displayCharacters.map(char => createChubCard(char)).join('');
     
     // Add click handlers
     grid.querySelectorAll('.chub-card').forEach(card => {
         const fullPath = card.dataset.fullPath;
-        const char = chubCharacters.find(c => c.fullPath === fullPath);
+        const char = displayCharacters.find(c => c.fullPath === fullPath);
         
         card.addEventListener('click', (e) => {
             // Don't open preview if clicking on author link
@@ -12646,7 +15139,10 @@ function createChubCard(char, isTimeline = false) {
     const name = char.name || 'Unknown';
     const creatorName = char.fullPath?.split('/')[0] || 'Unknown';
     const rating = char.rating ? char.rating.toFixed(1) : '0.0';
+    const ratingCount = char.ratingCount || 0;
+    // ChubAI's weird naming: starCount is actually downloads, n_favorites is the heart/favorite count
     const downloads = formatNumber(char.starCount || 0);
+    const favorites = formatNumber(char.n_favorites || char.nFavorites || 0);
     const avatarUrl = char.avatar_url || `https://avatars.charhub.io/avatars/${char.fullPath}/avatar.webp`;
     
     // Check if this character is in local library
@@ -12697,12 +15193,13 @@ function createChubCard(char, isTimeline = false) {
                 <div class="chub-card-name">${escapeHtml(name)}</div>
                 <span class="chub-card-creator-link" data-author="${escapeHtml(creatorName)}" title="Click to see all characters by ${escapeHtml(creatorName)}">${escapeHtml(creatorName)}</span>
                 <div class="chub-card-tags">
-                    ${tags.map(t => `<span class="chub-card-tag">${escapeHtml(t)}</span>`).join('')}
+                    ${tags.map(t => `<span class="chub-card-tag" title="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}
                 </div>
             </div>
             <div class="chub-card-footer">
-                <span class="chub-card-stat"><i class="fa-solid fa-star"></i> ${rating}</span>
-                <span class="chub-card-stat"><i class="fa-solid fa-download"></i> ${downloads}</span>
+                <span class="chub-card-stat" title="${ratingCount} rating${ratingCount !== 1 ? 's' : ''}"><i class="fa-solid fa-star"></i> ${rating}</span>
+                <span class="chub-card-stat" title="Downloads"><i class="fa-solid fa-download"></i> ${downloads}</span>
+                <span class="chub-card-stat" title="Favorites"><i class="fa-solid fa-heart"></i> ${favorites}</span>
                 ${dateInfo}
             </div>
         </div>
@@ -12771,8 +15268,14 @@ async function openChubCharPreview(char) {
         creatorExternal.href = `https://chub.ai/users/${creatorName}`;
     }
     openInBrowserBtn.href = `https://chub.ai/characters/${char.fullPath}`;
+    const ratingCount = char.ratingCount || 0;
     ratingEl.innerHTML = `<i class="fa-solid fa-star"></i> ${char.rating ? char.rating.toFixed(1) : '0.0'}`;
-    downloadsEl.innerHTML = `<i class="fa-solid fa-download"></i> ${formatNumber(char.starCount || 0)}`;
+    ratingEl.title = `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`;
+    // ChubAI's weird naming: starCount is actually downloads, n_favorites is the heart/favorite count
+    const downloadCount = char.starCount || 0;
+    const favoritesCount = char.n_favorites || char.nFavorites || 0;
+    downloadsEl.innerHTML = `<i class="fa-solid fa-download"></i> ${formatNumber(downloadCount)}`;
+    downloadsEl.title = 'Downloads';
     
     // Tags
     const tags = char.topics || [];
@@ -12781,6 +15284,14 @@ async function openChubCharPreview(char) {
     // Stats
     tokensEl.textContent = formatNumber(char.nTokens || 0);
     dateEl.textContent = char.createdAt ? new Date(char.createdAt).toLocaleDateString() : 'Unknown';
+    
+    // Favorite button - n_favorites is the actual favorite count
+    const favoriteBtn = document.getElementById('chubCharFavoriteBtn');
+    const favoriteCountEl = document.getElementById('chubCharFavoriteCount');
+    favoriteCountEl.textContent = formatNumber(favoritesCount);
+    
+    // Check if user has favorited this character (requires token)
+    updateChubFavoriteButton(char);
     
     // Creator's Notes (public ChubAI listing description) - use secure iframe renderer
     renderCreatorNotesSecure(char.description || char.tagline || 'No description available.', char.name, creatorNotesEl);
@@ -12863,8 +15374,186 @@ async function openChubCharPreview(char) {
             }
         }
     } catch (e) {
-        console.log('[ChubAI] Could not fetch detailed character info:', e.message);
+        debugLog('[ChubAI] Could not fetch detailed character info:', e.message);
         // Modal still works with basic info
+    }
+}
+
+/**
+ * Update the favorite button state for ChubAI character
+ */
+async function updateChubFavoriteButton(char) {
+    const favoriteBtn = document.getElementById('chubCharFavoriteBtn');
+    if (!favoriteBtn) return;
+    
+    // Reset state
+    favoriteBtn.classList.remove('favorited', 'loading');
+    favoriteBtn.querySelector('i').className = 'fa-regular fa-heart';
+    
+    // If no token, show but disable with tooltip
+    if (!chubToken) {
+        favoriteBtn.title = 'Login to ChubAI to add favorites';
+        return;
+    }
+    
+    favoriteBtn.title = 'Add to favorites on ChubAI';
+    
+    // If we already know the favorited state (from previous check or toggle), use it
+    if (char._isFavorited === true) {
+        favoriteBtn.classList.add('favorited');
+        favoriteBtn.querySelector('i').className = 'fa-solid fa-heart';
+        favoriteBtn.title = 'Remove from favorites on ChubAI';
+        return;
+    } else if (char._isFavorited === false) {
+        // Already checked and not favorited
+        return;
+    }
+    
+    // Check if user has favorited this character via API
+    try {
+        const charId = char.id || char.project_id;
+        if (!charId) {
+            debugLog('[ChubAI] Cannot check favorite status: no character id');
+            return;
+        }
+        
+        favoriteBtn.classList.add('loading');
+        
+        // Try to get user's favorites list and check if this char is in it
+        // The gateway endpoint might not support GET for single item, so we check differently
+        const url = `${CHUB_GATEWAY_BASE}/api/favorites?first=500`;
+        debugLog('[ChubAI] Checking favorites list for:', charId);
+        
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Accept': 'application/json',
+                'samwise': chubToken,
+                'CH-API-KEY': chubToken
+            }
+        });
+        
+        favoriteBtn.classList.remove('loading');
+        
+        if (response.ok) {
+            const data = await response.json();
+            debugLog('[ChubAI] Favorites response:', data);
+            
+            // Check if this character's ID is in the favorites list
+            let isFavorited = false;
+            const nodes = data.nodes || data.data || data || [];
+            if (Array.isArray(nodes)) {
+                isFavorited = nodes.some(fav => {
+                    const favId = fav.id || fav.project_id || fav.node?.id;
+                    return favId === charId || String(favId) === String(charId);
+                });
+            }
+            
+            // Store state on character for persistence
+            char._isFavorited = isFavorited;
+            
+            if (isFavorited) {
+                favoriteBtn.classList.add('favorited');
+                favoriteBtn.querySelector('i').className = 'fa-solid fa-heart';
+                favoriteBtn.title = 'Remove from favorites on ChubAI';
+                debugLog('[ChubAI] Character is in favorites');
+            } else {
+                char._isFavorited = false;
+                debugLog('[ChubAI] Character is NOT in favorites');
+            }
+        } else {
+            debugLog('[ChubAI] Favorites check failed:', response.status);
+        }
+    } catch (e) {
+        favoriteBtn.classList.remove('loading');
+        debugLog('[ChubAI] Could not check favorite status:', e.message);
+    }
+}
+
+/**
+ * Toggle favorite for the currently selected ChubAI character
+ */
+async function toggleChubCharFavorite() {
+    if (!chubSelectedChar || !chubToken) {
+        if (!chubToken) {
+            showToast('Login to ChubAI to add favorites', 'info');
+            openChubTokenModal();
+        }
+        return;
+    }
+    
+    const favoriteBtn = document.getElementById('chubCharFavoriteBtn');
+    const favoriteCountEl = document.getElementById('chubCharFavoriteCount');
+    if (!favoriteBtn) return;
+    
+    // ChubAI favorites API uses numeric project id at gateway.chub.ai
+    const charId = chubSelectedChar.id || chubSelectedChar.project_id;
+    if (!charId) {
+        showToast('Cannot favorite this character - missing ID', 'error');
+        return;
+    }
+    
+    const isCurrentlyFavorited = favoriteBtn.classList.contains('favorited');
+    
+    favoriteBtn.classList.add('loading');
+    
+    try {
+        const url = `${CHUB_GATEWAY_BASE}/api/favorites/${charId}`;
+        debugLog('[ChubAI] Toggle favorite:', isCurrentlyFavorited ? 'DELETE' : 'POST', url);
+        
+        const response = await fetch(url, {
+            method: isCurrentlyFavorited ? 'DELETE' : 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'samwise': chubToken,
+                'CH-API-KEY': chubToken
+            },
+            body: '{}'  // ChubAI expects empty JSON body
+        });
+        
+        favoriteBtn.classList.remove('loading');
+        
+        debugLog('[ChubAI] Favorite toggle response:', response.status, response.statusText);
+        
+        if (response.ok) {
+            const responseData = await response.json().catch(() => ({}));
+            debugLog('[ChubAI] Favorite toggle success data:', responseData);
+            
+            if (isCurrentlyFavorited) {
+                favoriteBtn.classList.remove('favorited');
+                favoriteBtn.querySelector('i').className = 'fa-regular fa-heart';
+                favoriteBtn.title = 'Add to favorites on ChubAI';
+                // Update stored state
+                chubSelectedChar._isFavorited = false;
+                // Decrement count
+                const currentCount = parseInt(favoriteCountEl.textContent.replace(/[KM]/g, '')) || 0;
+                if (currentCount > 0) {
+                    chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 1) - 1;
+                    favoriteCountEl.textContent = formatNumber(chubSelectedChar.n_favorites);
+                }
+                showToast('Removed from ChubAI favorites', 'info');
+            } else {
+                favoriteBtn.classList.add('favorited');
+                favoriteBtn.querySelector('i').className = 'fa-solid fa-heart';
+                favoriteBtn.title = 'Remove from favorites on ChubAI';
+                // Update stored state
+                chubSelectedChar._isFavorited = true;
+                // Increment count
+                chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 0) + 1;
+                favoriteCountEl.textContent = formatNumber(chubSelectedChar.n_favorites);
+                showToast('Added to ChubAI favorites!', 'success');
+            }
+        } else {
+            const errorText = await response.text().catch(() => '');
+            console.error('[ChubAI] Favorite toggle error response:', response.status, errorText);
+            const errorData = JSON.parse(errorText || '{}');
+            showToast(errorData.message || `Failed to update favorite (${response.status})`, 'error');
+        }
+    } catch (e) {
+        favoriteBtn.classList.remove('loading');
+        console.error('[ChubAI] Favorite toggle error:', e);
+        showToast('Failed to update favorite', 'error');
     }
 }
 
@@ -12923,7 +15612,7 @@ async function downloadChubCharacter() {
                 // Use the proper delete function that syncs with ST
                 const deleteSuccess = await deleteCharacter(toReplace, false);
                 if (deleteSuccess) {
-                    console.log('[ChubDownload] Deleted existing character:', toReplace.avatar);
+                    debugLog('[ChubDownload] Deleted existing character:', toReplace.avatar);
                 } else {
                     console.warn('[ChubDownload] Could not delete existing character, proceeding with import anyway');
                 }
@@ -12937,7 +15626,17 @@ async function downloadChubCharacter() {
         // Build the character card JSON from API data
         const characterCard = buildCharacterCardFromChub(metadata);
         
-        console.log('[ChubDownload] Character card built:', {
+        // Add ChubAI link metadata to extensions
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        characterCard.data.extensions.chub = {
+            id: metadata.id || null,
+            fullPath: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        debugLog('[ChubDownload] Character card built:', {
             name: characterCard.data.name,
             first_mes_length: characterCard.data.first_mes?.length,
             description_length: characterCard.data.description?.length
@@ -12957,7 +15656,7 @@ async function downloadChubCharacter() {
         // Embed character data into PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
-        console.log('[ChubDownload] PNG embedded, size:', embeddedPng.length, 'bytes');
+        debugLog('[ChubDownload] PNG embedded, size:', embeddedPng.length, 'bytes');
         
         // Create a Blob and File from the embedded PNG (match importChubCharacter exactly)
         const blob = new Blob([embeddedPng], { type: 'image/png' });
@@ -12983,7 +15682,7 @@ async function downloadChubCharacter() {
         
         // Read response as text first, then parse (same as importChubCharacter)
         const responseText = await importResponse.text();
-        console.log('[ChubDownload] Import response:', importResponse.status, responseText);
+        debugLog('[ChubDownload] Import response:', importResponse.status, responseText);
         
         if (!importResponse.ok) {
             throw new Error(`Import error: ${responseText}`);
@@ -13011,7 +15710,7 @@ async function downloadChubCharacter() {
             if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                 const context = window.opener.SillyTavern.getContext();
                 if (context && typeof context.getCharacters === 'function') {
-                    console.log('[ChubDownload] Triggering character refresh in main window...');
+                    debugLog('[ChubDownload] Triggering character refresh in main window...');
                     await context.getCharacters();
                 }
             }
@@ -13034,6 +15733,7 @@ async function downloadChubCharacter() {
                 galleryCharacters: hasGallery ? [{
                     name: characterName,
                     fullPath: fullPath,
+                    chubId: metadata.id || null,
                     url: `https://chub.ai/characters/${fullPath}`
                 }] : [],
                 mediaCharacters: hasMedia ? [{

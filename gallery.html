@@ -92,6 +92,13 @@
                         <button id="checkDuplicatesBtn" class="dropdown-item">
                             <i class="fa-solid fa-clone"></i> Find Duplicates
                         </button>
+                        <button id="bulkChubLinkBtn" class="dropdown-item">
+                            <i class="fa-solid fa-link"></i> Link ChubAI Characters
+                        </button>
+                        <div class="dropdown-divider"></div>
+                        <button id="galleryInfoBtn" class="dropdown-item">
+                            <i class="fa-solid fa-circle-info"></i> Help & Tips
+                        </button>
                         <button id="gallerySettingsBtn" class="dropdown-item">
                             <i class="fa-solid fa-gear"></i> Gallery Settings
                         </button>
@@ -139,24 +146,39 @@
                         </button>
                     </div>
                     
-                    <!-- Discovery Preset (combined sort + time logic) -->
-                    <select id="chubDiscoveryPreset" class="glass-select" title="Discovery mode">
-                        <optgroup label="Popular">
-                            <option value="popular_week" selected>🔥 Hot This Week</option>
-                            <option value="popular_month">📈 Hot This Month</option>
-                            <option value="popular_all">👑 Most Downloaded</option>
-                        </optgroup>
-                        <optgroup label="Quality">
-                            <option value="rated_week">⭐ Top Rated (Week)</option>
-                            <option value="rated_all">⭐ Top Rated (All Time)</option>
-                        </optgroup>
-                        <optgroup label="Discovery">
-                            <option value="newest">🆕 Newest</option>
+                    <!-- Sort dropdown container - holds both Browse and Following sorts in same spot -->
+                    <div class="chub-sort-container">
+                        <!-- Discovery Preset (combined sort + time logic) - Browse mode -->
+                        <select id="chubDiscoveryPreset" class="glass-select" title="Discovery mode">
+                            <optgroup label="Popular">
+                                <option value="popular_week" selected>🔥 Hot This Week</option>
+                                <option value="popular_month">📈 Hot This Month</option>
+                                <option value="popular_all">👑 Most Downloaded</option>
+                            </optgroup>
+                            <optgroup label="Quality">
+                                <option value="rated_week">⭐ Top Rated (Week)</option>
+                                <option value="rated_all">⭐ Top Rated (All Time)</option>
+                            </optgroup>
+                            <optgroup label="Discovery">
+                                <option value="newest">🆕 Newest</option>
+                                <option value="updated">🔄 Recently Updated</option>
+                                <option value="recent_hits">🌟 Recent Hits</option>
+                                <option value="random">🎲 Random</option>
+                            </optgroup>
+                        </select>
+                        
+                        <!-- Timeline Sort (Following mode) - hidden by default -->
+                        <select id="chubTimelineSortHeader" class="glass-select chub-filter-hidden" title="Sort timeline">
+                            <option value="newest">🆕 Newest Created</option>
                             <option value="updated">🔄 Recently Updated</option>
-                            <option value="recent_hits">🌟 Recent Hits</option>
-                            <option value="random">🎲 Random</option>
-                        </optgroup>
-                    </select>
+                            <option value="oldest">🕐 Oldest First</option>
+                            <option value="name_asc">📝 Name A-Z</option>
+                            <option value="name_desc">📝 Name Z-A</option>
+                            <option value="downloads">📥 Most Downloads</option>
+                            <option value="favorites">❤️ Most Favorites</option>
+                            <option value="rating">⭐ Top Rated</option>
+                        </select>
+                    </div>
                     
                     <!-- Content Toggles -->
                     <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
@@ -175,11 +197,11 @@
                             <label class="filter-checkbox"><input type="checkbox" id="chubFilterExpressions"> <i class="fa-solid fa-face-smile"></i> Expressions</label>
                             <label class="filter-checkbox"><input type="checkbox" id="chubFilterGreetings"> <i class="fa-solid fa-comments"></i> Alt Greetings</label>
                             <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                            <div class="dropdown-section-title">Quality filters:</div>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterVerified"> <i class="fa-solid fa-circle-check"></i> Verified Only</label>
-                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
                             <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires login)</span>:</div>
                             <label class="filter-checkbox"><input type="checkbox" id="chubFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
+                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                            <div class="dropdown-section-title">Library:</div>
+                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                         </div>
                     </div>
                     
@@ -283,17 +305,6 @@
                         <div class="chub-timeline-header-left">
                             <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
                             <p>New characters from authors you follow</p>
-                        </div>
-                        <div class="chub-timeline-header-right">
-                            <select id="chubTimelineSortSelect" class="glass-select" title="Sort timeline">
-                                <option value="newest">🆕 Newest Created</option>
-                                <option value="updated">🔄 Recently Updated</option>
-                                <option value="oldest">🕐 Oldest First</option>
-                                <option value="name_asc">📝 Name A-Z</option>
-                                <option value="name_desc">📝 Name Z-A</option>
-                                <option value="downloads">📥 Most Downloads</option>
-                                <option value="rating">⭐ Top Rated</option>
-                            </select>
                         </div>
                     </div>
                     <div id="chubTimelineGrid" class="chub-grid">
@@ -411,8 +422,9 @@
                         <p class="chub-char-meta">
                             by <a id="chubCharCreator" href="#" title="Click to see all characters by this author">Creator</a>
                             <a id="chubCreatorExternal" href="#" target="_blank" class="creator-external-link" title="Open author's ChubAI profile"><i class="fa-solid fa-external-link"></i></a> •
-                            <span id="chubCharRating"><i class="fa-solid fa-star"></i> 0</span> •
-                            <span id="chubCharDownloads"><i class="fa-solid fa-download"></i> 0</span>
+                            <span id="chubCharRating" title="Rating"><i class="fa-solid fa-star"></i> 0</span> •
+                            <span id="chubCharDownloads" title="Downloads"><i class="fa-solid fa-download"></i> 0</span> •
+                            <span id="chubCharFavoriteBtn" class="chub-favorite-btn-inline" title="Add to favorites on ChubAI"><i class="fa-regular fa-heart"></i> <span id="chubCharFavoriteCount">0</span></span>
                         </p>
                     </div>
                 </div>
@@ -561,6 +573,9 @@
                         <p class="meta-info">
                             Created: <span id="modalDate"></span> 
                             <span id="modalAuthorContainer" style="display:none">• Author: <a href="#" id="modalAuthor" class="creator-link" title="Click to filter by this creator"></a></span>
+                            <span class="chub-link-indicator" id="chubLinkIndicator" title="Click to link/manage ChubAI connection">
+                                • <i class="fa-solid fa-link"></i> <span class="chub-link-text">ChubAI</span>
+                            </span>
                         </p>
                         
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
@@ -779,7 +794,7 @@
                             <!-- User images for this character -->
                         </div>
                         <div class="upload-zone" id="uploadZone">
-                            <i class="fa-solid fa-cloud-upload"></i> Drop images here to add sprites
+                            <i class="fa-solid fa-cloud-upload"></i> Drop images here to add to gallery
                             <input type="file" id="imageUploadInput" multiple accept="image/*" style="display: none;">
                         </div>
                     </div>
@@ -817,6 +832,82 @@
 
     <div id="toastContainer" class="toast-container"></div>
 
+    <!-- ChubAI Link Modal -->
+    <div id="chubLinkModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content chub-link-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-link"></i> <span id="chubLinkModalTitle">ChubAI Link</span></h3>
+                <button class="close-confirm-btn" id="closeChubLinkModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body chub-link-modal-body">
+                <!-- Character sidebar with avatar -->
+                <div class="chub-link-sidebar">
+                    <div class="chub-link-avatar-wrapper">
+                        <img id="chubLinkCharAvatar" class="chub-link-avatar" src="" alt="Character">
+                        <div id="chubLinkStatusIcon" class="chub-link-status-icon unlinked">
+                            <i class="fa-solid fa-link-slash"></i>
+                        </div>
+                    </div>
+                    <div class="chub-link-char-name" id="chubLinkCharName">Character</div>
+                </div>
+                
+                <!-- Main content area -->
+                <div class="chub-link-main">
+                    <!-- Linked State -->
+                    <div id="chubLinkLinkedState" class="chub-link-state hidden">
+                        <a id="chubLinkCurrentPath" href="#" target="_blank" class="chub-link-current-path">
+                            <i class="fa-solid fa-external-link-alt"></i>
+                            <span></span>
+                        </a>
+                        
+                        <!-- Quick stats from linked character -->
+                        <div id="chubLinkStats" class="chub-link-stats">
+                            <span><i class="fa-solid fa-download"></i> <span id="chubLinkStars">-</span></span>
+                            <span><i class="fa-solid fa-heart"></i> <span id="chubLinkFavorites">-</span></span>
+                            <span><i class="fa-solid fa-coins"></i> <span id="chubLinkTokens">-</span></span>
+                        </div>
+                        
+                        <div class="chub-link-actions">
+                            <button id="chubLinkViewInGalleryBtn" class="chub-link-btn primary">
+                                <i class="fa-solid fa-eye"></i> View on ChubAI
+                            </button>
+                            <button id="chubLinkGalleryBtn" class="chub-link-btn secondary">
+                                <i class="fa-solid fa-images"></i> Download Gallery
+                            </button>
+                            <button id="chubLinkUnlinkBtn" class="chub-link-btn text-danger">
+                                <i class="fa-solid fa-unlink"></i> Unlink
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Unlinked State -->
+                    <div id="chubLinkUnlinkedState" class="chub-link-state">
+                        <div class="chub-link-search-section">
+                            <div class="chub-link-search-row">
+                                <input type="text" id="chubLinkSearchName" class="glass-input" placeholder="Character name">
+                                <span class="chub-link-search-by">by</span>
+                                <input type="text" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator">
+                                <button id="chubLinkSearchBtn" class="chub-link-search-btn" title="Search">
+                                    <i class="fa-solid fa-search"></i>
+                                </button>
+                            </div>
+                            <div id="chubLinkSearchResults" class="chub-link-search-results"></div>
+                        </div>
+                        
+                        <div class="chub-link-divider"><span>or paste URL</span></div>
+                        
+                        <div class="chub-link-url-row">
+                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="https://chub.ai/characters/...">
+                            <button id="chubLinkUrlBtn" class="chub-link-btn primary compact">
+                                <i class="fa-solid fa-link"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Import Summary Modal -->
     <div id="importSummaryModal" class="confirm-modal hidden">
         <div class="confirm-modal-content chub-gallery-modal-content">
@@ -827,21 +918,7 @@
             <div class="confirm-modal-body">
                 <p>The imported character(s) have additional content:</p>
                 <div id="importSummaryList" class="import-summary-list">
-                    <!-- Row for ChubAI Gallery -->
-                    <div id="importSummaryGalleryRow" class="import-summary-row hidden">
-                        <div class="import-summary-row-icon">
-                            <i class="fa-solid fa-images"></i>
-                        </div>
-                        <div class="import-summary-row-info">
-                            <span class="import-summary-row-title">ChubAI Gallery Images</span>
-                            <span class="import-summary-row-desc">Additional artwork available on ChubAI</span>
-                        </div>
-                        <a id="importSummaryGalleryLink" href="#" target="_blank" rel="noopener noreferrer" class="action-btn secondary">
-                            <i class="fa-solid fa-external-link-alt"></i> View Gallery
-                        </a>
-                    </div>
-                    
-                    <!-- Row for Embedded Media -->
+                    <!-- Row for Embedded Media (first - takes precedence) -->
                     <div id="importSummaryMediaRow" class="import-summary-row hidden">
                         <div class="import-summary-row-icon">
                             <i class="fa-solid fa-photo-film"></i>
@@ -854,10 +931,24 @@
                             <i class="fa-solid fa-download"></i> Download
                         </button>
                     </div>
+                    
+                    <!-- Row for ChubAI Gallery (second) -->
+                    <div id="importSummaryGalleryRow" class="import-summary-row hidden">
+                        <div class="import-summary-row-icon">
+                            <i class="fa-solid fa-images"></i>
+                        </div>
+                        <div class="import-summary-row-info">
+                            <span class="import-summary-row-title">ChubAI Gallery Images</span>
+                            <span id="importSummaryGalleryDesc" class="import-summary-row-desc">Additional artwork available on ChubAI</span>
+                        </div>
+                        <button id="importSummaryGalleryDownloadBtn" class="action-btn secondary" title="Download gallery images">
+                            <i class="fa-solid fa-download"></i> Download
+                        </button>
+                    </div>
                 </div>
             </div>
             <div class="confirm-modal-footer">
-                <button id="closeImportSummaryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Got it</button>
+                <button id="importSummaryDownloadAllBtn" class="action-btn download-all-btn"><i class="fa-solid fa-cloud-arrow-down"></i> Download All</button>
             </div>
         </div>
     </div>
@@ -997,6 +1088,173 @@ https://chub.ai/characters/author/another-character
             </div>
             <div class="confirm-modal-footer">
                 <button id="closeBulkSummaryBtn" class="action-btn primary"><i class="fa-solid fa-check"></i> Done</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk ChubAI Link Modal -->
+    <div id="bulkChubLinkModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content bulk-chub-link-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-link"></i> Link Characters to ChubAI</h3>
+                <button class="close-confirm-btn" id="closeBulkChubLinkModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <!-- Scanning Phase -->
+                <div id="bulkChubLinkScanning" class="bulk-chub-link-phase">
+                    <div class="bulk-chub-link-scan-info">
+                        <img id="bulkChubLinkScanAvatar" src="" alt="">
+                        <span id="bulkChubLinkScanName">Preparing...</span>
+                    </div>
+                    <p id="bulkChubLinkScanStatus">Scanning library for unlinked characters...</p>
+                    <div class="import-progress">
+                        <div class="import-progress-header">
+                            <span>Progress</span>
+                            <span id="bulkChubLinkScanProgress">0/0</span>
+                        </div>
+                        <div class="import-progress-bar">
+                            <div id="bulkChubLinkScanFill" class="import-progress-fill"></div>
+                        </div>
+                    </div>
+                    <div class="bulk-chub-link-scan-stats">
+                        <span><i class="fa-solid fa-check-circle"></i> <span id="bulkChubLinkConfidentCount">0</span> confident</span>
+                        <span><i class="fa-solid fa-question-circle"></i> <span id="bulkChubLinkUncertainCount">0</span> need review</span>
+                        <span><i class="fa-solid fa-times-circle"></i> <span id="bulkChubLinkNoMatchCount">0</span> no match</span>
+                    </div>
+                </div>
+                
+                <!-- Results Phase -->
+                <div id="bulkChubLinkResults" class="bulk-chub-link-phase hidden">
+                    <div class="bulk-chub-link-tabs">
+                        <button class="bulk-chub-link-tab active" data-tab="confident" onclick="switchBulkChubLinkTab('confident')">
+                            <i class="fa-solid fa-check-circle"></i> Confident (<span id="bulkChubLinkConfidentTabCount">0</span>)
+                        </button>
+                        <button class="bulk-chub-link-tab" data-tab="uncertain" onclick="switchBulkChubLinkTab('uncertain')">
+                            <i class="fa-solid fa-question-circle"></i> Needs Review (<span id="bulkChubLinkUncertainTabCount">0</span>)
+                        </button>
+                        <button class="bulk-chub-link-tab" data-tab="nomatch" onclick="switchBulkChubLinkTab('nomatch')">
+                            <i class="fa-solid fa-times-circle"></i> No Match (<span id="bulkChubLinkNoMatchTabCount">0</span>)
+                        </button>
+                    </div>
+                    <div class="bulk-chub-link-actions" id="bulkChubLinkConfidentActions">
+                        <button class="action-btn small secondary" onclick="bulkChubLinkSelectAll()"><i class="fa-solid fa-check-double"></i> Select All</button>
+                        <button class="action-btn small secondary" onclick="bulkChubLinkDeselectAll()"><i class="fa-solid fa-square"></i> Deselect All</button>
+                    </div>
+                    <div class="bulk-chub-link-list-container">
+                        <div id="bulkChubLinkConfidentList" class="bulk-chub-link-list"></div>
+                        <div id="bulkChubLinkUncertainList" class="bulk-chub-link-list" style="display: none;"></div>
+                        <div id="bulkChubLinkNoMatchList" class="bulk-chub-link-list" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="bulkChubLinkCancelBtn" class="action-btn secondary"><i class="fa-solid fa-stop"></i> Stop</button>
+                <button id="bulkChubLinkApplyBtn" class="action-btn primary hidden"><i class="fa-solid fa-link"></i> Link Selected (<span id="bulkChubLinkSelectedCount">0</span>)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Help & Tips Modal -->
+    <div id="galleryInfoModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content gallery-info-modal-content">
+            <div class="confirm-modal-header">
+                <h3><i class="fa-solid fa-circle-info"></i> Help & Tips</h3>
+                <button class="close-confirm-btn" id="closeGalleryInfoModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body gallery-info-body">
+                
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-magnifying-glass"></i> Search Filters</h4>
+                    <p>(These will be integrated in the UI later) For now: Use special search prefixes to filter your character library:</p>
+                    <div class="info-code-list">
+                        <div class="info-code-item">
+                            <code>creator:name</code>
+                            <span>Filter by author/creator name</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>chub:yes</code> / <code>chub:no</code>
+                            <span>Filter characters linked/not linked to ChubAI</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>favorite:yes</code> / <code>fav:no</code>
+                            <span>Filter by favorite status</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-link"></i> ChubAI Linking</h4>
+                    <p>Link your local characters to their ChubAI source for extra features:</p>
+                    <ul>
+                        <li><strong>Gallery Downloads:</strong> Download character gallery images from ChubAI</li>
+                        <li><strong>Quick Navigation:</strong> Jump to the ChubAI page from character details</li>
+                        <li><strong>Bulk Linking:</strong> Use "Link ChubAI Characters" to auto-match by name, creator, and content similarity. User review still required.</li>
+                    </ul>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-images"></i> Media Localization</h4>
+                    <p>Download embedded remote images, reference them dynamically:</p>
+                    <ul>
+                        <li>Preserves images if the original URL goes offline</li>
+                        <li>Downloads gallery images from linked ChubAI characters (if character is linked)</li>
+                        <li>Deduplication by image hash</li>
+                        <li>URL replacement uses the original filename to match local files</li>
+                    </ul>
+                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Enable "Replace remote media URLs" in Settings to auto-swap URLs when viewing.</p>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-clone"></i> Duplicate Detection</h4>
+                    <p>The duplicate scanner compares character content to find potential duplicates:</p>
+                    <ul>
+                        <li>Compares character name, creator, description, tags, and lorebook entries</li>
+                        <li>Shows a similarity score (0-100%) for each match</li>
+                        <li>Higher scores indicate closer matches</li>
+                        <li>Review and manage duplicates to keep your library organized</li>
+                    </ul>
+                    
+                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Adjust the minimum score threshold in Settings to see more or fewer matches.</p>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-keyboard"></i> Keyboard Shortcuts</h4>
+                    <div class="info-code-list">
+                        <div class="info-code-item">
+                            <code>Escape</code>
+                            <span>Close modals</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>page up / page down</code>
+                            <span>Scroll through character list</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>Home / End</code>
+                            <span>Scroll to top / bottom of character list</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-tags"></i> Tag Management</h4>
+                    <p>Click tags in the filter panel to cycle through states:</p>
+                    <ul>
+                        <li><span class="tag-state-example include">Green</span> - Include characters with this tag</li>
+                        <li><span class="tag-state-example exclude">Red</span> - Exclude characters with this tag</li>
+                        <li><span class="tag-state-example neutral">Gray</span> - Neutral (no filter)</li>
+                    </ul>
+                </div>
+
+                <div class="info-section info-section-dev">
+                    <h4><i class="fa-solid fa-code"></i> Developer Notes</h4>
+                    <p class="info-muted">Feature freeze time, I have been postponing a proper refactor for a while.</p>
+                    <ul class="info-dev-notes">
+                    </ul>
+                </div>
+
+            </div>
+            <div class="confirm-modal-footer">
+                <button id="closeGalleryInfoModalBtn" class="action-btn secondary"><i class="fa-solid fa-check"></i> Got it</button>
             </div>
         </div>
     </div>
@@ -1177,6 +1435,12 @@ https://chub.ai/characters/author/another-character
                         </button>
                         <span class="settings-hint">Reset the list of processed characters so bulk localize will scan everyone again.</span>
                     </div>
+                    <div class="settings-row" style="margin-top: 10px;">
+                        <label>
+                            <input type="checkbox" id="settingsIncludeChubGallery"> Include ChubAI Gallery for linked characters
+                        </label>
+                        <span class="settings-hint">For characters linked to ChubAI, also download their Chub gallery images. Runs after embedded media download.</span>
+                    </div>
                     <div class="settings-row" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
                         <label>
                             <input type="checkbox" id="settingsFixFilenames"> <span style="opacity: 0.6;">(Debug)</span> Fix filenames during localization
@@ -1204,6 +1468,17 @@ https://chub.ai/characters/author/another-character
                             <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
                         </label>
                         <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}} when viewing character details.</span>
+                    </div>
+                </div>
+                
+                <!-- Developer Section -->
+                <div class="settings-section">
+                    <h4><i class="fa-solid fa-terminal"></i> Developer</h4>
+                    <div class="settings-row">
+                        <label>
+                            <input type="checkbox" id="settingsDebugMode"> Enable debug logging
+                        </label>
+                        <span class="settings-hint">Output detailed debug information to browser console (DevTools → Console). Useful for troubleshooting.</span>
                     </div>
                 </div>
             </div>
