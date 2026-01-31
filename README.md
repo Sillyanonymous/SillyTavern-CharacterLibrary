@@ -37,28 +37,6 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 
 
 
-## 🚀 New ON-THE-FLY Media localization
-
-**Say goodbye to slow-loading remote images and broken links FOREVER!**
-
-Many character cards embed images from external hosts (Imgur, ImageShack, Catbox, etc.) which can be:
-- 🐌 **Slow to load** — waiting on remote servers every single time
-- 💀 **Unreliable** — links break, hosts go down, content gets deleted
-
-**The solution:** Download embedded media once, then Character Library **AUTOMATICALLY** swaps remote URLs with your local copies, **everywhere, on-the-fly, in real-time!**
-
-### ✨ How It Works:
-1. Open a character's **Media tab** in Character Library
-2. Click **"Download Embedded Media"** to save all remote images/audio locally
-3. Enable **"Media Localization"** in Settings (globally or per-character)
-4. 🎉 **BOOM!** Remote URLs are now replaced with local files in:
-   - ✅ Character Library detail views (creator notes, greetings, descriptions)
-   - ✅ **SillyTavern chat messages** - Yes, live in your conversations!
-
-**Your original character cards stay untouched**, the replacement happens dynamically at display time. Fast, private, offline-friendly, and future-proof! 
-
-
-
 ## ✨ Core Features
 
 ### 📚 Character Discovery & Organization
@@ -107,6 +85,18 @@ Click any character for a **rich tabbed interface**:
 - **Audio support**  MP3, WAV, OGG, M4A with built-in player
 - **Duplicate detection** via file hashing
 
+### 🎴 On-the-Fly Media Localization
+
+Many character cards embed images from external hosts (Imgur, ImageShack, Catbox, etc.) which can be slow or unreliable. Media Localization solves this:
+
+1. Download embedded media via the **Media tab** → **"Download Embedded Media"**
+2. Enable **"Media Localization"** in Settings (globally or per-character)
+3. Remote URLs are automatically replaced with local files in:
+   - Character Library detail views (creator notes, greetings, descriptions)
+   - **SillyTavern chat messages** — live in your conversations!
+
+**Your original character cards stay untouched** — replacement happens dynamically at display time. Fast, private, and offline-friendly!
+
 ### 🔗 Related Character Discovery
 
 Automatically finds similar characters via:
@@ -126,12 +116,23 @@ Shows relationship strength and reasoning for each suggestion.
 - Character preview with metadata
 - One-click import to your library
 - See which characters you already own
+- **Hide Owned** filter to show only characters not in your library
 
 ### With URQL Token (Optional)
 Unlock additional features:
 - **Timeline view** — New releases from followed authors
 - **Favorites filtering** — Show only your saved favorites
+- **Toggle favorites** — Add/remove characters from your ChubAI favorites
 - **Restricted content** — Access private listings
+
+### 🔗 Character Linking (New!)
+Link your local characters to their ChubAI counterparts:
+- **Manual linking** — Search and link via the ChubAI indicator in character details
+- **Bulk link scanner** — Automatically scan your library and match unlinked characters
+- **Auto-link on import** — Characters downloaded from ChubAI are automatically linked
+- **Gallery downloads** — Download gallery images from linked characters
+- **View on ChubAI** — Jump to the linked character's ChubAI page
+- **Filter by link status** — Use `chub:yes` or `chub:no` in search
 
 #### Getting Your Token:
 1. Log into [chub.ai](https://chub.ai)
@@ -143,6 +144,7 @@ Unlock additional features:
 - Paste multiple ChubAI URLs (one per line)
 - Progress tracking and error logging
 - Pre-import duplicate detection
+- **Auto-download options** — Optionally download gallery and embedded media during import
 - Gallery notification when imported characters have additional images
 
 ---
@@ -160,8 +162,10 @@ Unlock additional features:
 ## 💡 Tips & Tricks
 
 - **Quick creator filter** - Type `creator:AuthorName` in search
+- **Filter by ChubAI link** - Type `chub:yes` or `chub:no` to filter linked/unlinked characters
 - **Batch import** - Paste multiple ChubAI URLs in the import dialog
 - **Media tab** - See all character images and audio in one place
+- **Bulk link scanner** - Use ⋮ menu → "Bulk Link to ChubAI" to auto-match your library
 - **Duplicate cleanup** - Use Find Duplicates to clean up your library
 
 ---
@@ -172,4 +176,3 @@ Unlock additional features:
 - Performance improvements for very large libraries
 - Thumbnail caching
 - Mobile mode (still in planning/consideration phase)
-- Also download ChubAI galleries (investigating feasibility for clean implementation)
