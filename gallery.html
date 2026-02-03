@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=46">
+    <link rel="stylesheet" href="gallery.css?v=47">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -245,6 +245,9 @@
                         <div class="chub-search-input-wrapper">
                             <i class="fa-solid fa-search"></i>
                             <input type="text" id="chubSearchInput" placeholder="Search ChubAI characters...">
+                            <button id="chubClearSearchBtn" class="chub-search-clear hidden" title="Clear search">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
                             <button id="chubSearchBtn" class="chub-search-submit">
                                 <i class="fa-solid fa-arrow-right"></i>
                             </button>
@@ -567,6 +570,7 @@
                         <button class="tab-btn" data-tab="chats">Chats</button>
                         <button class="tab-btn" data-tab="gallery">Gallery</button>
                         <button class="tab-btn" data-tab="related">Related</button>
+                        <button class="tab-btn hidden" data-tab="info" id="infoTabBtn"><i class="fa-solid fa-microscope"></i> Info</button>
                     </div>
                     
                     <div class="tab-pane active" id="pane-details">
@@ -781,6 +785,9 @@
                         <div class="gallery-header">
                             <h4><i class="fa-solid fa-images"></i> Character Library</h4>
                             <div class="gallery-actions">
+                                <div id="checkLegacyFolderBtn" class="legacy-indicator hidden" title="Legacy images found">
+                                    <span id="legacyFolderCount"></span>
+                                </div>
                                 <button id="localizeMediaBtn" class="action-btn secondary small" title="Download remote images from character card">
                                     <i class="fa-solid fa-download"></i> Download Media
                                 </button>
@@ -823,6 +830,17 @@
                         </div>
                         <div class="related-results" id="relatedResults">
                             <div class="related-loading"><i class="fa-solid fa-spinner fa-spin"></i> Finding related characters...</div>
+                        </div>
+                    </div>
+
+                    <!-- Info Tab (Developer) -->
+                    <div class="tab-pane" id="pane-info">
+                        <div class="info-tab-header">
+                            <h4><i class="fa-solid fa-microscope"></i> Card Metadata & Mappings</h4>
+                            <p class="info-tab-desc">Debug information for this character card</p>
+                        </div>
+                        <div class="info-tab-content" id="infoTabContent">
+                            <!-- Populated by JS -->
                         </div>
                     </div>
                 </div>
@@ -965,6 +983,20 @@
                 <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
 https://chub.ai/characters/author/another-character
 ..."></textarea>
+                <div class="import-options">
+                    <label class="import-option-toggle">
+                        <input type="checkbox" id="importSkipDuplicates" checked>
+                        <span>Skip duplicates <span class="import-option-hint">(already in library)</span></span>
+                    </label>
+                    <label class="import-option-toggle">
+                        <input type="checkbox" id="importAutoDownloadGallery">
+                        <span>Auto-download gallery</span>
+                    </label>
+                    <label class="import-option-toggle">
+                        <input type="checkbox" id="importAutoDownloadMedia">
+                        <span>Auto-download embedded media</span>
+                    </label>
+                </div>
                 <div class="import-info">
                     <i class="fa-solid fa-info-circle"></i>
                     <span>Supports chub.ai and characterhub.org links. Characters will be imported as PNG files.</span>
@@ -976,6 +1008,21 @@ https://chub.ai/characters/author/another-character
                     </div>
                     <div class="import-progress-bar">
                         <div id="importProgressFill" class="import-progress-fill"></div>
+                    </div>
+                    <div id="importMediaProgress" class="import-media-progress hidden">
+                        <div class="import-progress-header">
+                            <span>Downloading media...</span>
+                            <span id="importMediaProgressCount">0/0</span>
+                        </div>
+                        <div class="import-progress-bar">
+                            <div id="importMediaProgressFill" class="import-progress-fill"></div>
+                        </div>
+                    </div>
+                    <div id="importStats" class="import-stats hidden">
+                        <div class="stat-item" title="Characters imported"><i class="fa-solid fa-user-plus"></i> <span id="importStatImported">0</span> imported</div>
+                        <div class="stat-item" title="Characters skipped (duplicates)"><i class="fa-solid fa-forward"></i> <span id="importStatSkipped">0</span> skipped</div>
+                        <div class="stat-item" title="Media files downloaded"><i class="fa-solid fa-download"></i> <span id="importStatMedia">0</span> media</div>
+                        <div class="stat-item" title="Errors"><i class="fa-solid fa-xmark"></i> <span id="importStatErrors">0</span> errors</div>
                     </div>
                     <div id="importLog" class="import-log"></div>
                 </div>
@@ -1325,160 +1372,322 @@ https://chub.ai/characters/author/another-character
 
     <!-- Gallery Settings Modal -->
     <div id="gallerySettingsModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content settings-modal-content">
+        <div class="confirm-modal-content settings-modal-content settings-with-sidebar">
             <div class="confirm-modal-header">
                 <h3><i class="fa-solid fa-gear"></i> Gallery Settings</h3>
                 <button class="close-confirm-btn" id="closeSettingsModal">&times;</button>
             </div>
-            <div class="confirm-modal-body settings-body">
-                <!-- ChubAI Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-cloud"></i> ChubAI Integration</h4>
-                    <div class="settings-row">
-                        <label for="settingsChubToken">URQL Token:</label>
-                        <div class="settings-input-group">
-                            <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
-                            <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                <i class="fa-solid fa-eye"></i>
-                            </button>
+            <div class="settings-layout">
+                <!-- Settings Sidebar Navigation -->
+                <nav class="settings-sidebar">
+                    <ul class="settings-nav">
+                        <li class="settings-nav-item active" data-section="general">
+                            <i class="fa-solid fa-sliders"></i>
+                            <span>General</span>
+                        </li>
+                        <li class="settings-nav-item" data-section="chub">
+                            <i class="fa-solid fa-cloud"></i>
+                            <span>ChubAI</span>
+                        </li>
+                        <li class="settings-nav-item" data-section="media">
+                            <i class="fa-solid fa-photo-film"></i>
+                            <span>Media</span>
+                        </li>
+                        <li class="settings-nav-item" data-section="gallery-folders">
+                            <i class="fa-solid fa-folder-tree"></i>
+                            <span>Gallery Folders</span>
+                        </li>
+                        <li class="settings-nav-item" data-section="developer">
+                            <i class="fa-solid fa-code"></i>
+                            <span>Developer</span>
+                        </li>
+                    </ul>
+                </nav>
+                
+                <!-- Settings Content Panels -->
+                <div class="settings-content">
+                    <!-- General Section -->
+                    <div class="settings-panel active" data-section="general">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-sliders"></i> General Settings</h4>
+                            <p class="settings-panel-desc">Search, sort, and display preferences</p>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-search"></i> Search Defaults</div>
+                            <div class="settings-row checkboxes">
+                                <label><input type="checkbox" id="settingsSearchName" checked> Character Name</label>
+                                <label><input type="checkbox" id="settingsSearchTags" checked> Tags</label>
+                                <label><input type="checkbox" id="settingsSearchAuthor"> Author</label>
+                                <label><input type="checkbox" id="settingsSearchNotes"> Creator Notes</label>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-sort"></i> Default Sort</div>
+                            <div class="settings-row">
+                                <select id="settingsDefaultSort" class="glass-select">
+                                    <option value="name_asc">Name (A-Z)</option>
+                                    <option value="name_desc">Name (Z-A)</option>
+                                    <option value="date_new">Date Added (Newest)</option>
+                                    <option value="date_old">Date Added (Oldest)</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-clone"></i> Duplicate Detection</div>
+                            <div class="settings-row">
+                                <label for="settingsMinScore">Minimum Match Score:</label>
+                                <div class="settings-slider-group">
+                                    <input type="range" id="settingsMinScore" min="20" max="80" step="5" value="35">
+                                    <span id="minScoreValue">35</span>
+                                </div>
+                                <span class="settings-hint">Lower = more matches shown</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsRichCreatorNotes"> Rich creator's notes rendering
+                                </label>
+                                <span class="settings-hint">Uses sandboxed iframe to render with full CSS/HTML support. May cause issues with unusual formatting.</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Appearance</div>
+                            <div class="settings-row">
+                                <label for="settingsHighlightColor">Accent Color:</label>
+                                <div class="settings-input-group color-input-group">
+                                    <input type="color" id="settingsHighlightColor" value="#4a9eff">
+                                    <span class="color-preview-label">Click to change</span>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
+                                </label>
+                                <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-bell"></i> Notifications</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsNotifyAdditionalContent" checked> Notify about additional content on import
+                                </label>
+                                <span class="settings-hint">Show notification when imported characters have gallery images or embedded media available</span>
+                            </div>
                         </div>
                     </div>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsRememberToken"> Remember token
-                        </label>
-                        <span class="settings-hint">Found in browser DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
-                    </div>
-                </div>
-                
-                <!-- Duplicate Detection Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-clone"></i> Duplicate Detection</h4>
-                    <div class="settings-row">
-                        <label for="settingsMinScore">Minimum Match Score:</label>
-                        <div class="settings-slider-group">
-                            <input type="range" id="settingsMinScore" min="20" max="80" step="5" value="35">
-                            <span id="minScoreValue">35</span>
+                    
+                    <!-- ChubAI Section -->
+                    <div class="settings-panel" data-section="chub">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-cloud"></i> ChubAI Integration</h4>
+                            <p class="settings-panel-desc">Configure ChubAI connection and features</p>
                         </div>
-                        <span class="settings-hint">Lower = more matches shown. Scoring: Name (15-25 pts), Creator (20 pts), Description (up to 20 pts), First Message (up to 15 pts)</span>
-                    </div>
-                </div>
-                
-                <!-- Search Defaults Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-search"></i> Default Search Options</h4>
-                    <div class="settings-row checkboxes">
-                        <label><input type="checkbox" id="settingsSearchName" checked> Character Name</label>
-                        <label><input type="checkbox" id="settingsSearchTags" checked> Tags</label>
-                        <label><input type="checkbox" id="settingsSearchAuthor"> Author</label>
-                        <label><input type="checkbox" id="settingsSearchNotes"> Creator Notes</label>
-                    </div>
-                </div>
-                
-                <!-- Default Sort Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-sort"></i> Default Sort Order</h4>
-                    <div class="settings-row">
-                        <select id="settingsDefaultSort" class="glass-select">
-                            <option value="name_asc">Name (A-Z)</option>
-                            <option value="name_desc">Name (Z-A)</option>
-                            <option value="date_new">Date Added (Newest)</option>
-                            <option value="date_old">Date Added (Oldest)</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <!-- Appearance Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-palette"></i> Appearance</h4>
-                    <div class="settings-row">
-                        <label for="settingsHighlightColor">Highlight Color:</label>
-                        <div class="settings-input-group color-input-group">
-                            <input type="color" id="settingsHighlightColor" value="#4a9eff">
-                            <span class="color-preview-label">Click to change accent color</span>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
+                            <div class="settings-row">
+                                <label for="settingsChubToken">URQL Token:</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
+                                    <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsRememberToken"> Remember token
+                                </label>
+                                <span class="settings-hint">Token location: DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
+                            </div>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Experimental Features Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-flask"></i> Experimental Features</h4>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsRichCreatorNotes"> Enable rich creator's notes rendering
-                        </label>
-                        <span class="settings-hint">Uses sandboxed iframe to render creator notes with full CSS/HTML support. May cause issues with some characters that use unusual formatting.</span>
+                    
+                    <!-- Media Section -->
+                    <div class="settings-panel" data-section="media">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-photo-film"></i> Media Localization</h4>
+                            <p class="settings-panel-desc">Download and manage embedded media</p>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-link-slash"></i> URL Replacement</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsMediaLocalization" checked> Replace remote URLs with local files
+                                </label>
+                                <span class="settings-hint">Auto-replace embedded remote media with local gallery files. Files must be downloaded first.</span>
+                            </div>
+                            <div class="settings-row settings-sub-note">
+                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-download"></i> Bulk Operations</div>
+                            <div class="settings-row">
+                                <button id="bulkLocalizeBtn" class="action-btn secondary">
+                                    <i class="fa-solid fa-download"></i> Bulk Localize All Characters
+                                </button>
+                                <span class="settings-hint">Scan and download remote media for ALL characters. Previously processed are skipped.</span>
+                            </div>
+                            <div class="settings-row">
+                                <button id="clearBulkLocalizeHistoryBtn" class="action-btn secondary">
+                                    <i class="fa-solid fa-eraser"></i> Clear Processed History
+                                </button>
+                                <span class="settings-hint">Reset the processed list so bulk localize scans everyone again.</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-gear"></i> Options</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsIncludeChubGallery"> Include ChubAI Gallery
+                                </label>
+                                <span class="settings-hint">Also download Chub gallery images for linked characters.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsFixFilenames" checked> Fix filenames during localization
+                                </label>
+                                <span class="settings-hint">Rename files to localized_media_* format when duplicates are detected.</span>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                
-                <!-- Media Localization Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-link-slash"></i> Media Localization</h4>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsMediaLocalization"> Replace remote media URLs with localized files
-                        </label>
-                        <span class="settings-hint">When viewing characters, automatically replace embedded remote URLs (images/video/audio) with local files from the character's gallery. Files must first be downloaded using "Localize Media". Works in Gallery and SillyTavern chat.</span>
+                    
+                    <!-- Gallery Folders Section -->
+                    <div class="settings-panel" data-section="gallery-folders">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-folder-tree"></i> Unique Gallery Folders</h4>
+                            <p class="settings-panel-desc">Give each character their own gallery, even if they share names</p>
+                        </div>
+                        
+                        <div class="settings-warning">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>This feature writes a unique ID into each character card. <strong>Backup your characters folder first.</strong></span>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-toggle-on"></i> Enable Feature</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsUniqueGalleryFolders"> Use unique gallery folder names
+                                </label>
+                                <span class="settings-hint">Folders use format: <code>CharName_abc123xyz</code></span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Step 1: Assign IDs</div>
+                            <span class="settings-hint">Generate unique IDs for all characters and register folder mappings.</span>
+                            <div class="settings-row" style="margin-top: 8px;">
+                                <button id="migrateGalleryFoldersBtn" class="action-btn secondary">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i> Assign Gallery IDs
+                                </button>
+                            </div>
+                            <div class="settings-row" id="galleryMigrationStatus" style="display: none;">
+                                <span class="settings-hint" id="galleryMigrationStatusText" style="color: var(--accent);"></span>
+                            </div>
+                            <div class="settings-row settings-sub-note">
+                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Refresh SillyTavern page after migration.</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-truck-moving"></i> Step 2: Migrate Images</div>
+                            <span class="settings-hint">Move existing images from old folders to new unique folders.</span>
+                            
+                            <div class="settings-sub-section">
+                                <div class="settings-sub-title"><i class="fa-solid fa-user"></i> Unique Names</div>
+                                <span class="settings-hint">Simply moves all images from {{charname}} folder into {charname}_{uuid} folder.</span>
+                                <div class="settings-row" style="margin-top: 6px;">
+                                    <button id="migrateAllImagesBtn" class="action-btn secondary small">
+                                        <i class="fa-solid fa-truck-moving"></i> Migrate All
+                                    </button>
+                                </div>
+                                <div class="settings-row" id="migrateAllStatus" style="display: none;">
+                                    <span class="settings-hint" id="migrateAllStatusText" style="color: var(--accent);"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-sub-section">
+                                <div class="settings-sub-title"><i class="fa-solid fa-users"></i> Shared Names</div>
+                                <span class="settings-hint">Uses fingerprinting to sort images to correct owners.</span>
+                                <div class="settings-row" style="margin-top: 6px;">
+                                    <button id="relocateSharedImagesBtn" class="action-btn secondary small">
+                                        <i class="fa-solid fa-fingerprint"></i> Smart Relocate
+                                    </button>
+                                </div>
+                                <div class="settings-row" id="imageRelocationStatus" style="display: none;">
+                                    <span class="settings-hint" id="imageRelocationStatusText" style="color: var(--accent);"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-row settings-sub-note" style="margin-top: 10px;">
+                                <span class="settings-hint"><i class="fa-solid fa-hand-point-right"></i> Unmatched images remain in the original folder for manual handling.</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-map"></i> Reference</div>
+                            <div class="settings-row">
+                                <button id="viewFolderMappingBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-map"></i> View Folder Mapping
+                                </button>
+                                <span class="settings-hint">See which unique folder belongs to which character.</span>
+                            </div>
+                            <div class="settings-row" style="margin-top: 8px;">
+                                <button id="browseOrphanedFoldersBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
+                                </button>
+                                <span class="settings-hint">Find and redistribute images from old legacy folders.</span>
+                            </div>
+                        </div>
                     </div>
-                    <div class="settings-row settings-sub-note">
-                        <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Per-character overrides available in the character detail panel.</span>
-                    </div>
-                    <div class="settings-row">
-                        <button id="bulkLocalizeBtn" class="action-btn secondary" style="margin-top: 10px;">
-                            <i class="fa-solid fa-download"></i> Bulk Localize All Characters
-                        </button>
-                        <span class="settings-hint">Scan and download remote media for ALL characters in your library. Previously processed characters are skipped.</span>
-                    </div>
-                    <div class="settings-row">
-                        <button id="clearBulkLocalizeHistoryBtn" class="action-btn secondary" style="margin-top: 5px;">
-                            <i class="fa-solid fa-eraser"></i> Clear Processed History
-                        </button>
-                        <span class="settings-hint">Reset the list of processed characters so bulk localize will scan everyone again.</span>
-                    </div>
-                    <div class="settings-row" style="margin-top: 10px;">
-                        <label>
-                            <input type="checkbox" id="settingsIncludeChubGallery"> Include ChubAI Gallery for linked characters
-                        </label>
-                        <span class="settings-hint">For characters linked to ChubAI, also download their Chub gallery images. Runs after embedded media download.</span>
-                    </div>
-                    <div class="settings-row" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
-                        <label>
-                            <input type="checkbox" id="settingsFixFilenames"> <span style="opacity: 0.6;">(Debug)</span> Fix filenames during localization
-                        </label>
-                        <span class="settings-hint">Renames existing gallery files to localized_media_* format when duplicates are detected. Use this to fix images imported before the current localization spec.</span>
-                    </div>
-                </div>
-                
-                <!-- Notifications Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-bell"></i> Notifications</h4>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsNotifyAdditionalContent" checked> Notify about additional content on import
-                        </label>
-                        <span class="settings-hint">Show a notification when imported characters have ChubAI gallery images or embedded remote media available.</span>
-                    </div>
-                </div>
-                
-                <!-- Display Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-eye"></i> Display</h4>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
-                        </label>
-                        <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}} when viewing character details.</span>
-                    </div>
-                </div>
-                
-                <!-- Developer Section -->
-                <div class="settings-section">
-                    <h4><i class="fa-solid fa-terminal"></i> Developer</h4>
-                    <div class="settings-row">
-                        <label>
-                            <input type="checkbox" id="settingsDebugMode"> Enable debug logging
-                        </label>
-                        <span class="settings-hint">Output detailed debug information to browser console (DevTools → Console). Useful for troubleshooting.</span>
+                    
+                    <!-- Developer Section -->
+                    <div class="settings-panel" data-section="developer">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-code"></i> Developer Options</h4>
+                            <p class="settings-panel-desc">Debugging and troubleshooting tools</p>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-terminal"></i> Logging</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsDebugMode"> Enable debug logging
+                                </label>
+                                <span class="settings-hint">Output detailed info to browser console (DevTools → Console)</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-microscope"></i> Character Inspection</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsShowInfoTab"> Show "Info" tab in character modal
+                                </label>
+                                <span class="settings-hint">Displays card metadata, file paths, and internal mappings for debugging</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
+                            <div class="settings-row">
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.0.0</span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1490,6 +1699,6 @@ https://chub.ai/characters/author/another-character
     </div>
 
     <!-- Scripts -->
-    <script src="gallery.js?v=71"></script>
+    <script src="gallery.js?v=72"></script>
 </body>
 </html>

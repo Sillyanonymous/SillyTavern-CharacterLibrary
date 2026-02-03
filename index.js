@@ -169,7 +169,8 @@ function getExtensionSettings() {
  */
 function isMediaLocalizationEnabledForChat(avatar) {
     const settings = getExtensionSettings();
-    const globalEnabled = settings.mediaLocalizationEnabled || false;
+    // Default to true if not explicitly set (matching gallery.js DEFAULT_SETTINGS)
+    const globalEnabled = settings.mediaLocalizationEnabled !== false;
     const perCharSettings = settings.mediaLocalizationPerChar || {};
     
     // Check per-character override first
@@ -186,6 +187,31 @@ function isMediaLocalizationEnabledForChat(avatar) {
 function sanitizeFolderName(name) {
     if (!name) return '';
     return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
+}
+
+/**
+ * Get the gallery folder name for a character
+ * Checks for unique folder override first, then falls back to character name
+ * @param {object} character - Character object with name and avatar
+ * @returns {string} The folder name to use
+ */
+function getGalleryFolderForCharacter(character) {
+    if (!character) return '';
+    
+    try {
+        const context = SillyTavern?.getContext?.();
+        
+        // Check for gallery folder override (unique folder)
+        const overrideFolders = context?.extensionSettings?.gallery?.folders;
+        if (overrideFolders && character.avatar && overrideFolders[character.avatar]) {
+            return overrideFolders[character.avatar];
+        }
+    } catch (e) {
+        // Fall through to default
+    }
+    
+    // Default to character name
+    return sanitizeFolderName(character.name || '');
 }
 
 /**
@@ -214,15 +240,26 @@ function extractFilenameFromUrl(url) {
 
 /**
  * Build URL→LocalPath mapping for a character by scanning their gallery folder
+ * @param {object} character - Full character object
  */
-async function buildChatMediaLocalizationMap(characterName, avatar) {
+async function buildChatMediaLocalizationMap(character) {
+    const avatar = character?.avatar;
+    
+    // Get the correct folder name (may be unique folder with UUID suffix)
+    const folderName = getGalleryFolderForCharacter(character);
+    if (!folderName) {
+        return {};
+    }
+    
+    // Cache key includes folder name to handle cases where override is registered after first call
+    const cacheKey = avatar ? `${avatar}::${folderName}` : null;
+    
     // Check cache first
-    if (avatar && chatMediaLocalizationCache[avatar]) {
-        return chatMediaLocalizationCache[avatar];
+    if (cacheKey && chatMediaLocalizationCache[cacheKey]) {
+        return chatMediaLocalizationCache[cacheKey];
     }
     
     const urlMap = {};
-    const safeFolderName = sanitizeFolderName(characterName);
     
     try {
         // Get CSRF token properly
@@ -235,7 +272,7 @@ async function buildChatMediaLocalizationMap(characterName, avatar) {
                 'Content-Type': 'application/json',
                 'X-CSRF-Token': csrfToken
             },
-            body: JSON.stringify({ folder: characterName, type: 7 }) // 7 = all media types
+            body: JSON.stringify({ folder: folderName, type: 7 }) // 7 = all media types
         });
         
         if (!response.ok) {
@@ -244,6 +281,7 @@ async function buildChatMediaLocalizationMap(characterName, avatar) {
         
         const files = await response.json();
         if (!files || files.length === 0) {
+            // Don't cache empty results - folder override may not be registered yet
             return urlMap;
         }
         
@@ -258,15 +296,15 @@ async function buildChatMediaLocalizationMap(characterName, avatar) {
             const match = fileName.match(localizedPattern);
             if (match) {
                 const sanitizedName = match[1];
-                const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+                const localPath = `/user/images/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}`;
                 urlMap[`__sanitized__${sanitizedName}`] = localPath;
                 localizedCount++;
             }
         }
         
-        // Cache the mapping
-        if (avatar) {
-            chatMediaLocalizationCache[avatar] = urlMap;
+        // Only cache if we found localized files - don't cache empty results
+        if (cacheKey && localizedCount > 0) {
+            chatMediaLocalizationCache[cacheKey] = urlMap;
         }
         
         return urlMap;
@@ -299,8 +337,7 @@ async function localizeMediaInMessage(messageElement, character) {
     // Check if localization is enabled
     if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
     
-    const characterName = character.name;
-    const urlMap = await buildChatMediaLocalizationMap(characterName, character.avatar);
+    const urlMap = await buildChatMediaLocalizationMap(character);
     
     if (Object.keys(urlMap).length === 0) return; // No localized files
     
@@ -458,7 +495,7 @@ async function localizeCharacterInfoPanels() {
         if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
         
         // Build the URL map
-        const urlMap = await buildChatMediaLocalizationMap(character.name, character.avatar);
+        const urlMap = await buildChatMediaLocalizationMap(character);
         if (Object.keys(urlMap).length === 0) return;
         
         // Selectors for ST panels that might contain character info with images

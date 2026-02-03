@@ -17,6 +17,72 @@ let pendingPayload = null;
 let showFavoritesOnly = false;
 
 // ========================================
+// PERFORMANCE UTILITIES
+// ========================================
+
+/**
+ * Debounce function - delays execution until wait ms after last call
+ * @param {Function} func - Function to debounce
+ * @param {number} wait - Milliseconds to wait
+ * @returns {Function} Debounced function
+ */
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+/**
+ * Throttle function - limits execution to once per wait ms
+ * @param {Function} func - Function to throttle  
+ * @param {number} wait - Minimum ms between calls
+ * @returns {Function} Throttled function
+ */
+function throttle(func, wait) {
+    let lastTime = 0;
+    return function executedFunction(...args) {
+        const now = Date.now();
+        if (now - lastTime >= wait) {
+            lastTime = now;
+            func(...args);
+        }
+    };
+}
+
+// Simple cache for expensive computations
+const computationCache = new Map();
+const CACHE_MAX_SIZE = 500;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCached(key) {
+    const entry = computationCache.get(key);
+    if (entry && Date.now() - entry.time < CACHE_TTL) {
+        return entry.value;
+    }
+    computationCache.delete(key);
+    return undefined;
+}
+
+function setCached(key, value) {
+    // Evict oldest entries if cache is full
+    if (computationCache.size >= CACHE_MAX_SIZE) {
+        const firstKey = computationCache.keys().next().value;
+        computationCache.delete(firstKey);
+    }
+    computationCache.set(key, { value, time: Date.now() });
+}
+
+function clearCache() {
+    computationCache.clear();
+}
+
+// ========================================
 // SETTINGS PERSISTENCE SYSTEM
 // Uses SillyTavern's extensionSettings via main window for server-side storage
 // Falls back to localStorage if main window unavailable
@@ -39,7 +105,9 @@ const DEFAULT_SETTINGS = {
     // Highlight/accent color (CSS color value)
     highlightColor: '#4a9eff',
     // Media Localization: Replace remote URLs with local files on-the-fly
-    mediaLocalizationEnabled: false,
+    mediaLocalizationEnabled: true,
+    // Fix filenames during localization (rename to localized_media_* format)
+    fixFilenames: true,
     // Per-character overrides for media localization (avatar -> boolean)
     mediaLocalizationPerChar: {},
     // Show notification when imported chars have additional content (gallery/embedded media)
@@ -48,6 +116,11 @@ const DEFAULT_SETTINGS = {
     replaceUserPlaceholder: true,
     // Debug mode - enable console logging
     debugMode: false,
+    // Unique Gallery Folders: Use gallery_id to create unique folder names, preventing shared galleries
+    // when multiple characters share the same name
+    uniqueGalleryFolders: false,
+    // Show Info tab in character modal (debugging/metadata info)
+    showInfoTab: false,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -88,6 +161,80 @@ function getSTContext() {
         console.warn('[Settings] Cannot access main window context:', e);
     }
     return null;
+}
+
+/**
+ * Directly set a value in ST's extensionSettings via the opener window
+ * Uses explicit property assignment to ensure cross-window write works
+ * @param {string} path - Dot-separated path like 'gallery.folders'
+ * @param {string} key - The key to set
+ * @param {*} value - The value to set
+ * @returns {boolean} True if successful
+ */
+function setSTExtensionSetting(path, key, value) {
+    try {
+        if (!window.opener || window.opener.closed) {
+            debugWarn('[ST Settings] window.opener not available');
+            return false;
+        }
+        
+        const stContext = window.opener.SillyTavern?.getContext?.();
+        if (!stContext?.extensionSettings) {
+            debugWarn('[ST Settings] ST context or extensionSettings unavailable');
+            return false;
+        }
+        
+        // Navigate to the path, creating objects as needed
+        const parts = path.split('.');
+        let current = stContext.extensionSettings;
+        
+        for (const part of parts) {
+            if (!current[part]) {
+                current[part] = {};
+            }
+            current = current[part];
+        }
+        
+        // Set the value
+        current[key] = value;
+        
+        // Trigger save
+        if (typeof stContext.saveSettingsDebounced === 'function') {
+            stContext.saveSettingsDebounced();
+        }
+        
+        return current[key] === value;
+    } catch (e) {
+        debugError('[ST Settings] Error setting value:', e);
+        return false;
+    }
+}
+
+/**
+ * Verify that our context access matches what ST's gallery would use
+ * This helps diagnose cross-window context issues
+ */
+function verifyContextAccess() {
+    const ourContext = getSTContext();
+    if (!ourContext?.extensionSettings) return false;
+    
+    // Ensure gallery.folders exists
+    if (!ourContext.extensionSettings.gallery) {
+        ourContext.extensionSettings.gallery = { folders: {} };
+    }
+    if (!ourContext.extensionSettings.gallery.folders) {
+        ourContext.extensionSettings.gallery.folders = {};
+    }
+    
+    // Try setting and reading back a test value
+    const testKey = '__contextTest__' + Date.now();
+    const testValue = 'test_' + Math.random();
+    
+    ourContext.extensionSettings.gallery.folders[testKey] = testValue;
+    const success = ourContext.extensionSettings.gallery.folders[testKey] === testValue;
+    delete ourContext.extensionSettings.gallery.folders[testKey];
+    
+    return success;
 }
 
 /**
@@ -251,9 +398,19 @@ function setupSettingsModal() {
     
     // Developer
     const debugModeCheckbox = document.getElementById('settingsDebugMode');
+    const showInfoTabCheckbox = document.getElementById('settingsShowInfoTab');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
+    
+    // Unique Gallery Folders
+    const uniqueGalleryFoldersCheckbox = document.getElementById('settingsUniqueGalleryFolders');
+    const migrateGalleryFoldersBtn = document.getElementById('migrateGalleryFoldersBtn');
+    const galleryMigrationStatus = document.getElementById('galleryMigrationStatus');
+    const galleryMigrationStatusText = document.getElementById('galleryMigrationStatusText');
+    const relocateSharedImagesBtn = document.getElementById('relocateSharedImagesBtn');
+    const imageRelocationStatus = document.getElementById('imageRelocationStatus');
+    const imageRelocationStatusText = document.getElementById('imageRelocationStatusText');
     
     if (!settingsBtn || !settingsModal) return;
     
@@ -279,10 +436,10 @@ function setupSettingsModal() {
         
         // Media Localization
         if (mediaLocalizationCheckbox) {
-            mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') || false;
+            mediaLocalizationCheckbox.checked = getSetting('mediaLocalizationEnabled') !== false; // Default true
         }
         if (fixFilenamesCheckbox) {
-            fixFilenamesCheckbox.checked = getSetting('fixFilenames') || false;
+            fixFilenamesCheckbox.checked = getSetting('fixFilenames') !== false; // Default true
         }
         if (includeChubGalleryCheckbox) {
             includeChubGalleryCheckbox.checked = getSetting('includeChubGallery') || false;
@@ -302,14 +459,47 @@ function setupSettingsModal() {
         if (debugModeCheckbox) {
             debugModeCheckbox.checked = getSetting('debugMode') || false;
         }
+        if (showInfoTabCheckbox) {
+            showInfoTabCheckbox.checked = getSetting('showInfoTab') || false;
+        }
         
         // Appearance
         if (highlightColorInput) {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
         }
         
+        // Unique Gallery Folders
+        if (uniqueGalleryFoldersCheckbox) {
+            uniqueGalleryFoldersCheckbox.checked = getSetting('uniqueGalleryFolders') || false;
+        }
+        // Update migration status
+        updateGalleryMigrationStatus();
+        updateImageRelocationStatus();
+        
+        // Reset to first section
+        switchSettingsSection('general');
+        
         settingsModal.classList.remove('hidden');
     };
+    
+    // Settings sidebar navigation
+    function switchSettingsSection(sectionName) {
+        // Update nav items
+        settingsModal.querySelectorAll('.settings-nav-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.section === sectionName);
+        });
+        // Update panels
+        settingsModal.querySelectorAll('.settings-panel').forEach(panel => {
+            panel.classList.toggle('active', panel.dataset.section === sectionName);
+        });
+    }
+    
+    // Attach click handlers to nav items
+    settingsModal.querySelectorAll('.settings-nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            switchSettingsSection(item.dataset.section);
+        });
+    });
     
     // Close modal
     const closeModal = () => settingsModal.classList.add('hidden');
@@ -337,8 +527,8 @@ function setupSettingsModal() {
         };
     }
     
-    // Save settings
-    saveSettingsBtn.onclick = () => {
+    // Helper function to actually save settings
+    const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
         
         setSettings({
@@ -358,7 +548,25 @@ function setupSettingsModal() {
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
+            showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
+            uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
         });
+        
+        // If unique gallery folders was just enabled, register overrides for all characters with gallery_ids
+        const uniqueFoldersEnabled = uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false;
+        if (uniqueFoldersEnabled) {
+            let registeredCount = 0;
+            for (const char of allCharacters) {
+                if (getCharacterGalleryId(char)) {
+                    if (registerGalleryFolderOverride(char)) {
+                        registeredCount++;
+                    }
+                }
+            }
+            if (registeredCount > 0) {
+                debugLog(`[Settings] Registered ${registeredCount} folder overrides on enable`);
+            }
+        }
         
         // Clear media localization cache when setting changes
         clearAllMediaLocalizationCache();
@@ -380,6 +588,35 @@ function setupSettingsModal() {
         
         showToast('Settings saved', 'success');
         closeModal();
+    };
+    
+    // Save settings
+    saveSettingsBtn.onclick = () => {
+        // Check if unique gallery folders is being disabled
+        const wasEnabled = getSetting('uniqueGalleryFolders');
+        const willBeEnabled = uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false;
+        
+        if (wasEnabled && !willBeEnabled) {
+            // Feature is being disabled - show confirmation modal
+            showDisableGalleryFoldersModal(
+                (movedImages) => {
+                    // User confirmed - save settings
+                    if (movedImages) {
+                        showToast('Images moved to default folders', 'success');
+                    }
+                    doSaveSettings();
+                },
+                () => {
+                    // User cancelled - revert checkbox
+                    if (uniqueGalleryFoldersCheckbox) {
+                        uniqueGalleryFoldersCheckbox.checked = true;
+                    }
+                }
+            );
+        } else {
+            // Normal save
+            doSaveSettings();
+        }
     };
     
     // Restore defaults - resets to default values AND saves them
@@ -406,6 +643,9 @@ function setupSettingsModal() {
         }
         if (notifyAdditionalContentCheckbox) {
             notifyAdditionalContentCheckbox.checked = DEFAULT_SETTINGS.notifyAdditionalContent;
+        }
+        if (uniqueGalleryFoldersCheckbox) {
+            uniqueGalleryFoldersCheckbox.checked = DEFAULT_SETTINGS.uniqueGalleryFolders;
         }
         
         // Apply default highlight color immediately
@@ -435,6 +675,335 @@ function setupSettingsModal() {
         
         showToast('Settings restored to defaults', 'success');
     };
+    
+    // Update gallery migration status display
+    function updateGalleryMigrationStatus() {
+        if (!galleryMigrationStatus || !galleryMigrationStatusText) return;
+        
+        const needsId = countCharactersNeedingGalleryId();
+        const needsRegistration = countCharactersNeedingFolderRegistration();
+        const total = allCharacters.length;
+        const hasId = total - needsId;
+        
+        if (total === 0) {
+            galleryMigrationStatus.style.display = 'none';
+            return;
+        }
+        
+        galleryMigrationStatus.style.display = 'block';
+        
+        if (needsId === 0 && needsRegistration === 0) {
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: #4caf50;"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
+        } else if (needsId === 0 && needsRegistration > 0) {
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> All characters have IDs, but ${needsRegistration} need folder override registration.`;
+        } else {
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> ${hasId}/${total} characters have gallery IDs. ${needsId} need assignment.`;
+        }
+    }
+    
+    // Migration button handler
+    if (migrateGalleryFoldersBtn) {
+        migrateGalleryFoldersBtn.onclick = async () => {
+            // Feature must be enabled to assign IDs
+            if (!getSetting('uniqueGalleryFolders')) {
+                showToast('Enable "Use unique gallery folder names" first!', 'error');
+                return;
+            }
+            
+            const needsId = countCharactersNeedingGalleryId();
+            const needsRegistration = countCharactersNeedingFolderRegistration();
+            
+            if (needsId === 0 && needsRegistration === 0) {
+                showToast('All characters already have gallery IDs and folder overrides!', 'info');
+                return;
+            }
+            
+            let confirmMsg = '';
+            if (needsId > 0) {
+                confirmMsg = `This will assign unique gallery IDs to ${needsId} character(s).\n\n`;
+            }
+            if (needsRegistration > 0) {
+                confirmMsg += `${needsRegistration} character(s) need folder override registration.\n\n`;
+            }
+            confirmMsg += `• Gallery IDs are stored in character data (data.extensions.gallery_id)\n` +
+                `• Folder overrides will be registered in SillyTavern settings\n` +
+                `• Existing gallery images are NOT moved (they remain accessible)\n\n` +
+                `Continue?`;
+            
+            const confirmed = confirm(confirmMsg);
+            
+            if (!confirmed) return;
+            
+            const originalText = migrateGalleryFoldersBtn.innerHTML;
+            migrateGalleryFoldersBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+            migrateGalleryFoldersBtn.disabled = true;
+            
+            let idAssignedCount = 0;
+            let errorCount = 0;
+            const totalToProcess = needsId;
+            let processed = 0;
+            
+            // Step 1: Assign gallery IDs to characters that need them
+            for (const char of allCharacters) {
+                const hasId = getCharacterGalleryId(char);
+                
+                if (!hasId) {
+                    const result = await assignGalleryIdToCharacter(char);
+                    if (result.success) {
+                        idAssignedCount++;
+                    } else {
+                        errorCount++;
+                        console.error(`Failed to assign gallery_id to ${char.name}:`, result.error);
+                    }
+                    processed++;
+                    
+                    // Update status during processing
+                    if (galleryMigrationStatusText) {
+                        galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Assigning IDs... ${processed}/${totalToProcess}`;
+                    }
+                }
+            }
+            
+            // Step 2: Sync ALL folder overrides to ST at once (more reliable than individual registration)
+            if (galleryMigrationStatusText) {
+                galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing folder overrides to ST...`;
+            }
+            
+            const syncResult = syncAllGalleryFolderOverrides();
+            
+            migrateGalleryFoldersBtn.innerHTML = originalText;
+            migrateGalleryFoldersBtn.disabled = false;
+            
+            updateGalleryMigrationStatus();
+            
+            // Build result message
+            let resultMsg = '';
+            if (idAssignedCount > 0) resultMsg += `${idAssignedCount} IDs assigned`;
+            if (syncResult.success > 0) resultMsg += (resultMsg ? ', ' : '') + `${syncResult.success} folder overrides synced`;
+            if (errorCount > 0) resultMsg += (resultMsg ? ', ' : '') + `${errorCount} errors`;
+            if (syncResult.failed > 0) resultMsg += (resultMsg ? ', ' : '') + `${syncResult.failed} sync failures`;
+            
+            if (errorCount === 0 && syncResult.failed === 0) {
+                showToast(resultMsg || 'Migration complete!', 'success');
+                // Important: Tell user to refresh ST
+                setTimeout(() => {
+                    showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
+                }, 1500);
+            } else {
+                showToast(resultMsg + '. Check console for details.', 'error');
+            }
+        };
+    }
+    
+    // Update image relocation status display
+    function updateImageRelocationStatus() {
+        if (!imageRelocationStatus || !imageRelocationStatusText) return;
+        
+        const { sharedNameGroups, charactersAffected } = countCharactersNeedingImageRelocation();
+        
+        if (sharedNameGroups === 0) {
+            imageRelocationStatus.style.display = 'none';
+            return;
+        }
+        
+        imageRelocationStatus.style.display = 'block';
+        imageRelocationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> Found ${sharedNameGroups} shared name group(s) with ${charactersAffected} characters that may have mixed gallery images.`;
+    }
+    
+    // Image relocation button handler
+    if (relocateSharedImagesBtn) {
+        relocateSharedImagesBtn.onclick = async () => {
+            const sharedNames = findCharactersWithSharedNames();
+            
+            if (sharedNames.size === 0) {
+                showToast('No characters share the same name - no relocation needed!', 'info');
+                return;
+            }
+            
+            // Check if unique folders is enabled
+            if (!getSetting('uniqueGalleryFolders')) {
+                showToast('Enable "Unique Gallery Folders" first before relocating images.', 'error');
+                return;
+            }
+            
+            // Check that all characters have gallery IDs
+            const needsId = countCharactersNeedingGalleryId();
+            if (needsId > 0) {
+                showToast(`Please assign gallery IDs first (${needsId} characters need IDs).`, 'error');
+                return;
+            }
+            
+            // Build description of what will happen
+            let groupDescriptions = [];
+            for (const [name, chars] of sharedNames) {
+                const linkedCount = chars.filter(c => getChubLinkInfo(c)?.id).length;
+                groupDescriptions.push(`• "${name}": ${chars.length} characters (${linkedCount} linked to Chub)`);
+            }
+            
+            const confirmed = confirm(
+                `Smart Image Relocation\n\n` +
+                `This will analyze and move gallery images for characters sharing the same name:\n\n` +
+                `${groupDescriptions.slice(0, 5).join('\n')}` +
+                `${groupDescriptions.length > 5 ? `\n...and ${groupDescriptions.length - 5} more groups` : ''}\n\n` +
+                `Process:\n` +
+                `1. Download Chub gallery + embedded media to build ownership "fingerprints"\n` +
+                `2. Scan shared folders and match images by content hash\n` +
+                `3. Move matched images to unique folders\n\n` +
+                `⚠ Images that can't be matched will remain in the shared folder.\n` +
+                `⚠ This may take several minutes for many characters.\n\n` +
+                `Continue?`
+            );
+            
+            if (!confirmed) return;
+            
+            const originalText = relocateSharedImagesBtn.innerHTML;
+            relocateSharedImagesBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+            relocateSharedImagesBtn.disabled = true;
+            
+            let totalMoved = 0;
+            let totalUnmatched = 0;
+            let totalErrors = 0;
+            let groupsProcessed = 0;
+            
+            for (const [name, chars] of sharedNames) {
+                // Update status
+                if (imageRelocationStatusText) {
+                    imageRelocationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing "${name}"... (${groupsProcessed + 1}/${sharedNames.size} groups)`;
+                }
+                
+                const result = await relocateSharedFolderImages(chars, {
+                    onLog: (msg, status) => {
+                        debugLog(`[Relocate] ${msg}`);
+                        return msg;
+                    },
+                    onLogUpdate: (entry, msg, status) => {
+                        debugLog(`[Relocate] ${msg}`);
+                    }
+                });
+                
+                totalMoved += result.moved;
+                totalUnmatched += result.unmatched;
+                totalErrors += result.errors;
+                groupsProcessed++;
+            }
+            
+            relocateSharedImagesBtn.innerHTML = originalText;
+            relocateSharedImagesBtn.disabled = false;
+            
+            updateImageRelocationStatus();
+            
+            // Show summary
+            const message = `Relocation complete: ${totalMoved} images moved, ${totalUnmatched} unmatched, ${totalErrors} errors`;
+            if (totalErrors === 0) {
+                showToast(message, 'success');
+            } else {
+                showToast(message, 'error');
+            }
+            
+            console.log('[ImageRelocation] Summary:', { totalMoved, totalUnmatched, totalErrors, groupsProcessed });
+        };
+    }
+    
+    // Migrate All Images button handler (for characters with unique names)
+    const migrateAllImagesBtn = document.getElementById('migrateAllImagesBtn');
+    const migrateAllStatus = document.getElementById('migrateAllStatus');
+    const migrateAllStatusText = document.getElementById('migrateAllStatusText');
+    
+    if (migrateAllImagesBtn) {
+        migrateAllImagesBtn.onclick = async () => {
+            // Check if unique folders is enabled
+            if (!getSetting('uniqueGalleryFolders')) {
+                showToast('Enable "Unique Gallery Folders" first before migrating images.', 'error');
+                return;
+            }
+            
+            // Get characters with gallery IDs (excluding those with shared names - they need fingerprinting)
+            const sharedNames = findCharactersWithSharedNames();
+            const sharedAvatars = new Set();
+            for (const [_, chars] of sharedNames) {
+                chars.forEach(c => sharedAvatars.add(c.avatar));
+            }
+            
+            const uniqueNameChars = allCharacters.filter(c => 
+                getCharacterGalleryId(c) && !sharedAvatars.has(c.avatar)
+            );
+            
+            if (uniqueNameChars.length === 0) {
+                showToast('No characters with unique names need migration.', 'info');
+                return;
+            }
+            
+            const confirmed = confirm(
+                `Migrate All Images\n\n` +
+                `This will move ALL existing gallery images for ${uniqueNameChars.length} characters with unique names ` +
+                `from their old folder to their new unique folder.\n\n` +
+                `Example:\n` +
+                `• "Alice" folder → "Alice_abc123xyz" folder\n\n` +
+                `Note: Characters sharing the same name (${sharedNames.size} groups) are excluded - ` +
+                `use "Smart Relocate" for those.\n\n` +
+                `Continue?`
+            );
+            
+            if (!confirmed) return;
+            
+            const originalText = migrateAllImagesBtn.innerHTML;
+            migrateAllImagesBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Migrating...';
+            migrateAllImagesBtn.disabled = true;
+            
+            if (migrateAllStatus) migrateAllStatus.style.display = 'block';
+            
+            let totalMoved = 0;
+            let totalErrors = 0;
+            let charsProcessed = 0;
+            let charsWithImages = 0;
+            
+            for (const char of uniqueNameChars) {
+                charsProcessed++;
+                
+                if (migrateAllStatusText) {
+                    migrateAllStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing ${char.name}... (${charsProcessed}/${uniqueNameChars.length})`;
+                }
+                
+                const result = await migrateCharacterImagesToUniqueFolder(char);
+                
+                if (result.moved > 0) {
+                    charsWithImages++;
+                    totalMoved += result.moved;
+                }
+                totalErrors += result.errors;
+            }
+            
+            migrateAllImagesBtn.innerHTML = originalText;
+            migrateAllImagesBtn.disabled = false;
+            
+            if (migrateAllStatusText) {
+                migrateAllStatusText.innerHTML = `<i class="fa-solid fa-check"></i> Migration complete: ${totalMoved} images moved for ${charsWithImages} characters`;
+            }
+            
+            // Show summary
+            const message = `Migration complete: ${totalMoved} images moved for ${charsWithImages} characters` + 
+                (totalErrors > 0 ? ` (${totalErrors} errors)` : '');
+            showToast(message, totalErrors === 0 ? 'success' : 'error');
+            
+            console.log('[MigrateAll] Summary:', { totalMoved, totalErrors, charsProcessed, charsWithImages });
+        };
+    }
+    
+    // View Folder Mapping button handler
+    const viewFolderMappingBtn = document.getElementById('viewFolderMappingBtn');
+    if (viewFolderMappingBtn) {
+        viewFolderMappingBtn.onclick = () => {
+            showFolderMappingModal();
+        };
+    }
+    
+    // Browse Orphaned Folders button handler
+    const browseOrphanedFoldersBtn = document.getElementById('browseOrphanedFoldersBtn');
+    if (browseOrphanedFoldersBtn) {
+        browseOrphanedFoldersBtn.onclick = () => {
+            showOrphanedFoldersModal();
+        };
+    }
 }
 
 // Helper to get cookie value
@@ -542,16 +1111,6 @@ async function withLoadingState(button, loadingText, operation) {
 }
 
 /**
- * Log error and show toast notification
- * @param {string} operation - Name of the operation that failed
- * @param {Error|string} error - Error object or message
- */
-function showError(operation, error) {
-    console.error(`[${operation}]`, error);
-    showToast(`${operation} failed: ${error.message || error}`, 'error');
-}
-
-/**
  * Render a loading spinner in a container
  * @param {HTMLElement|string} container - Container element or ID
  * @param {string} message - Loading message to display
@@ -578,50 +1137,6 @@ function renderSimpleEmpty(container, message, className = 'empty-state') {
 }
 
 /**
- * Render an empty state message in a container
- * @param {HTMLElement} container - Container element
- * @param {object} config - Empty state configuration
- */
-function renderEmptyState(container, { icon, title, message, action, actionIcon, actionText }) {
-    container.innerHTML = `
-        <div class="empty-state">
-            <i class="fa-solid ${icon}"></i>
-            <h3>${escapeHtml(title)}</h3>
-            <p>${escapeHtml(message)}</p>
-            ${action ? `<button class="action-btn primary" onclick="${action}">
-                <i class="fa-solid ${actionIcon}"></i> ${escapeHtml(actionText)}
-            </button>` : ''}
-        </div>
-    `;
-}
-
-/**
- * Setup standard modal close handlers (close button, backdrop click, Escape key)
- * @param {HTMLElement} modal - Modal overlay element
- * @param {string} closeButtonId - ID of the close button
- * @param {Function} onClose - Optional callback when modal closes
- * @returns {Function} Close function that can be called programmatically
- */
-function setupModalCloseHandlers(modal, closeButtonId, onClose = null) {
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') doClose();
-    };
-    
-    const doClose = () => {
-        onClose?.();
-        modal.remove();
-        document.removeEventListener('keydown', handleKeydown);
-    };
-    
-    const closeBtn = document.getElementById(closeButtonId);
-    if (closeBtn) closeBtn.onclick = doClose;
-    modal.onclick = (e) => { if (e.target === modal) doClose(); };
-    document.addEventListener('keydown', handleKeydown);
-    
-    return doClose;
-}
-
-/**
  * Get ChubAI API headers with optional authentication
  * @param {boolean} includeAuth - Whether to include Bearer token
  * @returns {object} Headers object
@@ -635,37 +1150,11 @@ function getChubHeaders(includeAuth = true) {
     return headers;
 }
 
-/**
- * DOMPurify sanitization with preset configs
- */
-const SANITIZE_CONFIGS = {
-    basic: {
-        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'a'],
-        ALLOWED_ATTR: ['href', 'title', 'class'],
-        ALLOW_DATA_ATTR: false
-    },
-    rich: {
-        ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 'span', 'div', 'a', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'pre', 'code', 'img', 'hr', 'table', 'thead', 'tbody', 'tr', 'th', 'td'],
-        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'width', 'height'],
-        ALLOW_DATA_ATTR: true
-    },
-    strict: {
-        ALLOWED_TAGS: ['p', 'br', 'strong', 'em'],
-        ALLOWED_ATTR: [],
-        ALLOW_DATA_ATTR: false
-    }
-};
-
-/**
- * Sanitize HTML content with preset configuration
- * @param {string} content - HTML content to sanitize
- * @param {string} configType - Config type: 'basic', 'rich', or 'strict'
- * @returns {string} Sanitized HTML
- */
-function sanitizeHtml(content, configType = 'basic') {
-    if (typeof DOMPurify === 'undefined') return escapeHtml(content);
-    return DOMPurify.sanitize(content, SANITIZE_CONFIGS[configType] || SANITIZE_CONFIGS.basic);
-}
+// ========================================
+// FALLBACK IMAGES
+// ========================================
+// SVG fallback for broken avatar images (inline data URI)
+const FALLBACK_AVATAR_SVG = "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>";
 
 // ========================================
 // API ENDPOINTS - Centralized path constants
@@ -691,6 +1180,2017 @@ const ENDPOINTS = {
 const CHUB_API_BASE = 'https://api.chub.ai';
 const CHUB_GATEWAY_BASE = 'https://gateway.chub.ai';
 const CHUB_AVATAR_BASE = 'https://avatars.charhub.io/avatars/';
+
+// ========================================
+// UNIQUE GALLERY FOLDER SYSTEM
+// Gives each character a unique gallery folder, even when multiple characters share the same name
+// by using a unique gallery_id stored in character data.extensions
+// ========================================
+
+/**
+ * Generate a unique gallery ID (12-character alphanumeric)
+ * @returns {string} A 12-character unique ID like 'aB3xY9kLmN2p'
+ */
+function generateGalleryId() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < 12; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
+
+/**
+ * Get a character's gallery_id from their data.extensions
+ * @param {object} char - Character object
+ * @returns {string|null} The gallery_id or null if not set
+ */
+function getCharacterGalleryId(char) {
+    return char?.data?.extensions?.gallery_id || null;
+}
+
+/**
+ * Build the unique gallery folder name for a character
+ * Format: "{CharacterName}_{gallery_id}"
+ * @param {object} char - Character object (must have name and data.extensions.gallery_id)
+ * @returns {string|null} The unique folder name or null if gallery_id not set
+ */
+function buildUniqueGalleryFolderName(char) {
+    const galleryId = getCharacterGalleryId(char);
+    if (!galleryId || !char?.name) return null;
+    
+    // Sanitize character name for folder use (remove/replace problematic characters)
+    const safeName = char.name.replace(/[<>:"/\\|?*]/g, '_').trim();
+    return `${safeName}_${galleryId}`;
+}
+
+/**
+ * Register or update the gallery folder override in SillyTavern's extensionSettings
+ * This tells ST to use our unique folder instead of just the character name
+ * @param {object} char - Character object with avatar and gallery_id
+ * @returns {boolean} True if successfully registered
+ */
+function registerGalleryFolderOverride(char) {
+    if (!getSetting('uniqueGalleryFolders')) return false;
+    
+    const avatar = char?.avatar;
+    const uniqueFolder = buildUniqueGalleryFolderName(char);
+    
+    if (!avatar || !uniqueFolder) {
+        debugWarn('[GalleryFolder] Cannot register override - missing avatar or gallery_id');
+        return false;
+    }
+    
+    const success = setSTExtensionSetting('gallery.folders', avatar, uniqueFolder);
+    
+    if (success) {
+        debugLog(`[GalleryFolder] Registered: ${avatar} -> ${uniqueFolder}`);
+    } else {
+        debugWarn(`[GalleryFolder] Failed to register: ${avatar}`);
+    }
+    
+    return success;
+}
+
+/**
+ * Remove a gallery folder override for a character
+ * @param {string} avatar - Character avatar filename
+ */
+function removeGalleryFolderOverride(avatar) {
+    const context = getSTContext();
+    if (!context?.extensionSettings?.gallery?.folders) return;
+    
+    if (context.extensionSettings.gallery.folders[avatar]) {
+        delete context.extensionSettings.gallery.folders[avatar];
+        if (typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
+            debugLog(`[GalleryFolder] Removed folder override for: ${avatar}`);
+        }
+    }
+}
+
+/**
+ * Get all active gallery folder overrides from ST settings
+ * @returns {Array<{avatar: string, folder: string, char: object|null}>}
+ */
+function getActiveGalleryFolderOverrides() {
+    const context = getSTContext();
+    if (!context?.extensionSettings?.gallery?.folders) return [];
+    
+    const overrides = [];
+    const folders = context.extensionSettings.gallery.folders;
+    
+    for (const [avatar, folder] of Object.entries(folders)) {
+        const char = allCharacters.find(c => c.avatar === avatar);
+        overrides.push({ avatar, folder, char });
+    }
+    
+    return overrides;
+}
+
+/**
+ * Clear ALL gallery folder overrides from ST settings
+ * @returns {{cleared: number}}
+ */
+function clearAllGalleryFolderOverrides() {
+    const context = getSTContext();
+    if (!context?.extensionSettings?.gallery?.folders) {
+        return { cleared: 0 };
+    }
+    
+    const count = Object.keys(context.extensionSettings.gallery.folders).length;
+    context.extensionSettings.gallery.folders = {};
+    
+    if (typeof context.saveSettings === 'function') {
+        context.saveSettings();
+    }
+    
+    debugLog(`[GalleryFolder] Cleared all ${count} folder overrides`);
+    return { cleared: count };
+}
+
+/**
+ * Move all images from unique folders back to default (character name) folders
+ * @param {function} progressCallback - Optional callback(current, total, charName)
+ * @returns {Promise<{moved: number, errors: number, chars: number}>}
+ */
+async function moveImagesToDefaultFolders(progressCallback) {
+    const overrides = getActiveGalleryFolderOverrides();
+    const results = { moved: 0, errors: 0, chars: 0 };
+    
+    for (let i = 0; i < overrides.length; i++) {
+        const { avatar, folder, char } = overrides[i];
+        
+        // Get the default folder name (just character name)
+        const defaultFolder = char?.name || folder.split('_').slice(0, -1).join('_');
+        
+        if (!defaultFolder || folder === defaultFolder) {
+            continue;
+        }
+        
+        if (progressCallback) {
+            progressCallback(i + 1, overrides.length, char?.name || avatar);
+        }
+        
+        // List files in the unique folder
+        try {
+            const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folder, type: 7 });
+            if (!response.ok) continue;
+            
+            const files = await response.json();
+            if (!files || files.length === 0) continue;
+            
+            results.chars++;
+            
+            // Move each file
+            for (const fileName of files) {
+                const moveResult = await moveImageToFolder(folder, defaultFolder, fileName, true);
+                if (moveResult.success) {
+                    results.moved++;
+                } else {
+                    results.errors++;
+                    debugWarn(`[GalleryFolder] Failed to move ${fileName}: ${moveResult.error}`);
+                }
+            }
+        } catch (e) {
+            debugError(`[GalleryFolder] Error processing ${folder}:`, e);
+        }
+    }
+    
+    return results;
+}
+
+/**
+ * Show confirmation modal when disabling unique gallery folders
+ * @param {function} onConfirm - Callback when user confirms (receives moveImages boolean)
+ * @param {function} onCancel - Callback when user cancels
+ */
+function showDisableGalleryFoldersModal(onConfirm, onCancel) {
+    const overrides = getActiveGalleryFolderOverrides();
+    
+    // If no overrides, just confirm immediately
+    if (overrides.length === 0) {
+        onConfirm(false);
+        return;
+    }
+    
+    const modalHtml = `
+        <div id="disableGalleryFoldersModal" class="confirm-modal">
+            <div class="confirm-modal-content" style="max-width: 500px;">
+                <div class="confirm-modal-header">
+                    <h3><i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i> Disabling Unique Gallery Folders</h3>
+                    <button class="close-confirm-btn" id="closeDisableGalleryModal">&times;</button>
+                </div>
+                <div class="confirm-modal-body">
+                    <p>
+                        Found <strong>${overrides.length}</strong> character(s) with active folder mappings in SillyTavern.
+                    </p>
+                    
+                    <p style="color: var(--text-secondary);">
+                        Disabling will remove folder mappings from ST settings. ST's gallery will revert to default behavior (folders by character name).
+                    </p>
+                    
+                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                        <p style="margin: 0; font-size: 0.9em;">
+                            <i class="fa-solid fa-info-circle"></i> Characters sharing the same name will share gallery folders again. Images in unique folders won't be accessible until moved.
+                        </p>
+                    </div>
+                    
+                    <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px;">
+                        <label class="disable-gallery-option">
+                            <input type="radio" name="disableOption" value="move" checked>
+                            <div>
+                                <strong>Move images to default folders first</strong>
+                                <div style="font-size: 0.85em; color: var(--text-muted);">Recommended - keeps images accessible</div>
+                            </div>
+                        </label>
+                        <label class="disable-gallery-option">
+                            <input type="radio" name="disableOption" value="skip">
+                            <div>
+                                <strong>Disable without moving</strong>
+                                <div style="font-size: 0.85em; color: var(--text-muted);">Recover later via "Browse Orphaned Folders"</div>
+                            </div>
+                        </label>
+                    </div>
+                    
+                    <div id="disableGalleryProgress" style="display: none; margin-top: 15px;">
+                        <div style="display: flex; align-items: center; gap: 10px; color: var(--accent);">
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                            <span id="disableGalleryProgressText">Moving images...</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="confirm-modal-footer">
+                    <button id="cancelDisableGallery" class="action-btn secondary">Cancel</button>
+                    <button id="confirmDisableGallery" class="action-btn danger">Disable</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+    const modal = document.getElementById('disableGalleryFoldersModal');
+    const closeBtn = document.getElementById('closeDisableGalleryModal');
+    const cancelBtn = document.getElementById('cancelDisableGallery');
+    const confirmBtn = document.getElementById('confirmDisableGallery');
+    const progressDiv = document.getElementById('disableGalleryProgress');
+    const progressText = document.getElementById('disableGalleryProgressText');
+    
+    const closeModal = () => {
+        modal.remove();
+    };
+    
+    closeBtn.onclick = () => {
+        closeModal();
+        onCancel();
+    };
+    
+    cancelBtn.onclick = () => {
+        closeModal();
+        onCancel();
+    };
+    
+    modal.onclick = (e) => {
+        if (e.target === modal) {
+            closeModal();
+            onCancel();
+        }
+    };
+    
+    confirmBtn.onclick = async () => {
+        const moveImages = document.querySelector('input[name="disableOption"]:checked')?.value === 'move';
+        
+        confirmBtn.disabled = true;
+        cancelBtn.disabled = true;
+        
+        if (moveImages) {
+            progressDiv.style.display = 'block';
+            
+            const results = await moveImagesToDefaultFolders((current, total, charName) => {
+                progressText.textContent = `Moving images... ${current}/${total} (${charName})`;
+            });
+            
+            debugLog(`[GalleryFolder] Move results:`, results);
+        }
+        
+        // Clear all overrides
+        clearAllGalleryFolderOverrides();
+        
+        closeModal();
+        onConfirm(moveImages);
+    };
+}
+
+/**
+ * Debug function to verify gallery folder overrides are properly set in ST
+ * @returns {{total: number, registered: number, missing: Array<string>}}
+ */
+function verifyGalleryFolderOverrides() {
+    const context = getSTContext();
+    const results = { total: 0, registered: 0, missing: [] };
+    
+    if (!context?.extensionSettings?.gallery?.folders) {
+        debugWarn('[GalleryFolder] Cannot verify - ST context or gallery settings unavailable');
+        return results;
+    }
+    
+    const folders = context.extensionSettings.gallery.folders;
+    
+    for (const char of allCharacters) {
+        const galleryId = getCharacterGalleryId(char);
+        if (!galleryId) continue;
+        
+        results.total++;
+        const expectedFolder = buildUniqueGalleryFolderName(char);
+        const actualFolder = folders[char.avatar];
+        
+        if (actualFolder === expectedFolder) {
+            results.registered++;
+        } else {
+            results.missing.push(`${char.name} (${char.avatar})`);
+        }
+    }
+    
+    debugLog(`[GalleryFolder] Verification: ${results.registered}/${results.total} overrides set`);
+    
+    return results;
+}
+
+/**
+ * Sync all gallery folder overrides to ST - call this manually if overrides aren't working
+ * This will register ALL characters with gallery_id to ST's settings
+ * @returns {{success: number, failed: number, skipped: number}}
+ */
+function syncAllGalleryFolderOverrides() {
+    if (!getSetting('uniqueGalleryFolders')) {
+        return { success: 0, failed: 0, skipped: 0, error: 'Feature disabled' };
+    }
+    
+    // Test cross-window access
+    if (!verifyContextAccess()) {
+        return { success: 0, failed: 0, skipped: 0, error: 'Cross-window access failed' };
+    }
+    
+    const results = { success: 0, failed: 0, skipped: 0 };
+    const charsWithGalleryId = allCharacters.filter(c => getCharacterGalleryId(c));
+    
+    for (const char of charsWithGalleryId) {
+        const uniqueFolder = buildUniqueGalleryFolderName(char);
+        if (!uniqueFolder) {
+            results.skipped++;
+            continue;
+        }
+        
+        if (setSTExtensionSetting('gallery.folders', char.avatar, uniqueFolder)) {
+            results.success++;
+        } else {
+            results.failed++;
+        }
+    }
+    
+    // Trigger an immediate save
+    const ctx = getSTContext();
+    if (typeof ctx?.saveSettings === 'function') {
+        ctx.saveSettings();
+    }
+    
+    debugLog(`[GalleryFolder] Sync complete: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped`);
+    
+    return results;
+}
+
+// Expose for console access (useful for manual sync after migration)
+window.syncAllGalleryFolderOverrides = syncAllGalleryFolderOverrides;
+
+/**
+ * Show a modal with folder mappings for characters sharing the same name
+ * Helps users manually move unmatched images to the correct unique folder
+ */
+function showFolderMappingModal() {
+    // Find characters with shared names
+    const sharedNames = findCharactersWithSharedNames();
+    
+    // Also get all characters with gallery IDs for reference
+    const charsWithGalleryIds = allCharacters.filter(c => getCharacterGalleryId(c));
+    
+    // Build modal content
+    let contentHtml = '';
+    
+    if (sharedNames.size === 0 && charsWithGalleryIds.length === 0) {
+        contentHtml = `
+            <div class="empty-state" style="padding: 30px; text-align: center;">
+                <i class="fa-solid fa-folder-open" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
+                <p style="color: var(--text-secondary);">No characters have unique gallery IDs assigned yet.</p>
+                <p style="color: var(--text-muted); font-size: 0.9em;">Run "Assign Gallery IDs to All Characters" first.</p>
+            </div>
+        `;
+    } else {
+        // Show shared name groups first (most relevant for manual moves)
+        if (sharedNames.size > 0) {
+            contentHtml += `
+                <div style="margin-bottom: 20px;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                        <i class="fa-solid fa-users" style="color: #e74c3c;"></i>
+                        Characters Sharing Names (${sharedNames.size} groups)
+                    </h4>
+                    <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
+                        These characters share the same name. Use this reference to move unmatched images from the old shared folder to the correct unique folder.
+                    </p>
+            `;
+            
+            for (const [name, chars] of sharedNames) {
+                contentHtml += `
+                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                        <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 8px;">
+                            <i class="fa-solid fa-folder" style="color: #f39c12;"></i> 
+                            Old shared folder: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">${escapeHtml(name)}</code>
+                        </div>
+                        <div style="margin-left: 20px;">
+                            ${chars.map(char => {
+                                const galleryId = getCharacterGalleryId(char);
+                                const uniqueFolder = buildUniqueGalleryFolderName(char);
+                                const chubInfo = getChubLinkInfo(char);
+                                const chubLabel = chubInfo?.id ? ` <span style="color: #3498db; font-size: 0.8em;">(${chubInfo.id})</span>` : '';
+                                return `
+                                    <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                                        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                            <img src="${getCharacterAvatarUrl(char.avatar)}" 
+                                                 style="width: 32px; height: 32px; border-radius: 4px; object-fit: cover;"
+                                                 onerror="this.src='/img/ai4.png'">
+                                            <span style="color: var(--text-primary);">${escapeHtml(char.name)}${chubLabel}</span>
+                                            <i class="fa-solid fa-arrow-right" style="color: var(--text-muted);"></i>
+                                            <code style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 2px 6px; border-radius: 3px; font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
+                                            <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy folder name" style="background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 4px;">
+                                                <i class="fa-solid fa-copy"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            contentHtml += `</div>`;
+        }
+        
+        // Show all other characters with unique folders (collapsed by default)
+        const otherChars = charsWithGalleryIds.filter(c => {
+            // Exclude chars that are in sharedNames groups
+            for (const [_, chars] of sharedNames) {
+                if (chars.some(sc => sc.avatar === c.avatar)) return false;
+            }
+            return true;
+        });
+        
+        if (otherChars.length > 0) {
+            contentHtml += `
+                <details style="margin-top: 15px;">
+                    <summary style="cursor: pointer; color: var(--text-primary); padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                        <i class="fa-solid fa-folder-tree"></i> 
+                        All Other Characters with Unique Folders (${otherChars.length})
+                    </summary>
+                    <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                            <thead>
+                                <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <th style="text-align: left; padding: 6px;">Character</th>
+                                    <th style="text-align: left; padding: 6px;">Unique Folder</th>
+                                    <th style="width: 40px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${otherChars.map(char => {
+                                    const uniqueFolder = buildUniqueGalleryFolderName(char);
+                                    return `
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                            <td style="padding: 6px; color: var(--text-primary);">${escapeHtml(char.name)}</td>
+                                            <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${uniqueFolder}</code></td>
+                                            <td style="padding: 6px;">
+                                                <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy" style="background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 2px;">
+                                                    <i class="fa-solid fa-copy"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </details>
+            `;
+        }
+    }
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.id = 'folderMappingModal';
+    modal.innerHTML = `
+        <div class="confirm-modal-content" style="max-width: 700px; max-height: 80vh;">
+            <div class="confirm-modal-header">
+                <h3 style="border: none; padding: 0; margin: 0;">
+                    <i class="fa-solid fa-map"></i> Gallery Folder Mapping
+                </h3>
+                <button class="close-confirm-btn" id="closeFolderMappingModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body" style="max-height: 60vh; overflow-y: auto;">
+                <div style="background: rgba(52, 152, 219, 0.1); border: 1px solid rgba(52, 152, 219, 0.3); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9em;">
+                        <i class="fa-solid fa-lightbulb" style="color: #f39c12;"></i>
+                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: 3px;">data/default-user/images/</code>
+                        <br>Move files from the old <code>CharName</code> folder to the new <code>CharName_abc123xyz</code> folder.
+                    </p>
+                </div>
+                ${contentHtml}
+            </div>
+            <div class="confirm-modal-footer">
+                <button class="action-btn primary" id="closeFolderMappingBtn">
+                    <i class="fa-solid fa-check"></i> Done
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup close handlers
+    const closeModal = () => modal.remove();
+    document.getElementById('closeFolderMappingModal').onclick = closeModal;
+    document.getElementById('closeFolderMappingBtn').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    
+    // Setup copy buttons with fallback for non-secure contexts
+    modal.querySelectorAll('.copy-folder-btn').forEach(btn => {
+        btn.onclick = async (e) => {
+            e.stopPropagation();
+            const folder = btn.dataset.folder;
+            if (folder) {
+                let success = false;
+                try {
+                    // Try modern Clipboard API first
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        await navigator.clipboard.writeText(folder);
+                        success = true;
+                    }
+                } catch (err) {
+                    // Clipboard API failed, try fallback
+                }
+                
+                // Fallback: use execCommand (works in more contexts)
+                if (!success) {
+                    try {
+                        const textarea = document.createElement('textarea');
+                        textarea.value = folder;
+                        textarea.style.position = 'fixed';
+                        textarea.style.opacity = '0';
+                        document.body.appendChild(textarea);
+                        textarea.select();
+                        success = document.execCommand('copy');
+                        document.body.removeChild(textarea);
+                    } catch (err2) {
+                        // Both methods failed
+                    }
+                }
+                
+                if (success) {
+                    btn.innerHTML = '<i class="fa-solid fa-check" style="color: #2ecc71;"></i>';
+                    setTimeout(() => { btn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 1500);
+                } else {
+                    showToast('Failed to copy to clipboard', 'error');
+                }
+            }
+        };
+    });
+}
+
+/**
+ * Scan for orphaned gallery folders (folders that exist but don't match any character's unique folder)
+ * These are typically old-style folders or leftover folders from deleted characters
+ * @returns {Promise<Array<{name: string, files: string[], isLegacy: boolean, matchingChars: Array}>>}
+ */
+async function scanOrphanedGalleryFolders() {
+    // Build a set of all "valid" folder names:
+    // 1. Unique folder names (CharName_uuid) for characters with gallery_id
+    // 2. Character names for characters without gallery_id (if unique folders disabled)
+    const validFolders = new Set();
+    const uniqueFolderToChar = new Map(); // Map unique folder name -> character
+    
+    for (const char of allCharacters) {
+        if (!char.name) continue;
+        
+        const uniqueFolder = buildUniqueGalleryFolderName(char);
+        if (uniqueFolder) {
+            validFolders.add(uniqueFolder);
+            uniqueFolderToChar.set(uniqueFolder, char);
+        }
+        // Also mark plain name as potentially valid if any char uses it
+        validFolders.add(char.name);
+    }
+    
+    // Now scan all character names to find folders that might have images
+    // We'll check both plain names and try to discover any _uuid folders
+    const potentialFolders = new Set();
+    
+    // Add all character names as potential folders to check
+    for (const char of allCharacters) {
+        if (char.name) {
+            potentialFolders.add(char.name);
+        }
+    }
+    
+    // Check each potential folder for images
+    const orphanedFolders = [];
+    
+    for (const folderName of potentialFolders) {
+        try {
+            const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { 
+                folder: folderName, 
+                type: 7 
+            });
+            
+            if (!response.ok) continue;
+            
+            const files = await response.json();
+            if (!files || files.length === 0) continue;
+            
+            const fileNames = files.map(f => typeof f === 'string' ? f : f.name).filter(Boolean);
+            if (fileNames.length === 0) continue;
+            
+            // Check if this folder is a "legacy" folder (not a unique folder)
+            const isUniqueFolder = folderName.match(/_[a-zA-Z0-9]{12}$/);
+            
+            // Find characters that share this name
+            const matchingChars = allCharacters.filter(c => c.name === folderName);
+            
+            // A folder is "orphaned" if:
+            // 1. It's a plain name folder AND there are characters with unique folders that should use a different folder
+            // 2. It doesn't match any character's current unique folder
+            
+            const isOrphaned = !isUniqueFolder && matchingChars.some(c => {
+                const uniqueFolder = buildUniqueGalleryFolderName(c);
+                return uniqueFolder && uniqueFolder !== folderName;
+            });
+            
+            if (isOrphaned || !matchingChars.length) {
+                orphanedFolders.push({
+                    name: folderName,
+                    files: fileNames,
+                    isLegacy: !isUniqueFolder,
+                    matchingChars: matchingChars
+                });
+            }
+        } catch (e) {
+            debugLog(`[OrphanedFolders] Error checking folder ${folderName}:`, e);
+        }
+    }
+    
+    return orphanedFolders;
+}
+
+/**
+ * Show a modal for browsing and redistributing orphaned folder contents
+ */
+async function showOrphanedFoldersModal() {
+    // Create initial modal with loading state
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.id = 'orphanedFoldersModal';
+    modal.innerHTML = `
+        <div class="confirm-modal-content orphaned-folders-modal">
+            <div class="confirm-modal-header">
+                <h3 style="border: none; padding: 0; margin: 0;">
+                    <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
+                </h3>
+                <button class="close-confirm-btn" id="closeOrphanedFoldersModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body" id="orphanedFoldersBody" style="min-width: 600px; min-height: 300px;">
+                <div class="loading-spinner">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <p>Scanning for orphaned folders...</p>
+                </div>
+            </div>
+            <div class="confirm-modal-footer">
+                <button class="action-btn secondary" id="closeOrphanedFoldersBtn">
+                    <i class="fa-solid fa-xmark"></i> Close
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup close handlers
+    const closeModal = () => modal.remove();
+    document.getElementById('closeOrphanedFoldersModal').onclick = closeModal;
+    document.getElementById('closeOrphanedFoldersBtn').onclick = closeModal;
+    modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+    
+    // Escape key handler
+    const escHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Scan for orphaned folders
+    const orphanedFolders = await scanOrphanedGalleryFolders();
+    const body = document.getElementById('orphanedFoldersBody');
+    
+    if (orphanedFolders.length === 0) {
+        body.innerHTML = `
+            <div class="empty-state" style="padding: 40px; text-align: center;">
+                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">No Orphaned Folders Found</h4>
+                <p style="color: var(--text-secondary); margin: 0;">
+                    All gallery folders are properly associated with characters.
+                </p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Build list of available destination characters (those with unique folders)
+    const destinationChars = allCharacters
+        .filter(c => getCharacterGalleryId(c))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    
+    // Render folder selector and content area
+    body.innerHTML = `
+        <div class="orphaned-folders-info">
+            <i class="fa-solid fa-info-circle"></i>
+            <span>Found <strong>${orphanedFolders.length}</strong> legacy folder(s) with images. Select a folder to view its contents, then choose images to move to a character's unique folder.</span>
+        </div>
+        
+        <div class="orphaned-folders-layout">
+            <div class="orphaned-folders-list">
+                <div class="orphaned-folders-list-header">
+                    <i class="fa-solid fa-folder"></i> Legacy Folders
+                </div>
+                <div class="orphaned-folders-list-items">
+                    ${orphanedFolders.map((folder, idx) => `
+                        <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
+                            <div class="orphaned-folder-name">
+                                <i class="fa-solid fa-folder" style="color: #f39c12;"></i>
+                                ${escapeHtml(folder.name)}
+                            </div>
+                            <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div class="orphaned-folders-content">
+                <div class="orphaned-content-header">
+                    <div class="orphaned-content-title">
+                        <span id="orphanedCurrentFolder">${escapeHtml(orphanedFolders[0].name)}</span>
+                        <span class="orphaned-file-count" id="orphanedFileCount">${orphanedFolders[0].files.length} files</span>
+                    </div>
+                    <div class="orphaned-content-actions">
+                        <button class="action-btn small" id="orphanedClearDuplicatesBtn" title="Remove files that already exist in a unique folder">
+                            <i class="fa-solid fa-broom"></i> Clear Duplicates
+                        </button>
+                        <label class="orphaned-select-all">
+                            <input type="checkbox" id="orphanedSelectAll">
+                            <span>Select All</span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="orphaned-images-grid" id="orphanedImagesGrid">
+                    <!-- Images will be rendered here -->
+                </div>
+                
+                <div class="orphaned-move-section" id="orphanedMoveSection" style="display: none;">
+                    <div class="orphaned-move-header">
+                        <i class="fa-solid fa-truck-moving"></i>
+                        Move <span id="orphanedSelectedCount">0</span> selected image(s) to:
+                    </div>
+                    <div class="orphaned-destination-picker">
+                        <div class="orphaned-search-wrapper">
+                            <i class="fa-solid fa-search"></i>
+                            <input type="text" id="orphanedDestSearch" placeholder="Search characters..." autocomplete="off">
+                        </div>
+                        <div class="orphaned-destination-list" id="orphanedDestList">
+                            ${destinationChars.map(char => {
+                                const uniqueFolder = buildUniqueGalleryFolderName(char);
+                                const chubInfo = getChubLinkInfo(char);
+                                const chubLabel = chubInfo?.id ? `<span class="dest-chub-id">${chubInfo.id}</span>` : '';
+                                return `
+                                    <div class="orphaned-dest-item" data-avatar="${escapeHtml(char.avatar)}" data-folder="${escapeHtml(uniqueFolder)}" data-name="${escapeHtml(char.name.toLowerCase())}">
+                                        <img src="${getCharacterAvatarUrl(char.avatar)}" class="dest-avatar" onerror="this.src='${FALLBACK_AVATAR_SVG}'">
+                                        <div class="dest-info">
+                                            <div class="dest-name">${escapeHtml(char.name)} ${chubLabel}</div>
+                                            <div class="dest-folder">${escapeHtml(uniqueFolder)}</div>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Store current state
+    let currentFolder = orphanedFolders[0];
+    let selectedFiles = new Set();
+    
+    // Render images for current folder
+    function renderFolderImages(folder) {
+        currentFolder = folder;
+        selectedFiles.clear();
+        
+        const grid = document.getElementById('orphanedImagesGrid');
+        const safeFolderName = sanitizeFolderName(folder.name);
+        
+        document.getElementById('orphanedCurrentFolder').textContent = folder.name;
+        document.getElementById('orphanedFileCount').textContent = `${folder.files.length} files`;
+        document.getElementById('orphanedSelectAll').checked = false;
+        
+        // Pre-fill destination search with folder name to show relevant characters first
+        const destSearch = document.getElementById('orphanedDestSearch');
+        if (destSearch) {
+            destSearch.value = folder.name;
+            // Trigger filtering
+            const query = folder.name.toLowerCase().trim();
+            document.querySelectorAll('.orphaned-dest-item').forEach(item => {
+                const name = item.dataset.name || '';
+                const itemFolder = item.dataset.folder?.toLowerCase() || '';
+                const matches = !query || name.includes(query) || itemFolder.includes(query);
+                item.style.display = matches ? '' : 'none';
+            });
+        }
+        
+        grid.innerHTML = folder.files.map(fileName => {
+            // Check if it's an image file
+            const ext = fileName.split('.').pop()?.toLowerCase() || '';
+            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'].includes(ext);
+            const isAudio = ['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext);
+            const isVideo = ['mp4', 'webm', 'mov', 'avi'].includes(ext);
+            
+            let previewHtml;
+            if (isImage) {
+                previewHtml = `<img src="/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}" 
+                     loading="lazy"
+                     onerror="this.onerror=null; this.parentElement.innerHTML='<div class=\\'orphaned-file-icon\\'><i class=\\'fa-solid fa-image\\'></i></div>';">`;
+            } else if (isAudio) {
+                previewHtml = `<div class="orphaned-file-icon audio"><i class="fa-solid fa-music"></i></div>`;
+            } else if (isVideo) {
+                previewHtml = `<div class="orphaned-file-icon video"><i class="fa-solid fa-video"></i></div>`;
+            } else {
+                previewHtml = `<div class="orphaned-file-icon"><i class="fa-solid fa-file"></i></div>`;
+            }
+            
+            return `
+            <div class="orphaned-image-item" data-filename="${escapeHtml(fileName)}">
+                ${previewHtml}
+                <div class="orphaned-image-checkbox">
+                    <input type="checkbox" class="orphaned-file-checkbox" data-filename="${escapeHtml(fileName)}">
+                </div>
+                <div class="orphaned-image-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
+            </div>`;
+        }).join('');
+        
+        // Bind checkbox events
+        grid.querySelectorAll('.orphaned-image-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                if (e.target.type === 'checkbox') return;
+                const checkbox = item.querySelector('.orphaned-file-checkbox');
+                checkbox.checked = !checkbox.checked;
+                checkbox.dispatchEvent(new Event('change'));
+            });
+        });
+        
+        grid.querySelectorAll('.orphaned-file-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                const filename = checkbox.dataset.filename;
+                if (checkbox.checked) {
+                    selectedFiles.add(filename);
+                    checkbox.closest('.orphaned-image-item').classList.add('selected');
+                } else {
+                    selectedFiles.delete(filename);
+                    checkbox.closest('.orphaned-image-item').classList.remove('selected');
+                }
+                updateMoveSection();
+            });
+        });
+        
+        updateMoveSection();
+    }
+    
+    // Update move section visibility and count
+    function updateMoveSection() {
+        const moveSection = document.getElementById('orphanedMoveSection');
+        const countSpan = document.getElementById('orphanedSelectedCount');
+        
+        if (selectedFiles.size > 0) {
+            moveSection.style.display = 'block';
+            countSpan.textContent = selectedFiles.size;
+        } else {
+            moveSection.style.display = 'none';
+        }
+        
+        // Update select all checkbox state
+        const selectAllCheckbox = document.getElementById('orphanedSelectAll');
+        selectAllCheckbox.checked = selectedFiles.size === currentFolder.files.length && currentFolder.files.length > 0;
+        selectAllCheckbox.indeterminate = selectedFiles.size > 0 && selectedFiles.size < currentFolder.files.length;
+    }
+    
+    // Initial render
+    renderFolderImages(orphanedFolders[0]);
+    
+    // Folder list click handler
+    body.querySelectorAll('.orphaned-folder-item').forEach(item => {
+        item.addEventListener('click', () => {
+            body.querySelectorAll('.orphaned-folder-item').forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+            
+            const folderName = item.dataset.folder;
+            const folder = orphanedFolders.find(f => f.name === folderName);
+            if (folder) {
+                renderFolderImages(folder);
+            }
+        });
+    });
+    
+    // Select all handler
+    document.getElementById('orphanedSelectAll').addEventListener('change', (e) => {
+        const checkAll = e.target.checked;
+        document.querySelectorAll('.orphaned-file-checkbox').forEach(checkbox => {
+            checkbox.checked = checkAll;
+            const filename = checkbox.dataset.filename;
+            if (checkAll) {
+                selectedFiles.add(filename);
+                checkbox.closest('.orphaned-image-item').classList.add('selected');
+            } else {
+                selectedFiles.delete(filename);
+                checkbox.closest('.orphaned-image-item').classList.remove('selected');
+            }
+        });
+        updateMoveSection();
+    });
+    
+    // Clear Duplicates handler - processes ALL orphaned folders
+    document.getElementById('orphanedClearDuplicatesBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('orphanedClearDuplicatesBtn');
+        const originalHtml = btn.innerHTML;
+        
+        // Confirm since this affects all folders
+        if (!confirm(`Clear Duplicates\n\nThis will scan ALL ${orphanedFolders.length} orphaned folder(s) and remove any files that already exist in their matching unique folders.\n\nContinue?`)) {
+            return;
+        }
+        
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+        btn.disabled = true;
+        
+        let totalDeleted = 0;
+        let totalKept = 0;
+        let foldersProcessed = 0;
+        let foldersCleared = 0;
+        
+        try {
+            for (const folder of [...orphanedFolders]) {
+                foldersProcessed++;
+                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Folder ${foldersProcessed}/${orphanedFolders.length}...`;
+                
+                // Find all unique folders that match this base name
+                const baseName = folder.name;
+                const matchingChars = allCharacters.filter(c => c.name === baseName && getCharacterGalleryId(c));
+                const matchingUniqueFolders = matchingChars
+                    .map(c => buildUniqueGalleryFolderName(c))
+                    .filter(f => f);
+                
+                console.log(`[ClearDuplicates] Folder "${baseName}": found ${matchingChars.length} matching chars, ${matchingUniqueFolders.length} unique folders:`, matchingUniqueFolders);
+                
+                if (matchingUniqueFolders.length === 0) {
+                    // No matching unique folders - keep all files
+                    console.log(`[ClearDuplicates] No unique folders found for "${baseName}", keeping ${folder.files.length} files`);
+                    totalKept += folder.files.length;
+                    continue;
+                }
+                
+                // Build hash set AND filename set from all matching unique folders
+                const uniqueFolderHashes = new Set();
+                const uniqueFolderFilenames = new Set();
+                for (const uniqueFolder of matchingUniqueFolders) {
+                    const folderHashes = await scanFolderForImageHashes(uniqueFolder);
+                    console.log(`[ClearDuplicates] Scanned "${uniqueFolder}": ${folderHashes.size} hashes`);
+                    for (const [hash, fileName] of folderHashes) {
+                        uniqueFolderHashes.add(hash);
+                        uniqueFolderFilenames.add(fileName);
+                    }
+                }
+                
+                console.log(`[ClearDuplicates] Total unique hashes: ${uniqueFolderHashes.size}, filenames: ${uniqueFolderFilenames.size}`);
+                
+                if (uniqueFolderHashes.size === 0 && uniqueFolderFilenames.size === 0) {
+                    totalKept += folder.files.length;
+                    continue;
+                }
+                
+                // Hash files in orphaned folder and find duplicates (by hash OR filename)
+                const safeFolderName = sanitizeFolderName(folder.name);
+                let folderDeleted = 0;
+                
+                for (const fileName of folder.files) {
+                    // First check filename match (fast, handles re-encoded files)
+                    if (uniqueFolderFilenames.has(fileName)) {
+                        console.log(`[ClearDuplicates] File "${fileName}" - DUPLICATE (filename match)`);
+                        const deletePath = `/user/images/${safeFolderName}/${fileName}`;
+                        await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                        folderDeleted++;
+                        totalDeleted++;
+                        continue;
+                    }
+                    
+                    // Then check hash match
+                    const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+                    
+                    try {
+                        const fileResponse = await fetch(localPath);
+                        if (fileResponse.ok) {
+                            const buffer = await fileResponse.arrayBuffer();
+                            const hash = await calculateHash(buffer);
+                            
+                            const isDuplicate = uniqueFolderHashes.has(hash);
+                            console.log(`[ClearDuplicates] File "${fileName}" hash: ${hash.substring(0, 16)}... isDuplicate: ${isDuplicate}`);
+                            
+                            if (isDuplicate) {
+                                // Duplicate found - delete from orphaned folder
+                                const deletePath = `/user/images/${safeFolderName}/${fileName}`;
+                                await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                                folderDeleted++;
+                                totalDeleted++;
+                            } else {
+                                totalKept++;
+                            }
+                        } else {
+                            console.warn(`[ClearDuplicates] Could not fetch file "${fileName}": ${fileResponse.status}`);
+                            totalKept++;
+                        }
+                    } catch (e) {
+                        console.warn(`[ClearDuplicates] Error processing ${fileName}:`, e);
+                        totalKept++;
+                    }
+                }
+                
+                // Update folder's file list
+                if (folderDeleted > 0) {
+                    const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folder.name, type: 7 });
+                    if (response.ok) {
+                        const files = await response.json();
+                        folder.files = files.map(f => typeof f === 'string' ? f : f.name).filter(Boolean);
+                    }
+                    
+                    if (folder.files.length === 0) {
+                        foldersCleared++;
+                    }
+                }
+            }
+            
+            // Remove cleared folders from the list and update UI
+            const remainingFolders = orphanedFolders.filter(f => f.files.length > 0);
+            orphanedFolders.length = 0;
+            orphanedFolders.push(...remainingFolders);
+            
+            if (orphanedFolders.length === 0) {
+                // All folders cleared
+                body.innerHTML = `
+                    <div class="empty-state" style="padding: 40px; text-align: center;">
+                        <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                        <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
+                        <p style="color: var(--text-secondary); margin: 0;">
+                            Cleared ${totalDeleted} duplicate file(s) from ${foldersCleared} folder(s).
+                        </p>
+                    </div>
+                `;
+            } else {
+                // Update sidebar folder list
+                const folderListItems = body.querySelector('.orphaned-folders-list-items');
+                if (folderListItems) {
+                    folderListItems.innerHTML = orphanedFolders.map((folder, idx) => `
+                        <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
+                            <div class="orphaned-folder-name">
+                                <i class="fa-solid fa-folder" style="color: #f39c12;"></i>
+                                ${escapeHtml(folder.name)}
+                            </div>
+                            <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
+                        </div>
+                    `).join('');
+                    
+                    // Re-bind folder click handlers
+                    folderListItems.querySelectorAll('.orphaned-folder-item').forEach(item => {
+                        item.addEventListener('click', () => {
+                            folderListItems.querySelectorAll('.orphaned-folder-item').forEach(i => i.classList.remove('active'));
+                            item.classList.add('active');
+                            
+                            const folderName = item.dataset.folder;
+                            const folder = orphanedFolders.find(f => f.name === folderName);
+                            if (folder) {
+                                renderFolderImages(folder);
+                            }
+                        });
+                    });
+                }
+                
+                // Re-render current folder (select first one)
+                currentFolder = orphanedFolders[0];
+                renderFolderImages(currentFolder);
+                
+                btn.innerHTML = originalHtml;
+                btn.disabled = false;
+            }
+            
+            showToast(`Cleared ${totalDeleted} duplicate(s) from ${foldersProcessed} folder(s), ${totalKept} unique file(s) remain`, totalDeleted > 0 ? 'success' : 'info');
+            
+        } catch (error) {
+            console.error('[ClearDuplicates] Error:', error);
+            showToast('Error clearing duplicates: ' + error.message, 'error');
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
+        }
+    });
+    
+    // Destination search handler
+    document.getElementById('orphanedDestSearch').addEventListener('input', (e) => {
+        const query = e.target.value.toLowerCase().trim();
+        document.querySelectorAll('.orphaned-dest-item').forEach(item => {
+            const name = item.dataset.name || '';
+            const folder = item.dataset.folder?.toLowerCase() || '';
+            const matches = !query || name.includes(query) || folder.includes(query);
+            item.style.display = matches ? '' : 'none';
+        });
+    });
+    
+    // Destination click handler - move files
+    body.querySelectorAll('.orphaned-dest-item').forEach(destItem => {
+        destItem.addEventListener('click', async () => {
+            if (selectedFiles.size === 0) {
+                showToast('No files selected', 'error');
+                return;
+            }
+            
+            const destFolder = destItem.dataset.folder;
+            const destName = destItem.querySelector('.dest-name').textContent.trim();
+            
+            // Confirm move
+            if (!confirm(`Move ${selectedFiles.size} file(s) to "${destName}"?\n\nDestination folder: ${destFolder}`)) {
+                return;
+            }
+            
+            // Show progress
+            const moveBtn = destItem;
+            const originalHtml = moveBtn.innerHTML;
+            moveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Moving...';
+            moveBtn.style.pointerEvents = 'none';
+            
+            let moved = 0;
+            let errors = 0;
+            
+            for (const fileName of selectedFiles) {
+                const result = await moveImageToFolder(currentFolder.name, destFolder, fileName, true);
+                if (result.success) {
+                    moved++;
+                } else {
+                    errors++;
+                    debugLog(`[OrphanedFolders] Error moving ${fileName}:`, result.error);
+                }
+            }
+            
+            moveBtn.innerHTML = originalHtml;
+            moveBtn.style.pointerEvents = '';
+            
+            // Show result
+            if (errors === 0) {
+                showToast(`Moved ${moved} file(s) successfully`, 'success');
+            } else {
+                showToast(`Moved ${moved} file(s), ${errors} error(s)`, 'error');
+            }
+            
+            // Refresh folder contents
+            const updatedFiles = currentFolder.files.filter(f => !selectedFiles.has(f));
+            currentFolder.files = updatedFiles;
+            
+            // Update folder item count
+            const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${escapeHtml(currentFolder.name)}"]`);
+            if (folderItem) {
+                const countEl = folderItem.querySelector('.orphaned-folder-count');
+                if (countEl) {
+                    countEl.textContent = `${updatedFiles.length} file${updatedFiles.length !== 1 ? 's' : ''}`;
+                }
+                
+                // Remove folder from list if empty
+                if (updatedFiles.length === 0) {
+                    folderItem.remove();
+                    
+                    // Select next folder or show empty state
+                    const remainingFolders = body.querySelectorAll('.orphaned-folder-item');
+                    if (remainingFolders.length > 0) {
+                        remainingFolders[0].click();
+                    } else {
+                        body.innerHTML = `
+                            <div class="empty-state" style="padding: 40px; text-align: center;">
+                                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                                <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
+                                <p style="color: var(--text-secondary); margin: 0;">
+                                    All orphaned folder contents have been redistributed.
+                                </p>
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+            }
+            
+            // Re-render images
+            renderFolderImages(currentFolder);
+        });
+    });
+}
+
+/**
+ * Get the gallery folder name to use for API calls
+ * Returns unique folder if enabled and available, otherwise falls back to character name
+ * @param {object} char - Character object
+ * @returns {string} The folder name to use for ch_name parameter
+ */
+function getGalleryFolderName(char) {
+    if (!char?.name) return '';
+    
+    // If unique folders disabled, use standard name
+    if (!getSetting('uniqueGalleryFolders')) {
+        return char.name;
+    }
+    
+    // Try to use unique folder name
+    const uniqueFolder = buildUniqueGalleryFolderName(char);
+    if (uniqueFolder) {
+        return uniqueFolder;
+    }
+    
+    // Fallback to standard name if no gallery_id
+    return char.name;
+}
+
+/**
+ * Resolve the gallery folder name from various inputs
+ * Use this when you might have a character object, avatar filename, or just a name
+ * @param {object|string} charOrNameOrAvatar - Character object, avatar filename, or character name
+ * @returns {string} The folder name to use for ch_name parameter
+ */
+function resolveGalleryFolderName(charOrNameOrAvatar) {
+    // If it's a character object, use getGalleryFolderName directly
+    if (charOrNameOrAvatar && typeof charOrNameOrAvatar === 'object' && charOrNameOrAvatar.name) {
+        return getGalleryFolderName(charOrNameOrAvatar);
+    }
+    
+    // It's a string - could be avatar or name
+    const str = String(charOrNameOrAvatar);
+    
+    // Try to find character by avatar
+    const charByAvatar = allCharacters.find(c => c.avatar === str);
+    if (charByAvatar) {
+        return getGalleryFolderName(charByAvatar);
+    }
+    
+    // Try to find character by name (only if exactly one match)
+    const charsByName = allCharacters.filter(c => c.name === str);
+    if (charsByName.length === 1) {
+        return getGalleryFolderName(charsByName[0]);
+    }
+    
+    // Multiple matches or no matches - return the string as-is
+    // For multiple matches with same name, they need to use unique folders
+    // to avoid mixing. Since we can't determine which one, use the shared name.
+    return str;
+}
+
+/**
+ * Assign a gallery_id to a character and save it
+ * Only works when uniqueGalleryFolders setting is enabled
+ * @param {object} char - Character object to update
+ * @returns {Promise<{success: boolean, galleryId: string|null, error?: string}>}
+ */
+async function assignGalleryIdToCharacter(char) {
+    // Feature must be enabled
+    if (!getSetting('uniqueGalleryFolders')) {
+        return { success: false, galleryId: null, error: 'Feature disabled' };
+    }
+    
+    if (!char || !char.avatar) {
+        return { success: false, galleryId: null, error: 'Invalid character' };
+    }
+    
+    // Check if already has gallery_id
+    if (getCharacterGalleryId(char)) {
+        debugLog(`[GalleryFolder] Character already has gallery_id: ${char.name}`);
+        return { success: true, galleryId: getCharacterGalleryId(char) };
+    }
+    
+    // Generate new ID
+    const galleryId = generateGalleryId();
+    
+    // Prepare the extensions update
+    const existingExtensions = char.data?.extensions || {};
+    const updatedExtensions = {
+        ...existingExtensions,
+        gallery_id: galleryId
+    };
+    
+    try {
+        // Save to character via merge-attributes API
+        const payload = {
+            avatar: char.avatar,
+            data: {
+                extensions: updatedExtensions
+            }
+        };
+        
+        const response = await apiRequest('/characters/merge-attributes', 'POST', payload);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`API error: ${errorText}`);
+        }
+        
+        // Update local character data
+        if (!char.data) char.data = {};
+        if (!char.data.extensions) char.data.extensions = {};
+        char.data.extensions.gallery_id = galleryId;
+        
+        // Also update in allCharacters array
+        const charIndex = allCharacters.findIndex(c => c.avatar === char.avatar);
+        if (charIndex !== -1) {
+            if (!allCharacters[charIndex].data) allCharacters[charIndex].data = {};
+            if (!allCharacters[charIndex].data.extensions) allCharacters[charIndex].data.extensions = {};
+            allCharacters[charIndex].data.extensions.gallery_id = galleryId;
+        }
+        
+        debugLog(`[GalleryFolder] Assigned gallery_id to ${char.name}: ${galleryId}`);
+        return { success: true, galleryId };
+        
+    } catch (error) {
+        debugError(`[GalleryFolder] Failed to assign gallery_id to ${char.name}:`, error);
+        return { success: false, galleryId: null, error: error.message };
+    }
+}
+
+/**
+ * Check if a character needs gallery folder migration
+ * (has gallery_id but folder override not registered, or has images in old folder)
+ * @param {object} char - Character object
+ * @returns {boolean}
+ */
+function needsGalleryFolderMigration(char) {
+    if (!getSetting('uniqueGalleryFolders')) return false;
+    if (!getCharacterGalleryId(char)) return false;
+    
+    const context = getSTContext();
+    if (!context?.extensionSettings?.gallery?.folders) return true;
+    
+    const expectedFolder = buildUniqueGalleryFolderName(char);
+    const currentOverride = context.extensionSettings.gallery.folders[char.avatar];
+    
+    return currentOverride !== expectedFolder;
+}
+
+/**
+ * Get gallery image/file information for a character
+ * @param {object} char - Character object
+ * @returns {Promise<{folder: string, files: string[], count: number}>}
+ */
+async function getCharacterGalleryInfo(char) {
+    const folderName = getGalleryFolderName(char);
+    if (!folderName) {
+        return { folder: '', files: [], count: 0 };
+    }
+    
+    try {
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folderName, type: 7 });
+        if (!response.ok) {
+            return { folder: folderName, files: [], count: 0 };
+        }
+        const files = await response.json();
+        return { folder: folderName, files: files || [], count: (files || []).length };
+    } catch (e) {
+        debugLog('[Gallery] Error getting gallery info:', e);
+        return { folder: folderName, files: [], count: 0 };
+    }
+}
+
+/**
+ * Count characters that need gallery_id assignment
+ * @returns {number}
+ */
+function countCharactersNeedingGalleryId() {
+    return allCharacters.filter(c => !getCharacterGalleryId(c)).length;
+}
+
+/**
+ * Count characters with gallery_id that need folder registration
+ * @returns {number}
+ */
+function countCharactersNeedingFolderRegistration() {
+    if (!getSetting('uniqueGalleryFolders')) return 0;
+    return allCharacters.filter(c => needsGalleryFolderMigration(c)).length;
+}
+
+// ========================================
+// SMART IMAGE RELOCATION SYSTEM
+// Uses content hashes from Chub gallery + embedded URLs as "fingerprints"
+// to determine which images belong to which character when migrating
+// from shared folders to unique folders
+// ========================================
+
+/**
+ * Build an ownership fingerprint for a character by downloading and hashing
+ * their Chub gallery images and embedded media URLs (without saving).
+ * This fingerprint proves which images belong to this character.
+ * @param {object} char - Character object
+ * @param {object} options - Progress callbacks
+ * @returns {Promise<{hashes: Set<string>, errors: number, chubCount: number, embeddedCount: number}>}
+ */
+async function buildOwnershipFingerprint(char, options = {}) {
+    const { onLog, onLogUpdate, shouldAbort } = options;
+    const hashes = new Set();
+    let errors = 0;
+    let chubCount = 0;
+    let embeddedCount = 0;
+    
+    // 1. Get hashes from Chub gallery images (if character is linked)
+    const chubInfo = getChubLinkInfo(char);
+    if (chubInfo?.id) {
+        const logEntry = onLog ? onLog(`Fetching Chub gallery fingerprint for ${char.name}...`, 'pending') : null;
+        
+        try {
+            const galleryImages = await fetchChubGalleryImages(chubInfo.id);
+            
+            for (const image of galleryImages) {
+                if (shouldAbort && shouldAbort()) break;
+                
+                const downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
+                if (downloadResult.success) {
+                    const hash = await calculateHash(downloadResult.arrayBuffer);
+                    hashes.add(hash);
+                    chubCount++;
+                } else {
+                    errors++;
+                }
+            }
+            
+            if (onLogUpdate && logEntry) {
+                onLogUpdate(logEntry, `Chub gallery: ${chubCount} hashes collected`, 'success');
+            }
+        } catch (e) {
+            console.error('[Fingerprint] Chub gallery error:', e);
+            if (onLogUpdate && logEntry) {
+                onLogUpdate(logEntry, `Chub gallery error: ${e.message}`, 'error');
+            }
+        }
+    }
+    
+    // 2. Get hashes from embedded media URLs
+    const mediaUrls = findCharacterMediaUrls(char);
+    if (mediaUrls.length > 0) {
+        const logEntry = onLog ? onLog(`Fetching embedded media fingerprint (${mediaUrls.length} URLs)...`, 'pending') : null;
+        
+        for (const url of mediaUrls) {
+            if (shouldAbort && shouldAbort()) break;
+            
+            try {
+                const downloadResult = await downloadMediaToMemory(url, 30000);
+                if (downloadResult.success) {
+                    const hash = await calculateHash(downloadResult.arrayBuffer);
+                    hashes.add(hash);
+                    embeddedCount++;
+                } else {
+                    errors++;
+                }
+            } catch (e) {
+                errors++;
+            }
+        }
+        
+        if (onLogUpdate && logEntry) {
+            onLogUpdate(logEntry, `Embedded media: ${embeddedCount} hashes collected`, 'success');
+        }
+    }
+    
+    debugLog(`[Fingerprint] ${char.name}: ${hashes.size} total hashes (${chubCount} chub, ${embeddedCount} embedded, ${errors} errors)`);
+    
+    return { hashes, errors, chubCount, embeddedCount };
+}
+
+/**
+ * Scan a folder and get hash -> filename map for all images
+ * @param {string} folderName - Folder to scan
+ * @returns {Promise<Map<string, string>>} Map of hash -> filename
+ */
+async function scanFolderForImageHashes(folderName) {
+    const hashToFile = new Map();
+    
+    try {
+        const safeFolderName = sanitizeFolderName(folderName);
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folderName, type: 7 });
+        
+        if (!response.ok) {
+            debugLog('[Migration] Could not list folder:', folderName);
+            return hashToFile;
+        }
+        
+        const files = await response.json();
+        if (!files || files.length === 0) {
+            return hashToFile;
+        }
+        
+        for (const file of files) {
+            const fileName = (typeof file === 'string') ? file : file.name;
+            if (!fileName) continue;
+            
+            // Only check media files
+            if (!fileName.match(/\.(png|jpg|jpeg|webp|gif|bmp|mp3|wav|ogg|m4a|mp4|webm)$/i)) continue;
+            
+            const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+            
+            try {
+                const fileResponse = await fetch(localPath);
+                if (fileResponse.ok) {
+                    const buffer = await fileResponse.arrayBuffer();
+                    const hash = await calculateHash(buffer);
+                    hashToFile.set(hash, fileName);
+                }
+            } catch (e) {
+                console.warn(`[Migration] Could not hash file: ${fileName}`);
+            }
+        }
+    } catch (error) {
+        console.error('[Migration] Error scanning folder:', error);
+    }
+    
+    return hashToFile;
+}
+
+/**
+ * Move/copy an image file from one gallery folder to another
+ * Since there's no move API, we download the file and re-upload to the new folder
+ * @param {string} sourceFolder - Source folder name
+ * @param {string} targetFolder - Target folder name  
+ * @param {string} fileName - File name to move
+ * @param {boolean} deleteSource - Whether to delete from source after copying
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+async function moveImageToFolder(sourceFolder, targetFolder, fileName, deleteSource = true) {
+    try {
+        const safeSourceFolder = sanitizeFolderName(sourceFolder);
+        const safeTargetFolder = sanitizeFolderName(targetFolder);
+        const sourcePath = `/user/images/${encodeURIComponent(safeSourceFolder)}/${encodeURIComponent(fileName)}`;
+        
+        debugLog(`[MoveFile] Moving ${fileName} from ${sourceFolder} to ${targetFolder}`);
+        
+        // Download the file
+        const response = await fetch(sourcePath);
+        if (!response.ok) {
+            return { success: false, error: `Could not read source file: ${response.status}` };
+        }
+        
+        const arrayBuffer = await response.arrayBuffer();
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+        const blob = new Blob([arrayBuffer], { type: contentType });
+        
+        debugLog(`[MoveFile] Downloaded ${fileName}, size: ${arrayBuffer.byteLength}, type: ${contentType}`);
+        
+        // Convert to base64
+        const base64Data = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+        
+        // Get extension from filename
+        const ext = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase() : 'png';
+        
+        debugLog(`[MoveFile] Uploading ${fileName} with extension: ${ext}`);
+        
+        // Upload to target folder with same filename
+        const uploadResponse = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+            image: base64Data,
+            ch_name: safeTargetFolder,
+            filename: fileName.includes('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName,
+            format: ext
+        });
+        
+        if (!uploadResponse.ok) {
+            const errorText = await uploadResponse.text().catch(() => 'Unknown error');
+            debugLog(`[MoveFile] Upload FAILED for ${fileName}: ${errorText}`);
+            return { success: false, error: `Upload failed: ${errorText}` };
+        }
+        
+        debugLog(`[MoveFile] Upload successful for ${fileName}`);
+        
+        // Delete from source folder if requested
+        if (deleteSource) {
+            const deletePath = `/user/images/${safeSourceFolder}/${fileName}`;
+            await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            debugLog(`[MoveFile] Deleted source file ${fileName}`);
+        }
+        
+        return { success: true };
+    } catch (error) {
+        debugLog(`[MoveFile] Exception moving ${fileName}: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Find characters that share the same name (and thus the same old folder)
+ * @returns {Map<string, Array<object>>} Map of character name -> array of characters with that name
+ */
+function findCharactersWithSharedNames() {
+    const nameMap = new Map();
+    
+    for (const char of allCharacters) {
+        if (!char.name) continue;
+        
+        const existing = nameMap.get(char.name) || [];
+        existing.push(char);
+        nameMap.set(char.name, existing);
+    }
+    
+    // Filter to only names with multiple characters
+    const sharedNames = new Map();
+    for (const [name, chars] of nameMap) {
+        if (chars.length > 1) {
+            sharedNames.set(name, chars);
+        }
+    }
+    
+    return sharedNames;
+}
+
+/**
+ * Perform smart image relocation for characters sharing the same name
+ * Uses fingerprinting to determine which images belong to which character
+ * @param {Array<object>} characters - Characters sharing the same name
+ * @param {object} options - Progress callbacks
+ * @returns {Promise<{moved: number, unmatched: number, errors: number, details: Array}>}
+ */
+async function relocateSharedFolderImages(characters, options = {}) {
+    const { onLog, onLogUpdate, onProgress, shouldAbort } = options;
+    const results = { moved: 0, unmatched: 0, errors: 0, details: [] };
+    
+    if (characters.length < 2) {
+        return results;
+    }
+    
+    const sharedFolderName = characters[0].name;
+    const logEntry = onLog ? onLog(`Analyzing shared folder: ${sharedFolderName}`, 'pending') : null;
+    
+    // 1. Build fingerprints for all characters sharing this name
+    const fingerprints = new Map(); // char.avatar -> Set of hashes
+    let totalFingerprints = 0;
+    
+    for (let i = 0; i < characters.length; i++) {
+        if (shouldAbort && shouldAbort()) return results;
+        
+        const char = characters[i];
+        if (onLogUpdate && logEntry) {
+            onLogUpdate(logEntry, `Building fingerprint for ${char.avatar}... (${i + 1}/${characters.length})`, 'pending');
+        }
+        
+        const fingerprint = await buildOwnershipFingerprint(char, { shouldAbort });
+        fingerprints.set(char.avatar, fingerprint.hashes);
+        totalFingerprints += fingerprint.hashes.size;
+        
+        results.details.push({
+            character: char.name,
+            avatar: char.avatar,
+            fingerprintSize: fingerprint.hashes.size
+        });
+    }
+    
+    if (totalFingerprints === 0) {
+        if (onLogUpdate && logEntry) {
+            onLogUpdate(logEntry, `No fingerprints found - characters may not be linked to Chub or have embedded media`, 'success');
+        }
+        return results;
+    }
+    
+    // 2. Scan the shared folder for existing images
+    if (onLogUpdate && logEntry) {
+        onLogUpdate(logEntry, `Scanning shared folder for images...`, 'pending');
+    }
+    
+    const folderImages = await scanFolderForImageHashes(sharedFolderName);
+    
+    if (folderImages.size === 0) {
+        if (onLogUpdate && logEntry) {
+            onLogUpdate(logEntry, `No images in shared folder`, 'success');
+        }
+        return results;
+    }
+    
+    // 3. Match images to characters based on hash fingerprints
+    if (onLogUpdate && logEntry) {
+        onLogUpdate(logEntry, `Matching ${folderImages.size} images to ${characters.length} characters...`, 'pending');
+    }
+    
+    const imagesToMove = []; // Array of { fileName, targetChar }
+    const unmatchedImages = [];
+    
+    for (const [hash, fileName] of folderImages) {
+        let matchedChar = null;
+        
+        // Find which character's fingerprint contains this hash
+        for (const [avatar, hashes] of fingerprints) {
+            if (hashes.has(hash)) {
+                matchedChar = characters.find(c => c.avatar === avatar);
+                break;
+            }
+        }
+        
+        if (matchedChar) {
+            imagesToMove.push({ fileName, targetChar: matchedChar, hash });
+        } else {
+            unmatchedImages.push(fileName);
+            results.unmatched++;
+        }
+    }
+    
+    // 4. Move matched images to their unique folders
+    // First, scan destination folders to avoid moving duplicates
+    const destFolderHashes = new Map(); // uniqueFolder -> Set of hashes
+    for (const { targetChar } of imagesToMove) {
+        const uniqueFolder = buildUniqueGalleryFolderName(targetChar);
+        if (uniqueFolder && !destFolderHashes.has(uniqueFolder)) {
+            const existingHashes = await scanFolderForImageHashes(uniqueFolder);
+            destFolderHashes.set(uniqueFolder, new Set(existingHashes.keys()));
+        }
+    }
+    
+    for (let i = 0; i < imagesToMove.length; i++) {
+        if (shouldAbort && shouldAbort()) return results;
+        
+        const { fileName, targetChar, hash } = imagesToMove[i];
+        const uniqueFolder = buildUniqueGalleryFolderName(targetChar);
+        
+        if (!uniqueFolder) {
+            results.errors++;
+            continue;
+        }
+        
+        // Skip if already in the correct folder (shouldn't happen, but safety check)
+        if (uniqueFolder === sharedFolderName) {
+            continue;
+        }
+        
+        // Check if file with same content already exists in destination
+        const destHashes = destFolderHashes.get(uniqueFolder);
+        if (destHashes && destHashes.has(hash)) {
+            // File already exists in destination - just delete from source
+            debugLog(`[Migration] File ${fileName} already exists in ${uniqueFolder}, deleting from source`);
+            const deletePath = `/user/images/${sanitizeFolderName(sharedFolderName)}/${fileName}`;
+            await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            results.moved++; // Count as successful (file is where it should be)
+            continue;
+        }
+        
+        if (onLogUpdate && logEntry) {
+            onLogUpdate(logEntry, `Moving ${fileName} to ${uniqueFolder}... (${i + 1}/${imagesToMove.length})`, 'pending');
+        }
+        
+        const moveResult = await moveImageToFolder(sharedFolderName, uniqueFolder, fileName, true);
+        
+        if (moveResult.success) {
+            results.moved++;
+        } else {
+            results.errors++;
+            console.error(`[Migration] Failed to move ${fileName}:`, moveResult.error);
+        }
+        
+        if (onProgress) onProgress(i + 1, imagesToMove.length);
+    }
+    
+    if (onLogUpdate && logEntry) {
+        const status = results.errors === 0 ? 'success' : 'warning';
+        onLogUpdate(logEntry, 
+            `${sharedFolderName}: ${results.moved} moved, ${results.unmatched} unmatched, ${results.errors} errors`, 
+            status
+        );
+    }
+    
+    if (unmatchedImages.length > 0) {
+        debugLog(`[Migration] Unmatched images in ${sharedFolderName}:`, unmatchedImages);
+    }
+    
+    return results;
+}
+
+/**
+ * Count how many characters share names and could benefit from image relocation
+ * @returns {{sharedNameGroups: number, charactersAffected: number}}
+ */
+function countCharactersNeedingImageRelocation() {
+    const sharedNames = findCharactersWithSharedNames();
+    let charactersAffected = 0;
+    
+    for (const [_, chars] of sharedNames) {
+        charactersAffected += chars.length;
+    }
+    
+    return {
+        sharedNameGroups: sharedNames.size,
+        charactersAffected
+    };
+}
+
+/**
+ * Migrate all images from a character's old name-based folder to their unique folder
+ * This is a simple migration for characters with unique names (no fingerprinting needed)
+ * @param {object} char - Character object with gallery_id
+ * @returns {Promise<{moved: number, errors: number, skipped: boolean}>}
+ */
+async function migrateCharacterImagesToUniqueFolder(char) {
+    const result = { moved: 0, errors: 0, skipped: false };
+    
+    // Must have gallery_id
+    const galleryId = getCharacterGalleryId(char);
+    if (!galleryId) {
+        result.skipped = true;
+        return result;
+    }
+    
+    const oldFolderName = char.name;
+    const uniqueFolderName = buildUniqueGalleryFolderName(char);
+    
+    if (!uniqueFolderName) {
+        result.skipped = true;
+        return result;
+    }
+    
+    // If old and new are the same, nothing to do
+    if (oldFolderName === uniqueFolderName) {
+        result.skipped = true;
+        return result;
+    }
+    
+    try {
+        // List files in the old folder
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: oldFolderName, type: 7 });
+        
+        if (!response.ok) {
+            // Folder might not exist, that's fine
+            return result;
+        }
+        
+        const files = await response.json();
+        
+        if (!files || files.length === 0) {
+            return result;
+        }
+        
+        // Filter to media files (images, audio, video)
+        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm'];
+        const mediaFiles = files.filter(f => {
+            const fileName = typeof f === 'string' ? f : f.name;
+            if (!fileName) return false;
+            const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+            return mediaExtensions.includes(ext);
+        });
+        
+        if (mediaFiles.length === 0) {
+            return result;
+        }
+        
+        debugLog(`[MigrateAll] ${char.name}: Moving ${mediaFiles.length} files from "${oldFolderName}" to "${uniqueFolderName}"`);
+        
+        // Move each file
+        for (const file of mediaFiles) {
+            const fileName = typeof file === 'string' ? file : file.name;
+            const moveResult = await moveImageToFolder(oldFolderName, uniqueFolderName, fileName, true);
+            
+            if (moveResult.success) {
+                result.moved++;
+            } else {
+                result.errors++;
+                console.warn(`[MigrateAll] Failed to move "${fileName}" from "${oldFolderName}" to "${uniqueFolderName}":`, moveResult.error);
+            }
+        }
+        
+        debugLog(`[MigrateAll] ${char.name}: Moved ${result.moved} files, ${result.errors} errors`);
+        
+    } catch (error) {
+        debugError(`[MigrateAll] Error migrating ${char.name}:`, error);
+        result.errors++;
+    }
+    
+    return result;
+}
+
+/**
+ * Handle gallery folder rename when a character's name changes
+ * Moves all files from OldName_UUID folder to NewName_UUID folder
+ * @param {object} char - Character object
+ * @param {string} oldName - The old character name
+ * @param {string} newName - The new character name  
+ * @param {string} galleryId - The character's gallery_id (UUID)
+ * @returns {Promise<{success: boolean, moved: number, errors: number}>}
+ */
+async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
+    const result = { success: false, moved: 0, errors: 0 };
+    
+    // Build old and new folder names
+    const safeOldName = oldName.replace(/[<>:"/\\|?*]/g, '_').trim();
+    const safeNewName = newName.replace(/[<>:"/\\|?*]/g, '_').trim();
+    const oldFolderName = `${safeOldName}_${galleryId}`;
+    const newFolderName = `${safeNewName}_${galleryId}`;
+    
+    if (oldFolderName === newFolderName) {
+        result.success = true;
+        return result;
+    }
+    
+    debugLog(`[GalleryRename] Renaming folder: "${oldFolderName}" -> "${newFolderName}"`);
+    
+    try {
+        // Check if old folder has any files
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: oldFolderName, type: 7 });
+        
+        if (!response.ok) {
+            // Old folder doesn't exist or can't be read - might be empty, that's fine
+            debugLog(`[GalleryRename] Old folder "${oldFolderName}" doesn't exist or is empty`);
+            // Still update the mapping for future use
+            registerGalleryFolderOverride(char);
+            result.success = true;
+            return result;
+        }
+        
+        const files = await response.json();
+        
+        if (!files || files.length === 0) {
+            debugLog(`[GalleryRename] Old folder "${oldFolderName}" is empty`);
+            registerGalleryFolderOverride(char);
+            result.success = true;
+            return result;
+        }
+        
+        // Filter to media files
+        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm'];
+        const mediaFiles = files.filter(f => {
+            const fileName = typeof f === 'string' ? f : f.name;
+            if (!fileName) return false;
+            const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
+            return mediaExtensions.includes(ext);
+        });
+        
+        if (mediaFiles.length === 0) {
+            debugLog(`[GalleryRename] No media files to move`);
+            registerGalleryFolderOverride(char);
+            result.success = true;
+            return result;
+        }
+        
+        debugLog(`[GalleryRename] Moving ${mediaFiles.length} files from "${oldFolderName}" to "${newFolderName}"`);
+        
+        // Move each file
+        for (const file of mediaFiles) {
+            const fileName = typeof file === 'string' ? file : file.name;
+            const moveResult = await moveImageToFolder(oldFolderName, newFolderName, fileName, true);
+            
+            if (moveResult.success) {
+                result.moved++;
+            } else {
+                result.errors++;
+                console.warn(`[GalleryRename] Failed to move "${fileName}":`, moveResult.error);
+            }
+        }
+        
+        // Update the folder mapping with the new folder name
+        // char.name should already be updated by now, but we ensure it matches newName
+        const tempChar = { ...char, name: newName };
+        registerGalleryFolderOverride(tempChar);
+        
+        result.success = result.errors === 0;
+        debugLog(`[GalleryRename] Complete: ${result.moved} moved, ${result.errors} errors`);
+        
+        if (result.moved > 0) {
+            showToast(`Gallery folder renamed: ${result.moved} files moved`, 'success');
+        }
+        
+    } catch (error) {
+        debugError(`[GalleryRename] Error:`, error);
+        result.errors++;
+    }
+    
+    return result;
+}
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
@@ -785,8 +3285,20 @@ async function loadCharInMain(charOrAvatar) {
     // Normalize inputs
     let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
     let charName = (typeof charOrAvatar === 'object') ? charOrAvatar.name : null;
+    let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
+    
+    // If we only have avatar string, find the full character object
+    if (!charObj && avatar) {
+        charObj = allCharacters.find(c => c.avatar === avatar);
+    }
 
-    console.log(`Attempting to load character by file: ${avatar}`);
+    // IMPORTANT: Register the gallery folder override BEFORE loading the character
+    // This ensures index.js can find the correct folder for media localization
+    if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
+        registerGalleryFolderOverride(charObj);
+    }
+
+    debugLog(`Attempting to load character by file: ${avatar}`);
 
     try {
         let context = null;
@@ -809,8 +3321,11 @@ async function loadCharInMain(charOrAvatar) {
             showToast(`Character file "${avatar}" not found`, "error");
             return false;
         } else {
-             console.log("Found character in main list at index", characterIndex, ":", targetChar);
+             debugLog("Found character in main list at index", characterIndex, ":", targetChar);
         }
+
+        // Show toast immediately before attempting to load
+        showToast(`Loading ${charName || avatar}...`, "success");
 
         // Helper: Timeout wrapper for promises
         const withTimeout = (promise, ms = 2000) => {
@@ -831,11 +3346,15 @@ async function loadCharInMain(charOrAvatar) {
         };
 
         // Method 1: context.selectCharacterById (Best API) - PASS THE NUMERIC INDEX!
+        // Note: This function may not return a promise, so we call it and return immediately
         if (context && typeof context.selectCharacterById === 'function') {
-             console.log(`Trying context.selectCharacterById with index ${characterIndex}`);
+             debugLog(`Trying context.selectCharacterById with index ${characterIndex}`);
              try {
-                 await withTimeout(context.selectCharacterById(characterIndex), 3000);
-                 showToast(`Loading ${charName || avatar}...`, "success");
+                 const result = context.selectCharacterById(characterIndex);
+                 // If it returns a promise, wait briefly; otherwise assume success
+                 if (result && typeof result.then === 'function') {
+                     await withTimeout(result, 5000);
+                 }
                  return true;
              } catch (err) {
                  console.warn("selectCharacterById failed or timed out:", err);
@@ -845,11 +3364,10 @@ async function loadCharInMain(charOrAvatar) {
 
         // Method 2: context.loadCharacter (Alternative API)
         if (context && typeof context.loadCharacter === 'function') {
-             console.log("Trying context.loadCharacter");
+             debugLog("Trying context.loadCharacter");
              try {
                 // Some versions return a promise, some don't.
-                await withTimeout(Promise.resolve(context.loadCharacter(avatar)), 3000);
-                showToast(`Loading ${charName || avatar}...`, "success");
+                await withTimeout(Promise.resolve(context.loadCharacter(avatar)), 5000);
                 return true;
              } catch (err) {
                  console.warn("context.loadCharacter failed:", err);
@@ -858,10 +3376,9 @@ async function loadCharInMain(charOrAvatar) {
 
         // Method 3: Global loadCharacter (Legacy)
         if (typeof window.opener.loadCharacter === 'function') {
-            console.log("Trying global loadCharacter");
+            debugLog("Trying global loadCharacter");
             try {
                 window.opener.loadCharacter(avatar);
-                showToast(`Loading (Legacy)...`, "success");
                 return true;
             } catch (err) {
                 console.warn("global loadCharacter failed:", err);
@@ -878,9 +3395,8 @@ async function loadCharInMain(charOrAvatar) {
             });
             
             if (charBtn.length) {
-                console.log("Loaded via jQuery click (data-file match)");
+                debugLog("Loaded via jQuery click (data-file match)");
                 charBtn.first().click();
-                showToast(`Selected ${charName || avatar}`, "success");
                 return true;
             } else {
                  console.warn("Character found in array but not in DOM (Virtualization?)");
@@ -893,7 +3409,7 @@ async function loadCharInMain(charOrAvatar) {
         
         if (charName && !isDuplicateName && context && context.executeSlashCommandsWithOptions) {
               const safeName = charName.replace(/"/g, '\\"');
-              console.log("Falling back to Slash Command (Unique Name)");
+              debugLog("Falling back to Slash Command (Unique Name)");
               context.executeSlashCommandsWithOptions(`/go "${safeName}"`, { displayCommand: false, showOutput: true });
               showToast(`Loaded ${charName} (Slash Command)`, "success");
               return true;
@@ -917,19 +3433,24 @@ async function loadCharInMain(charOrAvatar) {
 // Data Fetching
 // forceRefresh: if true, try to refresh from main window first, then fall back to API
 async function fetchCharacters(forceRefresh = false) {
+    // Clear computation cache on refresh to prevent stale token estimates, etc.
+    if (forceRefresh) {
+        clearCache();
+    }
+    
     try {
         // Method 1: Try to get data directly from the opener (Main Window)
         // This is preferred even on refresh because it has full character data including extensions
         if (window.opener && !window.opener.closed) {
             try {
-                console.log("Attempting to read characters from window.opener...");
+                debugLog("Attempting to read characters from window.opener...");
                 let openerChars = null;
                 
                 // If forceRefresh, trigger a refresh in the main window first
                 if (forceRefresh && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                     const context = window.opener.SillyTavern.getContext();
                     if (context && typeof context.getCharacters === 'function') {
-                        console.log("Triggering character refresh in main window...");
+                        debugLog("Triggering character refresh in main window...");
                         await context.getCharacters();
                     }
                 }
@@ -941,7 +3462,7 @@ async function fetchCharacters(forceRefresh = false) {
                 if (!openerChars && window.opener.characters) openerChars = window.opener.characters;
 
                 if (openerChars && Array.isArray(openerChars)) {
-                    console.log(`Loaded ${openerChars.length} characters from main window.`);
+                    debugLog(`Loaded ${openerChars.length} characters from main window.`);
                     processAndRender(openerChars);
                     return;
                 }
@@ -953,26 +3474,26 @@ async function fetchCharacters(forceRefresh = false) {
         // Method 2: Fallback to API Fetch with multiple endpoint attempts
         // Try standard endpoint
         let url = '/characters';
-        console.log(`Fetching characters from: ${API_BASE}${url}`);
+        debugLog(`Fetching characters from: ${API_BASE}${url}`);
 
         let response = await apiRequest(url, 'GET');
         
         // Fallbacks
         if (response.status === 404 || response.status === 405) {
-            console.log("GET failed, trying POST...");
+            debugLog("GET failed, trying POST...");
             response = await apiRequest(url, 'POST', {});
         }
 
         // Second fallback: try /api/characters/all (some forks/versions)
         if (response.status === 404) {
-            console.log("POST failed, trying /api/characters/all...");
+            debugLog("POST failed, trying /api/characters/all...");
             url = '/characters/all';
             response = await apiRequest(url, 'POST', {});
         }
         
         // Third fallback: try GET /api/characters/all
         if (response.status === 404 || response.status === 405) {
-             console.log("POST /all failed, trying GET /api/characters/all...");
+             debugLog("POST /all failed, trying GET /api/characters/all...");
              response = await apiRequest(url, 'GET');
         }
         
@@ -983,7 +3504,7 @@ async function fetchCharacters(forceRefresh = false) {
         }
 
         let data = await response.json();
-        console.log('Gallery Data:', data);
+        debugLog('Gallery Data:', data);
         processAndRender(data);
 
     } catch (error) {
@@ -1460,9 +3981,44 @@ const modal = document.getElementById('charModal');
 let activeChar = null;
 
 // Fetch User Images for Character
-async function fetchCharacterImages(charName) {
+// charOrName can be a character object or a character name string
+// If unique gallery folders are enabled, we use the unique folder name
+async function fetchCharacterImages(charOrName) {
     const grid = document.getElementById('spritesGrid');
     renderLoadingState(grid, 'Loading Media...');
+    
+    // Determine the folder name to use
+    let folderName;
+    let displayName;
+    
+    if (charOrName && typeof charOrName === 'object') {
+        // It's a character object - use getGalleryFolderName for proper unique folder support
+        folderName = getGalleryFolderName(charOrName);
+        displayName = charOrName.name || folderName;
+    } else {
+        // It's a string - try to find the character and get their unique folder
+        const charName = String(charOrName);
+        displayName = charName;
+        
+        // Try to find a matching character for unique folder lookup
+        // First check activeChar (most common case when viewing gallery)
+        if (activeChar && activeChar.name === charName) {
+            folderName = getGalleryFolderName(activeChar);
+        } else {
+            // Try to find by name in allCharacters
+            const matchingChars = allCharacters.filter(c => c.name === charName);
+            if (matchingChars.length === 1) {
+                // Exactly one match - use its unique folder
+                folderName = getGalleryFolderName(matchingChars[0]);
+            } else {
+                // Multiple or no matches - use the name as-is
+                // This is the fallback for shared name scenarios
+                folderName = charName;
+            }
+        }
+    }
+    
+    debugLog(`[Gallery] Fetching images from folder: ${folderName} (display: ${displayName})`);
     
     // The user's images are stored in /user/images/CharacterName/...
     // We can list files in that directory using the /api/files/list endpoint or similar if it exists.
@@ -1473,11 +4029,11 @@ async function fetchCharacterImages(charName) {
     // data/default-user/user/images/<Name> mapped to /user/images/<Name> in URL
     
     try {
-        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: charName, type: 7 });
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folderName, type: 7 });
 
         if (response.ok) {
             const files = await response.json();
-            renderGalleryImages(files, charName);
+            renderGalleryImages(files, folderName);
         } else {
              console.warn(`[Gallery] Failed to list images: ${response.status}`);
              renderSimpleEmpty(grid, 'No user images found for this character.');
@@ -1582,6 +4138,292 @@ function renderGalleryImages(files, folderName) {
     }
 }
 
+// ========================================
+// LEGACY FOLDER MIGRATION
+// Helps users move images from old "CharName" folders to new "CharName_uuid" folders
+// ========================================
+
+/**
+ * Check if there are files in the legacy (non-UUID) folder for a character
+ * @param {object} char - Character object
+ * @returns {Promise<{hasLegacy: boolean, files: string[], legacyFolder: string, currentFolder: string}>}
+ */
+async function checkLegacyFolder(char) {
+    const result = {
+        hasLegacy: false,
+        files: [],
+        legacyFolder: char.name,
+        currentFolder: getGalleryFolderName(char)
+    };
+    
+    // Only relevant if unique folders are enabled and character has gallery_id
+    if (!getSetting('uniqueGalleryFolders')) return result;
+    const galleryId = getCharacterGalleryId(char);
+    if (!galleryId) return result;
+    
+    // If legacyFolder and currentFolder are the same, no legacy folder exists
+    if (result.legacyFolder === result.currentFolder) return result;
+    
+    try {
+        const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { 
+            folder: result.legacyFolder, 
+            type: 7 
+        });
+        
+        if (response.ok) {
+            const files = await response.json();
+            if (files && files.length > 0) {
+                // Filter to only image files
+                result.files = files.filter(f => 
+                    f.match(/\.(png|jpg|jpeg|webp|gif|bmp)$/i)
+                );
+                result.hasLegacy = result.files.length > 0;
+            }
+        }
+    } catch (e) {
+        console.warn('[LegacyFolder] Error checking legacy folder:', e);
+    }
+    
+    return result;
+}
+
+/**
+ * Update the legacy folder button visibility based on whether legacy files exist
+ * @param {object} char - Character object
+ */
+async function updateLegacyFolderButton(char) {
+    const btn = document.getElementById('checkLegacyFolderBtn');
+    const countSpan = document.getElementById('legacyFolderCount');
+    
+    if (!btn) return;
+    
+    // Hide by default
+    btn.classList.add('hidden');
+    
+    // Check for legacy files
+    const legacyInfo = await checkLegacyFolder(char);
+    
+    if (legacyInfo.hasLegacy) {
+        // Show indicator with count
+        if (countSpan) {
+            countSpan.textContent = legacyInfo.files.length;
+        }
+        btn.classList.remove('hidden');
+        btn.title = `${legacyInfo.files.length} image${legacyInfo.files.length > 1 ? 's' : ''} in legacy folder "${legacyInfo.legacyFolder}" - Click to migrate`;
+    }
+}
+
+/**
+ * Show modal with legacy folder images for selective migration
+ * @param {object} char - Character object
+ */
+async function showLegacyFolderModal(char) {
+    const legacyInfo = await checkLegacyFolder(char);
+    
+    if (!legacyInfo.hasLegacy) {
+        showToast('No legacy images found', 'info');
+        return;
+    }
+    
+    // Create modal
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.id = 'legacyFolderModal';
+    
+    const safeLegacyFolder = sanitizeFolderName(legacyInfo.legacyFolder);
+    
+    modal.innerHTML = `
+        <div class="confirm-modal-content" style="max-width: 800px; max-height: 90vh;">
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(74, 158, 255, 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
+                <h3 style="border: none; padding: 0; margin: 0;">
+                    <i class="fa-solid fa-folder-tree" style="color: var(--accent-color);"></i>
+                    Legacy Folder Migration
+                </h3>
+                <button class="close-confirm-btn" id="closeLegacyModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body" style="padding: 15px;">
+                <div style="margin-bottom: 15px; padding: 12px; background: rgba(74, 158, 255, 0.1); border-radius: 8px; border: 1px solid rgba(74, 158, 255, 0.3);">
+                    <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                        <i class="fa-solid fa-info-circle" style="color: var(--accent-color);"></i>
+                        <strong style="color: var(--text-primary);">Images in Old Folder Format</strong>
+                    </div>
+                    <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
+                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
+                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.currentFolder)}</code>.
+                    </p>
+                </div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary);">
+                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent-color);">
+                        <span>Select All (<span id="legacySelectedCount">0</span>/${legacyInfo.files.length})</span>
+                    </label>
+                    <div style="display: flex; gap: 8px;">
+                        <button class="action-btn secondary small" id="legacyRefreshBtn" title="Refresh file list">
+                            <i class="fa-solid fa-sync"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="legacyImagesGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 5px;">
+                    ${legacyInfo.files.map(fileName => `
+                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                            <img src="/user/images/${encodeURIComponent(safeLegacyFolder)}/${encodeURIComponent(fileName)}" 
+                                 style="width: 100%; height: 100%; object-fit: cover;"
+                                 loading="lazy"
+                                 onerror="this.src='/img/No-Image-Placeholder.svg'">
+                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;">
+                            </div>
+                            <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 4px; background: linear-gradient(transparent, rgba(0,0,0,0.8)); font-size: 10px; color: white; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
+                                ${escapeHtml(fileName)}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="confirm-modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="action-btn secondary" id="cancelLegacyBtn">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+                <button class="action-btn primary" id="moveSelectedLegacyBtn" disabled>
+                    <i class="fa-solid fa-arrow-right"></i> Move Selected
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Setup event handlers
+    const closeModal = () => {
+        modal.remove();
+    };
+    
+    modal.querySelector('#closeLegacyModal').addEventListener('click', closeModal);
+    modal.querySelector('#cancelLegacyBtn').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    // Escape key handler
+    const escHandler = (e) => {
+        if (e.key === 'Escape') {
+            closeModal();
+            document.removeEventListener('keydown', escHandler);
+        }
+    };
+    document.addEventListener('keydown', escHandler);
+    
+    // Update selected count
+    const updateSelectedCount = () => {
+        const checkboxes = modal.querySelectorAll('.legacy-file-checkbox');
+        const checked = modal.querySelectorAll('.legacy-file-checkbox:checked');
+        const countSpan = modal.querySelector('#legacySelectedCount');
+        const moveBtn = modal.querySelector('#moveSelectedLegacyBtn');
+        const selectAllCheckbox = modal.querySelector('#legacySelectAll');
+        
+        if (countSpan) countSpan.textContent = checked.length;
+        if (moveBtn) moveBtn.disabled = checked.length === 0;
+        if (selectAllCheckbox) selectAllCheckbox.checked = checked.length === checkboxes.length && checkboxes.length > 0;
+        
+        // Update visual selection state
+        modal.querySelectorAll('.legacy-image-item').forEach(item => {
+            const checkbox = item.querySelector('.legacy-file-checkbox');
+            if (checkbox?.checked) {
+                item.style.borderColor = 'var(--accent-color)';
+                item.style.boxShadow = '0 0 10px rgba(74, 158, 255, 0.3)';
+            } else {
+                item.style.borderColor = 'transparent';
+                item.style.boxShadow = 'none';
+            }
+        });
+    };
+    
+    // Click on image item to toggle checkbox
+    modal.querySelectorAll('.legacy-image-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (e.target.type === 'checkbox') return; // Don't double-toggle
+            const checkbox = item.querySelector('.legacy-file-checkbox');
+            if (checkbox) {
+                checkbox.checked = !checkbox.checked;
+                updateSelectedCount();
+            }
+        });
+    });
+    
+    // Checkbox change events
+    modal.querySelectorAll('.legacy-file-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', updateSelectedCount);
+    });
+    
+    // Select all
+    modal.querySelector('#legacySelectAll').addEventListener('change', (e) => {
+        modal.querySelectorAll('.legacy-file-checkbox').forEach(cb => {
+            cb.checked = e.target.checked;
+        });
+        updateSelectedCount();
+    });
+    
+    // Refresh button
+    modal.querySelector('#legacyRefreshBtn').addEventListener('click', async () => {
+        closeModal();
+        await showLegacyFolderModal(char);
+    });
+    
+    // Move selected button
+    modal.querySelector('#moveSelectedLegacyBtn').addEventListener('click', async () => {
+        const selectedFiles = Array.from(modal.querySelectorAll('.legacy-file-checkbox:checked'))
+            .map(cb => cb.dataset.filename);
+        
+        if (selectedFiles.length === 0) {
+            showToast('No files selected', 'info');
+            return;
+        }
+        
+        const moveBtn = modal.querySelector('#moveSelectedLegacyBtn');
+        const originalHtml = moveBtn.innerHTML;
+        moveBtn.disabled = true;
+        moveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Moving...';
+        
+        let successCount = 0;
+        let errorCount = 0;
+        
+        for (let i = 0; i < selectedFiles.length; i++) {
+            const fileName = selectedFiles[i];
+            moveBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${i + 1}/${selectedFiles.length}`;
+            
+            const result = await moveImageToFolder(
+                legacyInfo.legacyFolder, 
+                legacyInfo.currentFolder, 
+                fileName, 
+                true // delete source
+            );
+            
+            if (result.success) {
+                successCount++;
+            } else {
+                errorCount++;
+                console.error(`Failed to move ${fileName}:`, result.error);
+            }
+        }
+        
+        closeModal();
+        
+        if (successCount > 0) {
+            showToast(`Moved ${successCount} image${successCount > 1 ? 's' : ''} to unique folder`, 'success');
+            // Refresh gallery view
+            fetchCharacterImages(char);
+            // Update legacy button
+            updateLegacyFolderButton(char);
+        }
+        
+        if (errorCount > 0) {
+            showToast(`Failed to move ${errorCount} image${errorCount > 1 ? 's' : ''}`, 'error');
+        }
+    });
+}
+
 function openModal(char) {
     activeChar = char;
     // ... existing ... 
@@ -1589,6 +4431,12 @@ function openModal(char) {
     
     document.getElementById('modalImage').src = imgPath;
     document.getElementById('modalTitle').innerText = char.name;
+    
+    // Reset/hide legacy folder button (will be updated when Gallery tab is clicked)
+    const legacyBtn = document.getElementById('checkLegacyFolderBtn');
+    if (legacyBtn) {
+        legacyBtn.classList.add('hidden');
+    }
     
     // Update favorite button state
     updateFavoriteButtonUI(isCharacterFavorite(char));
@@ -1824,9 +4672,18 @@ function openModal(char) {
             galleryTabBtn.classList.add('active');
             document.getElementById('pane-gallery').classList.add('active');
             
-            // Fetch
-            fetchCharacterImages(char.name);
+            // Fetch - pass character object for unique folder support
+            fetchCharacterImages(char);
+            
+            // Check for legacy folder images (async, updates button visibility)
+            updateLegacyFolderButton(char);
         };
+    }
+    
+    // Setup legacy folder button handler
+    const legacyFolderBtn = document.getElementById('checkLegacyFolderBtn');
+    if (legacyFolderBtn) {
+        legacyFolderBtn.onclick = () => showLegacyFolderModal(char);
     }
     
     // Chats tab logic
@@ -1859,6 +4716,29 @@ function openModal(char) {
         };
     }
 
+    // Info tab logic (developer/debugging feature)
+    const infoTabBtn = document.getElementById('infoTabBtn');
+    if (infoTabBtn) {
+        // Show/hide based on setting - explicitly check for true (default is false/hidden)
+        const showInfoTab = getSetting('showInfoTab') === true;
+        if (showInfoTab) {
+            infoTabBtn.classList.remove('hidden');
+        } else {
+            infoTabBtn.classList.add('hidden');
+        }
+        
+        infoTabBtn.onclick = () => {
+            // Switch tabs
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            infoTabBtn.classList.add('active');
+            document.getElementById('pane-info').classList.add('active');
+            
+            // Populate info content
+            populateInfoTab(char);
+        };
+    }
+
     // Show modal
     modal.classList.remove('hidden');
     
@@ -1882,78 +4762,355 @@ function closeModal() {
         restoreDuplicateModalState();
         duplicateModalState.wasOpen = false; // Reset flag
     }
+    // Check if we need to restore bulk summary modal
+    else if (bulkSummaryModalState.wasOpen) {
+        restoreBulkSummaryModalState();
+        bulkSummaryModalState.wasOpen = false; // Reset flag
+    }
+}
+
+// ==================== INFO TAB (Developer) ====================
+
+/**
+ * Populate the Info tab with character metadata and mappings
+ * @param {Object} char - Character object
+ */
+function populateInfoTab(char) {
+    const container = document.getElementById('infoTabContent');
+    if (!container || !char) return;
+    
+    // Gather all the useful debug info
+    const charName = char.name || char.data?.name || 'Unknown';
+    const avatar = char.avatar || '';
+    const galleryFolder = getGalleryFolderName(char);
+    const chatsFolder = sanitizeFolderName(charName);
+    const chubInfo = getChubLinkInfo(char);
+    const galleryId = getCharacterGalleryId(char);
+    const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders');
+    const mediaLocStatus = char.avatar ? getMediaLocalizationStatus(char.avatar) : null;
+    const isFavorite = isCharacterFavorite(char);
+    
+    // Get token estimate
+    const tokenEstimate = estimateTokens(char);
+    
+    // Get embedded media URLs count
+    const embeddedMediaUrls = findCharacterMediaUrls(char);
+    
+    // Get lorebook info
+    const characterBook = char.character_book || char.data?.character_book;
+    const lorebookEntries = characterBook?.entries?.length || 0;
+    
+    // Get alternate greetings count
+    const altGreetings = char.alternate_greetings || char.data?.alternate_greetings || [];
+    
+    // Build HTML
+    let html = '';
+    
+    // Section: Identity
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-user"></i> Identity</div>
+        <div class="info-row">
+            <span class="info-label">Display Name</span>
+            <span class="info-value">${escapeHtml(charName)}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Creator</span>
+            <span class="info-value">${escapeHtml(char.creator || char.data?.creator || '(not set)')}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Version</span>
+            <span class="info-value">${escapeHtml(char.character_version || char.data?.character_version || '(not set)')}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Favorite</span>
+            <span class="info-value">${isFavorite ? '<i class="fa-solid fa-star" style="color: gold;"></i> Yes' : 'No'}</span>
+        </div>
+    </div>`;
+    
+    // Section: Files & Paths
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-folder-tree"></i> Files & Paths</div>
+        <div class="info-row">
+            <span class="info-label">Avatar Filename</span>
+            <span class="info-value info-code">${escapeHtml(avatar) || '(none)'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Gallery Folder</span>
+            <span class="info-value info-code">/characters/${escapeHtml(galleryFolder)}/</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Chats Folder</span>
+            <span class="info-value info-code">/chats/${escapeHtml(chatsFolder)}/</span>
+        </div>
+    </div>`;
+    
+    // Section: Unique Gallery ID
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-fingerprint"></i> Unique Gallery</div>
+        <div class="info-row">
+            <span class="info-label">Feature Enabled</span>
+            <span class="info-value">${uniqueFoldersEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Gallery ID</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(galleryId) : '<span style="color: #888;">(not assigned)</span>'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Unique Folder Name</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(buildUniqueGalleryFolderName(char)) : '<span style="color: #888;">(using standard name)</span>'}</span>
+        </div>
+    </div>`;
+    
+    // Section: ChubAI Link
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-link"></i> ChubAI Link</div>
+        <div class="info-row">
+            <span class="info-label">Linked</span>
+            <span class="info-value">${chubInfo ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+        </div>`;
+    if (chubInfo) {
+        html += `<div class="info-row">
+            <span class="info-label">Full Path</span>
+            <span class="info-value info-code">${escapeHtml(chubInfo.fullPath || '')}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Chub ID</span>
+            <span class="info-value info-code">${escapeHtml(String(chubInfo.id || ''))}</span>
+        </div>`;
+    }
+    html += `</div>`;
+    
+    // Section: Media Localization
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-images"></i> Media Localization</div>
+        <div class="info-row">
+            <span class="info-label">Global Setting</span>
+            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Enabled' : '<i class="fa-solid fa-times" style="color: #888;"></i> Disabled'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Per-Character Override</span>
+            <span class="info-value">${mediaLocStatus?.hasOverride ? (mediaLocStatus.isEnabled ? 'Force ON' : 'Force OFF') : '(none)'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Effective State</span>
+            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Active' : '<i class="fa-solid fa-times" style="color: #888;"></i> Inactive'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Embedded Media URLs</span>
+            <span class="info-value">${embeddedMediaUrls.length} URL(s) found</span>
+        </div>
+    </div>`;
+    
+    // Section: Content Stats
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-chart-bar"></i> Content Stats</div>
+        <div class="info-row">
+            <span class="info-label">Est. Token Count</span>
+            <span class="info-value">~${tokenEstimate.toLocaleString()} tokens</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Alternate Greetings</span>
+            <span class="info-value">${altGreetings.length}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Lorebook Entries</span>
+            <span class="info-value">${lorebookEntries}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Tags</span>
+            <span class="info-value">${(getTags(char) || []).length}</span>
+        </div>
+    </div>`;
+    
+    // Section: Spec Info
+    const spec = char.spec || char.data?.spec || 'unknown';
+    const specVersion = char.spec_version || char.data?.spec_version || '';
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-file-code"></i> Card Spec</div>
+        <div class="info-row">
+            <span class="info-label">Spec</span>
+            <span class="info-value info-code">${escapeHtml(spec)}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Spec Version</span>
+            <span class="info-value info-code">${escapeHtml(specVersion) || '(not set)'}</span>
+        </div>
+    </div>`;
+    
+    // Section: Date Info
+    let dateLastChat = char.date_last_chat ? new Date(Number(char.date_last_chat)).toLocaleString() : null;
+    html += `<div class="info-section">
+        <div class="info-section-title"><i class="fa-solid fa-calendar"></i> Dates</div>
+        <div class="info-row">
+            <span class="info-label">Last Updated</span>
+            <span class="info-value">${dateLastChat || '(not available)'}</span>
+        </div>
+    </div>`;
+    
+    // Section: Raw Extensions (if any)
+    const extensions = char.data?.extensions || char.extensions || {};
+    const extensionKeys = Object.keys(extensions).filter(k => k !== 'chub'); // Exclude chub as it's shown separately
+    if (extensionKeys.length > 0) {
+        html += `<div class="info-section">
+            <div class="info-section-title"><i class="fa-solid fa-puzzle-piece"></i> Extensions</div>`;
+        for (const key of extensionKeys) {
+            const value = extensions[key];
+            const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+            html += `<div class="info-row">
+                <span class="info-label info-code">${escapeHtml(key)}</span>
+                <span class="info-value info-code" style="word-break: break-all;">${escapeHtml(displayValue.substring(0, 100))}${displayValue.length > 100 ? '...' : ''}</span>
+            </div>`;
+        }
+        html += `</div>`;
+    }
+    
+    // Section: Actions
+    html += `<div class="info-section info-actions-section">
+        <div class="info-section-title"><i class="fa-solid fa-wrench"></i> Actions</div>
+        <div class="info-actions">
+            <button type="button" class="action-btn secondary small" id="copyRawCardDataBtn">
+                <i class="fa-solid fa-copy"></i> Copy Raw Card Data
+            </button>
+        </div>
+    </div>`;
+    
+    container.innerHTML = html;
+    
+    // Attach event handler for copy button (use activeChar for most up-to-date reference)
+    const copyBtn = document.getElementById('copyRawCardDataBtn');
+    if (copyBtn) {
+        copyBtn.onclick = () => copyRawCardData(activeChar);
+    }
+}
+
+/**
+ * Copy the raw character card data to clipboard as JSON
+ * @param {Object} char - Character object (optional, falls back to activeChar)
+ */
+function copyRawCardData(char) {
+    // Use activeChar as fallback
+    const character = char || activeChar;
+    
+    if (!character) {
+        showToast('No character data available', 'error');
+        return;
+    }
+    
+    try {
+        // Build the complete card data structure
+        const cardData = {
+            // Include spec info
+            spec: character.spec || character.data?.spec || 'chara_card_v2',
+            spec_version: character.spec_version || character.data?.spec_version || '2.0',
+            // Include the data object (main character definition)
+            data: character.data || {
+                name: character.name,
+                description: character.description,
+                personality: character.personality,
+                scenario: character.scenario,
+                first_mes: character.first_mes,
+                mes_example: character.mes_example,
+                creator_notes: character.creator_notes,
+                system_prompt: character.system_prompt,
+                post_history_instructions: character.post_history_instructions,
+                alternate_greetings: character.alternate_greetings || [],
+                tags: character.tags || [],
+                creator: character.creator,
+                character_version: character.character_version,
+                extensions: character.extensions || {},
+                character_book: character.character_book || null,
+            },
+            // Include ST-specific metadata
+            _meta: {
+                avatar: character.avatar,
+                date_added: character.date_added,
+                create_date: character.create_date,
+            }
+        };
+        
+        const jsonString = JSON.stringify(cardData, null, 2);
+        
+        // Try modern clipboard API first, fall back to legacy method
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(jsonString).then(() => {
+                showToast('Card data copied to clipboard', 'success');
+            }).catch(err => {
+                console.error('Clipboard API failed:', err);
+                // Fallback to legacy method
+                copyToClipboardFallback(jsonString);
+            });
+        } else {
+            // Use fallback for older browsers or non-secure contexts
+            copyToClipboardFallback(jsonString);
+        }
+    } catch (error) {
+        console.error('Error preparing card data:', error);
+        showToast('Error preparing card data', 'error');
+    }
+}
+
+/**
+ * Fallback clipboard copy using textarea element
+ * @param {string} text - Text to copy
+ */
+function copyToClipboardFallback(text) {
+    try {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        textarea.style.top = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        
+        const success = document.execCommand('copy');
+        document.body.removeChild(textarea);
+        
+        if (success) {
+            showToast('Card data copied to clipboard', 'success');
+        } else {
+            showToast('Failed to copy to clipboard', 'error');
+        }
+    } catch (err) {
+        console.error('Fallback copy failed:', err);
+        showToast('Failed to copy to clipboard', 'error');
+    }
 }
 
 // ==================== RELATED CHARACTERS ====================
 
+// Common English words to skip when extracting keywords (prepositions, conjunctions, etc.)
+const COMMON_SKIP_WORDS = new Set([
+    'the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'their', 
+    'will', 'would', 'could', 'should', 'have', 'has', 'had', 'been', 'being', 
+    'very', 'just', 'also', 'only', 'some', 'other', 'more', 'most', 'such', 
+    'than', 'then', 'when', 'where', 'which', 'while', 'about', 'after', 
+    'before', 'between', 'under', 'over', 'into', 'through', 'during', 
+    'including', 'until', 'against', 'among', 'throughout', 'despite', 
+    'towards', 'upon', 'concerning', 'like', 'what', 'they', 'them', 'there',
+    'here', 'these', 'those', 'each', 'every', 'both', 'either', 'neither',
+    'because', 'since', 'although', 'though', 'even', 'still', 'already'
+]);
+
 /**
  * Extract keywords from text for content-based matching
- * Looks for franchise names, universe keywords, and significant proper nouns
+ * Extracts significant proper nouns (capitalized words) that might indicate
+ * shared universe, characters, or locations
  */
 function extractContentKeywords(text) {
     if (!text) return new Set();
     
-    // Common franchise/universe indicators to look for
-    const franchisePatterns = [
-        // Anime/Manga
-        /\b(genshin|impact|honkai|star rail|hoyoverse)\b/gi,
-        /\b(fate|grand order|fgo|nasuverse|type-moon)\b/gi,
-        /\b(naruto|konoha|chakra|shinobi|hokage)\b/gi,
-        /\b(one piece|straw hat|devil fruit|pirate king)\b/gi,
-        /\b(dragon ball|saiyan|kamehameha|capsule corp)\b/gi,
-        /\b(pokemon|pokémon|trainer|gym leader|paldea|kanto)\b/gi,
-        /\b(attack on titan|aot|titan shifter|survey corps|marley)\b/gi,
-        /\b(jujutsu kaisen|cursed energy|sorcerer)\b/gi,
-        /\b(demon slayer|hashira|breathing style)\b/gi,
-        /\b(my hero academia|mha|quirk|u\.?a\.? high)\b/gi,
-        /\b(hololive|vtuber|nijisanji)\b/gi,
-        /\b(touhou|gensokyo|reimu|marisa)\b/gi,
-        /\b(persona|phantom thieves|velvet room)\b/gi,
-        /\b(final fantasy|ff7|ff14|moogle|chocobo)\b/gi,
-        /\b(league of legends|lol|runeterra|summoner)\b/gi,
-        /\b(overwatch|talon|overwatch 2)\b/gi,
-        /\b(valorant|radiant|radianite)\b/gi,
-        /\b(elden ring|tarnished|lands between)\b/gi,
-        /\b(dark souls|undead|firelink|chosen undead)\b/gi,
-        /\b(zelda|hyrule|triforce|link)\b/gi,
-        /\b(resident evil|umbrella|raccoon city|bioweapon)\b/gi,
-        /\b(metal gear|solid snake|big boss|foxhound)\b/gi,
-        // Western
-        /\b(marvel|avengers|x-men|mutant|stark|shield)\b/gi,
-        /\b(dc comics|batman|gotham|justice league|krypton)\b/gi,
-        /\b(star wars|jedi|sith|force|lightsaber|galactic)\b/gi,
-        /\b(star trek|starfleet|federation|vulcan|klingon)\b/gi,
-        /\b(harry potter|hogwarts|wizard|muggle|ministry of magic)\b/gi,
-        /\b(lord of the rings|lotr|middle.?earth|mordor|hobbit)\b/gi,
-        /\b(game of thrones|westeros|iron throne|seven kingdoms)\b/gi,
-        /\b(warhammer|40k|imperium|chaos|space marine)\b/gi,
-        /\b(dungeons|dragons|d&d|dnd|forgotten realms)\b/gi,
-        /\b(fallout|wasteland|vault|brotherhood of steel)\b/gi,
-        /\b(cyberpunk|night city|netrunner|arasaka)\b/gi,
-        /\b(mass effect|normandy|citadel|reapers|shepard)\b/gi,
-        /\b(witcher|geralt|kaer morhen|nilfgaard)\b/gi,
-    ];
-    
     const keywords = new Set();
-    const lowerText = text.toLowerCase();
-    
-    // Extract franchise keywords
-    for (const pattern of franchisePatterns) {
-        const matches = text.match(pattern);
-        if (matches) {
-            matches.forEach(m => keywords.add(m.toLowerCase().trim()));
-        }
-    }
     
     // Extract capitalized proper nouns (likely character/place names)
-    // Match sequences of capitalized words
+    // Match sequences of capitalized words (e.g., "Genshin Impact", "Harry Potter")
     const properNouns = text.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g);
     if (properNouns) {
         properNouns.forEach(noun => {
-            // Skip common words and very short names
             const lower = noun.toLowerCase();
-            const skipWords = new Set(['the', 'and', 'for', 'with', 'this', 'that', 'from', 'your', 'their', 'will', 'would', 'could', 'should', 'have', 'has', 'had', 'been', 'being', 'very', 'just', 'also', 'only', 'some', 'other', 'more', 'most', 'such', 'than', 'then', 'when', 'where', 'which', 'while', 'about', 'after', 'before', 'between', 'under', 'over', 'into', 'through', 'during', 'including', 'until', 'against', 'among', 'throughout', 'despite', 'towards', 'upon', 'concerning']);
-            if (noun.length > 3 && !skipWords.has(lower)) {
+            // Skip common words and very short names
+            if (noun.length > 3 && !COMMON_SKIP_WORDS.has(lower)) {
                 keywords.add(lower);
             }
         });
@@ -2306,9 +5463,13 @@ window.openRelatedCharacter = openRelatedCharacter;
 
 // ==================== DELETE CHARACTER ====================
 
-function showDeleteConfirmation(char) {
+async function showDeleteConfirmation(char) {
     const charName = getCharacterName(char);
     const avatar = char.avatar || '';
+    
+    // Get gallery info for this character
+    const galleryInfo = await getCharacterGalleryInfo(char);
+    const hasImages = galleryInfo.count > 0;
     
     // Create delete confirmation modal
     const deleteModal = document.createElement('div');
@@ -2331,6 +5492,19 @@ function showDeleteConfirmation(char) {
                          onerror="this.src='/img/ai4.png'">
                     <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
                 </div>
+                
+                ${hasImages ? `
+                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
+                            <i class="fa-solid fa-images"></i>
+                            <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                        </div>
+                        <p style="margin: 8px 0 0 0; color: var(--text-secondary); font-size: 13px;">
+                            The gallery folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;">${escapeHtml(galleryInfo.folder)}</code> will remain after deletion.
+                        </p>
+                    </div>
+                ` : ''}
+                
                 <p style="color: var(--text-secondary); margin-bottom: 15px;">
                     Are you sure you want to delete this character? This action cannot be undone.
                 </p>
@@ -2409,7 +5583,13 @@ async function deleteCharacter(char, deleteChats = false) {
             return false;
         }
         
-        debugLog('[Delete] API call successful, triggering ST refresh...');
+        debugLog('[Delete] API call successful, cleaning up...');
+        
+        // Clean up gallery folder override if this character had a unique folder
+        if (avatar && getCharacterGalleryId(char)) {
+            removeGalleryFolderOverride(avatar);
+            debugLog('[Delete] Removed gallery folder override for:', avatar);
+        }
         
         // CRITICAL: Trigger character refresh in main SillyTavern window
         // This updates ST's in-memory character array and cleans up related data
@@ -2746,6 +5926,9 @@ function showSaveConfirmation() {
     // Store pending payload for actual save
     // SillyTavern's merge-attributes API expects data in the character card v2 format
     // with fields both at root level (for backwards compat) and under 'data' object
+    // IMPORTANT: Preserve existing extensions (like gallery_id, favorites, chub link) to avoid wiping them
+    const existingExtensions = activeChar.data?.extensions || {};
+    
     pendingPayload = {
         avatar: activeChar.avatar,
         name: currentValues.name,
@@ -2778,6 +5961,8 @@ function showSaveConfirmation() {
             tags: currentValues.tagsArray,
             alternate_greetings: currentValues.alternate_greetings,
             character_book: currentValues.character_book,
+            // CRITICAL: Include existing extensions to preserve gallery_id, favorites, chub link, etc.
+            extensions: existingExtensions
         }
     };
     
@@ -2800,11 +5985,23 @@ function showSaveConfirmation() {
 async function performSave() {
     if (!activeChar || !pendingPayload) return;
     
+    // Capture old name BEFORE updating for gallery folder rename
+    const oldName = originalValues.name;
+    const newName = pendingPayload.name;
+    const nameChanged = oldName && newName && oldName !== newName;
+    const galleryId = getCharacterGalleryId(activeChar);
+    
     try {
         const response = await apiRequest('/characters/merge-attributes', 'POST', pendingPayload);
         
         if (response.ok) {
             showToast("Character saved successfully!", "success");
+            
+            // Handle gallery folder rename if name changed and character has unique gallery folder
+            if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
+                await handleGalleryFolderRename(activeChar, oldName, newName, galleryId);
+            }
+            
             // Update local data - update root level fields
             activeChar.name = pendingPayload.name;
             activeChar.description = pendingPayload.description;
@@ -3157,14 +6354,19 @@ async function toggleCharacterFavorite(char) {
     const currentFavStatus = isCharacterFavorite(char);
     const newFavStatus = !currentFavStatus;
     
+    // IMPORTANT: Preserve all existing extensions when updating favorites
+    const existingExtensions = char.data?.extensions || {};
+    const updatedExtensions = {
+        ...existingExtensions,
+        fav: newFavStatus
+    };
+    
     try {
         const response = await apiRequest('/characters/merge-attributes', 'POST', {
             avatar: char.avatar,
             fav: newFavStatus,
             data: {
-                extensions: {
-                    fav: newFavStatus
-                }
+                extensions: updatedExtensions
             }
         });
         
@@ -4067,7 +7269,7 @@ function buildExpandedLorebookEntryHtml(entry, idx) {
                 <div class="expanded-lorebook-entry-controls">
                     <label class="expanded-lorebook-toggle ${entry.enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                         <input type="checkbox" class="expanded-lorebook-enabled" ${entry.enabled ? 'checked' : ''} style="display: none;">
-                        ${entry.enabled ? '? On' : '? Off'}
+                        ${entry.enabled ? '<i class="fa-solid fa-toggle-on"></i> On' : '<i class="fa-solid fa-toggle-off"></i> Off'}
                     </label>
                     <button type="button" class="expanded-lorebook-delete" title="Delete entry">
                         <i class="fa-solid fa-trash"></i>
@@ -4138,14 +7340,16 @@ function setupExpandedLorebookEntryHandlers(entryEl) {
     
     // Toggle enabled handler
     const toggleLabel = entryEl.querySelector('.expanded-lorebook-toggle');
-    const enabledCheckbox = entryEl.querySelector('.expanded-lorebook-enabled');
     
-    toggleLabel.onclick = () => {
-        const isEnabled = enabledCheckbox.checked;
-        enabledCheckbox.checked = !isEnabled;
-        toggleLabel.className = `expanded-lorebook-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '? On' : '? Off'}`;
-        entryEl.classList.toggle('disabled', isEnabled);
+    toggleLabel.onclick = (e) => {
+        e.preventDefault();
+        const checkbox = entryEl.querySelector('.expanded-lorebook-enabled');
+        const isEnabled = checkbox.checked;
+        const newEnabled = !isEnabled;
+        checkbox.checked = newEnabled;
+        toggleLabel.className = `expanded-lorebook-toggle ${newEnabled ? 'enabled' : 'disabled'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="expanded-lorebook-enabled" ${newEnabled ? 'checked' : ''} style="display: none;">${newEnabled ? '<i class="fa-solid fa-toggle-on"></i> On' : '<i class="fa-solid fa-toggle-off"></i> Off'}`;
+        entryEl.classList.toggle('disabled', !newEnabled);
     };
     
     // Delete handler
@@ -4295,10 +7499,15 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
     // Save/Apply handler
     document.getElementById('expandFieldSave').onclick = () => {
         const newValue = expandTextarea.value;
-        originalField.value = newValue;
-        
-        // Trigger input event so any listeners know the value changed
-        originalField.dispatchEvent(new Event('input', { bubbles: true }));
+        // Re-query the original field to ensure we have a fresh reference
+        const targetField = document.getElementById(fieldId);
+        if (targetField) {
+            targetField.value = newValue;
+            // Trigger input event so any listeners know the value changed
+            targetField.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+            console.error('[ExpandField] Could not find target field:', fieldId);
+        }
         
         closeExpandModal();
         document.removeEventListener('keydown', handleKeydown);
@@ -4316,15 +7525,22 @@ function openChubExpandedView(sectionId, label, iconClass) {
         return;
     }
     
-    // Check if section contains an iframe (Creator's Notes uses secure iframe rendering)
-    const existingIframe = sectionEl.querySelector('iframe');
+    // Check if we have full content stored (for truncated sections like First Message)
     let content;
-    if (existingIframe && existingIframe.contentDocument?.body) {
-        // Extract content from existing iframe
-        content = existingIframe.contentDocument.body.innerHTML;
+    if (sectionEl.dataset.fullContent) {
+        // Use stored full content and format it
+        const charName = document.getElementById('chubCharName')?.textContent || 'Character';
+        content = formatRichText(sectionEl.dataset.fullContent, charName, true);
     } else {
-        // Use innerHTML directly
-        content = sectionEl.innerHTML;
+        // Check if section contains an iframe (Creator's Notes uses secure iframe rendering)
+        const existingIframe = sectionEl.querySelector('iframe');
+        if (existingIframe && existingIframe.contentDocument?.body) {
+            // Extract content from existing iframe
+            content = existingIframe.contentDocument.body.innerHTML;
+        } else {
+            // Use innerHTML directly
+            content = sectionEl.innerHTML;
+        }
     }
     
     // Build iframe document like Creator's Notes does
@@ -4571,6 +7787,12 @@ async function openChat(char, chatFile) {
         // Close any open modals
         hide('chatPreviewModal');
         document.querySelector('.modal-overlay')?.classList.add('hidden');
+        
+        // IMPORTANT: Register the gallery folder override BEFORE opening the chat
+        // This ensures index.js can find the correct folder for media localization
+        if (getSetting('uniqueGalleryFolders') && getCharacterGalleryId(char)) {
+            registerGalleryFolderOverride(char);
+        }
         
         if (window.opener && !window.opener.closed) {
             let context = null;
@@ -4819,9 +8041,12 @@ function filterLocalByCreator(creatorName) {
     showToast(`Filtering by creator: ${creatorName}`, 'info');
 }
 
+// Debounced search for better performance (150ms delay)
+const debouncedSearch = debounce(performSearch, 150);
+
 // Event Listeners
 function setupEventListeners() {
-    on('searchInput', 'input', performSearch);
+    on('searchInput', 'input', debouncedSearch);
 
     // Filter Checkboxes
     ['searchName', 'searchTags', 'searchAuthor', 'searchNotes'].forEach(id => {
@@ -5255,7 +8480,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
             <div class="lorebook-entry-controls">
                 <label class="lorebook-entry-toggle ${enabled ? 'enabled' : 'disabled'}" title="Toggle enabled">
                     <input type="checkbox" class="lorebook-enabled-checkbox" ${enabled ? 'checked' : ''} style="display: none;">
-                    ${enabled ? '? On' : '? Off'}
+                    ${enabled ? '<i class="fa-solid fa-toggle-on"></i> On' : '<i class="fa-solid fa-toggle-off"></i> Off'}
                 </label>
                 <span class="lorebook-entry-delete" title="Delete entry">
                     <i class="fa-solid fa-trash"></i>
@@ -5314,13 +8539,15 @@ function addLorebookEntryField(container, entry = null, index = null) {
     
     // Toggle enabled handler
     const toggleLabel = wrapper.querySelector('.lorebook-entry-toggle');
-    const enabledCheckbox = wrapper.querySelector('.lorebook-enabled-checkbox');
-    toggleLabel.addEventListener('click', () => {
-        const isEnabled = enabledCheckbox.checked;
-        enabledCheckbox.checked = !isEnabled;
-        toggleLabel.className = `lorebook-entry-toggle ${!isEnabled ? 'enabled' : 'disabled'}`;
-        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${!isEnabled ? 'checked' : ''} style="display: none;">${!isEnabled ? '? On' : '? Off'}`;
-        wrapper.classList.toggle('disabled', isEnabled);
+    toggleLabel.addEventListener('click', (e) => {
+        e.preventDefault();
+        const checkbox = wrapper.querySelector('.lorebook-enabled-checkbox');
+        const isEnabled = checkbox.checked;
+        const newEnabled = !isEnabled;
+        checkbox.checked = newEnabled;
+        toggleLabel.className = `lorebook-entry-toggle ${newEnabled ? 'enabled' : 'disabled'}`;
+        toggleLabel.innerHTML = `<input type="checkbox" class="lorebook-enabled-checkbox" ${newEnabled ? 'checked' : ''} style="display: none;">${newEnabled ? '<i class="fa-solid fa-toggle-on"></i> On' : '<i class="fa-solid fa-toggle-off"></i> Off'}`;
+        wrapper.classList.toggle('disabled', !newEnabled);
     });
     
     // Delete handler
@@ -5461,7 +8688,7 @@ function renderLorebookEntryHtml(entry, index) {
     if (selective) statusItems.push('<span class="lb-stat-sel" title="Selective: triggers only when both primary AND secondary keys match"><i class="fa-solid fa-filter"></i>Selective</span>');
     if (constant) statusItems.push('<span class="lb-stat-const" title="Constant: always injected into context"><i class="fa-solid fa-thumbtack"></i>Constant</span>');
     statusItems.push(`<span class="${enabled ? 'lb-stat-on' : 'lb-stat-off'}" title="${enabled ? 'Entry is active' : 'Entry is disabled'}"><i class="fa-solid fa-${enabled ? 'circle-check' : 'circle-xmark'}"></i>${enabled ? 'Active' : 'Off'}</span>`);
-    const statusRow = statusItems.join('<span style="color:#444">�</span>');
+    const statusRow = statusItems.join('<span style="color:#444"> · </span>');
     
     // Build key chips
     const keyChips = keyArr.length 
@@ -5483,14 +8710,6 @@ function renderLorebookEntryHtml(entry, index) {
 function renderLorebookEntriesHtml(entries) {
     if (!entries || !entries.length) return '';
     return entries.map((entry, i) => renderLorebookEntryHtml(entry, i)).join('');
-}
-
-/**
- * Show a modal by ID
- * @param {string} modalId - Modal element ID
- */
-function showModal(modalId) {
-    document.getElementById(modalId)?.classList.remove('hidden');
 }
 
 /**
@@ -5819,6 +9038,9 @@ async function uploadImages(files) {
     let uploadedCount = 0;
     let errorCount = 0;
     
+    // Get the folder name (unique or standard)
+    const folderName = getGalleryFolderName(activeChar);
+    
     for (let file of files) {
         if (!file.type.startsWith('image/')) {
             console.warn(`[Gallery] Skipping non-image file: ${file.name}`);
@@ -5834,7 +9056,7 @@ async function uploadImages(files) {
                 image: base64,
                 filename: nameOnly,
                 format: ext,
-                ch_name: activeChar.name
+                ch_name: folderName
             });
             
             if (res.ok) {
@@ -5853,8 +9075,8 @@ async function uploadImages(files) {
     
     if (uploadedCount > 0) {
         showToast(`Uploaded ${uploadedCount} image(s)`, 'success');
-        // Refresh the gallery
-        fetchCharacterImages(activeChar.name);
+        // Refresh the gallery - pass character object for unique folder support
+        fetchCharacterImages(activeChar);
     } else if (errorCount > 0) {
         showToast(`Upload failed for ${errorCount} image(s)`, 'error');
     }
@@ -5883,6 +9105,11 @@ importBtn?.addEventListener('click', () => {
     importLog.innerHTML = '';
     startImportBtn.disabled = false;
     startImportBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
+    startImportBtn.classList.remove('success');
+    cancelImportBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
+    // Hide stats when opening fresh
+    const importStats = document.getElementById('importStats');
+    if (importStats) importStats.classList.add('hidden');
 });
 
 closeImportModal?.addEventListener('click', () => {
@@ -5923,46 +9150,13 @@ function parseChubUrl(url) {
 }
 
 /**
- * Try to find the Chub path for a local character
- * Uses creator and character name to construct potential path
- * @param {Object} char - The character object
- * @returns {string|null} The Chub path (author/character-name) or null
- */
-function findChubPath(char) {
-    if (!char) return null;
-    
-    // Get character name
-    const name = char.name || char.data?.name || '';
-    if (!name) return null;
-    
-    // Get creator
-    const creator = char.creator || char.data?.creator || '';
-    if (!creator) return null;
-    
-    // Construct potential Chub path: creator/character-name
-    // Normalize the character name (Chub uses lowercase with dashes)
-    const normalizedName = name.toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-    
-    // Creator username is usually lowercase
-    const normalizedCreator = creator.toLowerCase()
-        .replace(/[^a-z0-9_-]+/g, '')
-        .trim();
-    
-    if (!normalizedCreator || !normalizedName) return null;
-    
-    return `${normalizedCreator}/${normalizedName}`;
-}
-
-/**
  * Search for a character on Chub by name and creator
  * Strategy: First get author's characters, then find matching name
  * @param {string} charName - The character's name
  * @param {string} creatorName - The creator's name
  * @returns {Promise<{id: number, fullPath: string, hasGallery: boolean}|null>}
  */
-async function searchChubForCharacter(charName, creatorName) {
+async function searchChubForCharacter(charName, creatorName, localChar = null) {
     if (!charName) return null;
     
     try {
@@ -5970,12 +9164,12 @@ async function searchChubForCharacter(charName, creatorName) {
         
         // Strategy 1: If we have a creator, search their characters first
         if (creatorName) {
-            const authorResult = await searchChubByAuthor(charName, creatorName);
+            const authorResult = await searchChubByAuthor(charName, creatorName, localChar);
             if (authorResult) return authorResult;
         }
         
         // Strategy 2: Fall back to general search with character name
-        const generalResult = await searchChubGeneral(charName, creatorName);
+        const generalResult = await searchChubGeneral(charName, creatorName, localChar);
         if (generalResult) return generalResult;
         
         debugLog('[ChubSearch] No results found');
@@ -5989,7 +9183,7 @@ async function searchChubForCharacter(charName, creatorName) {
 /**
  * Search Chub by author's characters and find matching name
  */
-async function searchChubByAuthor(charName, creatorName) {
+async function searchChubByAuthor(charName, creatorName, localChar = null) {
     try {
         // Search for author's characters (no search term, just username filter)
         const params = new URLSearchParams({
@@ -6002,14 +9196,30 @@ async function searchChubByAuthor(charName, creatorName) {
         
         debugLog('[ChubSearch] Fetching characters by author:', creatorName);
         
-        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
-        });
-        
-        if (!response.ok) {
-            debugLog('[ChubSearch] Author search failed:', response.status);
-            return null;
+        const searchUrl = `${CHUB_API_BASE}/search?${params.toString()}`;
+        let response;
+        try {
+            // Try direct fetch first
+            response = await fetch(searchUrl, {
+                method: 'GET',
+                headers: getChubHeaders(true)
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (directError) {
+            // Direct fetch failed (likely CORS), try proxy
+            debugLog('[ChubSearch] Direct fetch failed, trying proxy:', directError.message);
+            const proxyUrl = `/proxy/${encodeURIComponent(searchUrl)}`;
+            response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: getChubHeaders(true)
+            });
+            
+            if (!response.ok) {
+                debugLog('[ChubSearch] Author search failed:', response.status);
+                return null;
+            }
         }
         
         const data = await response.json();
@@ -6020,11 +9230,12 @@ async function searchChubByAuthor(charName, creatorName) {
             return null;
         }
         
-        console.log(`[ChubSearch] Found ${nodes.length} characters by ${creatorName}`);
+        debugLog(`[ChubSearch] Found ${nodes.length} characters by ${creatorName}`);
         
         // Find matching character name
         const normalizedSearchName = charName.toLowerCase().trim();
         
+        // Pass 1: Exact or partial name match
         for (const node of nodes) {
             const nodeName = (node.name || '').toLowerCase().trim();
             
@@ -6041,7 +9252,7 @@ async function searchChubByAuthor(charName, creatorName) {
             }
         }
         
-        // Try matching by slug in fullPath (e.g., "author/naomi" matches "Naomi")
+        // Pass 2: Try matching by slug in fullPath (e.g., "author/naomi" matches "Naomi")
         const normalizedSlug = charName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         for (const node of nodes) {
             const nodeSlug = (node.fullPath || '').split('/')[1]?.toLowerCase() || '';
@@ -6055,6 +9266,61 @@ async function searchChubByAuthor(charName, creatorName) {
             }
         }
         
+        // Pass 3: Content comparison if we have localChar (for tagline-as-name cases)
+        if (localChar && nodes.length <= 50) {
+            const localDesc = getCharField(localChar, 'description') || '';
+            const localNotes = getCharField(localChar, 'creator_notes') || '';
+            
+            if (localDesc.length > 100 || localNotes.length > 100) {
+                debugLog('[ChubSearch] Trying content comparison for', nodes.length, 'candidates');
+                
+                let bestMatch = null;
+                let bestScore = 0;
+                
+                for (const node of nodes) {
+                    // Fetch the character details to compare content
+                    try {
+                        const metadata = await fetchChubMetadata(node.fullPath);
+                        if (!metadata?.definition) continue;
+                        
+                        const chubDesc = metadata.definition.description || '';
+                        const chubNotes = metadata.definition.creator_notes || '';
+                        
+                        let score = 0;
+                        
+                        // Compare descriptions
+                        if (localDesc.length > 100 && chubDesc.length > 100) {
+                            const descSim = contentSimilarity(localDesc, chubDesc);
+                            if (descSim >= 0.5) score += descSim * 50;
+                        }
+                        
+                        // Compare creator notes
+                        if (localNotes.length > 100 && chubNotes.length > 100) {
+                            const notesSim = contentSimilarity(localNotes, chubNotes);
+                            if (notesSim >= 0.5) score += notesSim * 50;
+                        }
+                        
+                        if (score > bestScore && score >= 40) {
+                            bestScore = score;
+                            bestMatch = node;
+                            debugLog('[ChubSearch] Content match candidate:', node.fullPath, 'score:', score);
+                        }
+                    } catch (e) {
+                        // Skip on error
+                    }
+                }
+                
+                if (bestMatch) {
+                    debugLog('[ChubSearch] Found match by content:', bestMatch.fullPath, 'score:', bestScore);
+                    return {
+                        id: bestMatch.id,
+                        fullPath: bestMatch.fullPath,
+                        hasGallery: bestMatch.hasGallery || false
+                    };
+                }
+            }
+        }
+        
         return null;
     } catch (error) {
         console.error('[ChubSearch] Author search error:', error);
@@ -6065,7 +9331,7 @@ async function searchChubByAuthor(charName, creatorName) {
 /**
  * General search on Chub with character name
  */
-async function searchChubGeneral(charName, creatorName) {
+async function searchChubGeneral(charName, creatorName, localChar = null) {
     try {
         const params = new URLSearchParams({
             search: charName,
@@ -6077,12 +9343,28 @@ async function searchChubGeneral(charName, creatorName) {
         
         debugLog('[ChubSearch] General search for:', charName);
         
-        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
-            method: 'GET',
-            headers: { 'Accept': 'application/json' }
-        });
-        
-        if (!response.ok) return null;
+        const searchUrl = `${CHUB_API_BASE}/search?${params.toString()}`;
+        let response;
+        try {
+            // Try direct fetch first
+            response = await fetch(searchUrl, {
+                method: 'GET',
+                headers: getChubHeaders(true)
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (directError) {
+            // Direct fetch failed (likely CORS), try proxy
+            debugLog('[ChubSearch] Direct fetch failed, trying proxy:', directError.message);
+            const proxyUrl = `/proxy/${encodeURIComponent(searchUrl)}`;
+            response = await fetch(proxyUrl, {
+                method: 'GET',
+                headers: getChubHeaders(true)
+            });
+            
+            if (!response.ok) return null;
+        }
         
         const data = await response.json();
         const nodes = extractNodes(data);
@@ -6123,6 +9405,57 @@ async function searchChubGeneral(charName, creatorName) {
             }
         }
         
+        // Content comparison fallback if localChar provided
+        if (localChar && nodes.length > 0) {
+            const localDesc = getCharField(localChar, 'description') || '';
+            const localNotes = getCharField(localChar, 'creator_notes') || '';
+            
+            if (localDesc.length > 100 || localNotes.length > 100) {
+                debugLog('[ChubSearch] Trying content comparison for', nodes.length, 'general search results');
+                
+                let bestMatch = null;
+                let bestScore = 0;
+                
+                for (const node of nodes) {
+                    try {
+                        const metadata = await fetchChubMetadata(node.fullPath);
+                        if (!metadata?.definition) continue;
+                        
+                        const chubDesc = metadata.definition.description || '';
+                        const chubNotes = metadata.definition.creator_notes || '';
+                        
+                        let score = 0;
+                        
+                        if (localDesc.length > 100 && chubDesc.length > 100) {
+                            const descSim = contentSimilarity(localDesc, chubDesc);
+                            if (descSim >= 0.5) score += descSim * 50;
+                        }
+                        
+                        if (localNotes.length > 100 && chubNotes.length > 100) {
+                            const notesSim = contentSimilarity(localNotes, chubNotes);
+                            if (notesSim >= 0.5) score += notesSim * 50;
+                        }
+                        
+                        if (score > bestScore && score >= 40) {
+                            bestScore = score;
+                            bestMatch = node;
+                        }
+                    } catch (e) {
+                        // Skip on error
+                    }
+                }
+                
+                if (bestMatch) {
+                    debugLog('[ChubSearch] Found match by content:', bestMatch.fullPath, 'score:', bestScore);
+                    return {
+                        id: bestMatch.id,
+                        fullPath: bestMatch.fullPath,
+                        hasGallery: bestMatch.hasGallery || false
+                    };
+                }
+            }
+        }
+        
         return null;
     } catch (error) {
         console.error('[ChubSearch] General search error:', error);
@@ -6141,20 +9474,66 @@ function extractNodes(data) {
     return [];
 }
 
-// Fetch character metadata from Chub API
+// Cache for ChubAI metadata (longer TTL since it rarely changes)
+const chubMetadataCache = new Map();
+const CHUB_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+// Fetch character metadata from Chub API (with caching)
 async function fetchChubMetadata(fullPath) {
+    // Check cache first
+    const cached = chubMetadataCache.get(fullPath);
+    if (cached && Date.now() - cached.time < CHUB_CACHE_TTL) {
+        debugLog('[Chub] Using cached metadata for:', fullPath);
+        return cached.value;
+    }
+    
     try {
         const url = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
         debugLog('[Chub] Fetching metadata from:', url);
         
-        const response = await fetch(url, {
-            headers: { 'Accept': 'application/json' }
-        });
-        if (!response.ok) {
-            return null;
+        let response;
+        try {
+            // Try direct fetch first
+            response = await fetch(url, {
+                headers: getChubHeaders(true)
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (directError) {
+            // Direct fetch failed (likely CORS), try proxy
+            debugLog('[Chub] Direct fetch failed, trying proxy:', directError.message);
+            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+            response = await fetch(proxyUrl, {
+                headers: getChubHeaders(true)
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    const text = await response.text();
+                    if (text.includes('CORS proxy is disabled')) {
+                        console.error('[Chub] CORS blocked and proxy is disabled');
+                        return null;
+                    }
+                }
+                return null;
+            }
         }
+        
         const data = await response.json();
-        return data.node || null;
+        const result = data.node || null;
+        
+        // Cache the result
+        if (result) {
+            chubMetadataCache.set(fullPath, { value: result, time: Date.now() });
+            // Limit cache size
+            if (chubMetadataCache.size > 100) {
+                const firstKey = chubMetadataCache.keys().next().value;
+                chubMetadataCache.delete(firstKey);
+            }
+        }
+        
+        return result;
     } catch (error) {
         return null;
     }
@@ -6170,13 +9549,27 @@ async function fetchChubGalleryImages(characterId) {
         const url = `${CHUB_GATEWAY_BASE}/api/gallery/project/${characterId}?limit=100&count=false`;
         debugLog('[ChubGallery] Fetching gallery from:', url);
         
-        const response = await fetch(url, {
-            headers: getChubHeaders(true)
-        });
-        
-        if (!response.ok) {
-            debugLog('[ChubGallery] Gallery fetch failed:', response.status);
-            return [];
+        let response;
+        try {
+            // Try direct fetch first
+            response = await fetch(url, {
+                headers: getChubHeaders(true)
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+        } catch (directError) {
+            // Direct fetch failed (likely CORS), try proxy
+            debugLog('[ChubGallery] Direct fetch failed, trying proxy:', directError.message);
+            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+            response = await fetch(proxyUrl, {
+                headers: getChubHeaders(true)
+            });
+            
+            if (!response.ok) {
+                debugLog('[ChubGallery] Gallery fetch failed:', response.status);
+                return [];
+            }
         }
         
         const data = await response.json();
@@ -6200,12 +9593,12 @@ async function fetchChubGalleryImages(characterId) {
 
 /**
  * Download Chub gallery images for a character
- * @param {string} characterName - The character's name (used for folder)
+ * @param {string} folderName - The gallery folder name (use getGalleryFolderName() for unique folders)
  * @param {number|string} characterId - The numeric character ID from Chub API
  * @param {Object} options - Optional callbacks for progress/logging
  * @returns {Promise<{success: number, skipped: number, errors: number}>}
  */
-async function downloadChubGalleryForCharacter(characterName, characterId, options = {}) {
+async function downloadChubGalleryForCharacter(folderName, characterId, options = {}) {
     const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
     
     let successCount = 0;
@@ -6224,8 +9617,8 @@ async function downloadChubGalleryForCharacter(characterName, characterId, optio
     if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
     
     // Get existing files and their hashes to check for duplicates
-    const existingHashMap = await getExistingFileHashes(characterName);
-    console.log(`[ChubGallery] Found ${existingHashMap.size} existing file hashes for ${characterName}`);
+    const existingHashMap = await getExistingFileHashes(folderName);
+    debugLog(`[ChubGallery] Found ${existingHashMap.size} existing file hashes for ${folderName}`);
     
     for (let i = 0; i < galleryImages.length; i++) {
         // Check for abort signal
@@ -6235,7 +9628,7 @@ async function downloadChubGalleryForCharacter(characterName, characterId, optio
         
         const image = galleryImages[i];
         const displayUrl = image.imageUrl.length > 60 ? image.imageUrl.substring(0, 60) + '...' : image.imageUrl;
-        const imgLogEntry = onLog ? onLog(`Checking ${displayUrl}...`, 'pending') : null;
+        const imgLogEntry = onLog ? onLog(`Checking ${displayUrl}`, 'pending') : null;
         
         // Download to memory first to check hash
         const downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
@@ -6255,14 +9648,14 @@ async function downloadChubGalleryForCharacter(characterName, characterId, optio
         if (existingFile) {
             skippedCount++;
             if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
-            console.log(`[ChubGallery] Duplicate found: ${image.imageUrl} -> ${existingFile.fileName}`);
+            debugLog(`[ChubGallery] Duplicate found: ${image.imageUrl} -> ${existingFile.fileName}`);
             if (onProgress) onProgress(i + 1, galleryImages.length);
             continue;
         }
         
         // Not a duplicate, save the file with chubgallery naming convention
         if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Saving ${displayUrl}...`, 'pending');
-        const result = await saveChubGalleryImage(downloadResult, image, characterName, contentHash);
+        const result = await saveChubGalleryImage(downloadResult, image, folderName, contentHash);
         
         if (result.success) {
             successCount++;
@@ -6283,24 +9676,44 @@ async function downloadChubGalleryForCharacter(characterName, characterId, optio
 /**
  * Save a Chub gallery image with the proper naming convention
  * Naming: chubgallery_{hash}_{originalFilename}.{ext}
+ * @param {Object} downloadResult - Result from downloadMediaToMemory
+ * @param {Object} imageInfo - Image info from Chub gallery
+ * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
+ * @param {string} contentHash - Hash of the file content
  */
-async function saveChubGalleryImage(downloadResult, imageInfo, characterName, contentHash) {
+async function saveChubGalleryImage(downloadResult, imageInfo, folderName, contentHash) {
     try {
         const { arrayBuffer, contentType } = downloadResult;
         const blob = new Blob([arrayBuffer], { type: contentType });
         
-        // Determine file extension
+        // Determine file extension from content type
         let extension = 'webp'; // Default for Chub gallery
         if (contentType) {
             const mimeToExt = {
+                // Images
                 'image/png': 'png',
                 'image/jpeg': 'jpg',
                 'image/webp': 'webp',
                 'image/gif': 'gif',
                 'image/bmp': 'bmp',
-                'image/svg+xml': 'svg'
+                'image/svg+xml': 'svg',
+                // Audio (in case Chub ever serves audio files)
+                'audio/mpeg': 'mp3',
+                'audio/mp3': 'mp3',
+                'audio/wav': 'wav',
+                'audio/ogg': 'ogg',
+                'audio/flac': 'flac'
             };
-            extension = mimeToExt[contentType] || extension;
+            
+            // Try exact match first
+            if (mimeToExt[contentType]) {
+                extension = mimeToExt[contentType];
+            } else if (contentType.startsWith('audio/')) {
+                // Unknown audio type - extract subtype, don't default to image extension!
+                const subtype = contentType.split('/')[1].split(';')[0];
+                extension = subtype.replace('x-', '') || 'audio';
+            }
+            // For unknown image types, 'webp' default is acceptable for Chub
         } else {
             const urlMatch = imageInfo.imageUrl.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
             if (urlMatch) {
@@ -6340,7 +9753,7 @@ async function saveChubGalleryImage(downloadResult, imageInfo, characterName, co
             image: base64Data,
             filename: filenameBase,
             format: extension,
-            ch_name: characterName
+            ch_name: folderName
         });
         
         if (!saveResponse.ok) {
@@ -6385,6 +9798,45 @@ for (let i = 0; i < 256; i++) {
         c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
     }
     crc32Table[i] = c;
+}
+
+/**
+ * Convert any image (WebP, JPEG, etc.) to PNG using canvas
+ * @param {ArrayBuffer} imageBuffer - The source image data
+ * @returns {Promise<ArrayBuffer>} PNG image data
+ */
+async function convertImageToPng(imageBuffer) {
+    return new Promise((resolve, reject) => {
+        const blob = new Blob([imageBuffer]);
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+            
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            
+            canvas.toBlob((pngBlob) => {
+                if (pngBlob) {
+                    pngBlob.arrayBuffer().then(resolve).catch(reject);
+                } else {
+                    reject(new Error('Failed to convert image to PNG'));
+                }
+            }, 'image/png');
+        };
+        
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load image for conversion'));
+        };
+        
+        img.src = url;
+    });
 }
 
 // Create a tEXt chunk for PNG
@@ -6457,7 +9909,7 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
                 keyword += String.fromCharCode(bytes[i]);
             }
             if (keyword === 'chara') {
-                console.log(`[PNG] Removing existing '${type}' chunk with 'chara' keyword`);
+                debugLog(`[PNG] Removing existing '${type}' chunk with 'chara' keyword`);
                 skipChunk = true;
             }
         }
@@ -6483,7 +9935,7 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
     const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
     const textChunk = createTextChunk('chara', base64Data);
     
-    console.log(`[PNG] Adding new chara chunk: JSON=${jsonString.length} chars, base64=${base64Data.length} chars`);
+    debugLog(`[PNG] Adding new chara chunk: JSON=${jsonString.length} chars, base64=${base64Data.length} chars`);
     
     // Calculate total size
     let totalSize = 8; // PNG signature
@@ -6547,11 +9999,6 @@ function buildCharacterCardFromChub(apiData) {
 
 // Import a single character from Chub
 async function importChubCharacter(fullPath) {
-    // Avatar image URL (just the image, not the full card)
-    const avatarUrl = `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`;
-    // Fallback to PNG card URL
-    const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
-    
     try {
         // Fetch complete character data from the API
         const metadata = await fetchChubMetadata(fullPath);
@@ -6576,6 +10023,13 @@ async function importChubCharacter(fullPath) {
             linkedAt: new Date().toISOString()
         };
         
+        // Add unique gallery_id if unique gallery folders are enabled
+        // This ensures new characters start using unique folders from day one
+        if (getSetting('uniqueGalleryFolders')) {
+            characterCard.data.extensions.gallery_id = generateGalleryId();
+            debugLog('[Chub Import] Assigned gallery_id:', characterCard.data.extensions.gallery_id);
+        }
+        
         debugLog('[Chub Import] Character card built:', {
             name: characterCard.data.name,
             first_mes_length: characterCard.data.first_mes?.length,
@@ -6589,15 +10043,68 @@ async function importChubCharacter(fullPath) {
             console.warn('[Chub Import] WARNING: first_mes seems too short:', characterCard.data.first_mes?.length);
         }
         
-        // Fetch the PNG image
-        const response = await fetch(pngUrl);
+        // Try multiple image URLs in order of preference
+        // Include avatar_url from metadata if available
+        const imageUrls = [];
         
-        if (!response.ok) {
-            throw new Error(`Image download failed: ${response.status}`);
+        // Add PNG card URL first (has embedded data already)
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
+        
+        // Add avatar URL from metadata if available
+        if (metadata.avatar_url) {
+            imageUrls.push(metadata.avatar_url);
         }
         
-        // Get the PNG as ArrayBuffer
-        const pngBuffer = await response.arrayBuffer();
+        // Add standard avatar URLs as fallback
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar`);
+        
+        // De-duplicate URLs
+        const uniqueUrls = [...new Set(imageUrls)];
+        
+        debugLog('[Chub Import] Will try these image URLs:', uniqueUrls);
+        
+        let imageBuffer = null;
+        let needsConversion = false;
+        
+        for (const url of uniqueUrls) {
+            debugLog('[Chub Import] Trying image URL:', url);
+            try {
+                // Try direct fetch first
+                let response = await fetch(url);
+                debugLog('[Chub Import] Direct fetch result:', response.status);
+                
+                if (!response.ok) {
+                    // Try proxy fallback
+                    const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+                    response = await fetch(proxyUrl);
+                    debugLog('[Chub Import] Proxy fetch result:', response.status);
+                }
+                
+                if (response.ok) {
+                    imageBuffer = await response.arrayBuffer();
+                    needsConversion = url.endsWith('.webp') || response.headers.get('content-type')?.includes('webp');
+                    debugLog('[Chub Import] Successfully fetched from:', url, 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
+                    break;
+                } else {
+                    debugLog('[Chub Import] URL failed:', url, response.status);
+                }
+            } catch (e) {
+                debugLog('[Chub Import] Failed to fetch', url, ':', e.message);
+            }
+        }
+        
+        if (!imageBuffer) {
+            throw new Error('Could not download character image from any available URL');
+        }
+        
+        // Convert WebP to PNG if needed using canvas
+        let pngBuffer = imageBuffer;
+        if (needsConversion) {
+            debugLog('[Chub Import] Converting WebP to PNG...');
+            pngBuffer = await convertImageToPng(imageBuffer);
+        }
         
         // Embed character data into PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
@@ -6627,7 +10134,7 @@ async function importChubCharacter(fullPath) {
         });
         
         const responseText = await importResponse.text();
-        console.log('Import response:', importResponse.status, responseText);
+        debugLog('Import response:', importResponse.status, responseText);
         
         if (!importResponse.ok) {
             throw new Error(`Import error: ${responseText}`);
@@ -6648,6 +10155,9 @@ async function importChubCharacter(fullPath) {
         // Check for embedded media URLs in the character card
         const mediaUrls = findCharacterMediaUrls(characterCard);
         
+        // Get the gallery_id we assigned (if any)
+        const galleryId = characterCard.data.extensions?.gallery_id || null;
+        
         return { 
             success: true, 
             fileName: result.file_name || fileName,
@@ -6655,8 +10165,9 @@ async function importChubCharacter(fullPath) {
             chubId: metadata.id || null,
             characterName: characterName,
             fullPath: fullPath,
-            avatarUrl: avatarUrl,
-            embeddedMediaUrls: mediaUrls
+            avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
+            embeddedMediaUrls: mediaUrls,
+            galleryId: galleryId  // Include the gallery_id for immediate use
         };
         
     } catch (error) {
@@ -6741,7 +10252,8 @@ startImportBtn?.addEventListener('click', async () => {
         return;
     }
     
-    // Get auto-download options
+    // Get import options
+    const skipDuplicates = document.getElementById('importSkipDuplicates')?.checked ?? true;
     const autoDownloadGallery = document.getElementById('importAutoDownloadGallery')?.checked ?? false;
     const autoDownloadMedia = document.getElementById('importAutoDownloadMedia')?.checked ?? false;
     
@@ -6759,67 +10271,176 @@ startImportBtn?.addEventListener('click', async () => {
     
     let successCount = 0;
     let errorCount = 0;
-    const charactersWithGallery = [];
-    const charactersWithEmbeddedMedia = [];
+    let skippedCount = 0;
+    let mediaDownloadCount = 0;
+    
+    // Get stat elements
+    const importStats = document.getElementById('importStats');
+    const importStatImported = document.getElementById('importStatImported');
+    const importStatSkipped = document.getElementById('importStatSkipped');
+    const importStatMedia = document.getElementById('importStatMedia');
+    const importStatErrors = document.getElementById('importStatErrors');
+    const importMediaProgress = document.getElementById('importMediaProgress');
+    const importMediaProgressFill = document.getElementById('importMediaProgressFill');
+    const importMediaProgressCount = document.getElementById('importMediaProgressCount');
+    
+    // Show stats section
+    if (importStats) {
+        importStats.classList.remove('hidden');
+        importStatImported.textContent = '0';
+        importStatSkipped.textContent = '0';
+        importStatMedia.textContent = '0';
+        importStatErrors.textContent = '0';
+    }
+    
+    // Helper to update stats display
+    const updateStats = () => {
+        if (importStatImported) importStatImported.textContent = successCount;
+        if (importStatSkipped) importStatSkipped.textContent = skippedCount;
+        if (importStatMedia) importStatMedia.textContent = mediaDownloadCount;
+        if (importStatErrors) importStatErrors.textContent = errorCount;
+    };
     
     for (let i = 0; i < validUrls.length; i++) {
         const { url, fullPath } = validUrls[i];
         const displayName = fullPath.split('/').pop();
         
-        const logEntry = addImportLogEntry(`Importing ${displayName}...`, 'pending');
+        const logEntry = addImportLogEntry(`Checking ${displayName}`, 'pending');
+        
+        // === PRE-IMPORT DUPLICATE CHECK ===
+        if (skipDuplicates) {
+            try {
+                // Fetch metadata to check for duplicates
+                const metadata = await fetchChubMetadata(fullPath);
+                
+                if (metadata && metadata.definition) {
+                    const characterName = metadata.definition?.name || metadata.name || displayName;
+                    const characterCreator = metadata.definition?.creator || metadata.creator || fullPath.split('/')[0] || '';
+                    
+                    // Check for duplicates
+                    const duplicateMatches = checkCharacterForDuplicates({
+                        name: characterName,
+                        creator: characterCreator,
+                        fullPath: fullPath,
+                        definition: metadata.definition
+                    });
+                    
+                    if (duplicateMatches.length > 0) {
+                        const bestMatch = duplicateMatches[0];
+                        const existingName = getCharField(bestMatch.char, 'name');
+                        skippedCount++;
+                        updateStats();
+                        updateLogEntry(logEntry, `${displayName} skipped - already exists as "${existingName}" (${bestMatch.matchReason})`, 'info');
+                        
+                        // Update progress
+                        const progress = ((i + 1) / validUrls.length) * 100;
+                        importProgressFill.style.width = `${progress}%`;
+                        importProgressCount.textContent = `${i + 1}/${validUrls.length}`;
+                        continue;
+                    }
+                }
+            } catch (e) {
+                debugLog('[Import] Error checking for duplicates:', e);
+                // Continue with import if duplicate check fails
+            }
+        }
+        // === END DUPLICATE CHECK ===
+        
+        updateLogEntry(logEntry, `Importing ${displayName}`, 'pending');
         
         const result = await importChubCharacter(fullPath);
         
         if (result.success) {
             successCount++;
+            updateStats();
             updateLogEntry(logEntry, `${displayName} imported successfully`, 'success');
             
-            // Track characters with galleries
-            if (result.hasGallery) {
-                charactersWithGallery.push({
-                    name: result.characterName,
-                    fullPath: result.fullPath,
-                    chubId: result.chubId,
-                    url: `https://chub.ai/characters/${result.fullPath}`
-                });
-            }
-            
-            // Track characters with embedded media
-            if (result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
-                charactersWithEmbeddedMedia.push({
-                    name: result.characterName,
-                    avatar: result.avatarUrl,
-                    mediaUrls: result.embeddedMediaUrls
-                });
+            // Determine folder name for media downloads
+            // Use gallery_id if available (for unique folders), otherwise fall back to character name
+            let folderName;
+            if (result.galleryId) {
+                // Build the unique folder name: CharacterName_uuid
+                const safeName = result.characterName.replace(/[<>:"/\\|?*]/g, '_').trim();
+                folderName = `${safeName}_${result.galleryId}`;
+                debugLog('[Import] Using unique gallery folder:', folderName);
+                
+                // Register the gallery folder override immediately so media can be downloaded there
+                // Create a minimal char-like object for the registration function
+                if (result.fileName) {
+                    const tempChar = {
+                        avatar: result.fileName,
+                        name: result.characterName,
+                        data: { extensions: { gallery_id: result.galleryId } }
+                    };
+                    registerGalleryFolderOverride(tempChar);
+                    debugLog('[Import] Registered gallery folder override:', result.fileName, '->', folderName);
+                }
+            } else {
+                // Fall back to character name-based folder
+                folderName = resolveGalleryFolderName(result.fileName || result.characterName);
+                debugLog('[Import] Using name-based folder:', folderName);
             }
             
             // Auto-download embedded media FIRST if enabled (takes precedence for media localization)
             if (autoDownloadMedia && result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
-                const mediaLogEntry = addImportLogEntry(`Downloading embedded media for ${result.characterName}...`, 'pending');
-                const mediaResult = await downloadEmbeddedMediaForCharacter(result.characterName, result.embeddedMediaUrls, {});
+                // Show media progress
+                if (importMediaProgress) {
+                    importMediaProgress.classList.remove('hidden');
+                    importMediaProgressFill.style.width = '0%';
+                    importMediaProgressCount.textContent = `0/${result.embeddedMediaUrls.length}`;
+                }
+                
+                const mediaLogEntry = addImportLogEntry(`  ↳ Embedded Media: downloading ${result.embeddedMediaUrls.length} file(s)...`, 'pending');
+                const mediaResult = await downloadEmbeddedMediaForCharacter(folderName, result.embeddedMediaUrls, {
+                    onProgress: (current, total) => {
+                        if (importMediaProgressFill) {
+                            importMediaProgressFill.style.width = `${(current / total) * 100}%`;
+                            importMediaProgressCount.textContent = `${current}/${total}`;
+                        }
+                    }
+                });
+                mediaDownloadCount += mediaResult.success || 0;
+                updateStats();
                 if (mediaResult.success > 0) {
-                    updateLogEntry(mediaLogEntry, `Downloaded ${mediaResult.success} media file(s) for ${result.characterName}`, 'success');
+                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.success} downloaded, ${mediaResult.skipped || 0} skipped, ${mediaResult.errors || 0} failed`, 'success');
                 } else if (mediaResult.skipped > 0) {
-                    updateLogEntry(mediaLogEntry, `Media files already exist for ${result.characterName}`, 'success');
+                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.skipped} already exist`, 'info');
                 } else {
-                    updateLogEntry(mediaLogEntry, `No media files found for ${result.characterName}`, 'success');
+                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: no files downloaded`, 'info');
                 }
             }
             
             // Auto-download gallery SECOND if enabled (will skip duplicates already downloaded as embedded media)
             if (autoDownloadGallery && result.hasGallery && result.chubId) {
-                const galleryLogEntry = addImportLogEntry(`Downloading gallery for ${result.characterName}...`, 'pending');
-                const galleryResult = await downloadChubGalleryForCharacter(result.characterName, result.chubId, {});
+                // Show media progress
+                if (importMediaProgress) {
+                    importMediaProgress.classList.remove('hidden');
+                    importMediaProgressFill.style.width = '0%';
+                    importMediaProgressCount.textContent = `0/?`;
+                }
+                
+                const galleryLogEntry = addImportLogEntry(`  ↳ ChubAI Gallery: downloading...`, 'pending');
+                const galleryResult = await downloadChubGalleryForCharacter(folderName, result.chubId, {
+                    onProgress: (current, total) => {
+                        if (importMediaProgressFill) {
+                            importMediaProgressFill.style.width = `${(current / total) * 100}%`;
+                            importMediaProgressCount.textContent = `${current}/${total}`;
+                        }
+                    }
+                });
+                mediaDownloadCount += galleryResult.success || 0;
+                updateStats();
                 if (galleryResult.success > 0) {
-                    updateLogEntry(galleryLogEntry, `Downloaded ${galleryResult.success} gallery image(s) for ${result.characterName}`, 'success');
+                    updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: ${galleryResult.success} downloaded, ${galleryResult.skipped || 0} skipped, ${galleryResult.errors || 0} failed`, 'success');
                 } else if (galleryResult.skipped > 0) {
-                    updateLogEntry(galleryLogEntry, `Gallery images already exist for ${result.characterName}`, 'success');
+                    updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: ${galleryResult.skipped} already exist`, 'info');
                 } else {
-                    updateLogEntry(galleryLogEntry, `No gallery images found for ${result.characterName}`, 'success');
+                    updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: no images available`, 'info');
                 }
             }
         } else {
             errorCount++;
+            updateStats();
             updateLogEntry(logEntry, `${displayName}: ${result.error}`, 'error');
         }
         
@@ -6832,40 +10453,53 @@ startImportBtn?.addEventListener('click', async () => {
     // Done
     isImporting = false;
     startImportBtn.disabled = false;
-    startImportBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
+    startImportBtn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
+    startImportBtn.classList.add('success');
     cancelImportBtn.disabled = false;
+    cancelImportBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Close';
     importUrlsInput.disabled = false;
     
+    // Hide media progress
+    if (importMediaProgress) {
+        importMediaProgress.classList.add('hidden');
+    }
+    
     // Show summary toast
-    if (successCount > 0) {
-        showToast(`Imported ${successCount} character${successCount > 1 ? 's' : ''}${errorCount > 0 ? ` (${errorCount} failed)` : ''}`, 'success');
+    if (successCount > 0 || skippedCount > 0) {
+        const parts = [];
+        if (successCount > 0) parts.push(`Imported ${successCount}`);
+        if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
+        if (mediaDownloadCount > 0) parts.push(`${mediaDownloadCount} media`);
+        if (errorCount > 0) parts.push(`${errorCount} failed`);
+        showToast(parts.join(', '), successCount > 0 ? 'success' : 'info');
         
-        // Try to refresh the main SillyTavern window's character list
-        try {
-            if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                const context = window.opener.SillyTavern.getContext();
-                if (context && typeof context.getCharacters === 'function') {
-                    console.log('Triggering character refresh in main window...');
-                    await context.getCharacters();
+        // Only refresh if we actually imported something
+        if (successCount > 0) {
+            // Try to refresh the main SillyTavern window's character list
+            try {
+                if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
+                    const context = window.opener.SillyTavern.getContext();
+                    if (context && typeof context.getCharacters === 'function') {
+                        debugLog('Triggering character refresh in main window...');
+                        await context.getCharacters();
+                    }
                 }
+            } catch (e) {
+                console.warn('Could not refresh main window characters:', e);
             }
-        } catch (e) {
-            console.warn('Could not refresh main window characters:', e);
-        }
-        
-        // Refresh the gallery (force API fetch since we just imported)
-        fetchCharacters(true);
-        
-        // Show import summary modal if there's anything to report (and setting enabled)
-        // Don't show if auto-download was enabled (user already handled it)
-        const hasGalleryChars = charactersWithGallery.length > 0 && !autoDownloadGallery;
-        const hasMediaChars = charactersWithEmbeddedMedia.length > 0 && !autoDownloadMedia;
-        
-        if ((hasGalleryChars || hasMediaChars) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGalleryChars ? charactersWithGallery : [],
-                mediaCharacters: hasMediaChars ? charactersWithEmbeddedMedia : []
-            });
+            
+            // Refresh the gallery (force API fetch since we just imported)
+            await fetchCharacters(true);
+            
+            // Register gallery folder overrides for newly imported characters
+            if (getSetting('uniqueGalleryFolders')) {
+                // Sync all overrides - this ensures newly imported chars with gallery_id are registered
+                syncAllGalleryFolderOverrides();
+                debugLog('[BatchImport] Synced gallery folder overrides for newly imported characters');
+            }
+            
+            // NOTE: Import summary modal is NOT shown here - it's only for ChubAI browser downloads
+            // This modal already shows progress with stats, no need for additional popup
         }
     } else {
         showToast(`Import failed: ${errorCount} error${errorCount > 1 ? 's' : ''}`, 'error');
@@ -7003,7 +10637,15 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
         }
         
         for (const charInfo of pendingMediaCharacters) {
-            const result = await downloadEmbeddedMediaForCharacter(charInfo.name, charInfo.mediaUrls || [], {});
+            // Use gallery_id directly if available for UUID folder, otherwise resolve from avatar/name
+            let folderName;
+            if (charInfo.galleryId) {
+                const safeName = (charInfo.name || 'Unknown').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 50);
+                folderName = `${safeName}_${charInfo.galleryId}`;
+            } else {
+                folderName = resolveGalleryFolderName(charInfo.avatar || charInfo.name);
+            }
+            const result = await downloadEmbeddedMediaForCharacter(folderName, charInfo.mediaUrls || [], {});
             totalMediaSuccess += result.success;
         }
         
@@ -7029,7 +10671,15 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
                 }
             }
             if (chubId) {
-                const result = await downloadChubGalleryForCharacter(charInfo.name, chubId, {});
+                // Use gallery_id directly if available for UUID folder, otherwise resolve from avatar/name
+                let folderName;
+                if (charInfo.galleryId) {
+                    const safeName = (charInfo.name || 'Unknown').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 50);
+                    folderName = `${safeName}_${charInfo.galleryId}`;
+                } else {
+                    folderName = resolveGalleryFolderName(charInfo.avatar || charInfo.name);
+                }
+                const result = await downloadChubGalleryForCharacter(folderName, chubId, {});
                 totalGallerySuccess += result.success;
             }
         }
@@ -7088,14 +10738,17 @@ on('importSummaryGalleryDownloadBtn', 'click', async () => {
         }
         
         if (!chubId) {
-            console.log(`[GalleryDownload] Could not find chubId for ${characterName}`);
+            debugLog(`[GalleryDownload] Could not find chubId for ${characterName}`);
             totalErrors++;
             continue;
         }
         
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${characterName}...`;
         
-        const result = await downloadChubGalleryForCharacter(characterName, chubId, {
+        // Use avatar if available to resolve unique folder, fallback to name
+        const folderName = resolveGalleryFolderName(charInfo.avatar || characterName);
+        
+        const result = await downloadChubGalleryForCharacter(folderName, chubId, {
             onProgress: (current, total) => {
                 btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${current}/${total}`;
             }
@@ -7149,7 +10802,10 @@ on('importSummaryDownloadBtn', 'click', async () => {
         const characterName = charInfo.name;
         const mediaUrls = charInfo.mediaUrls || [];
         
-        const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
+        // Use avatar if available to resolve unique folder, fallback to name
+        const folderName = resolveGalleryFolderName(charInfo.avatar || characterName);
+        
+        const result = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
             onProgress: (current, total) => {
                 processedFiles++;
                 btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${processedFiles}/${totalFiles}`;
@@ -7381,10 +11037,71 @@ async function searchChubForLink(name, creator) {
     resultsContainer.innerHTML = '<div class="chub-link-search-loading"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
     
     try {
-        // Build search params (same format as other Chub searches)
-        // Note: Don't use username filter - it requires exact match and often fails
-        // Users can search by name and pick from results
-        const searchTerm = creator.trim() ? `${name.trim()} ${creator.trim()}` : name.trim();
+        const headers = getChubHeaders(true);
+        
+        let allNodes = [];
+        const normalizedName = name.trim().toLowerCase();
+        const nameWords = normalizedName.split(/\s+/).filter(w => w.length > 2);
+        
+        // Pass 1: If we have a creator, search by username filter first
+        // This finds ALL characters by this author, then we filter by name
+        if (creator && creator.trim()) {
+            const creatorLower = creator.trim().toLowerCase();
+            const authorParams = new URLSearchParams({
+                first: '200', // Get many results to find even less popular characters
+                sort: 'download_count',
+                nsfw: 'true',
+                nsfl: 'true',
+                include_forks: 'true',
+                username: creatorLower
+            });
+            
+            try {
+                const authorResponse = await fetch(`${CHUB_API_BASE}/search?${authorParams.toString()}`, {
+                    method: 'GET',
+                    headers
+                });
+                
+                if (authorResponse.ok) {
+                    const authorData = await authorResponse.json();
+                    const authorNodes = extractNodes(authorData);
+                    
+                    // Filter to characters whose name contains or is contained by search name
+                    // This handles "Ghost" matching "Ghost exorcism simulator"
+                    for (const node of authorNodes) {
+                        const nodeName = (node.name || '').toLowerCase().trim();
+                        const nodeNameWords = nodeName.split(/\s+/).filter(w => w.length > 2);
+                        
+                        // Match if:
+                        // 1. Exact match
+                        // 2. Node name contains search name
+                        // 3. Search name contains node name
+                        // 4. First word matches
+                        // 5. Any significant word from search is in node name
+                        const firstWordMatch = nodeNameWords.length > 0 && nameWords.length > 0 && 
+                            (nodeNameWords[0] === nameWords[0] || nodeNameWords[0].startsWith(nameWords[0]) || nameWords[0].startsWith(nodeNameWords[0]));
+                        const anyWordMatch = nameWords.some(w => nodeName.includes(w));
+                        
+                        if (nodeName === normalizedName || 
+                            nodeName.includes(normalizedName) ||
+                            normalizedName.includes(nodeName) ||
+                            firstWordMatch ||
+                            anyWordMatch) {
+                            allNodes.push(node);
+                        }
+                    }
+                    
+                    if (allNodes.length > 0) {
+                        debugLog(`[ChubLink] Found ${allNodes.length} matches for "${name}" by author "${creator}"`);
+                    }
+                }
+            } catch (e) {
+                debugLog('[ChubLink] Author search failed, falling back to term search');
+            }
+        }
+        
+        // Pass 2: Combined search term (adds more results)
+        const searchTerm = creator && creator.trim() ? `${name.trim()} ${creator.trim()}` : name.trim();
         
         const params = new URLSearchParams({
             search: searchTerm,
@@ -7396,17 +11113,6 @@ async function searchChubForLink(name, creator) {
             min_tokens: '50'
         });
         
-        // Build headers (same as Chub browser view)
-        const headers = {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        };
-        
-        // Add Authorization if token available
-        if (chubToken) {
-            headers['Authorization'] = `Bearer ${chubToken}`;
-        }
-        
         const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
             method: 'GET',
             headers
@@ -7417,15 +11123,28 @@ async function searchChubForLink(name, creator) {
         }
         
         const data = await response.json();
-        const nodes = extractNodes(data);
+        let nodes = extractNodes(data);
         
-        if (nodes.length === 0) {
+        // Merge results (avoid duplicates)
+        for (const node of nodes) {
+            if (!allNodes.some(n => n.fullPath === node.fullPath)) {
+                allNodes.push(node);
+            }
+        }
+        
+        if (allNodes.length === 0) {
             resultsContainer.innerHTML = '<div class="chub-link-search-empty"><i class="fa-solid fa-search"></i> No characters found</div>';
             return;
         }
         
+        // Sort results by content similarity to the local character
+        // This helps when creators use taglines as names on ChubAI
+        if (activeChar) {
+            allNodes = sortChubResultsByContentSimilarity(allNodes, activeChar);
+        }
+        
         // Render results
-        resultsContainer.innerHTML = nodes.map(node => {
+        resultsContainer.innerHTML = allNodes.map(node => {
             const avatarUrl = node.avatar_url || `${CHUB_AVATAR_BASE}${node.fullPath}/avatar`;
             const rating = node.rating ? node.rating.toFixed(1) : 'N/A';
             const starCount = node.starCount || 0;
@@ -7564,13 +11283,18 @@ async function saveChubLink(char, chubInfo) {
         setChubLinkInfo(charInArray, chubInfo);
     }
     
-    // Save to server via merge-attributes API (same as favorites)
+    // IMPORTANT: Preserve all existing extensions when updating chub link
+    const existingExtensions = char.data?.extensions || {};
+    const updatedExtensions = {
+        ...existingExtensions,
+        chub: chubInfo
+    };
+    
+    // Save to server via merge-attributes API
     const response = await apiRequest('/characters/merge-attributes', 'POST', {
         avatar: char.avatar,
         data: {
-            extensions: {
-                chub: chubInfo
-            }
+            extensions: updatedExtensions
         }
     });
     
@@ -7593,7 +11317,7 @@ async function saveChubLink(char, chubInfo) {
         console.warn('[ChubLink] Could not update main window:', e);
     }
     
-    console.log(`[ChubLink] Saved link for ${char.name || char.avatar}: ${chubInfo?.fullPath || 'unlinked'}`);
+    debugLog(`[ChubLink] Saved link for ${char.name || char.avatar}: ${chubInfo?.fullPath || 'unlinked'}`);
 }
 
 /**
@@ -7734,11 +11458,14 @@ async function downloadLinkedGallery() {
     
     try {
         const characterName = getCharacterName(activeChar, 'unknown');
-        const result = await downloadChubGalleryForCharacter(characterName, chubInfo.id, {});
+        // Use character object to get unique folder name if available
+        const folderName = getGalleryFolderName(activeChar);
+        const result = await downloadChubGalleryForCharacter(folderName, chubInfo.id, {});
         
         if (result.success > 0) {
             showToast(`Downloaded ${result.success} gallery image${result.success > 1 ? 's' : ''}`, 'success');
-            fetchCharacterImages(characterName);
+            // Refresh gallery - pass character object for unique folder support
+            fetchCharacterImages(activeChar);
         } else if (result.skipped > 0) {
             showToast('All gallery images already exist', 'info');
         } else {
@@ -7806,54 +11533,122 @@ on('chubLinkUnlinkBtn', 'click', unlinkFromChub);
 // ==============================================
 
 let bulkChubLinkAborted = false;
+let bulkChubLinkIsScanning = false;
 let bulkChubLinkResults = {
     confident: [],   // { char, chubMatch, selected: true }
     uncertain: [],   // { char, chubOptions: [], selectedOption: null }
     nomatch: []      // { char }
 };
+// Track scan state for persistence across modal open/close
+let bulkChubLinkScanState = {
+    scannedAvatars: new Set(),  // Set of character avatars that have been scanned
+    scanComplete: false,        // Whether the scan finished (vs was stopped)
+    lastUnlinkedCount: 0        // Track if library changed since last scan
+};
 
 /**
- * Open the Bulk ChubAI Link modal and start scanning
+ * Open the Bulk ChubAI Link modal - preserves state if reopening
  */
 function openBulkChubLinkModal() {
     // Hide dropdown menu
     document.getElementById('moreOptionsMenu')?.classList.add('hidden');
     
-    // Reset state
-    bulkChubLinkAborted = false;
-    bulkChubLinkResults = { confident: [], uncertain: [], nomatch: [] };
-    
-    // Reset UI
     const modal = document.getElementById('bulkChubLinkModal');
     const scanningPhase = document.getElementById('bulkChubLinkScanning');
     const resultsPhase = document.getElementById('bulkChubLinkResults');
     const applyBtn = document.getElementById('bulkChubLinkApplyBtn');
     const cancelBtn = document.getElementById('bulkChubLinkCancelBtn');
     
-    scanningPhase.classList.remove('hidden');
-    resultsPhase.classList.add('hidden');
-    applyBtn.classList.add('hidden');
-    cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+    // Check if we have existing results to show
+    const hasResults = bulkChubLinkResults.confident.length > 0 || 
+                       bulkChubLinkResults.uncertain.length > 0 || 
+                       bulkChubLinkResults.nomatch.length > 0;
     
-    document.getElementById('bulkChubLinkScanAvatar').src = '';
-    document.getElementById('bulkChubLinkScanName').textContent = 'Preparing...';
-    document.getElementById('bulkChubLinkScanStatus').textContent = 'Scanning library for unlinked characters...';
-    document.getElementById('bulkChubLinkScanProgress').textContent = '0/0';
-    document.getElementById('bulkChubLinkScanFill').style.width = '0%';
-    document.getElementById('bulkChubLinkConfidentCount').textContent = '0';
-    document.getElementById('bulkChubLinkUncertainCount').textContent = '0';
-    document.getElementById('bulkChubLinkNoMatchCount').textContent = '0';
+    // Count current unlinked characters
+    const currentUnlinkedCount = allCharacters.filter(char => {
+        const chubInfo = getChubLinkInfo(char);
+        return !chubInfo || !chubInfo.fullPath;
+    }).length;
     
-    modal.classList.remove('hidden');
+    // If library changed significantly, reset state
+    if (bulkChubLinkScanState.lastUnlinkedCount !== currentUnlinkedCount && 
+        Math.abs(bulkChubLinkScanState.lastUnlinkedCount - currentUnlinkedCount) > 5) {
+        // Library changed significantly - reset
+        bulkChubLinkResults = { confident: [], uncertain: [], nomatch: [] };
+        bulkChubLinkScanState = { scannedAvatars: new Set(), scanComplete: false, lastUnlinkedCount: 0 };
+    }
     
-    // Start scanning
-    runBulkChubLinkScan();
+    if (hasResults) {
+        // We have existing results - show them
+        modal.classList.remove('hidden');
+        
+        if (bulkChubLinkScanState.scanComplete || bulkChubLinkAborted) {
+            // Scan was finished or stopped - show results directly
+            showBulkChubLinkResults();
+            
+            // If scan was incomplete (stopped), offer to resume
+            if (!bulkChubLinkScanState.scanComplete) {
+                const remaining = currentUnlinkedCount - bulkChubLinkScanState.scannedAvatars.size;
+                if (remaining > 0) {
+                    cancelBtn.innerHTML = '<i class="fa-solid fa-play"></i> Resume';
+                    cancelBtn.onclick = () => {
+                        // Reset abort flag and resume scanning
+                        bulkChubLinkAborted = false;
+                        cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+                        cancelBtn.onclick = null; // Remove custom handler
+                        
+                        // Show scanning UI
+                        scanningPhase.classList.remove('hidden');
+                        resultsPhase.classList.add('hidden');
+                        applyBtn.classList.add('hidden');
+                        
+                        runBulkChubLinkScan();
+                    };
+                }
+            }
+        } else if (bulkChubLinkIsScanning) {
+            // Scan is still running - show scanning UI
+            scanningPhase.classList.remove('hidden');
+            resultsPhase.classList.add('hidden');
+            applyBtn.classList.add('hidden');
+            cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+        }
+    } else {
+        // Fresh start - reset everything
+        bulkChubLinkAborted = false;
+        bulkChubLinkResults = { confident: [], uncertain: [], nomatch: [] };
+        bulkChubLinkScanState = { scannedAvatars: new Set(), scanComplete: false, lastUnlinkedCount: currentUnlinkedCount };
+        
+        // Reset UI
+        scanningPhase.classList.remove('hidden');
+        resultsPhase.classList.add('hidden');
+        applyBtn.classList.add('hidden');
+        cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+        cancelBtn.onclick = null;
+        
+        document.getElementById('bulkChubLinkScanAvatar').src = '';
+        document.getElementById('bulkChubLinkScanName').textContent = 'Preparing...';
+        document.getElementById('bulkChubLinkScanStatus').textContent = 'Scanning library for unlinked characters...';
+        document.getElementById('bulkChubLinkScanProgress').textContent = '0/0';
+        document.getElementById('bulkChubLinkScanFill').style.width = '0%';
+        document.getElementById('bulkChubLinkConfidentCount').textContent = '0';
+        document.getElementById('bulkChubLinkUncertainCount').textContent = '0';
+        document.getElementById('bulkChubLinkNoMatchCount').textContent = '0';
+        
+        modal.classList.remove('hidden');
+        
+        // Start scanning
+        runBulkChubLinkScan();
+    }
 }
 
 /**
  * Run the bulk ChubAI link scan
  */
 async function runBulkChubLinkScan() {
+    bulkChubLinkIsScanning = true;
+    bulkChubLinkScanState.scanComplete = false;
+    
     // Find all characters without a chub link
     const unlinkedChars = allCharacters.filter(char => {
         const chubInfo = getChubLinkInfo(char);
@@ -7863,52 +11658,78 @@ async function runBulkChubLinkScan() {
     if (unlinkedChars.length === 0) {
         document.getElementById('bulkChubLinkScanStatus').textContent = 'All characters are already linked!';
         document.getElementById('bulkChubLinkCancelBtn').innerHTML = '<i class="fa-solid fa-check"></i> Done';
+        bulkChubLinkIsScanning = false;
+        bulkChubLinkScanState.scanComplete = true;
         return;
     }
     
+    // Filter out characters we've already scanned (for resume functionality)
+    const charsToScan = unlinkedChars.filter(char => !bulkChubLinkScanState.scannedAvatars.has(char.avatar));
+    const alreadyScanned = unlinkedChars.length - charsToScan.length;
     const total = unlinkedChars.length;
     
-    for (let i = 0; i < unlinkedChars.length; i++) {
+    if (charsToScan.length === 0) {
+        // All characters already scanned
+        bulkChubLinkIsScanning = false;
+        bulkChubLinkScanState.scanComplete = true;
+        showBulkChubLinkResults();
+        return;
+    }
+    
+    // Update initial counts from existing results
+    document.getElementById('bulkChubLinkConfidentCount').textContent = bulkChubLinkResults.confident.length;
+    document.getElementById('bulkChubLinkUncertainCount').textContent = bulkChubLinkResults.uncertain.length;
+    document.getElementById('bulkChubLinkNoMatchCount').textContent = bulkChubLinkResults.nomatch.length;
+    
+    for (let i = 0; i < charsToScan.length; i++) {
         if (bulkChubLinkAborted) break;
         
-        const char = unlinkedChars[i];
+        const char = charsToScan[i];
         const charName = getCharacterName(char, 'Unknown');
         const charCreator = (char.creator || char.data?.creator || '').trim();
+        
+        const currentProgress = alreadyScanned + i + 1;
         
         // Update UI
         document.getElementById('bulkChubLinkScanAvatar').src = getCharacterAvatarUrl(char.avatar);
         document.getElementById('bulkChubLinkScanName').textContent = charName;
         document.getElementById('bulkChubLinkScanStatus').textContent = `Searching ChubAI for "${charName}"...`;
-        document.getElementById('bulkChubLinkScanProgress').textContent = `${i + 1}/${total}`;
-        document.getElementById('bulkChubLinkScanFill').style.width = `${((i + 1) / total) * 100}%`;
+        document.getElementById('bulkChubLinkScanProgress').textContent = `${currentProgress}/${total}`;
+        document.getElementById('bulkChubLinkScanFill').style.width = `${(currentProgress / total) * 100}%`;
         
         // Search Chub API
         const searchResults = await searchChubForBulkLink(charName, charCreator);
+        
+        // Mark this character as scanned
+        bulkChubLinkScanState.scannedAvatars.add(char.avatar);
         
         if (searchResults.length === 0) {
             // No match found
             bulkChubLinkResults.nomatch.push({ char });
             document.getElementById('bulkChubLinkNoMatchCount').textContent = bulkChubLinkResults.nomatch.length;
         } else {
+            // Sort results by content similarity for better ordering in review UI
+            const sortedResults = sortChubResultsByContentSimilarity(searchResults, char);
+            
             // Check for confident match
-            const confidentMatch = findConfidentMatch(char, searchResults);
+            const confidentMatch = findConfidentMatch(char, sortedResults);
             
             if (confidentMatch) {
-                // Find the index of the confident match in results
-                const confidentIdx = searchResults.findIndex(r => r.fullPath === confidentMatch.fullPath);
+                // Find the index of the confident match in sorted results
+                const confidentIdx = sortedResults.findIndex(r => r.fullPath === confidentMatch.fullPath);
                 bulkChubLinkResults.confident.push({
                     char,
                     chubMatch: confidentMatch,
-                    chubOptions: searchResults.slice(0, 5), // Store top 5 for manual override
+                    chubOptions: sortedResults.slice(0, 5), // Store top 5 sorted by content similarity
                     selectedOption: confidentIdx >= 0 && confidentIdx < 5 ? confidentIdx : 0, // Pre-select the confident match
                     selected: true
                 });
                 document.getElementById('bulkChubLinkConfidentCount').textContent = bulkChubLinkResults.confident.length;
             } else {
-                // Multiple options, needs review
+                // Multiple options, needs review - sorted by content similarity
                 bulkChubLinkResults.uncertain.push({
                     char,
-                    chubOptions: searchResults.slice(0, 5), // Top 5 options
+                    chubOptions: sortedResults.slice(0, 5), // Top 5 sorted by content similarity
                     selectedOption: null
                 });
                 document.getElementById('bulkChubLinkUncertainCount').textContent = bulkChubLinkResults.uncertain.length;
@@ -7919,6 +11740,13 @@ async function runBulkChubLinkScan() {
         if (!bulkChubLinkAborted) {
             await new Promise(resolve => setTimeout(resolve, 300));
         }
+    }
+    
+    bulkChubLinkIsScanning = false;
+    
+    // Mark scan as complete only if we weren't aborted
+    if (!bulkChubLinkAborted) {
+        bulkChubLinkScanState.scanComplete = true;
     }
     
     // Show results (even if aborted, show what we found so far)
@@ -7933,9 +11761,78 @@ async function runBulkChubLinkScan() {
 
 /**
  * Search ChubAI for bulk linking
+ * Uses multiple search strategies to find the character:
+ * 1. If creator is known: search by username filter first
+ * 2. Fall back to name + creator search term
+ * 3. Finally try name-only search
  */
 async function searchChubForBulkLink(name, creator) {
     try {
+        const headers = getChubHeaders(true);
+        
+        let allResults = [];
+        const normalizedName = name.toLowerCase().trim();
+        const nameWords = normalizedName.split(/\s+/).filter(w => w.length > 2);
+        
+        // Pass 1: If we have a creator, search by username filter first
+        // This is the most reliable way to find a character by a specific author
+        if (creator && creator.trim()) {
+            const creatorLower = creator.toLowerCase().trim();
+            const authorParams = new URLSearchParams({
+                first: '200', // Get many results to find even less popular characters
+                sort: 'download_count',
+                nsfw: 'true',
+                nsfl: 'true',
+                include_forks: 'true',
+                username: creatorLower
+            });
+            
+            try {
+                const authorResponse = await fetch(`${CHUB_API_BASE}/search?${authorParams.toString()}`, {
+                    method: 'GET',
+                    headers
+                });
+                
+                if (authorResponse.ok) {
+                    const authorData = await authorResponse.json();
+                    const authorNodes = extractNodes(authorData);
+                    
+                    // Filter to characters whose name contains or is contained by our search name
+                    // This handles "Ghost" matching "Ghost exorcism simulator"
+                    for (const node of authorNodes) {
+                        const nodeName = (node.name || '').toLowerCase().trim();
+                        const nodeNameWords = nodeName.split(/\s+/).filter(w => w.length > 2);
+                        
+                        // Match if:
+                        // 1. Exact match
+                        // 2. Node name contains search name (e.g., "Ghost exorcism simulator" contains "Ghost")
+                        // 3. Search name contains node name
+                        // 4. First word matches (e.g., "Ghost" matches first word of "Ghost exorcism simulator")
+                        // 5. Any significant word from search is in node name
+                        const firstWordMatch = nodeNameWords.length > 0 && nameWords.length > 0 && 
+                            (nodeNameWords[0] === nameWords[0] || nodeNameWords[0].startsWith(nameWords[0]) || nameWords[0].startsWith(nodeNameWords[0]));
+                        const anyWordMatch = nameWords.some(w => nodeName.includes(w));
+                        
+                        if (nodeName === normalizedName || 
+                            nodeName.includes(normalizedName) ||
+                            normalizedName.includes(nodeName) ||
+                            firstWordMatch ||
+                            anyWordMatch) {
+                            allResults.push(node);
+                        }
+                    }
+                    
+                    if (allResults.length > 0) {
+                        debugLog(`[BulkChubLink] Found ${allResults.length} matches for "${name}" by author "${creator}"`);
+                        return allResults;
+                    }
+                }
+            } catch (e) {
+                debugLog('[BulkChubLink] Author search failed, falling back to term search');
+            }
+        }
+        
+        // Pass 2: Combined name + creator search term
         const searchTerm = creator ? `${name} ${creator}` : name;
         
         const params = new URLSearchParams({
@@ -7948,24 +11845,47 @@ async function searchChubForBulkLink(name, creator) {
             min_tokens: '50'
         });
         
-        const headers = {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        };
-        
-        if (chubToken) {
-            headers['Authorization'] = `Bearer ${chubToken}`;
-        }
-        
         const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
             method: 'GET',
             headers
         });
         
-        if (!response.ok) return [];
+        if (!response.ok) return allResults;
         
         const data = await response.json();
-        return extractNodes(data);
+        const nodes = extractNodes(data);
+        
+        // Add any nodes not already in results
+        for (const node of nodes) {
+            if (!allResults.some(r => r.fullPath === node.fullPath)) {
+                allResults.push(node);
+            }
+        }
+        
+        // Pass 3: If still no results and we have a creator, try name-only search
+        if (allResults.length === 0 && creator) {
+            const nameOnlyParams = new URLSearchParams({
+                search: name,
+                first: '15',
+                sort: 'download_count',
+                nsfw: 'true',
+                nsfl: 'true',
+                include_forks: 'true',
+                min_tokens: '50'
+            });
+            
+            const nameResponse = await fetch(`${CHUB_API_BASE}/search?${nameOnlyParams.toString()}`, {
+                method: 'GET',
+                headers
+            });
+            
+            if (nameResponse.ok) {
+                const nameData = await nameResponse.json();
+                allResults = extractNodes(nameData);
+            }
+        }
+        
+        return allResults;
     } catch (error) {
         console.error('[BulkChubLink] Search error:', error);
         return [];
@@ -7981,28 +11901,140 @@ const GENERIC_CREATORS = new Set([
 ]);
 
 /**
- * Calculate word set similarity (Jaccard index) between two texts
+ * Sort ChubAI search results by content similarity to a local character
+ * Results with higher content similarity appear first
+ * @param {Array} results - ChubAI search results from API
+ * @param {Object} localChar - Local character to compare against
+ * @returns {Array} - Results sorted by content similarity (descending)
  */
-function calculateTextSimilarity(textA, textB) {
-    if (!textA || !textB || textA.length < 20 || textB.length < 20) return 0;
+function sortChubResultsByContentSimilarity(results, localChar) {
+    if (!localChar || !results || results.length === 0) return results;
     
-    const getWords = (text) => {
-        const words = text.toLowerCase().match(/\b\w{3,}\b/g) || [];
-        return new Set(words);
-    };
+    const charDescription = getCharField(localChar, 'description') || '';
+    const charCreatorNotes = getCharField(localChar, 'creator_notes') || '';
+    const charFirstMes = getCharField(localChar, 'first_mes') || '';
+    const charName = getCharacterName(localChar, '').toLowerCase().trim();
+    const charCreator = (localChar.creator || localChar.data?.creator || '').toLowerCase().trim();
+    const charNameWords = charName.split(/\s+/).filter(w => w.length > 2);
     
-    const wordsA = getWords(textA);
-    const wordsB = getWords(textB);
+    // Combine local content for matching
+    const localContent = `${charDescription} ${charCreatorNotes} ${charFirstMes}`.trim();
+    const hasLocalContent = localContent.length > 100;
     
-    if (wordsA.size === 0 || wordsB.size === 0) return 0;
+    // Calculate scores for each result
+    const scoredResults = results.map(result => {
+        const chubName = (result.name || '').toLowerCase().trim();
+        const chubCreator = (result.fullPath || '').split('/')[0].toLowerCase().trim();
+        const chubTagline = result.tagline || '';
+        const chubDescription = result.description || result.tagline || '';
+        const chubNameWords = chubName.split(/\s+/).filter(w => w.length > 2);
+        
+        // Combine chub content
+        const chubContent = `${chubDescription} ${chubTagline}`.trim();
+        
+        let score = 0;
+        let matchReasons = [];
+        
+        // === NAME MATCHING (important for finding the right character) ===
+        
+        // Exact name match gets biggest boost
+        if (chubName === charName) {
+            score += 100;
+            matchReasons.push('exact name');
+        }
+        // ChubAI name STARTS with local name (e.g., "Ghost Exorcism Simulator" starts with "Ghost")
+        else if (chubName.startsWith(charName + ' ') || chubName.startsWith(charName + ':') || chubName.startsWith(charName + ',')) {
+            score += 90;
+            matchReasons.push('name prefix');
+        }
+        // First word exact match (e.g., "Ghost" = first word of "Ghost Exorcism Simulator")
+        else if (chubNameWords.length > 0 && charNameWords.length > 0 && chubNameWords[0] === charNameWords[0]) {
+            score += 85;
+            matchReasons.push('first word');
+        }
+        // Local name is contained in ChubAI name
+        else if (chubName.includes(charName) && charName.length > 3) {
+            score += 75;
+            matchReasons.push('name in title');
+        }
+        // Any significant word from local name is in ChubAI name
+        else if (charNameWords.length > 0 && charNameWords.some(w => chubName.includes(w))) {
+            score += 60;
+            matchReasons.push('word match');
+        }
+        
+        // === CREATOR MATCHING ===
+        if (charCreator && chubCreator === charCreator) {
+            score += 50;
+            matchReasons.push('creator');
+        }
+        
+        // === CONTENT SIMILARITY (heavily weighted - this is the best signal!) ===
+        if (hasLocalContent && chubContent.length > 50) {
+            // Compare description to description
+            const descToDescSim = calculateTextSimilarity(charDescription, chubDescription);
+            
+            // Compare description to tagline (often very useful)
+            const descToTaglineSim = calculateTextSimilarity(charDescription, chubTagline);
+            
+            // Compare creator_notes to tagline (creators often put tagline in notes)
+            const notesToTaglineSim = charCreatorNotes ? calculateTextSimilarity(charCreatorNotes, chubTagline) : 0;
+            
+            // Compare creator_notes to description
+            const notesToDescSim = charCreatorNotes ? calculateTextSimilarity(charCreatorNotes, chubDescription) : 0;
+            
+            // Compare first_mes to description (can help identify unique characters)
+            const firstMesToDescSim = charFirstMes ? calculateTextSimilarity(charFirstMes, chubDescription) : 0;
+            
+            // Full content comparison
+            const fullContentSim = calculateTextSimilarity(localContent, chubContent);
+            
+            // Take the best match from all comparisons
+            const bestContentMatch = Math.max(
+                descToDescSim, 
+                descToTaglineSim, 
+                notesToTaglineSim, 
+                notesToDescSim,
+                firstMesToDescSim,
+                fullContentSim
+            );
+            
+            // Content similarity is HUGE - up to 100 points for high match
+            // This helps when names don't match but content clearly does
+            if (bestContentMatch >= 0.5) {
+                score += bestContentMatch * 100; // 50-100 points for good content match
+                matchReasons.push(`${Math.round(bestContentMatch * 100)}% content`);
+            } else if (bestContentMatch >= 0.25) {
+                score += bestContentMatch * 60; // 15-30 points for partial content match
+                matchReasons.push(`${Math.round(bestContentMatch * 100)}% content`);
+            } else if (bestContentMatch > 0.1) {
+                score += bestContentMatch * 30; // Small boost for weak match
+            }
+        }
+        
+        // Keep original API order as tiebreaker (download count)
+        score += (results.length - results.indexOf(result)) * 0.01;
+        
+        return { result, score, matchReasons };
+    });
     
-    let intersection = 0;
-    for (const word of wordsA) {
-        if (wordsB.has(word)) intersection++;
+    // Sort by score descending
+    scoredResults.sort((a, b) => b.score - a.score);
+    
+    // Debug log for top results
+    if (scoredResults.length > 0 && scoredResults[0].score > 50) {
+        debugLog(`[ChubSearch] Top match: "${scoredResults[0].result.name}" (score: ${scoredResults[0].score.toFixed(1)}, reasons: ${scoredResults[0].matchReasons.join(', ')})`);
     }
     
-    const union = wordsA.size + wordsB.size - intersection;
-    return union > 0 ? intersection / union : 0;
+    return scoredResults.map(s => s.result);
+}
+
+/**
+ * Calculate word set similarity (Jaccard index) between two texts
+ * Wrapper for contentSimilarity used in ChubAI matching
+ */
+function calculateTextSimilarity(textA, textB) {
+    return contentSimilarity(textA, textB);
 }
 
 /**
@@ -8042,12 +12074,12 @@ function findConfidentMatch(char, searchResults) {
         if (isGenericCreator || GENERIC_CREATORS.has(chubCreator)) {
             // For generic creators, require significant content similarity
             if (bestContentSimilarity >= 0.4) {
-                console.log(`[BulkChubLink] Content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}% similarity`);
+                debugLog(`[BulkChubLink] Content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}% similarity`);
                 return result;
             }
             // Or if it's the top result with matching generic creator and high download count
-            if (chubCreator === charCreator && searchResults.indexOf(result) === 0 && result.downloadCount > 100) {
-                console.log(`[BulkChubLink] Top popular result match for "${charName}" by generic creator`);
+            if (chubCreator === charCreator && searchResults.indexOf(result) === 0 && (result.downloadCount || result.starCount || 0) > 100) {
+                debugLog(`[BulkChubLink] Top popular result match for "${charName}" by generic creator`);
                 return result;
             }
             continue;
@@ -8055,7 +12087,7 @@ function findConfidentMatch(char, searchResults) {
         
         // Case 2: Specific creator - creator match is sufficient
         if (charCreator && chubCreator === charCreator) {
-            console.log(`[BulkChubLink] Creator match for "${charName}" by ${charCreator}`);
+            debugLog(`[BulkChubLink] Creator match for "${charName}" by ${charCreator}`);
             return result;
         }
         
@@ -8063,7 +12095,7 @@ function findConfidentMatch(char, searchResults) {
         if (!charCreator && searchResults.indexOf(result) === 0) {
             // Top result with good content match
             if (bestContentSimilarity >= 0.3) {
-                console.log(`[BulkChubLink] Top result with content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}%`);
+                debugLog(`[BulkChubLink] Top result with content match for "${charName}": ${(bestContentSimilarity * 100).toFixed(1)}%`);
                 return result;
             }
         }
@@ -8084,7 +12116,32 @@ function showBulkChubLinkResults() {
     scanningPhase.classList.add('hidden');
     resultsPhase.classList.remove('hidden');
     applyBtn.classList.remove('hidden');
-    cancelBtn.innerHTML = '<i class="fa-solid fa-times"></i> Close';
+    
+    // Check if scan was incomplete (stopped early)
+    const unlinkedCount = allCharacters.filter(char => {
+        const chubInfo = getChubLinkInfo(char);
+        return !chubInfo || !chubInfo.fullPath;
+    }).length;
+    const remaining = unlinkedCount - bulkChubLinkScanState.scannedAvatars.size;
+    
+    if (!bulkChubLinkScanState.scanComplete && remaining > 0) {
+        // Scan was stopped - offer resume option
+        cancelBtn.innerHTML = `<i class="fa-solid fa-play"></i> Resume (${remaining} left)`;
+        cancelBtn.onclick = () => {
+            bulkChubLinkAborted = false;
+            cancelBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Stop';
+            cancelBtn.onclick = null;
+            
+            scanningPhase.classList.remove('hidden');
+            resultsPhase.classList.add('hidden');
+            applyBtn.classList.add('hidden');
+            
+            runBulkChubLinkScan();
+        };
+    } else {
+        cancelBtn.innerHTML = '<i class="fa-solid fa-times"></i> Close';
+        cancelBtn.onclick = null;
+    }
     
     // Update tab counts
     document.getElementById('bulkChubLinkConfidentTabCount').textContent = bulkChubLinkResults.confident.length;
@@ -8470,6 +12527,10 @@ async function applyBulkChubLinks() {
     // Close modal
     document.getElementById('bulkChubLinkModal').classList.add('hidden');
     
+    // Reset state since we linked characters - they're no longer in the unlinked pool
+    bulkChubLinkResults = { confident: [], uncertain: [], nomatch: [] };
+    bulkChubLinkScanState = { scannedAvatars: new Set(), scanComplete: false, lastUnlinkedCount: 0 };
+    
     // Rebuild lookup
     buildLocalLibraryLookup();
     
@@ -8481,6 +12542,7 @@ async function applyBulkChubLinks() {
 // Event handlers for Bulk ChubAI Link
 document.getElementById('bulkChubLinkBtn')?.addEventListener('click', openBulkChubLinkModal);
 document.getElementById('closeBulkChubLinkModal')?.addEventListener('click', () => {
+    // Just set abort flag and close - state is preserved for resuming
     bulkChubLinkAborted = true;
     document.getElementById('bulkChubLinkModal').classList.add('hidden');
 });
@@ -8521,14 +12583,13 @@ document.getElementById('closeGalleryInfoModalBtn')?.addEventListener('click', (
 
 /**
  * Download embedded media for a character (core function used by both localize button and import summary)
- * @param {string} characterName - The character's name (used for folder)
+ * @param {string} folderName - The gallery folder name (use getGalleryFolderName() for unique folders)
  * @param {string[]} mediaUrls - Array of URLs to download
  * @param {Object} options - Optional callbacks for progress/logging
- * @param {boolean} options.fixFilenames - If true, rename existing duplicates to localized_media_* format
  * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
  */
-async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort, fixFilenames } = options;
+async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options = {}) {
+    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
     
     let successCount = 0;
     let errorCount = 0;
@@ -8540,8 +12601,8 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
     }
     
     // Get existing files and their hashes to check for duplicates BEFORE downloading
-    const existingHashMap = await getExistingFileHashes(characterName);
-    console.log(`[EmbeddedMedia] Found ${existingHashMap.size} existing file hashes for ${characterName}`);
+    const existingHashMap = await getExistingFileHashes(folderName);
+    debugLog(`[EmbeddedMedia] Found ${existingHashMap.size} existing file hashes for ${folderName}`);
     
     let startIndex = Date.now(); // Use timestamp as start index for unique filenames
     
@@ -8556,7 +12617,7 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         
         // Truncate URL for display
         const displayUrl = url.length > 60 ? url.substring(0, 60) + '...' : url;
-        const logEntry = onLog ? onLog(`Checking ${displayUrl}...`, 'pending') : null;
+        const logEntry = onLog ? onLog(`Checking ${displayUrl}`, 'pending') : null;
         
         // Download to memory first to check hash (with 30s timeout)
         const downloadResult = await downloadMediaToMemory(url, 30000);
@@ -8576,33 +12637,60 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
         if (existingFile) {
             // File exists - check if we should rename it
             // Always rename chubgallery_* files to localized_media_* (embedded takes precedence)
-            // Also rename other non-localized files if fixFilenames is enabled
+            // Also rename files that don't follow localized_media_* naming convention
+            // Also rename if extension doesn't match actual content type (fixes corrupted files)
             const isChubGalleryFile = existingFile.fileName.startsWith('chubgallery_');
-            const needsRename = isChubGalleryFile || (fixFilenames && !existingFile.fileName.startsWith('localized_media_'));
+            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_');
+            
+            // Check if extension matches detected content type
+            let hasWrongExtension = false;
+            if (downloadResult.contentType && isAlreadyLocalized) {
+                const currentExt = existingFile.fileName.includes('.') 
+                    ? existingFile.fileName.substring(existingFile.fileName.lastIndexOf('.') + 1).toLowerCase()
+                    : '';
+                const expectedExtMap = {
+                    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif',
+                    'image/bmp': 'bmp', 'image/svg+xml': 'svg',
+                    'video/mp4': 'mp4', 'video/webm': 'webm',
+                    'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg',
+                    'audio/flac': 'flac', 'audio/aac': 'aac', 'audio/mp4': 'm4a'
+                };
+                const expectedExt = expectedExtMap[downloadResult.contentType];
+                // Check if current extension mismatches expected (e.g., audio saved as .png)
+                if (expectedExt && currentExt !== expectedExt) {
+                    // Special case: jpg vs jpeg are equivalent
+                    if (!(currentExt === 'jpeg' && expectedExt === 'jpg') && !(currentExt === 'jpg' && expectedExt === 'jpeg')) {
+                        hasWrongExtension = true;
+                        debugLog(`[EmbeddedMedia] Extension mismatch: ${existingFile.fileName} has .${currentExt} but content is ${downloadResult.contentType} (should be .${expectedExt})`);
+                    }
+                }
+            }
+            
+            const needsRename = isChubGalleryFile || !isAlreadyLocalized || hasWrongExtension;
             
             if (needsRename) {
                 // Rename to proper localized_media_* format (pass downloadResult since we have it)
-                const renameResult = await renameToLocalizedFormat(existingFile, url, characterName, fileIndex, downloadResult);
+                const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult);
                 if (renameResult.success) {
                     renamedCount++;
-                    const action = isChubGalleryFile ? 'Converted' : 'Renamed';
-                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `${action}: ${existingFile.fileName} ? ${renameResult.newName}`, 'success');
+                    const action = isChubGalleryFile ? 'Converted' : (hasWrongExtension ? 'Fixed extension' : 'Renamed');
+                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `${action}: ${existingFile.fileName} → ${renameResult.newName}`, 'success');
                 } else {
                     skippedCount++;
                     if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (rename failed): ${displayUrl}`, 'success');
                 }
             } else {
                 skippedCount++;
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
             }
-            console.log(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
+            debugLog(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
             if (onProgress) onProgress(i + 1, mediaUrls.length);
             continue;
         }
         
         // Not a duplicate, save the file
         if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saving ${displayUrl}...`, 'pending');
-        const result = await saveMediaFromMemory(downloadResult, url, characterName, fileIndex);
+        const result = await saveMediaFromMemory(downloadResult, url, folderName, fileIndex);
         
         if (result.success) {
             successCount++;
@@ -8623,32 +12711,24 @@ async function downloadEmbeddedMediaForCharacter(characterName, mediaUrls, optio
 /**
  * Rename an existing file to localized_media_* format
  * Since there's no rename API, we delete old + save new (data already in memory)
+ * @param {Object} existingFile - Existing file info
+ * @param {string} originalUrl - Original URL of the media
+ * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
+ * @param {number} index - File index for naming
+ * @param {Object} downloadResult - Result from downloadMediaToMemory
  */
-async function renameToLocalizedFormat(existingFile, originalUrl, characterName, index, downloadResult) {
+async function renameToLocalizedFormat(existingFile, originalUrl, folderName, index, downloadResult) {
     try {
-        // Extract original filename from URL for the new name
-        const urlFilename = extractFilenameFromUrl(originalUrl);
-        const nameWithoutExt = urlFilename.includes('.') 
-            ? urlFilename.substring(0, urlFilename.lastIndexOf('.'))
-            : urlFilename;
-        const sanitizedName = nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
-        
-        // Get extension from existing file
-        const ext = existingFile.fileName.includes('.') 
-            ? existingFile.fileName.substring(existingFile.fileName.lastIndexOf('.') + 1)
-            : 'png';
-        
-        const newName = `localized_media_${index}_${sanitizedName}.${ext}`;
-        
-        // Save with new name first (we have the data in downloadResult)
-        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, characterName, index);
+        // Save with new name using saveMediaFromMemory which determines correct extension
+        // from the detected content type (via magic bytes), not the old filename
+        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, folderName, index);
         
         if (!saveResult.success) {
             return { success: false, error: saveResult.error };
         }
         
         // Delete the old file - API expects full relative path like "/user/images/CharName/file.png"
-        const safeFolderName = sanitizeFolderName(characterName);
+        const safeFolderName = sanitizeFolderName(folderName);
         const deletePath = `/user/images/${safeFolderName}/${existingFile.fileName}`;
         const deleteResponse = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
             path: deletePath
@@ -8657,7 +12737,7 @@ async function renameToLocalizedFormat(existingFile, originalUrl, characterName,
         if (!deleteResponse.ok) {
             console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName} (path: ${deletePath}), but new file was saved`);
         } else {
-            console.log(`[EmbeddedMedia] Deleted old file: ${deletePath}`);
+            debugLog(`[EmbeddedMedia] Deleted old file: ${deletePath}`);
         }
         
         return { success: true, newName: saveResult.filename };
@@ -8758,7 +12838,7 @@ function findCharacterMediaUrls(character) {
         });
     }
     
-    console.log(`[Localize] Found ${mediaUrls.size} remote media URLs in character`);
+    debugLog(`[Localize] Found ${mediaUrls.size} remote media URLs in character`);
     return Array.from(mediaUrls);
 }
 
@@ -8816,8 +12896,178 @@ async function getExistingFileHashes(characterName) {
 }
 
 /**
+ * Parse MP4/M4A container to check if it contains video tracks
+ * MP4 files are structured as nested "atoms" (boxes) with 4-byte size + 4-byte type
+ * We scan for 'hdlr' (handler) atoms and check if any have 'vide' (video) handler type
+ * @param {Uint8Array} bytes - The file bytes
+ * @returns {boolean} True if video track found, false if audio-only
+ */
+function mp4HasVideoTrack(bytes) {
+    const len = bytes.length;
+    let pos = 0;
+    
+    // Scan through atoms looking for 'hdlr' handler atoms
+    // hdlr atom structure: [4-byte size][hdlr][4-byte version/flags][4-byte predefined][4-byte handler_type]
+    // handler_type at offset 16 from atom start: 'vide' for video, 'soun' for sound
+    while (pos < len - 24) {
+        // Read atom size (big-endian 32-bit)
+        const atomSize = (bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3];
+        
+        // Read atom type
+        const atomType = String.fromCharCode(bytes[pos + 4], bytes[pos + 5], bytes[pos + 6], bytes[pos + 7]);
+        
+        // Check for 'hdlr' atom
+        if (atomType === 'hdlr' && atomSize >= 24) {
+            // Handler type is at offset 16 from atom start (after size[4] + type[4] + version[4] + predefined[4])
+            const handlerType = String.fromCharCode(
+                bytes[pos + 16], bytes[pos + 17], bytes[pos + 18], bytes[pos + 19]
+            );
+            
+            if (handlerType === 'vide') {
+                return true; // Found video track
+            }
+        }
+        
+        // Move to next atom
+        // Atom size of 0 means "extends to end of file" - stop scanning
+        // Atom size of 1 means 64-bit extended size (rare, skip for simplicity)
+        if (atomSize === 0 || atomSize === 1) {
+            break;
+        }
+        
+        // For container atoms (moov, trak, mdia, minf, stbl), descend into them
+        // by moving just past the header (8 bytes) instead of skipping the whole atom
+        const containerAtoms = ['moov', 'trak', 'mdia', 'minf', 'stbl', 'udta', 'edts'];
+        if (containerAtoms.includes(atomType)) {
+            pos += 8; // Just skip the header, scan contents
+        } else {
+            pos += atomSize; // Skip entire atom
+        }
+        
+        // Safety: prevent infinite loop on malformed files
+        if (atomSize < 8 && !containerAtoms.includes(atomType)) {
+            break;
+        }
+    }
+    
+    return false; // No video track found = audio only
+}
+
+/**
  * Download a media file to memory (ArrayBuffer) without saving
  */
+/**
+ * Validate that downloaded content is actually valid media by checking magic bytes
+ * Returns the detected media type or null if invalid
+ * @param {ArrayBuffer} arrayBuffer - The downloaded content
+ * @param {string} contentType - Content-Type header from response
+ * @returns {{ valid: boolean, detectedType: string|null, reason: string }}
+ */
+function validateMediaContent(arrayBuffer, contentType) {
+    // Check minimum size
+    if (!arrayBuffer || arrayBuffer.byteLength < 8) {
+        return { valid: false, detectedType: null, reason: 'Content too small to be valid media' };
+    }
+    
+    const bytes = new Uint8Array(arrayBuffer);
+    
+    // Check for common magic bytes
+    // PNG: 89 50 4E 47 0D 0A 1A 0A
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+        return { valid: true, detectedType: 'image/png', reason: 'Valid PNG' };
+    }
+    
+    // JPEG: FF D8 FF
+    if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+        return { valid: true, detectedType: 'image/jpeg', reason: 'Valid JPEG' };
+    }
+    
+    // GIF: 47 49 46 38 (GIF8)
+    if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+        return { valid: true, detectedType: 'image/gif', reason: 'Valid GIF' };
+    }
+    
+    // WebP: 52 49 46 46 ... 57 45 42 50 (RIFF....WEBP)
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) {
+        return { valid: true, detectedType: 'image/webp', reason: 'Valid WebP' };
+    }
+    
+    // BMP: 42 4D (BM)
+    if (bytes[0] === 0x42 && bytes[1] === 0x4D) {
+        return { valid: true, detectedType: 'image/bmp', reason: 'Valid BMP' };
+    }
+    
+    // MP4/M4A/M4V: ... 66 74 79 70 (....ftyp) at offset 4
+    // MP4 and M4A share the same container format - we need to check for video tracks
+    if (bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+        // Check the major brand at bytes 8-11 first (quick check)
+        const brand = String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]);
+        
+        // Definitive audio brands - no need to scan
+        if (brand === 'M4A ' || brand === 'M4B ' || brand === 'M4P ') {
+            return { valid: true, detectedType: 'audio/mp4', reason: 'Valid M4A audio (brand)' };
+        }
+        
+        // For generic brands (isom, mp41, mp42, etc.), scan the file for video tracks
+        // Look for 'moov' -> 'trak' -> 'mdia' -> 'hdlr' with 'vide' handler type
+        const hasVideoTrack = mp4HasVideoTrack(bytes);
+        
+        if (hasVideoTrack) {
+            return { valid: true, detectedType: 'video/mp4', reason: 'Valid MP4 video (has video track)' };
+        } else {
+            return { valid: true, detectedType: 'audio/mp4', reason: 'Valid M4A audio (no video track)' };
+        }
+    }
+    
+    // WebM: 1A 45 DF A3
+    if (bytes[0] === 0x1A && bytes[1] === 0x45 && bytes[2] === 0xDF && bytes[3] === 0xA3) {
+        return { valid: true, detectedType: 'video/webm', reason: 'Valid WebM' };
+    }
+    
+    // MP3: ID3 tag (49 44 33) or MPEG sync word (FF FB, FF FA, FF F3, FF F2)
+    if ((bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) ||
+        (bytes[0] === 0xFF && (bytes[1] === 0xFB || bytes[1] === 0xFA || bytes[1] === 0xF3 || bytes[1] === 0xF2))) {
+        return { valid: true, detectedType: 'audio/mpeg', reason: 'Valid MP3' };
+    }
+    
+    // OGG: 4F 67 67 53 (OggS)
+    if (bytes[0] === 0x4F && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) {
+        return { valid: true, detectedType: 'audio/ogg', reason: 'Valid OGG' };
+    }
+    
+    // WAV: 52 49 46 46 ... 57 41 56 45 (RIFF....WAVE)
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+        bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45) {
+        return { valid: true, detectedType: 'audio/wav', reason: 'Valid WAV' };
+    }
+    
+    // FLAC: 66 4C 61 43 (fLaC)
+    if (bytes[0] === 0x66 && bytes[1] === 0x4C && bytes[2] === 0x61 && bytes[3] === 0x43) {
+        return { valid: true, detectedType: 'audio/flac', reason: 'Valid FLAC' };
+    }
+    
+    // SVG: Check for <?xml or <svg
+    const textStart = new TextDecoder().decode(bytes.slice(0, Math.min(100, bytes.length)));
+    if (textStart.includes('<?xml') || textStart.includes('<svg')) {
+        return { valid: true, detectedType: 'image/svg+xml', reason: 'Valid SVG' };
+    }
+    
+    // Check if it looks like HTML (common error page response)
+    if (textStart.includes('<!DOCTYPE') || textStart.includes('<html') || textStart.includes('<HTML')) {
+        return { valid: false, detectedType: 'text/html', reason: 'Content is HTML (likely error page)' };
+    }
+    
+    // If content-type suggests media but we couldn't validate, allow it with warning
+    if (contentType && (contentType.startsWith('image/') || contentType.startsWith('audio/') || contentType.startsWith('video/'))) {
+        debugLog(`[EmbeddedMedia] Unknown format but content-type suggests media: ${contentType}`);
+        return { valid: true, detectedType: contentType, reason: 'Unknown format, trusting content-type' };
+    }
+    
+    // Unknown format
+    return { valid: false, detectedType: null, reason: 'Unknown or invalid media format' };
+}
+
 async function downloadMediaToMemory(url, timeoutMs = 30000) {
     try {
         let response;
@@ -8858,11 +13108,29 @@ async function downloadMediaToMemory(url, timeoutMs = 30000) {
         const arrayBuffer = await response.arrayBuffer();
         const contentType = response.headers.get('content-type') || '';
         
+        // Validate that the downloaded content is actually valid media
+        // This is critical because some CDNs/servers return incorrect Content-Type headers
+        // (e.g., returning "image/jpeg" for an MP3 file), which would cause files to be
+        // saved with wrong extensions. Magic byte detection ensures we identify the true
+        // file type regardless of what the server claims.
+        const validation = validateMediaContent(arrayBuffer, contentType);
+        if (!validation.valid) {
+            debugLog(`[EmbeddedMedia] Invalid media from ${url}: ${validation.reason}`);
+            return {
+                success: false,
+                error: validation.reason
+            };
+        }
+        
+        // Use detected content type if header was missing/wrong
+        const finalContentType = validation.detectedType || contentType;
+        
         return {
             success: true,
             arrayBuffer: arrayBuffer,
-            contentType: contentType,
-            usedProxy: usedProxy
+            contentType: finalContentType,
+            usedProxy: usedProxy,
+            detectedType: validation.detectedType
         };
     } catch (error) {
         return {
@@ -8874,30 +13142,60 @@ async function downloadMediaToMemory(url, timeoutMs = 30000) {
 
 /**
  * Save a media file from memory (already downloaded ArrayBuffer) to character's gallery
+ * @param {Object} downloadResult - Result from downloadMediaToMemory
+ * @param {string} url - Original URL of the media
+ * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
+ * @param {number} index - File index for naming
  */
-async function saveMediaFromMemory(downloadResult, url, characterName, index) {
+async function saveMediaFromMemory(downloadResult, url, folderName, index) {
     try {
         const { arrayBuffer, contentType } = downloadResult;
         const blob = new Blob([arrayBuffer], { type: contentType });
         
-        // Determine file extension
-        let extension = 'png'; // Default
+        // Determine file extension from content type (detected via magic bytes)
+        let extension = 'png'; // Default for images
         if (contentType) {
             const mimeToExt = {
+                // Images
                 'image/png': 'png',
                 'image/jpeg': 'jpg',
                 'image/webp': 'webp',
                 'image/gif': 'gif',
                 'image/bmp': 'bmp',
                 'image/svg+xml': 'svg',
+                // Video
                 'video/mp4': 'mp4',
                 'video/webm': 'webm',
                 'video/quicktime': 'mov',
+                // Audio
                 'audio/mpeg': 'mp3',
+                'audio/mp3': 'mp3',
                 'audio/wav': 'wav',
-                'audio/ogg': 'ogg'
+                'audio/wave': 'wav',
+                'audio/x-wav': 'wav',
+                'audio/ogg': 'ogg',
+                'audio/flac': 'flac',
+                'audio/x-flac': 'flac',
+                'audio/aac': 'aac',
+                'audio/mp4': 'm4a',
+                'audio/x-m4a': 'm4a'
             };
-            extension = mimeToExt[contentType] || extension;
+            
+            // Try exact match first
+            if (mimeToExt[contentType]) {
+                extension = mimeToExt[contentType];
+            } else if (contentType.startsWith('audio/')) {
+                // Unknown audio type - extract subtype as extension, don't default to png!
+                const subtype = contentType.split('/')[1].split(';')[0];
+                extension = subtype.replace('x-', '') || 'audio';
+                debugLog(`[EmbeddedMedia] Unknown audio type '${contentType}', using extension: ${extension}`);
+            } else if (contentType.startsWith('video/')) {
+                // Unknown video type - extract subtype as extension
+                const subtype = contentType.split('/')[1].split(';')[0];
+                extension = subtype.replace('x-', '') || 'video';
+                debugLog(`[EmbeddedMedia] Unknown video type '${contentType}', using extension: ${extension}`);
+            }
+            // For unknown image types, 'png' default is acceptable
         } else {
             const urlMatch = url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
             if (urlMatch) {
@@ -8937,7 +13235,7 @@ async function saveMediaFromMemory(downloadResult, url, characterName, index) {
             image: base64Data,
             filename: filenameBase,
             format: extension,
-            ch_name: characterName
+            ch_name: folderName
         });
         
         if (!saveResponse.ok) {
@@ -8967,7 +13265,6 @@ async function saveMediaFromMemory(downloadResult, url, characterName, index) {
 
 // Convenience wrappers for localize log
 function addLocalizeLogEntry(message, status = 'pending') {
-    const localizeLog = document.getElementById('localizeLog');
     return addLogEntry(localizeLog, message, status);
 }
 
@@ -9062,8 +13359,9 @@ localizeMediaBtn?.addEventListener('click', async () => {
     localizeProgressFill.style.width = '0%';
     localizeProgressCount.textContent = '0/0';
     
-    // Get character name for folder
+    // Get character name for folder (use unique folder if enabled)
     const characterName = getCharacterName(activeChar, 'unknown');
+    const folderName = getGalleryFolderName(activeChar);
     
     // Find all media URLs
     const mediaUrls = findCharacterMediaUrls(activeChar);
@@ -9074,13 +13372,10 @@ localizeMediaBtn?.addEventListener('click', async () => {
     
     if (mediaUrls.length === 0 && !hasChubLink) {
         localizeStatus.textContent = 'No remote media found in this character card.';
-        addLocalizeLogEntry('No embedded media URLs detected', 'success');
-        addLocalizeLogEntry('Character not linked to ChubAI', 'info');
+        addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
+        addLocalizeLogEntry('ChubAI Gallery: character not linked', 'info');
         return;
     }
-    
-    // debug: fix filenames for images localized before current spec, rename to localized_media_* format
-    const fixFilenames = getSetting('fixFilenames') || false;
     
     // Phase 1: Download embedded media first (takes precedence for duplicate detection)
     localizeStatus.textContent = mediaUrls.length > 0 
@@ -9088,8 +13383,14 @@ localizeMediaBtn?.addEventListener('click', async () => {
         : 'No embedded media, checking ChubAI gallery...';
     localizeProgressCount.textContent = `0/${mediaUrls.length}`;
     
-    const result = await downloadEmbeddedMediaForCharacter(characterName, mediaUrls, {
-        fixFilenames,
+    // Add section header for embedded media
+    if (mediaUrls.length > 0) {
+        addLocalizeLogEntry(`Embedded Media (${mediaUrls.length} URL(s) found)`, 'info');
+    } else {
+        addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
+    }
+    
+    const result = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
         onProgress: (current, total) => {
             const progress = (current / total) * 100;
             localizeProgressFill.style.width = `${progress}%`;
@@ -9116,6 +13417,17 @@ localizeMediaBtn?.addEventListener('click', async () => {
     
     localizeStatus.textContent = statusMsg || 'No new files to download.';
     
+    // Add embedded media result summary to log
+    if (mediaUrls.length > 0) {
+        if (result.success > 0) {
+            addLocalizeLogEntry(`  ✓ ${result.success} downloaded, ${result.skipped || 0} skipped, ${result.errors || 0} failed`, 'success');
+        } else if (result.skipped > 0) {
+            addLocalizeLogEntry(`  ✓ ${result.skipped} already exist`, 'info');
+        } else if (result.errors > 0) {
+            addLocalizeLogEntry(`  ✗ ${result.errors} failed to download`, 'error');
+        }
+    }
+    
     if (result.success > 0 || result.renamed > 0) {
         const msg = result.renamed > 0 
             ? `Downloaded ${result.success}, renamed ${result.renamed} file(s)` 
@@ -9127,9 +13439,9 @@ localizeMediaBtn?.addEventListener('click', async () => {
             clearMediaLocalizationCache(activeChar.avatar);
         }
         
-        // Refresh the sprites grid to show new images
+        // Refresh the sprites grid to show new images - pass character object for unique folder support
         if (activeChar) {
-            fetchCharacterImages(getCharacterName(activeChar));
+            fetchCharacterImages(activeChar);
         }
     } else if (result.skipped > 0 && result.errors === 0) {
         showToast('All files already exist', 'info');
@@ -9145,11 +13457,11 @@ localizeMediaBtn?.addEventListener('click', async () => {
     // Phase 2: If character is linked to ChubAI, also download gallery
     if (hasChubLink) {
         addLocalizeLogEntry('', 'divider');
-        addLocalizeLogEntry(`Checking ChubAI gallery (${chubInfo.fullPath})...`, 'info');
+        addLocalizeLogEntry(`ChubAI Gallery (${chubInfo.fullPath})`, 'info');
         localizeStatus.textContent = 'Downloading ChubAI gallery...';
         
         try {
-            const galleryResult = await downloadChubGalleryForCharacter(characterName, chubInfo.id, {
+            const galleryResult = await downloadChubGalleryForCharacter(folderName, chubInfo.id, {
                 onLog: (message, status) => addLocalizeLogEntry(message, status),
                 onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
             });
@@ -9160,28 +13472,28 @@ localizeMediaBtn?.addEventListener('click', async () => {
             result.errors += galleryResult.errors || 0;
             
             if (galleryResult.success > 0) {
-                addLocalizeLogEntry(`Downloaded ${galleryResult.success} gallery image(s)`, 'success');
+                addLocalizeLogEntry(`  ✓ ${galleryResult.success} downloaded, ${galleryResult.skipped || 0} skipped, ${galleryResult.errors || 0} failed`, 'success');
             } else if (galleryResult.skipped > 0) {
-                addLocalizeLogEntry(`All ${galleryResult.skipped} gallery image(s) already exist`, 'info');
+                addLocalizeLogEntry(`  ✓ ${galleryResult.skipped} already exist`, 'info');
             } else {
-                addLocalizeLogEntry('No gallery images found on ChubAI', 'info');
+                addLocalizeLogEntry('  ✗ No images available on ChubAI', 'info');
             }
         } catch (error) {
             console.error('[MediaLocalize] Chub gallery error:', error);
-            addLocalizeLogEntry(`Gallery download failed: ${error.message}`, 'error');
+            addLocalizeLogEntry(`  ✗ Download failed: ${error.message}`, 'error');
             result.errors++;
         }
         
         // Update final status
-        let statusMsg = '';
+        statusMsg = '';
         if (result.success > 0) statusMsg = `Downloaded ${result.success} file(s)`;
         if (result.skipped > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} existed`;
         if (result.errors > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.errors} failed`;
         localizeStatus.textContent = statusMsg || 'Complete';
         
-        // Refresh sprites grid
-        if (result.success > 0) {
-            fetchCharacterImages(characterName);
+        // Refresh sprites grid - pass character object for unique folder support
+        if (result.success > 0 && activeChar) {
+            fetchCharacterImages(activeChar);
         }
     }
     
@@ -9281,18 +13593,80 @@ function getFilteredBulkResults() {
     const search = (bulkSummarySearch?.value || '').toLowerCase().trim();
     
     return bulkLocalizeResults.filter(r => {
-        // Apply filter
-        if (filter === 'downloaded' && r.downloaded === 0) return false;
-        if (filter === 'skipped' && r.skipped === 0) return false;
-        if (filter === 'errors' && r.errors === 0) return false;
+        // Calculate combined totals for filtering
+        const totalDownloaded = (r.downloaded || 0) + (r.chubDownloaded || 0);
+        const totalSkipped = (r.skipped || 0) + (r.chubSkipped || 0);
+        const totalErrors = (r.errors || 0) + (r.chubErrors || 0);
+        const hasAnyMedia = r.totalUrls > 0 || r.chubDownloaded > 0 || r.chubSkipped > 0 || r.chubErrors > 0;
+        
+        // Apply filter (includes both embedded and Chub gallery)
+        if (filter === 'downloaded' && totalDownloaded === 0) return false;
+        if (filter === 'skipped' && totalSkipped === 0) return false;
+        if (filter === 'errors' && totalErrors === 0) return false;
         if (filter === 'incomplete' && !r.incomplete) return false;
-        if (filter === 'none' && r.totalUrls > 0) return false;
+        if (filter === 'none' && hasAnyMedia) return false;
         
         // Apply search
         if (search && !r.name.toLowerCase().includes(search)) return false;
         
         return true;
     });
+}
+
+/**
+ * Save bulk summary modal state before opening character modal
+ */
+function saveBulkSummaryModalState() {
+    const modal = bulkSummaryModal;
+    bulkSummaryModalState.wasOpen = modal && !modal.classList.contains('hidden');
+    bulkSummaryModalState.scrollPosition = bulkSummaryList ? bulkSummaryList.scrollTop : 0;
+    bulkSummaryModalState.currentPage = bulkSummaryCurrentPage;
+    bulkSummaryModalState.filterValue = bulkSummaryFilterSelect?.value || 'all';
+    bulkSummaryModalState.searchValue = bulkSummarySearch?.value || '';
+}
+
+/**
+ * Restore bulk summary modal state after closing character modal
+ */
+function restoreBulkSummaryModalState() {
+    if (!bulkSummaryModalState.wasOpen) return;
+    
+    // Restore filter/search values
+    if (bulkSummaryFilterSelect) bulkSummaryFilterSelect.value = bulkSummaryModalState.filterValue;
+    if (bulkSummarySearch) bulkSummarySearch.value = bulkSummaryModalState.searchValue;
+    bulkSummaryCurrentPage = bulkSummaryModalState.currentPage;
+    
+    // Show the modal
+    bulkSummaryModal.classList.remove('hidden');
+    
+    // Re-render and restore scroll position
+    renderBulkSummaryList();
+    
+    setTimeout(() => {
+        if (bulkSummaryList) {
+            bulkSummaryList.scrollTop = bulkSummaryModalState.scrollPosition;
+        }
+    }, 50);
+}
+
+/**
+ * Open character modal from bulk summary list
+ */
+function openCharFromBulkSummary(avatar) {
+    const char = allCharacters.find(c => c.avatar === avatar);
+    if (!char) {
+        showToast('Character not found', 'error');
+        return;
+    }
+    
+    // Save current bulk summary state
+    saveBulkSummaryModalState();
+    
+    // Hide bulk summary modal
+    bulkSummaryModal.classList.add('hidden');
+    
+    // Open character modal
+    openModal(char);
 }
 
 /**
@@ -9315,22 +13689,38 @@ function renderBulkSummaryList() {
             const hasChubStats = r.chubDownloaded > 0 || r.chubSkipped > 0 || r.chubErrors > 0;
             const totalEmbedded = (r.downloaded || 0) + (r.skipped || 0) + (r.errors || 0);
             const hasEmbeddedStats = totalEmbedded > 0;
+            const hasAnyMedia = hasEmbeddedStats || hasChubStats;
+            
+            // Build embedded stats section
+            let embeddedHtml = '';
+            if (hasEmbeddedStats) {
+                const parts = [];
+                if (r.downloaded > 0) parts.push(`<span class="downloaded" title="${r.downloaded} new file(s) downloaded"><i class="fa-solid fa-download"></i>${r.downloaded}</span>`);
+                if (r.skipped > 0) parts.push(`<span class="skipped" title="${r.skipped} file(s) already local"><i class="fa-solid fa-check"></i>${r.skipped}</span>`);
+                if (r.errors > 0) parts.push(`<span class="errors" title="${r.errors} file(s) failed"><i class="fa-solid fa-xmark"></i>${r.errors}</span>`);
+                if (bulkSummaryShowRenamed && r.renamed > 0) parts.push(`<span class="renamed" title="${r.renamed} file(s) renamed"><i class="fa-solid fa-file-pen"></i>${r.renamed}</span>`);
+                embeddedHtml = `<div class="media-source-group embedded" title="Embedded media from character data"><i class="fa-solid fa-file-code source-icon"></i>${parts.join('')}</div>`;
+            }
+            
+            // Build Chub gallery stats section
+            let chubHtml = '';
+            if (hasChubStats) {
+                const parts = [];
+                if (r.chubDownloaded > 0) parts.push(`<span class="downloaded" title="${r.chubDownloaded} gallery image(s) downloaded from Chub"><i class="fa-solid fa-download"></i>${r.chubDownloaded}</span>`);
+                if (r.chubSkipped > 0) parts.push(`<span class="skipped" title="${r.chubSkipped} gallery image(s) already local"><i class="fa-solid fa-check"></i>${r.chubSkipped}</span>`);
+                if (r.chubErrors > 0) parts.push(`<span class="errors" title="${r.chubErrors} gallery image(s) failed"><i class="fa-solid fa-xmark"></i>${r.chubErrors}</span>`);
+                chubHtml = `<div class="media-source-group chub" title="ChubAI gallery images"><i class="fa-solid fa-images source-icon"></i>${parts.join('')}</div>`;
+            }
             
             return `
             <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
                 <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
-                <span class="char-name" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>
+                <a class="char-name-link" href="#" onclick="openCharFromBulkSummary('${escapeHtml(r.avatar)}'); return false;" title="Click to view ${escapeHtml(r.name)}">${escapeHtml(r.name)}</a>
                 <div class="char-stats">
-                    ${!hasEmbeddedStats && !hasChubStats
-                        ? '<span class="none" title="Character has no embedded remote media URLs"><i class="fa-solid fa-minus"></i> No media</span>'
-                        : `
-                            ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
-                            ${r.downloaded > 0 ? `<span class="downloaded" title="${r.downloaded} embedded file(s) newly downloaded"><i class="fa-solid fa-download"></i> ${r.downloaded}</span>` : ''}
-                            ${bulkSummaryShowRenamed && r.renamed > 0 ? `<span class="renamed" title="${r.renamed} file(s) renamed to localized format"><i class="fa-solid fa-file-pen"></i> ${r.renamed}</span>` : ''}
-                            ${r.skipped > 0 ? `<span class="skipped" title="${r.skipped} embedded file(s) already exist locally"><i class="fa-solid fa-forward"></i> ${r.skipped}</span>` : ''}
-                            ${r.errors > 0 ? `<span class="errors" title="${r.errors} embedded file(s) failed to download"><i class="fa-solid fa-xmark"></i> ${r.errors}</span>` : ''}
-                            ${hasChubStats ? `<span class="chub-gallery-stats" title="ChubAI Gallery: ${r.chubDownloaded || 0} downloaded, ${r.chubSkipped || 0} already local, ${r.chubErrors || 0} failed"><i class="fa-solid fa-images"></i> ${r.chubDownloaded || 0}/${r.chubSkipped || 0}/${r.chubErrors || 0}</span>` : ''}
-                        `
+                    ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
+                    ${!hasAnyMedia 
+                        ? '<span class="none" title="Character has no embedded remote media URLs and no Chub gallery"><i class="fa-solid fa-minus"></i> No media</span>'
+                        : `${embeddedHtml}${chubHtml}`
                     }
                 </div>
             </div>
@@ -9346,7 +13736,7 @@ function renderBulkSummaryList() {
 /**
  * Show the bulk summary modal with results
  */
-function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames = false) {
+function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     // Calculate totals
     const totals = bulkLocalizeResults.reduce((acc, r) => {
         acc.characters++;
@@ -9363,50 +13753,117 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames 
         return acc;
     }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, withMedia: 0, incomplete: 0, chubDownloaded: 0, chubSkipped: 0, chubErrors: 0, withChubGallery: 0 });
     
-    const hasChubStats = totals.chubDownloaded > 0 || totals.chubSkipped > 0 || totals.chubErrors > 0;
+    const hasEmbedded = totals.downloaded > 0 || totals.skipped > 0 || totals.errors > 0;
+    const hasChub = totals.chubDownloaded > 0 || totals.chubSkipped > 0 || totals.chubErrors > 0;
+    const totalDownloaded = totals.downloaded + totals.chubDownloaded;
+    const totalSkipped = totals.skipped + totals.chubSkipped;
+    const totalErrors = totals.errors + totals.chubErrors;
     
-    // Render overview with tooltips and icons
+    // Build the overview with two media source sections
     bulkSummaryOverview.innerHTML = `
-        <div class="bulk-summary-stat" title="Total characters scanned in this run">
-            <span class="stat-value">${totals.characters}</span>
-            <span class="stat-label"><i class="fa-solid fa-user"></i> ${wasAborted ? 'Processed' : 'Characters'}</span>
+        <!-- Summary header row -->
+        <div class="bulk-summary-header-row">
+            <div class="bulk-summary-stat main" title="Characters processed in this scan">
+                <span class="stat-value">${totals.characters}</span>
+                <span class="stat-label"><i class="fa-solid fa-user"></i> ${wasAborted ? 'Processed' : 'Scanned'}</span>
+            </div>
+            ${skippedCompleted > 0 ? `
+            <div class="bulk-summary-stat previously-done" title="Characters skipped because media was already localized in a previous run">
+                <span class="stat-value">${skippedCompleted}</span>
+                <span class="stat-label"><i class="fa-solid fa-check-double"></i> Previously Done</span>
+            </div>
+            ` : ''}
+            ${totals.incomplete > 0 ? `
+            <div class="bulk-summary-stat incomplete" title="Characters that had download errors or were interrupted mid-process">
+                <span class="stat-value">${totals.incomplete}</span>
+                <span class="stat-label"><i class="fa-solid fa-exclamation-triangle"></i> Incomplete</span>
+            </div>
+            ` : ''}
         </div>
-        ${skippedCompleted > 0 ? `
-        <div class="bulk-summary-stat previously-done" title="Characters skipped because they were processed in a previous run">
-            <span class="stat-value">${skippedCompleted}</span>
-            <span class="stat-label"><i class="fa-solid fa-check-double"></i> Previously Done</span>
+        
+        <!-- Two-column media sources -->
+        <div class="bulk-summary-media-sources">
+            <!-- Embedded Media Column -->
+            <div class="bulk-summary-source embedded ${!hasEmbedded ? 'empty' : ''}">
+                <div class="source-header">
+                    <i class="fa-solid fa-file-code"></i>
+                    <span>Embedded Media</span>
+                    <span class="source-hint" title="Images and media URLs found within character description, personality, first message, and other text fields">?</span>
+                </div>
+                <div class="source-stats">
+                    <div class="source-stat downloaded" title="New files downloaded from remote URLs embedded in character data and saved to gallery">
+                        <i class="fa-solid fa-download"></i>
+                        <span class="value">${totals.downloaded}</span>
+                        <span class="label">Downloaded</span>
+                    </div>
+                    <div class="source-stat skipped" title="Files that were already present in the local gallery (matched by content hash)">
+                        <i class="fa-solid fa-check"></i>
+                        <span class="value">${totals.skipped}</span>
+                        <span class="label">Already Local</span>
+                    </div>
+                    <div class="source-stat errors" title="Files that failed to download due to network errors, missing files, or access restrictions">
+                        <i class="fa-solid fa-xmark"></i>
+                        <span class="value">${totals.errors}</span>
+                        <span class="label">Failed</span>
+                    </div>
+                    ${totals.renamed > 0 ? `
+                    <div class="source-stat renamed" title="Existing gallery files that were renamed to localized_media_* format for proper hash-based lookup">
+                        <i class="fa-solid fa-file-pen"></i>
+                        <span class="value">${totals.renamed}</span>
+                        <span class="label">Renamed</span>
+                    </div>
+                    ` : ''}
+                </div>
+                ${!hasEmbedded ? '<div class="source-empty">No embedded media found</div>' : ''}
+            </div>
+            
+            <!-- Chub Gallery Column -->
+            <div class="bulk-summary-source chub ${!hasChub ? 'empty' : ''}">
+                <div class="source-header">
+                    <i class="fa-solid fa-images"></i>
+                    <span>Chub Gallery</span>
+                    <span class="source-hint" title="Gallery images from ChubAI for characters with a chub.ai link. Downloaded from the character's public gallery page.">?</span>
+                </div>
+                <div class="source-stats">
+                    <div class="source-stat downloaded" title="New gallery images downloaded from ChubAI and saved to the character's local gallery">
+                        <i class="fa-solid fa-download"></i>
+                        <span class="value">${totals.chubDownloaded}</span>
+                        <span class="label">Downloaded</span>
+                    </div>
+                    <div class="source-stat skipped" title="Gallery images that were already present locally (matched by content hash)">
+                        <i class="fa-solid fa-check"></i>
+                        <span class="value">${totals.chubSkipped}</span>
+                        <span class="label">Already Local</span>
+                    </div>
+                    <div class="source-stat errors" title="Gallery images that failed to download from ChubAI">
+                        <i class="fa-solid fa-xmark"></i>
+                        <span class="value">${totals.chubErrors}</span>
+                        <span class="label">Failed</span>
+                    </div>
+                </div>
+                ${!hasChub ? '<div class="source-empty">No Chub galleries processed</div>' : ''}
+                ${hasChub ? `<div class="source-footer">${totals.withChubGallery} character${totals.withChubGallery !== 1 ? 's' : ''} with gallery</div>` : ''}
+            </div>
         </div>
-        ` : ''}
-        <div class="bulk-summary-stat downloaded" title="Total media files newly downloaded to gallery (embedded + Chub gallery)">
-            <span class="stat-value">${totals.downloaded + totals.chubDownloaded}</span>
-            <span class="stat-label"><i class="fa-solid fa-download"></i> Downloaded</span>
+        
+        <!-- Grand totals row -->
+        <div class="bulk-summary-totals">
+            <div class="total-item downloaded" title="Total new files downloaded from all sources">
+                <i class="fa-solid fa-download"></i>
+                <span class="total-value">${totalDownloaded}</span>
+                <span class="total-label">Total Downloaded</span>
+            </div>
+            <div class="total-item skipped" title="Total files already present locally">
+                <i class="fa-solid fa-check"></i>
+                <span class="total-value">${totalSkipped}</span>
+                <span class="total-label">Already Local</span>
+            </div>
+            <div class="total-item errors" title="Total files that failed to download">
+                <i class="fa-solid fa-xmark"></i>
+                <span class="total-value">${totalErrors}</span>
+                <span class="total-label">Failed</span>
+            </div>
         </div>
-        <div class="bulk-summary-stat skipped" title="Media files that already existed locally (matched by content hash)">
-            <span class="stat-value">${totals.skipped + totals.chubSkipped}</span>
-            <span class="stat-label"><i class="fa-solid fa-forward"></i> Already Local</span>
-        </div>
-        <div class="bulk-summary-stat errors" title="Media files that failed to download">
-            <span class="stat-value">${totals.errors + totals.chubErrors}</span>
-            <span class="stat-label"><i class="fa-solid fa-xmark"></i> Failed</span>
-        </div>
-        ${fixFilenames ? `
-        <div class="bulk-summary-stat renamed" title="Existing files renamed to localized_media_* format">
-            <span class="stat-value">${totals.renamed}</span>
-            <span class="stat-label"><i class="fa-solid fa-file-pen"></i> Renamed</span>
-        </div>
-        ` : ''}
-        ${hasChubStats ? `
-        <div class="bulk-summary-stat chub-gallery" title="ChubAI gallery images processed for ${totals.withChubGallery} linked character(s)">
-            <span class="stat-value">${totals.chubDownloaded}/${totals.chubSkipped}/${totals.chubErrors}</span>
-            <span class="stat-label"><i class="fa-solid fa-images"></i> Chub Gallery</span>
-        </div>
-        ` : ''}
-        ${totals.incomplete > 0 ? `
-        <div class="bulk-summary-stat incomplete" title="Characters with download errors or that were interrupted">
-            <span class="stat-value">${totals.incomplete}</span>
-            <span class="stat-label"><i class="fa-solid fa-exclamation-triangle"></i> Incomplete</span>
-        </div>
-        ` : ''}
     `;
     
     // Reset filters
@@ -9414,8 +13871,8 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0, fixFilenames 
     bulkSummarySearch.value = '';
     bulkSummaryCurrentPage = 1;
     
-    // Store fixFilenames for list rendering
-    bulkSummaryShowRenamed = fixFilenames;
+    // Always show renamed column since we always rename non-localized duplicates
+    bulkSummaryShowRenamed = true;
     
     // Render list
     renderBulkSummaryList();
@@ -9458,8 +13915,6 @@ async function runBulkLocalization() {
     bulkLocalizeAborted = false;
     bulkLocalizeResults = [];
     
-    // debug: fix filenames for images localized before current spec, rename to localized_media_* format
-    const fixFilenames = getSetting('fixFilenames') || false;
     // Include Chub gallery downloads for linked characters
     const includeChubGallery = getSetting('includeChubGallery') || false;
     
@@ -9501,6 +13956,8 @@ async function runBulkLocalization() {
         
         const char = characters[i];
         const charName = getCharacterName(char, 'Unknown');
+        // Get unique folder name if enabled
+        const folderName = getGalleryFolderName(char);
         
         // Skip characters that already completed successfully in previous runs
         if (char.avatar && completedAvatars.has(char.avatar)) {
@@ -9534,15 +13991,14 @@ async function runBulkLocalization() {
             bulkLocalizeFileFill.style.width = '0%';
             
             // Download media for this character with abort support
-            const downloadResult = await downloadEmbeddedMediaForCharacter(charName, mediaUrls, {
+            const downloadResult = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
                 onProgress: (current, total) => {
                     if (!bulkLocalizeAborted) {
                         bulkLocalizeFileCount.textContent = `${current}/${total} files`;
                         bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
                     }
                 },
-                shouldAbort: () => bulkLocalizeAborted,
-                fixFilenames: fixFilenames
+                shouldAbort: () => bulkLocalizeAborted
             });
             
             result.downloaded = downloadResult.success;
@@ -9589,7 +14045,7 @@ async function runBulkLocalization() {
                 bulkLocalizeFileFill.style.width = '0%';
                 
                 try {
-                    const chubResult = await downloadChubGalleryForCharacter(charName, chubData.id, {
+                    const chubResult = await downloadChubGalleryForCharacter(folderName, chubData.id, {
                         onProgress: (current, total) => {
                             if (!bulkLocalizeAborted) {
                                 bulkLocalizeFileCount.textContent = `Chub: ${current}/${total} files`;
@@ -9649,7 +14105,7 @@ async function runBulkLocalization() {
     
     // Hide progress modal and show summary
     bulkLocalizeModal.classList.add('hidden');
-    showBulkSummary(bulkLocalizeAborted, skippedCompleted, fixFilenames);
+    showBulkSummary(bulkLocalizeAborted, skippedCompleted);
     
     // Show toast
     const renamedMsg = totalRenamed > 0 ? `, renamed ${totalRenamed}` : '';
@@ -9748,7 +14204,7 @@ function extractFilenameFromUrl(url) {
  * @returns {boolean} Whether localization is enabled
  */
 function isMediaLocalizationEnabled(avatar) {
-    const globalEnabled = getSetting('mediaLocalizationEnabled');
+    const globalEnabled = getSetting('mediaLocalizationEnabled') !== false; // Default true
     const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
     
     // Check per-character override first
@@ -9766,7 +14222,7 @@ function isMediaLocalizationEnabled(avatar) {
  * @returns {object} { hasOverride: boolean, isEnabled: boolean, globalEnabled: boolean }
  */
 function getMediaLocalizationStatus(avatar) {
-    const globalEnabled = getSetting('mediaLocalizationEnabled') || false;
+    const globalEnabled = getSetting('mediaLocalizationEnabled') !== false; // Default true
     const perCharSettings = getSetting('mediaLocalizationPerChar') || {};
     const hasOverride = avatar && avatar in perCharSettings;
     const isEnabled = hasOverride ? perCharSettings[avatar] : globalEnabled;
@@ -9856,7 +14312,7 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
             mediaLocalizationCache[avatar] = urlMap;
         }
         
-        console.log(`[MediaLocalize] Built map for ${characterName}: ${Object.keys(urlMap).length} entries`);
+        debugLog(`[MediaLocalize] Built map for ${characterName}: ${Object.keys(urlMap).length} entries`);
         return urlMap;
         
     } catch (error) {
@@ -9991,20 +14447,22 @@ function replaceMediaUrlsInText(text, urlMap) {
 async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes) {
     const avatar = char?.avatar;
     const charName = char?.name || char?.data?.name || '';
+    // Use proper gallery folder name (may include _uuid suffix)
+    const folderName = getGalleryFolderName(char);
     
     // Check if localization is enabled
     if (!avatar || !isMediaLocalizationEnabled(avatar)) {
         return;
     }
     
-    // Build the URL map
-    const urlMap = await buildMediaLocalizationMap(charName, avatar);
+    // Build the URL map using the actual gallery folder
+    const urlMap = await buildMediaLocalizationMap(folderName, avatar);
     
     if (Object.keys(urlMap).length === 0) {
         return; // No localized files, nothing to replace
     }
     
-    console.log(`[MediaLocalize] Applying localization to modal for ${charName}`);
+    debugLog(`[MediaLocalize] Applying localization to modal for ${charName}`);
     
     // Update Description
     if (desc) {
@@ -10055,7 +14513,7 @@ async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings,
 function clearMediaLocalizationCache(avatar) {
     if (avatar && mediaLocalizationCache[avatar]) {
         delete mediaLocalizationCache[avatar];
-        console.log(`[MediaLocalize] Cleared cache for ${avatar}`);
+        debugLog(`[MediaLocalize] Cleared cache for ${avatar}`);
     }
 }
 
@@ -10143,6 +14601,15 @@ let duplicateModalState = {
     wasOpen: false,
     expandedGroups: new Set(),
     scrollPosition: 0
+};
+
+// State for returning to bulk summary modal after viewing a character
+let bulkSummaryModalState = {
+    wasOpen: false,
+    scrollPosition: 0,
+    currentPage: 1,
+    filterValue: 'all',
+    searchValue: ''
 };
 
 /**
@@ -10423,9 +14890,14 @@ function getCharField(char, field) {
 }
 
 /**
- * Calculate token count estimate from character data
+ * Calculate token count estimate from character data (cached)
  */
 function estimateTokens(char) {
+    // Use avatar as cache key since it's unique per character
+    const cacheKey = `tokens_${char?.avatar || char?.name || ''}`;
+    const cached = getCached(cacheKey);
+    if (cached !== undefined) return cached;
+    
     const desc = getCharField(char, 'description') || '';
     const personality = getCharField(char, 'personality') || '';
     const scenario = getCharField(char, 'scenario') || '';
@@ -10434,7 +14906,10 @@ function estimateTokens(char) {
     
     const totalText = desc + personality + scenario + firstMes + sysprompt;
     // Rough estimate: ~4 chars per token
-    return Math.round(totalText.length / 4);
+    const tokens = Math.round(totalText.length / 4);
+    
+    setCached(cacheKey, tokens);
+    return tokens;
 }
 
 /**
@@ -10462,24 +14937,24 @@ function calculateCharacterSimilarity(charA, charB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON ===
+    // === NAME COMPARISON (reduced weight - some creators use taglines) ===
     const nameA = getCharField(charA, 'name') || '';
     const nameB = getCharField(charB, 'name') || '';
     const normalizedNameA = normalizeCharName(nameA);
     const normalizedNameB = normalizeCharName(nameB);
     
     if (nameA.toLowerCase().trim() === nameB.toLowerCase().trim() && nameA) {
-        score += 25;
-        breakdown.name = 25;
-        matchReasons.push('Exact name match');
-    } else if (normalizedNameA === normalizedNameB && normalizedNameA.length > 2) {
         score += 20;
         breakdown.name = 20;
+        matchReasons.push('Exact name match');
+    } else if (normalizedNameA === normalizedNameB && normalizedNameA.length > 2) {
+        score += 15;
+        breakdown.name = 15;
         matchReasons.push('Name variant match');
     } else if (normalizedNameA.length > 2 && normalizedNameB.length > 2) {
         const nameSim = stringSimilarity(normalizedNameA, normalizedNameB);
         if (nameSim >= 0.7) {
-            const nameScore = Math.round(nameSim * 15);
+            const nameScore = Math.round(nameSim * 12);
             score += nameScore;
             breakdown.name = nameScore;
             if (nameSim >= 0.85) {
@@ -10498,17 +14973,33 @@ function calculateCharacterSimilarity(charA, charB) {
         matchReasons.push('Same creator');
     }
     
-    // === DESCRIPTION COMPARISON ===
+    // === CREATOR NOTES COMPARISON (weighted heavily - often unique identifier) ===
+    const notesA = getCharField(charA, 'creator_notes') || '';
+    const notesB = getCharField(charB, 'creator_notes') || '';
+    
+    if (notesA && notesB && notesA.length > 50 && notesB.length > 50) {
+        const notesSim = contentSimilarity(notesA, notesB);
+        if (notesSim >= 0.25) { // Lower threshold - creator notes often have CSS/HTML differences
+            const notesScore = Math.round(notesSim * 25);
+            score += notesScore;
+            breakdown.creator_notes = notesScore;
+            if (notesSim >= 0.6) {
+                matchReasons.push(`${Math.round(notesSim * 100)}% creator notes match`);
+            }
+        }
+    }
+    
+    // === DESCRIPTION COMPARISON (increased weight) ===
     const descA = getCharField(charA, 'description') || '';
     const descB = getCharField(charB, 'description') || '';
     
-    if (descA && descB) {
+    if (descA && descB && descA.length > 50 && descB.length > 50) {
         const descSim = contentSimilarity(descA, descB);
-        if (descSim >= 0.3) { // Only count if somewhat similar
-            const descScore = Math.round(descSim * 20);
+        if (descSim >= 0.25) { // Lower threshold
+            const descScore = Math.round(descSim * 25);
             score += descScore;
             breakdown.description = descScore;
-            if (descSim >= 0.7) {
+            if (descSim >= 0.6) {
                 matchReasons.push(`${Math.round(descSim * 100)}% description match`);
             }
         }
@@ -10518,13 +15009,13 @@ function calculateCharacterSimilarity(charA, charB) {
     const firstMesA = getCharField(charA, 'first_mes') || '';
     const firstMesB = getCharField(charB, 'first_mes') || '';
     
-    if (firstMesA && firstMesB) {
+    if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30) {
         const firstMesSim = contentSimilarity(firstMesA, firstMesB);
-        if (firstMesSim >= 0.3) {
+        if (firstMesSim >= 0.25) {
             const fmScore = Math.round(firstMesSim * 15);
             score += fmScore;
             breakdown.first_mes = fmScore;
-            if (firstMesSim >= 0.7) {
+            if (firstMesSim >= 0.6) {
                 matchReasons.push(`${Math.round(firstMesSim * 100)}% first message match`);
             }
         }
@@ -10534,13 +15025,13 @@ function calculateCharacterSimilarity(charA, charB) {
     const persA = getCharField(charA, 'personality') || '';
     const persB = getCharField(charB, 'personality') || '';
     
-    if (persA && persB) {
+    if (persA && persB && persA.length > 20 && persB.length > 20) {
         const persSim = contentSimilarity(persA, persB);
         if (persSim >= 0.3) {
             const persScore = Math.round(persSim * 10);
             score += persScore;
             breakdown.personality = persScore;
-            if (persSim >= 0.8) {
+            if (persSim >= 0.7) {
                 matchReasons.push(`${Math.round(persSim * 100)}% personality match`);
             }
         }
@@ -10550,7 +15041,7 @@ function calculateCharacterSimilarity(charA, charB) {
     const scenA = getCharField(charA, 'scenario') || '';
     const scenB = getCharField(charB, 'scenario') || '';
     
-    if (scenA && scenB) {
+    if (scenA && scenB && scenA.length > 20 && scenB.length > 20) {
         const scenSim = contentSimilarity(scenA, scenB);
         if (scenSim >= 0.3) {
             const scenScore = Math.round(scenSim * 5);
@@ -10719,7 +15210,8 @@ function checkCharacterForDuplicates(newChar) {
         description: newChar.description || newChar.definition?.description || '',
         first_mes: newChar.first_mes || newChar.definition?.first_mes || '',
         personality: newChar.personality || newChar.definition?.personality || '',
-        scenario: newChar.scenario || newChar.definition?.scenario || ''
+        scenario: newChar.scenario || newChar.definition?.scenario || '',
+        creator_notes: newChar.creator_notes || newChar.definition?.creator_notes || ''
     };
     
     for (const existing of allCharacters) {
@@ -10766,47 +15258,164 @@ function checkCharacterForDuplicates(newChar) {
 }
 
 /**
- * Render a field diff between two characters
+ * Render a field diff between two characters - side by side comparison
  */
-function renderFieldDiff(fieldName, valueA, valueB, labelA = 'Original', labelB = 'Duplicate') {
+function renderFieldDiff(fieldName, valueA, valueB, labelA = 'Keep', labelB = 'Duplicate') {
     valueA = valueA || '';
     valueB = valueB || '';
     
-    const isSame = valueA.trim() === valueB.trim();
-    const truncateLength = 200;
-    
-    const truncate = (text) => {
-        if (text.length <= truncateLength) return escapeHtml(text);
-        return escapeHtml(text.substring(0, truncateLength)) + '...';
+    // Normalize for comparison - handle invisible whitespace differences
+    const normalizeText = (text) => {
+        return text
+            .replace(/\r\n/g, '\n')           // Normalize line endings
+            .replace(/\r/g, '\n')             // Handle old Mac line endings
+            .replace(/\u00A0/g, ' ')          // Non-breaking space to regular space
+            .replace(/\u200B/g, '')           // Remove zero-width spaces
+            .replace(/\t/g, '    ')           // Tabs to 4 spaces
+            .replace(/ +/g, ' ')              // Multiple spaces to single
+            .replace(/ *\n */g, '\n')         // Trim spaces around newlines
+            .trim();
     };
     
-    if (isSame && !valueA) return ''; // Both empty, don't show
+    const normA = normalizeText(valueA);
+    const normB = normalizeText(valueB);
+    const isSame = normA === normB;
     
+    // Check if normalization made a difference (raw values differ but normalized are same)
+    const rawDiffers = valueA !== valueB;
+    const normalizedAway = isSame && rawDiffers;
+    
+    // Both empty - don't show
+    if (isSame && !normA) return { html: '', isSame: true, isEmpty: true, normalizedAway: false };
+    
+    // Get icon for field type
+    const icons = {
+        'Description': 'fa-solid fa-scroll',
+        'Personality': 'fa-solid fa-brain',
+        'First Message': 'fa-solid fa-comment',
+        'Scenario': 'fa-solid fa-map',
+        'Example Messages': 'fa-solid fa-comments',
+        'System Prompt': 'fa-solid fa-terminal',
+        'Creator Notes': 'fa-solid fa-sticky-note',
+        'Tags': 'fa-solid fa-tags'
+    };
+    const icon = icons[fieldName] || 'fa-solid fa-file-alt';
+    
+    // Identical content (after normalization) - show once
     if (isSame) {
-        return `
-            <div class="char-dup-diff-section">
-                <div class="char-dup-diff-label">${escapeHtml(fieldName)} (identical)</div>
-                <div class="char-dup-diff-content same">${truncate(valueA)}</div>
-            </div>
-        `;
+        const wsNote = normalizedAway ? '<span class="diff-ws-note" title="The raw text differs only in whitespace (spaces, tabs, line endings)"><i class="fa-solid fa-asterisk"></i> whitespace differs</span>' : '';
+        const html = `<div class="char-dup-diff-section"><div class="char-dup-diff-label"><i class="${icon}"></i> ${escapeHtml(fieldName)} ${wsNote}</div><div class="char-dup-diff-content same"><div class="char-dup-diff-content-label">Both versions identical</div><div class="diff-text-content">${escapeHtml(normA)}</div></div></div>`;
+        return { html, isSame: true, isEmpty: false, normalizedAway };
     }
     
-    let html = `<div class="char-dup-diff-section"><div class="char-dup-diff-label">${escapeHtml(fieldName)}</div>`;
+    // Different content - show with diff highlighting
+    let keepHtml, dupHtml;
     
-    if (valueA) {
-        html += `<div class="char-dup-diff-content" style="margin-bottom: 5px;"><strong>${escapeHtml(labelA)}:</strong> ${truncate(valueA)}</div>`;
-    }
-    if (valueB) {
-        html += `<div class="char-dup-diff-content"><strong>${escapeHtml(labelB)}:</strong> ${truncate(valueB)}</div>`;
+    if (!normA) {
+        keepHtml = '<span class="diff-empty">(empty)</span>';
+        dupHtml = `<span class="diff-added">${escapeHtml(normB)}</span>`;
+    } else if (!normB) {
+        keepHtml = `<span class="diff-removed">${escapeHtml(normA)}</span>`;
+        dupHtml = '<span class="diff-empty">(empty)</span>';
+    } else {
+        // Both have content - find and highlight differences
+        const diffStart = findFirstDifference(normA, normB);
+        const diffEnd = findLastDifference(normA, normB);
+        
+        if (diffStart === -1) {
+            // No difference found (shouldn't happen since we checked isSame)
+            keepHtml = escapeHtml(normA);
+            dupHtml = escapeHtml(normB);
+        } else {
+            const oldChangeEnd = diffEnd.pos1 + 1;
+            const newChangeEnd = diffEnd.pos2 + 1;
+            keepHtml = buildHighlightedString(normA, diffStart, oldChangeEnd, 'diff-removed');
+            dupHtml = buildHighlightedString(normB, diffStart, newChangeEnd, 'diff-added');
+        }
     }
     
-    html += '</div>';
-    return html;
+    const html = `<div class="char-dup-diff-section"><div class="char-dup-diff-label"><i class="${icon}"></i> ${escapeHtml(fieldName)}</div><div class="char-dup-diff-stack"><div class="char-dup-diff-content keep"><div class="char-dup-diff-content-label"><i class="fa-solid fa-check"></i> ${escapeHtml(labelA)}</div><div class="diff-text-content">${keepHtml}</div></div><div class="char-dup-diff-content duplicate"><div class="char-dup-diff-content-label"><i class="fa-solid fa-trash"></i> ${escapeHtml(labelB)}</div><div class="diff-text-content">${dupHtml}</div></div></div></div>`;
+    return { html, isSame: false, isEmpty: false, normalizedAway: false };
 }
 
 /**
- * Render a character comparison card
+ * Render a tag comparison diff for duplicate detection
+ * @param {Array} tagsA - Tags from the first character
+ * @param {Array} tagsB - Tags from the second character
+ * @returns {Object} Object with html, isSame, isEmpty flags
  */
+function renderTagsDiff(tagsA, tagsB) {
+    const arrA = Array.isArray(tagsA) ? tagsA.map(t => String(t).trim()).filter(t => t) : [];
+    const arrB = Array.isArray(tagsB) ? tagsB.map(t => String(t).trim()).filter(t => t) : [];
+    
+    const setA = new Set(arrA);
+    const setB = new Set(arrB);
+    
+    // Find differences
+    const onlyInA = arrA.filter(t => !setB.has(t));
+    const onlyInB = arrB.filter(t => !setA.has(t));
+    const inBoth = arrA.filter(t => setB.has(t));
+    
+    const isSame = onlyInA.length === 0 && onlyInB.length === 0;
+    const isEmpty = arrA.length === 0 && arrB.length === 0;
+    
+    if (isEmpty) return { html: '', isSame: true, isEmpty: true };
+    
+    const icon = 'fa-solid fa-tags';
+    
+    // Helper to render tag pills
+    const renderTagPill = (tag, className = '') => 
+        `<span class="dup-tag-pill ${className}">${escapeHtml(tag)}</span>`;
+    
+    if (isSame) {
+        // All tags identical
+        const tagPills = arrA.map(t => renderTagPill(t)).join('');
+        const html = `
+            <div class="char-dup-diff-section">
+                <div class="char-dup-diff-label"><i class="${icon}"></i> Tags (${arrA.length})</div>
+                <div class="char-dup-diff-content same">
+                    <div class="char-dup-diff-content-label">Both versions identical</div>
+                    <div class="dup-tags-container">${tagPills}</div>
+                </div>
+            </div>`;
+        return { html, isSame: true, isEmpty: false };
+    }
+    
+    // Tags differ - show comparison
+    const keepTagsHtml = arrA.length === 0 
+        ? '<span class="diff-empty">(no tags)</span>'
+        : arrA.map(t => renderTagPill(t, setB.has(t) ? 'dup-tag-same' : 'dup-tag-removed')).join('');
+    
+    const dupTagsHtml = arrB.length === 0
+        ? '<span class="diff-empty">(no tags)</span>'
+        : arrB.map(t => renderTagPill(t, setA.has(t) ? 'dup-tag-same' : 'dup-tag-added')).join('');
+    
+    // Summary of differences
+    const diffSummary = [];
+    if (onlyInA.length > 0) diffSummary.push(`${onlyInA.length} only in Keep`);
+    if (onlyInB.length > 0) diffSummary.push(`${onlyInB.length} only in Duplicate`);
+    if (inBoth.length > 0) diffSummary.push(`${inBoth.length} shared`);
+    
+    const html = `
+        <div class="char-dup-diff-section">
+            <div class="char-dup-diff-label"><i class="${icon}"></i> Tags <span class="dup-diff-summary">(${diffSummary.join(', ')})</span></div>
+            <div class="char-dup-diff-container">
+                <div class="char-dup-diff-stack">
+                    <div class="char-dup-diff-content keep">
+                        <div class="char-dup-diff-content-label">Keep (${arrA.length})</div>
+                        <div class="dup-tags-container">${keepTagsHtml}</div>
+                    </div>
+                    <div class="char-dup-diff-content duplicate">
+                        <div class="char-dup-diff-content-label">Duplicate (${arrB.length})</div>
+                        <div class="dup-tags-container">${dupTagsHtml}</div>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+    
+    return { html, isSame: false, isEmpty: false };
+}
+
 /**
  * Compare two characters and return difference indicators
  * @param {Object} refChar - Reference character
@@ -10835,6 +15444,19 @@ function compareCharacterDifferences(refChar, dupChar) {
     const dupFirstMes = (getCharField(dupChar, 'first_mes') || '').trim();
     const refPers = (getCharField(refChar, 'personality') || '').trim();
     const dupPers = (getCharField(dupChar, 'personality') || '').trim();
+    const refScenario = (getCharField(refChar, 'scenario') || '').trim();
+    const dupScenario = (getCharField(dupChar, 'scenario') || '').trim();
+    
+    // Compare tags
+    const refTags = getTags(refChar);
+    const dupTags = getTags(dupChar);
+    const refTagSet = new Set(refTags.map(t => String(t).toLowerCase().trim()));
+    const dupTagSet = new Set(dupTags.map(t => String(t).toLowerCase().trim()));
+    const tagsMatch = refTagSet.size === dupTagSet.size && [...refTagSet].every(t => dupTagSet.has(t));
+    const tagDiff = dupTags.length - refTags.length;
+    // Count tags that are different (unique to each side)
+    const tagsOnlyInRef = [...refTagSet].filter(t => !dupTagSet.has(t)).length;
+    const tagsOnlyInDup = [...dupTagSet].filter(t => !refTagSet.has(t)).length;
     
     // Token difference threshold (consider different if >5% difference)
     const tokenDiffPercent = refTokens > 0 ? Math.abs(refTokens - dupTokens) / refTokens : 0;
@@ -10847,11 +15469,16 @@ function compareCharacterDifferences(refChar, dupChar) {
         description: refDesc !== dupDesc,
         firstMessage: refFirstMes !== dupFirstMes,
         personality: refPers !== dupPers,
+        scenario: refScenario !== dupScenario,
         // Which is newer
         isNewer: dupDate && refDate && dupDate > refDate,
         isOlder: dupDate && refDate && dupDate < refDate,
         hasMoreTokens: dupTokens > refTokens,
-        hasLessTokens: dupTokens < refTokens
+        hasLessTokens: dupTokens < refTokens,
+        tags: !tagsMatch,
+        tagDiff: tagDiff,  // positive = more tags, negative = fewer tags
+        tagsOnlyInKeep: tagsOnlyInRef,  // tags unique to keep/reference
+        tagsOnlyInDup: tagsOnlyInDup    // tags unique to duplicate
     };
 }
 
@@ -10885,6 +15512,19 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
         if (diffs.description) badges.push('<span class="diff-badge content-diff" title="Description differs"><i class="fa-solid fa-file-alt"></i> Desc</span>');
         if (diffs.firstMessage) badges.push('<span class="diff-badge content-diff" title="First message differs"><i class="fa-solid fa-comment"></i> 1st Msg</span>');
         if (diffs.personality) badges.push('<span class="diff-badge content-diff" title="Personality differs"><i class="fa-solid fa-brain"></i> Pers</span>');
+        if (diffs.scenario) badges.push('<span class="diff-badge content-diff" title="Scenario differs"><i class="fa-solid fa-map"></i> Scen</span>');
+        if (diffs.tags) {
+            let tagTooltip;
+            if (diffs.tagDiff > 0) {
+                tagTooltip = `Has ${diffs.tagDiff} more tag${diffs.tagDiff !== 1 ? 's' : ''}`;
+            } else if (diffs.tagDiff < 0) {
+                tagTooltip = `Has ${Math.abs(diffs.tagDiff)} fewer tag${Math.abs(diffs.tagDiff) !== 1 ? 's' : ''}`;
+            } else {
+                // Same count but different tags - show breakdown
+                tagTooltip = `${diffs.tagsOnlyInDup} unique here, ${diffs.tagsOnlyInKeep} unique in Keep`;
+            }
+            badges.push(`<span class="diff-badge tags-diff" title="${tagTooltip}"><i class="fa-solid fa-tags"></i> Tags</span>`);
+        }
         
         if (badges.length > 0) {
             diffBadges = `<div class="char-dup-card-diffs">${badges.join('')}</div>`;
@@ -10895,8 +15535,11 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const dateClass = diffs && diffs.date ? 'diff-highlight' : '';
     const tokenClass = diffs && diffs.tokens ? 'diff-highlight' : '';
     
+    // Create a unique ID for this card's gallery count element
+    const galleryCountId = `gallery-count-${char.avatar.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    
     return `
-        <div class="char-dup-card ${type}">
+        <div class="char-dup-card ${type}" data-avatar="${escapeHtml(char.avatar)}">
             <div class="char-dup-card-label">${label}</div>
             ${diffBadges}
             <div class="char-dup-card-header">
@@ -10909,20 +15552,15 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
             <div class="char-dup-card-meta">
                 <div class="char-dup-card-meta-item ${dateClass}"><i class="fa-solid fa-calendar"></i> ${dateStr}</div>
                 <div class="char-dup-card-meta-item ${tokenClass}"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
+                <div class="char-dup-card-meta-item gallery-count-item" id="${galleryCountId}" title="Gallery images"><i class="fa-solid fa-images"></i> <span class="gallery-count-value">...</span></div>
             </div>
             <div class="char-dup-card-actions">
-                ${isReference ? `
-                    <button class="action-btn secondary small" onclick="viewCharFromDuplicates('${escapeHtml(char.avatar)}')">
-                        <i class="fa-solid fa-eye"></i> View
-                    </button>
-                ` : `
-                    <button class="action-btn secondary small" onclick="viewCharFromDuplicates('${escapeHtml(char.avatar)}')">
-                        <i class="fa-solid fa-eye"></i> View
-                    </button>
-                    <button class="action-btn secondary small" style="color: #e74c3c;" onclick="deleteDuplicateChar('${escapeHtml(char.avatar)}', ${groupIdx})">
-                        <i class="fa-solid fa-trash"></i> Delete
-                    </button>
-                `}
+                <button class="action-btn secondary small" onclick="viewCharFromDuplicates('${escapeHtml(char.avatar)}')">
+                    <i class="fa-solid fa-eye"></i> View
+                </button>
+                <button class="action-btn secondary small" style="color: #e74c3c;" onclick="deleteDuplicateChar('${escapeHtml(char.avatar)}', ${groupIdx})">
+                    <i class="fa-solid fa-trash"></i> Delete
+                </button>
             </div>
         </div>
     `;
@@ -10989,11 +15627,12 @@ function renderDuplicateGroups(groups) {
                 if (dup.breakdown.personality) parts.push(`Pers: ${dup.breakdown.personality}`);
                 if (dup.breakdown.scenario) parts.push(`Scen: ${dup.breakdown.scenario}`);
                 if (parts.length > 0) {
-                    scoreBreakdown = `<div style="font-size: 0.6rem; color: var(--text-secondary); margin-top: 3px;">${parts.join(' \u2022 ')}</div>`;
+                    scoreBreakdown = `<div class="match-breakdown">${parts.join(' • ')}</div>`;
                 }
             }
             
-            // Build diff sections
+            // Build diff sections - now returns objects with html and isSame
+            // Compare more fields for better coverage
             const descDiff = renderFieldDiff('Description', 
                 getCharField(ref, 'description'), 
                 getCharField(dupChar, 'description'));
@@ -11003,32 +15642,115 @@ function renderDuplicateGroups(groups) {
             const firstMesDiff = renderFieldDiff('First Message', 
                 getCharField(ref, 'first_mes'), 
                 getCharField(dupChar, 'first_mes'));
+            const scenarioDiff = renderFieldDiff('Scenario', 
+                getCharField(ref, 'scenario'), 
+                getCharField(dupChar, 'scenario'));
+            const mesExampleDiff = renderFieldDiff('Example Messages', 
+                getCharField(ref, 'mes_example'), 
+                getCharField(dupChar, 'mes_example'));
+            const systemPromptDiff = renderFieldDiff('System Prompt', 
+                getCharField(ref, 'system_prompt'), 
+                getCharField(dupChar, 'system_prompt'));
+            const creatorNotesDiff = renderFieldDiff('Creator Notes', 
+                getCharField(ref, 'creator_notes'), 
+                getCharField(dupChar, 'creator_notes'));
+            const tagsDiff = renderTagsDiff(
+                getTags(ref), 
+                getTags(dupChar));
+            
+            // Separate into identical and different fields
+            const allDiffs = [descDiff, persDiff, scenarioDiff, firstMesDiff, mesExampleDiff, systemPromptDiff, creatorNotesDiff, tagsDiff];
+            const identicalFields = allDiffs.filter(d => d.isSame && !d.isEmpty).map(d => d.html).join('');
+            const differentFields = allDiffs.filter(d => !d.isSame && !d.isEmpty).map(d => d.html).join('');
+            
+            // Count fields
+            const identicalCount = allDiffs.filter(d => d.isSame && !d.isEmpty).length;
+            const differentCount = allDiffs.filter(d => !d.isSame && !d.isEmpty).length;
+            
+            // Check if any fields had whitespace-only differences that were normalized away
+            const wsNormalizedCount = allDiffs.filter(d => d.normalizedAway).length;
+            
+            // Build the diff summary message when all content is identical
+            let diffSummary = '';
+            if (differentCount === 0 && identicalCount > 0) {
+                // All content is identical - explain what differs (file/metadata)
+                const refAvatar = ref.avatar || '';
+                const dupAvatar = dupChar.avatar || '';
+                const refDate = ref.date_added ? new Date(Number(ref.date_added)) : (ref.create_date ? new Date(ref.create_date) : null);
+                const dupDate = dupChar.date_added ? new Date(Number(dupChar.date_added)) : (dupChar.create_date ? new Date(dupChar.create_date) : null);
+                
+                const metaDiffs = [];
+                if (refAvatar !== dupAvatar) {
+                    metaDiffs.push(`<div class="meta-diff-item"><i class="fa-solid fa-file-image"></i> <strong>Different files:</strong> <code>${escapeHtml(refAvatar)}</code> vs <code>${escapeHtml(dupAvatar)}</code></div>`);
+                }
+                if (refDate && dupDate && refDate.getTime() !== dupDate.getTime()) {
+                    const formatDate = (d) => d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                    metaDiffs.push(`<div class="meta-diff-item"><i class="fa-solid fa-calendar"></i> <strong>Added:</strong> ${formatDate(refDate)} vs ${formatDate(dupDate)}</div>`);
+                }
+                
+                // Note about whitespace differences
+                const wsNote = wsNormalizedCount > 0 
+                    ? `<div class="ws-diff-note"><i class="fa-solid fa-asterisk"></i> ${wsNormalizedCount} field${wsNormalizedCount !== 1 ? 's have' : ' has'} minor whitespace differences (extra spaces, line endings)</div>` 
+                    : '';
+                
+                diffSummary = `
+                    <div class="char-dup-identical-notice">
+                        <div class="identical-notice-header">
+                            <i class="fa-solid fa-clone"></i>
+                            <strong>Content Identical</strong> — These are duplicate files with the same character data
+                        </div>
+                        ${wsNote}
+                        ${metaDiffs.length > 0 ? `<div class="meta-diffs">${metaDiffs.join('')}</div>` : ''}
+                        <div class="identical-notice-hint">
+                            <i class="fa-solid fa-lightbulb"></i>
+                            You can safely delete one. Check gallery images before deciding which to keep.
+                        </div>
+                    </div>
+                `;
+            }
             
             html += `
                 <div class="char-dup-comparison" data-dup-idx="${dupIdx}">
                     ${renderCharDupCard(ref, 'reference', idx)}
                     <div class="char-dup-divider">
                         <i class="fa-solid fa-arrows-left-right"></i>
-                        <div class="char-dup-group-confidence ${dup.confidence}" style="font-size: 0.65rem;">
+                        <div class="char-dup-group-confidence ${dup.confidence} match-score">
                             ${dup.score || 0} pts
                         </div>
-                        <div style="font-size: 0.6rem; color: var(--text-secondary); text-align: center; max-width: 120px;">
+                        <div class="match-reason">
                             ${dup.matchReason}
                         </div>
                         ${scoreBreakdown}
                     </div>
                     ${renderCharDupCard(dupChar, 'duplicate', idx, dupIdx, diffs)}
                 </div>
-                ${(descDiff || persDiff || firstMesDiff) ? `
-                    <div class="char-dup-diff" style="padding: 0 15px 15px;">
-                        <details>
-                            <summary style="cursor: pointer; color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 10px;">
-                                <i class="fa-solid fa-code-compare"></i> Show Field Comparison
-                            </summary>
-                            ${descDiff}
-                            ${persDiff}
-                            ${firstMesDiff}
-                        </details>
+                ${diffSummary}
+                ${differentFields ? `
+                    <div class="char-dup-diff-container">
+                        <div class="char-dup-diff differs">
+                            <details open>
+                                <summary>
+                                    <i class="fa-solid fa-triangle-exclamation"></i> 
+                                    Different Fields
+                                    <span class="diff-count">${differentCount}</span>
+                                </summary>
+                                ${differentFields}
+                            </details>
+                        </div>
+                    </div>
+                ` : ''}
+                ${identicalFields && differentCount > 0 ? `
+                    <div class="char-dup-diff-container">
+                        <div class="char-dup-diff identical">
+                            <details>
+                                <summary>
+                                    <i class="fa-solid fa-check-circle"></i> 
+                                    Identical Fields
+                                    <span class="diff-count">${identicalCount}</span>
+                                </summary>
+                                ${identicalFields}
+                            </details>
+                        </div>
                     </div>
                 ` : ''}
             `;
@@ -11041,6 +15763,55 @@ function renderDuplicateGroups(groups) {
     });
     
     resultsEl.innerHTML = html;
+    
+    // Load gallery counts asynchronously after rendering
+    loadDuplicateGalleryCounts(groups);
+}
+
+/**
+ * Load and display gallery image counts for all characters in duplicate groups
+ * @param {Array} groups - The duplicate groups
+ */
+async function loadDuplicateGalleryCounts(groups) {
+    // Collect all unique characters from groups
+    const characters = new Map();
+    
+    groups.forEach(group => {
+        characters.set(group.reference.avatar, group.reference);
+        group.duplicates.forEach(dup => {
+            characters.set(dup.char.avatar, dup.char);
+        });
+    });
+    
+    // Load counts in parallel with a limit to avoid overloading
+    const BATCH_SIZE = 5;
+    const avatars = Array.from(characters.keys());
+    
+    for (let i = 0; i < avatars.length; i += BATCH_SIZE) {
+        const batch = avatars.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (avatar) => {
+            const char = characters.get(avatar);
+            try {
+                const galleryInfo = await getCharacterGalleryInfo(char);
+                const countEl = document.getElementById(`gallery-count-${avatar.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (countEl) {
+                    const countValue = countEl.querySelector('.gallery-count-value');
+                    if (countValue) {
+                        countValue.textContent = galleryInfo.count.toString();
+                        // Highlight if has images (yellow for warning about deletion)
+                        if (galleryInfo.count > 0) {
+                            countEl.classList.add('has-images');
+                            countEl.title = `${galleryInfo.count} gallery image${galleryInfo.count !== 1 ? 's' : ''} - will be deleted if character is removed`;
+                        } else {
+                            countEl.title = 'No gallery images';
+                        }
+                    }
+                }
+            } catch (e) {
+                debugLog(`[Gallery] Error loading count for ${avatar}:`, e);
+            }
+        }));
+    }
 }
 
 /**
@@ -11124,36 +15895,350 @@ function viewCharFromDuplicates(avatar) {
 }
 
 /**
- * Delete a duplicate character
+ * Delete a duplicate character with option to transfer gallery images
  */
 async function deleteDuplicateChar(avatar, groupIdx) {
     const char = allCharacters.find(c => c.avatar === avatar);
     if (!char) return;
     
     const name = getCharField(char, 'name') || avatar;
+    const avatarPath = getCharacterAvatarUrl(avatar);
     
-    if (!confirm(`Are you sure you want to delete "${name}"?\n\nThis action cannot be undone.`)) {
-        return;
+    // Get gallery info for this character
+    const galleryInfo = await getCharacterGalleryInfo(char);
+    const hasImages = galleryInfo.count > 0;
+    
+    // Find other characters this could be transferred to (same name or in same duplicate group)
+    const currentGroup = duplicateScanCache.groups?.[groupIdx];
+    const transferTargets = [];
+    
+    if (currentGroup) {
+        // Add reference character
+        if (currentGroup.reference.avatar !== avatar) {
+            transferTargets.push(currentGroup.reference);
+        }
+        // Add other duplicates
+        currentGroup.duplicates.forEach(d => {
+            if (d.char.avatar !== avatar) {
+                transferTargets.push(d.char);
+            }
+        });
     }
     
-    // Use the main deleteCharacter function which handles ST sync
-    const success = await deleteCharacter(char, false);
+    // Create enhanced delete confirmation modal
+    const deleteModal = document.createElement('div');
+    deleteModal.className = 'confirm-modal';
+    deleteModal.id = 'deleteDuplicateModal';
     
-    if (success) {
-        showToast(`Deleted "${name}"`, 'success');
+    // Check if unique gallery folders is enabled - critical for delete safety
+    const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders');
+    const sharesFolder = !uniqueFoldersEnabled && transferTargets.length > 0;
+    
+    // Build transfer targets HTML with more details
+    let transferTargetsHtml = '';
+    if (hasImages && transferTargets.length > 0) {
+        // Warning message if folders are shared
+        const sharedFolderWarning = sharesFolder ? `
+            <div class="dup-delete-shared-warning">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span><strong>Shared folder detected:</strong> Unique Gallery Folders is OFF. These characters share the same gallery folder, so images belong to both.</span>
+            </div>
+        ` : '';
         
-        // Invalidate cache
-        duplicateScanCache.timestamp = 0;
-        
-        // Refresh the gallery
-        await fetchCharacters(true);
-        
-        // Re-run duplicate scan with new data
-        const groups = await findCharacterDuplicates(true);
-        renderDuplicateGroups(groups);
-    } else {
-        showToast(`Failed to delete "${name}"`, 'error');
+        transferTargetsHtml = `
+            <div class="dup-delete-transfer-section">
+                <div class="dup-delete-transfer-header">
+                    <i class="fa-solid fa-images"></i>
+                    <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                </div>
+                ${sharedFolderWarning}
+                <div class="dup-delete-image-options">
+                    ${sharesFolder ? `
+                        <label class="dup-delete-option-radio selected" data-action="keep">
+                            <input type="radio" name="imageAction" value="keep" checked>
+                            <div class="option-content">
+                                <i class="fa-solid fa-folder-open"></i>
+                                <div class="option-text">
+                                    <strong>Keep images</strong>
+                                    <span>Images remain available to the other character</span>
+                                </div>
+                            </div>
+                        </label>
+                    ` : `
+                        <label class="dup-delete-option-radio selected" data-action="transfer">
+                            <input type="radio" name="imageAction" value="transfer" checked>
+                            <div class="option-content">
+                                <i class="fa-solid fa-arrow-right-arrow-left"></i>
+                                <div class="option-text">
+                                    <strong>Transfer images</strong>
+                                    <span>Move to another character's gallery</span>
+                                </div>
+                            </div>
+                        </label>
+                        <label class="dup-delete-option-radio" data-action="delete">
+                            <input type="radio" name="imageAction" value="delete">
+                            <div class="option-content">
+                                <i class="fa-solid fa-trash-can"></i>
+                                <div class="option-text">
+                                    <strong>Delete images</strong>
+                                    <span>Permanently remove all gallery images</span>
+                                </div>
+                            </div>
+                        </label>
+                        <label class="dup-delete-option-radio" data-action="keep">
+                            <input type="radio" name="imageAction" value="keep">
+                            <div class="option-content">
+                                <i class="fa-solid fa-folder-open"></i>
+                                <div class="option-text">
+                                    <strong>Keep images</strong>
+                                    <span>Leave in folder (can reassign later)</span>
+                                </div>
+                            </div>
+                        </label>
+                    `}
+                </div>
+                ${!sharesFolder ? `
+                    <div class="dup-delete-transfer-target" id="transferTargetWrapper">
+                        <label>Transfer to:</label>
+                        <div class="dup-delete-transfer-select-wrapper">
+                            ${transferTargets.map((t, idx) => {
+                                const tName = getCharField(t, 'name') || t.avatar;
+                                const tAvatar = getCharacterAvatarUrl(t.avatar);
+                                return `
+                                    <label class="dup-delete-transfer-radio ${idx === 0 ? 'selected' : ''}" data-avatar="${escapeHtml(t.avatar)}">
+                                        <input type="radio" name="transferTarget" value="${escapeHtml(t.avatar)}" ${idx === 0 ? 'checked' : ''}>
+                                        <img src="${tAvatar}" onerror="this.src='/img/ai4.png'" alt="">
+                                        <span>${escapeHtml(tName)}</span>
+                                    </label>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } else if (hasImages) {
+        transferTargetsHtml = `
+            <div class="dup-delete-transfer-section warning-only">
+                <div class="dup-delete-transfer-header">
+                    <i class="fa-solid fa-images"></i>
+                    <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                </div>
+                <div class="dup-delete-image-options">
+                    <label class="dup-delete-option-radio selected" data-action="delete">
+                        <input type="radio" name="imageAction" value="delete" checked>
+                        <div class="option-content">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <div class="option-text">
+                                <strong>Delete images</strong>
+                                <span>Permanently remove all gallery images</span>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="dup-delete-option-radio" data-action="keep">
+                        <input type="radio" name="imageAction" value="keep">
+                        <div class="option-content">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <div class="option-text">
+                                <strong>Keep images</strong>
+                                <span>Leave in folder (can reassign later)</span>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        `;
     }
+    
+    deleteModal.innerHTML = `
+        <div class="confirm-modal-content dup-delete-modal-content">
+            <div class="confirm-modal-header dup-delete-header">
+                <h3>
+                    <i class="fa-solid fa-trash"></i>
+                    Delete Character
+                </h3>
+                <button class="close-confirm-btn" id="closeDuplicateDeleteModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <div class="dup-delete-char-info">
+                    <img src="${avatarPath}" 
+                         alt="${escapeHtml(name)}" 
+                         class="dup-delete-avatar"
+                         onerror="this.src='/img/ai4.png'">
+                    <div class="dup-delete-char-details">
+                        <h4>${escapeHtml(name)}</h4>
+                        <p>by ${escapeHtml(getCharField(char, 'creator') || 'Unknown')}</p>
+                    </div>
+                </div>
+                
+                ${transferTargetsHtml}
+                
+                <p class="dup-delete-confirm-text">
+                    <i class="fa-solid fa-exclamation-circle"></i>
+                    Are you sure you want to delete this character? This cannot be undone.
+                </p>
+            </div>
+            <div class="confirm-modal-footer">
+                <button class="action-btn secondary" id="cancelDuplicateDeleteBtn">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+                <button class="action-btn danger" id="confirmDuplicateDeleteBtn">
+                    <i class="fa-solid fa-trash"></i> Delete
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(deleteModal);
+    
+    // Setup event handlers
+    const closeModal = () => deleteModal.remove();
+    
+    deleteModal.querySelector('#closeDuplicateDeleteModal').addEventListener('click', closeModal);
+    deleteModal.querySelector('#cancelDuplicateDeleteBtn').addEventListener('click', closeModal);
+    deleteModal.addEventListener('click', (e) => {
+        if (e.target === deleteModal) closeModal();
+    });
+    
+    // Image action radio button handling
+    const confirmBtn = deleteModal.querySelector('#confirmDuplicateDeleteBtn');
+    const transferTargetWrapper = deleteModal.querySelector('#transferTargetWrapper');
+    
+    const updateButtonText = () => {
+        const selectedAction = deleteModal.querySelector('input[name="imageAction"]:checked')?.value;
+        if (selectedAction === 'transfer') {
+            confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete & Transfer';
+        } else if (selectedAction === 'delete') {
+            confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete All';
+        } else {
+            confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
+        }
+    };
+    
+    deleteModal.querySelectorAll('.dup-delete-option-radio').forEach(option => {
+        option.addEventListener('click', () => {
+            deleteModal.querySelectorAll('.dup-delete-option-radio').forEach(o => o.classList.remove('selected'));
+            option.classList.add('selected');
+            option.querySelector('input').checked = true;
+            
+            // Show/hide transfer target selector
+            if (transferTargetWrapper) {
+                transferTargetWrapper.style.display = option.dataset.action === 'transfer' ? 'block' : 'none';
+            }
+            updateButtonText();
+        });
+    });
+    
+    // Initialize button text
+    updateButtonText();
+    
+    // Radio button selection styling for transfer targets
+    deleteModal.querySelectorAll('.dup-delete-transfer-radio').forEach(radio => {
+        radio.addEventListener('click', () => {
+            deleteModal.querySelectorAll('.dup-delete-transfer-radio').forEach(r => r.classList.remove('selected'));
+            radio.classList.add('selected');
+            radio.querySelector('input').checked = true;
+        });
+    });
+    
+    // Handle delete confirmation
+    deleteModal.querySelector('#confirmDuplicateDeleteBtn').addEventListener('click', async () => {
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+        
+        const imageAction = deleteModal.querySelector('input[name="imageAction"]:checked')?.value || 'keep';
+        
+        // Handle images based on selected action
+        if (hasImages && imageAction === 'transfer') {
+            // Transfer images to selected target
+            const selectedRadio = deleteModal.querySelector('input[name="transferTarget"]:checked');
+            if (selectedRadio?.value) {
+                const targetAvatar = selectedRadio.value;
+                const targetChar = allCharacters.find(c => c.avatar === targetAvatar);
+                
+                if (targetChar) {
+                    const targetFolder = getGalleryFolderName(targetChar);
+                    let transferred = 0;
+                    let errors = 0;
+                    
+                    confirmBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Transferring images...`;
+                    
+                    for (const fileName of galleryInfo.files) {
+                        const result = await moveImageToFolder(galleryInfo.folder, targetFolder, fileName, true);
+                        if (result.success) {
+                            transferred++;
+                        } else {
+                            errors++;
+                            debugLog(`[Transfer] Failed to transfer ${fileName}: ${result.error}`);
+                        }
+                    }
+                    
+                    if (transferred > 0) {
+                        showToast(`Transferred ${transferred} image${transferred !== 1 ? 's' : ''} to ${getCharField(targetChar, 'name')}`, 'success');
+                    }
+                    if (errors > 0) {
+                        showToast(`Failed to transfer ${errors} image${errors !== 1 ? 's' : ''}`, 'error');
+                    }
+                }
+            }
+        } else if (hasImages && imageAction === 'delete') {
+            // Delete all gallery images
+            confirmBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Deleting images...`;
+            let deleted = 0;
+            let errors = 0;
+            
+            const safeFolderName = sanitizeFolderName(galleryInfo.folder);
+            for (const fileName of galleryInfo.files) {
+                try {
+                    const deletePath = `/user/images/${safeFolderName}/${fileName}`;
+                    const response = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
+                        path: deletePath
+                    });
+                    if (response.ok) {
+                        deleted++;
+                    } else {
+                        errors++;
+                        debugLog(`[Delete] Failed to delete ${fileName}: ${response.status}`);
+                    }
+                } catch (e) {
+                    errors++;
+                    debugLog(`[Delete] Failed to delete ${fileName}:`, e);
+                }
+            }
+            
+            if (deleted > 0) {
+                showToast(`Deleted ${deleted} image${deleted !== 1 ? 's' : ''}`, 'info');
+            }
+            if (errors > 0) {
+                showToast(`Failed to delete ${errors} image${errors !== 1 ? 's' : ''}`, 'error');
+            }
+        }
+        // If imageAction === 'keep', do nothing with images
+        
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
+        
+        // Use the main deleteCharacter function which handles ST sync
+        const success = await deleteCharacter(char, false);
+        
+        if (success) {
+            showToast(`Deleted "${name}"`, 'success');
+            closeModal();
+            
+            // Invalidate cache
+            duplicateScanCache.timestamp = 0;
+            
+            // Refresh the gallery
+            await fetchCharacters(true);
+            
+            // Re-run duplicate scan with new data
+            const groups = await findCharacterDuplicates(true);
+            renderDuplicateGroups(groups);
+        } else {
+            showToast(`Failed to delete "${name}"`, 'error');
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '<i class="fa-solid fa-trash"></i> Delete';
+        }
+    });
 }
 
 /**
@@ -11301,7 +16386,7 @@ function initChatsView() {
         btn.addEventListener('click', (e) => {
             e.preventDefault();
             const view = btn.dataset.view;
-            console.log('View toggle clicked:', view);
+            debugLog('View toggle clicked:', view);
             switchView(view);
         });
     });
@@ -11352,7 +16437,7 @@ function initChatsView() {
         }
     });
     
-    console.log('Chats view initialized');
+    debugLog('Chats view initialized');
 }
 
 // Call init when DOM is ready
@@ -11486,7 +16571,7 @@ function saveChatCache(chats) {
             }))
         };
         localStorage.setItem(CHATS_CACHE_KEY, JSON.stringify(cacheData));
-        console.log(`[ChatsCache] Saved ${chats.length} chats to cache`);
+        debugLog(`[ChatsCache] Saved ${chats.length} chats to cache`);
     } catch (e) {
         console.warn('[ChatsCache] Failed to save cache:', e);
     }
@@ -11507,7 +16592,7 @@ async function loadAllChats(forceRefresh = false) {
     const isCacheValid = cached && cached.chats && cached.chats.length > 0;
     
     if (isCacheValid && !forceRefresh) {
-        console.log(`[ChatsCache] Using cached data (${Math.round(cacheAge/1000)}s old, ${cached.chats.length} chats)`);
+        debugLog(`[ChatsCache] Using cached data (${Math.round(cacheAge/1000)}s old, ${cached.chats.length} chats)`);
         
         // Reconstruct allChats from cache with character references
         allChats = cached.chats.map(cachedChat => {
@@ -11616,7 +16701,7 @@ async function fetchFreshChats(isBackground = false) {
         
         // Find chats that need preview loading
         const chatsNeedingPreviews = allChats.filter(c => c.preview === null);
-        console.log(`[ChatsCache] ${chatsNeedingPreviews.length} of ${allChats.length} chats need preview loading`);
+        debugLog(`[ChatsCache] ${chatsNeedingPreviews.length} of ${allChats.length} chats need preview loading`);
         
         if (chatsNeedingPreviews.length > 0) {
             await loadChatPreviews(chatsNeedingPreviews);
@@ -11643,11 +16728,11 @@ async function fetchFreshChats(isBackground = false) {
 async function loadChatPreviews(chatsToLoad = null) {
     const BATCH_SIZE = 5; // Fetch 5 at a time to avoid overwhelming the server
     const targetChats = chatsToLoad || allChats;
-    console.log(`[ChatPreviews] Starting to load previews for ${targetChats.length} chats`);
+    debugLog(`[ChatPreviews] Starting to load previews for ${targetChats.length} chats`);
     
     for (let i = 0; i < targetChats.length; i += BATCH_SIZE) {
         const batch = targetChats.slice(i, i + BATCH_SIZE);
-        console.log(`[ChatPreviews] Processing batch ${i/BATCH_SIZE + 1}, chats ${i} to ${i + batch.length}`);
+        debugLog(`[ChatPreviews] Processing batch ${i/BATCH_SIZE + 1}, chats ${i} to ${i + batch.length}`);
         
         await Promise.all(batch.map(async (chat) => {
             try {
@@ -11660,11 +16745,11 @@ async function loadChatPreviews(chatsToLoad = null) {
                     avatar_url: chat.character.avatar
                 });
                 
-                console.log(`[ChatPreviews] ${chat.file_name}: response status ${response.status}`);
+                debugLog(`[ChatPreviews] ${chat.file_name}: response status ${response.status}`);
                 
                 if (response.ok) {
                     const messages = await response.json();
-                    console.log(`[ChatPreviews] ${chat.file_name}: got ${messages?.length || 0} messages`);
+                    debugLog(`[ChatPreviews] ${chat.file_name}: got ${messages?.length || 0} messages`);
                     
                     if (messages && messages.length > 0) {
                         // Get last non-system message as preview
@@ -11696,7 +16781,7 @@ async function loadChatPreviews(chatsToLoad = null) {
         }));
     }
     
-    console.log(`[ChatPreviews] Finished loading all previews`);
+    debugLog(`[ChatPreviews] Finished loading all previews`);
 }
 
 // Update a chat card's preview text in the DOM
@@ -12073,7 +17158,7 @@ async function openChatPreview(chat) {
     try {
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
         
-        console.log(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
+        debugLog(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
         
         const response = await apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
             ch_name: chat.character.name,
@@ -12081,7 +17166,7 @@ async function openChatPreview(chat) {
             avatar_url: chat.character.avatar
         });
         
-        console.log(`[ChatPreview] Response status: ${response.status}`);
+        debugLog(`[ChatPreview] Response status: ${response.status}`);
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -12090,7 +17175,7 @@ async function openChatPreview(chat) {
         }
         
         const messages = await response.json();
-        console.log(`[ChatPreview] Got ${messages?.length || 0} messages`);
+        debugLog(`[ChatPreview] Got ${messages?.length || 0} messages`);
         renderChatMessages(messages, chat.character);
         
     } catch (e) {
@@ -12414,14 +17499,14 @@ async function saveChatToServer(chat, messages) {
     }
 }
 
-// Search input should also filter chats when in chats view
+// Search input should also filter chats when in chats view (debounced)
 const searchInputForChats = document.getElementById('searchInput');
 if (searchInputForChats) {
-    searchInputForChats.addEventListener('input', () => {
+    searchInputForChats.addEventListener('input', debounce(() => {
         if (currentView === 'chats') {
             renderChats();
         }
-    });
+    }, 150));
 }
 
 // ========================================
@@ -12558,12 +17643,10 @@ function isCharInLocalLibrary(chubChar) {
     return false;
 }
 
-// Dynamic tags - populated from ChubAI search results
+// Dynamic tags - populated from ChubAI API
 let chubPopularTags = [];
-const CHUB_FALLBACK_TAGS = [
-    'female', 'male', 'fantasy', 'anime', 'original', 'rpg', 
-    'romance', 'adventure', 'sci-fi', 'game', 'cute', 'monster'
-];
+let chubTagsLoading = false;
+let chubTagsLoaded = false;
 
 /**
  * Render creator notes with simple sanitized HTML (no iframe, no custom CSS)
@@ -13156,7 +18239,8 @@ function initCreatorNotesHandlers() {
                 // Build localization map if enabled for this character
                 let urlMap = null;
                 if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
-                    urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+                    const folderName = getGalleryFolderName(activeChar);
+                    urlMap = await buildMediaLocalizationMap(folderName, activeChar.avatar);
                 }
                 openCreatorNotesFullscreen(window.currentCreatorNotesContent, charName, urlMap);
             } else {
@@ -13412,7 +18496,8 @@ function initContentExpandHandlers() {
             
             let urlMap = null;
             if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
-                urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+                const folderName = getGalleryFolderName(activeChar);
+                urlMap = await buildMediaLocalizationMap(folderName, activeChar.avatar);
             }
             openContentFullscreen(content, 'First Message', 'fa-message', charName, urlMap);
         });
@@ -13433,7 +18518,8 @@ function initContentExpandHandlers() {
             
             let urlMap = null;
             if (activeChar && activeChar.avatar && isMediaLocalizationEnabled(activeChar.avatar)) {
-                urlMap = await buildMediaLocalizationMap(charName, activeChar.avatar);
+                const folderName = getGalleryFolderName(activeChar);
+                urlMap = await buildMediaLocalizationMap(folderName, activeChar.avatar);
             }
             openAltGreetingsFullscreen(greetings, charName, urlMap);
         });
@@ -13501,7 +18587,30 @@ function initChubView() {
         }
     });
     
+    // Show/hide clear button based on input content
+    on('chubSearchInput', 'input', (e) => {
+        const clearBtn = document.getElementById('chubClearSearchBtn');
+        if (clearBtn) {
+            clearBtn.classList.toggle('hidden', !e.target.value.trim());
+        }
+    });
+    
     on('chubSearchBtn', 'click', () => performChubSearch());
+    
+    // Clear search button
+    on('chubClearSearchBtn', 'click', () => {
+        const input = document.getElementById('chubSearchInput');
+        if (input) {
+            input.value = '';
+            input.focus();
+        }
+        // Hide the clear button
+        document.getElementById('chubClearSearchBtn')?.classList.add('hidden');
+        // Re-render tags to remove active states
+        renderChubPopularTags();
+        // Perform search (will show default results)
+        performChubSearch();
+    });
     
     // Creator search handlers
     on('chubCreatorSearchInput', 'keypress', (e) => {
@@ -13562,7 +18671,7 @@ function initChubView() {
                 return;
             }
             setter(e.target.checked);
-            console.log(`Filter ${id} set to:`, e.target.checked);
+            debugLog(`Filter ${id} set to:`, e.target.checked);
             updateChubFiltersButtonState();
             
             // For timeline mode with favorites filter, fetch favorite IDs first
@@ -13665,7 +18774,7 @@ function initChubView() {
     // Initialize NSFW toggle state (defaults to enabled)
     updateNsfwToggleState();
     
-    console.log('ChubAI view initialized');
+    debugLog('ChubAI view initialized');
 }
 
 // ============================================================================
@@ -13797,19 +18906,157 @@ function openChubTokenModal() {
     
     // Use classList.remove('hidden') to match how the modal is closed
     modal.classList.remove('hidden');
+    
+    // Fetch popular tags from ChubAI if not already loaded
+    if (!chubTagsLoaded && !chubTagsLoading) {
+        fetchChubPopularTags();
+    }
+}
+
+/**
+ * Fetch popular tags from ChubAI API by aggregating tags from top characters
+ * Uses a single request to get tags from the most popular characters
+ */
+async function fetchChubPopularTags() {
+    if (chubTagsLoading || chubTagsLoaded) return;
+    
+    chubTagsLoading = true;
+    renderChubPopularTags(); // Show loading state
+    
+    try {
+        // Fetch top 500 most downloaded characters - they'll have the most representative tags
+        const params = new URLSearchParams({
+            search: '',
+            first: '500',
+            sort: 'download_count',
+            nsfw: 'true',
+            nsfl: 'true',
+            include_forks: 'false',
+            min_tokens: '50'
+        });
+        
+        const headers = getChubHeaders(true);
+        
+        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+            method: 'GET',
+            headers
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const characters = extractNodes(data);
+        
+        // Aggregate tags from all characters
+        const tagCounts = new Map();
+        for (const char of characters) {
+            const topics = char.topics || [];
+            for (const tag of topics) {
+                const normalizedTag = tag.toLowerCase().trim();
+                if (normalizedTag && normalizedTag.length > 1 && normalizedTag.length < 30) {
+                    tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
+                }
+            }
+        }
+        
+        // Sort by frequency and take top 200 tags
+        const sortedTags = [...tagCounts.entries()]
+            .filter(([_, count]) => count >= 2) // At least 2 uses
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 200)
+            .map(([tag]) => tag);
+        
+        if (sortedTags.length > 0) {
+            chubPopularTags = sortedTags;
+            chubTagsLoaded = true;
+        }
+        
+        debugLog(`[ChubTags] Loaded ${chubPopularTags.length} popular tags from ${characters.length} characters`);
+        
+    } catch (error) {
+        console.error('[ChubTags] Error fetching popular tags:', error);
+    } finally {
+        chubTagsLoading = false;
+        renderChubPopularTags();
+    }
+}
+
+/**
+ * Add a tag to the search input (appending to existing search)
+ */
+function addTagToChubSearch(tag) {
+    const input = document.getElementById('chubSearchInput');
+    if (!input) return;
+    
+    const currentValue = input.value.trim();
+    
+    // Check if tag is already in the search
+    const existingTags = currentValue.split(/\s+/).filter(t => t);
+    if (existingTags.includes(tag)) {
+        // Tag already present - remove it (toggle behavior)
+        input.value = existingTags.filter(t => t !== tag).join(' ');
+    } else {
+        // Add tag to search
+        input.value = currentValue ? `${currentValue} ${tag}` : tag;
+    }
+    
+    // Update clear button visibility
+    const clearBtn = document.getElementById('chubClearSearchBtn');
+    if (clearBtn) {
+        clearBtn.classList.toggle('hidden', !input.value.trim());
+    }
+    
+    performChubSearch();
+}
+
+/**
+ * Check if a tag is currently in the search input
+ */
+function isTagInChubSearch(tag) {
+    const input = document.getElementById('chubSearchInput');
+    if (!input) return false;
+    
+    const currentTags = input.value.trim().toLowerCase().split(/\s+/).filter(t => t);
+    return currentTags.includes(tag.toLowerCase());
 }
 
 function renderChubPopularTags() {
     const container = document.getElementById('chubPopularTags');
     if (!container) return;
     
-    // Use dynamic tags if available, otherwise fallback
-    const tagsToShow = chubPopularTags.length > 0 ? chubPopularTags.slice(0, 12) : CHUB_FALLBACK_TAGS;
+    // Show loading state
+    if (chubTagsLoading) {
+        container.innerHTML = `
+            <span class="chub-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</span>
+        `;
+        return;
+    }
+    
+    // No tags available
+    if (chubPopularTags.length === 0) {
+        container.innerHTML = `
+            <span class="chub-tags-empty">No tags available</span>
+            <button class="chub-tag-btn chub-more-tags-btn" title="Retry loading tags">
+                <i class="fa-solid fa-rotate"></i> Retry
+            </button>
+        `;
+        container.querySelector('.chub-more-tags-btn')?.addEventListener('click', () => {
+            chubTagsLoaded = false;
+            fetchChubPopularTags();
+        });
+        return;
+    }
+    
+    // Show top tags with active state for selected ones
+    const tagsToShow = chubPopularTags.slice(0, 12);
     
     container.innerHTML = `
-        ${tagsToShow.map(tag => 
-            `<button class="chub-tag-btn" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`
-        ).join('')}
+        ${tagsToShow.map(tag => {
+            const isActive = isTagInChubSearch(tag);
+            return `<button class="chub-tag-btn${isActive ? ' active' : ''}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
+        }).join('')}
         <button class="chub-tag-btn chub-more-tags-btn" title="Browse all tags">
             <i class="fa-solid fa-ellipsis"></i> More
         </button>
@@ -13817,8 +19064,8 @@ function renderChubPopularTags() {
     
     container.querySelectorAll('.chub-tag-btn:not(.chub-more-tags-btn)').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.getElementById('chubSearchInput').value = btn.dataset.tag;
-            performChubSearch();
+            addTagToChubSearch(btn.dataset.tag);
+            renderChubPopularTags(); // Re-render to update active states
         });
     });
     
@@ -13830,28 +19077,36 @@ function renderChubPopularTags() {
 
 /**
  * Extract popular tags from ChubAI search results
- * Aggregates tags from characters and sorts by frequency
+ * Supplements existing tags if not fully loaded yet
  */
 function extractChubTagsFromResults(characters) {
+    // If we already have 200 tags loaded from API, don't update
+    if (chubTagsLoaded && chubPopularTags.length >= 150) return;
+    
     const tagCounts = new Map();
+    
+    // Start with existing tag counts
+    for (const tag of chubPopularTags) {
+        tagCounts.set(tag, 10); // Give existing tags a baseline
+    }
     
     for (const char of characters) {
         const topics = char.topics || [];
         for (const tag of topics) {
             const normalizedTag = tag.toLowerCase().trim();
-            if (normalizedTag && normalizedTag.length > 1) {
+            if (normalizedTag && normalizedTag.length > 1 && normalizedTag.length < 30) {
                 tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
             }
         }
     }
     
-    // Sort by frequency and take top tags
+    // Sort by frequency and take top 200 tags
     const sortedTags = [...tagCounts.entries()]
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 50)
+        .slice(0, 200)
         .map(([tag]) => tag);
     
-    if (sortedTags.length > 0) {
+    if (sortedTags.length > chubPopularTags.length) {
         chubPopularTags = sortedTags;
         renderChubPopularTags();
     }
@@ -13864,29 +19119,68 @@ function openChubTagsPopup() {
     // Remove existing popup if any
     document.getElementById('chubTagsPopup')?.remove();
     
-    const tagsToShow = chubPopularTags.length > 0 ? chubPopularTags : CHUB_FALLBACK_TAGS;
+    // If tags not loaded yet, try to fetch them
+    if (chubPopularTags.length === 0 && !chubTagsLoading) {
+        fetchChubPopularTags();
+    }
     
     const popup = document.createElement('div');
     popup.id = 'chubTagsPopup';
     popup.className = 'chub-tags-popup';
+    
+    const renderPopupTags = () => {
+        const listContainer = popup.querySelector('#chubTagsPopupList');
+        if (!listContainer) return;
+        
+        if (chubTagsLoading) {
+            listContainer.innerHTML = `<div class="chub-tags-popup-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>`;
+            return;
+        }
+        
+        if (chubPopularTags.length === 0) {
+            listContainer.innerHTML = `<div class="chub-tags-popup-empty">No tags available. <button class="retry-btn">Retry</button></div>`;
+            listContainer.querySelector('.retry-btn')?.addEventListener('click', () => {
+                chubTagsLoaded = false;
+                fetchChubPopularTags().then(() => renderPopupTags());
+            });
+            return;
+        }
+        
+        const filter = popup.querySelector('#chubTagsPopupSearch')?.value?.toLowerCase() || '';
+        const filteredTags = filter 
+            ? chubPopularTags.filter(tag => tag.includes(filter))
+            : chubPopularTags;
+        
+        listContainer.innerHTML = filteredTags.map(tag => {
+            const isActive = isTagInChubSearch(tag);
+            return `<button class="chub-popup-tag-btn${isActive ? ' active' : ''}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
+        }).join('');
+        
+        // Re-attach click handlers
+        listContainer.querySelectorAll('.chub-popup-tag-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                addTagToChubSearch(btn.dataset.tag);
+                btn.classList.toggle('active');
+                renderChubPopularTags(); // Update main tag bar
+            });
+        });
+    };
+    
     popup.innerHTML = `
         <div class="chub-tags-popup-content">
             <div class="chub-tags-popup-header">
-                <h3><i class="fa-solid fa-tags"></i> Browse Tags</h3>
+                <h3><i class="fa-solid fa-tags"></i> Browse Tags (${chubPopularTags.length})</h3>
                 <button class="close-btn" id="chubTagsPopupClose">&times;</button>
             </div>
             <div class="chub-tags-popup-search">
                 <input type="text" id="chubTagsPopupSearch" placeholder="Filter tags...">
             </div>
-            <div class="chub-tags-popup-list" id="chubTagsPopupList">
-                ${tagsToShow.map(tag => 
-                    `<button class="chub-popup-tag-btn" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`
-                ).join('')}
-            </div>
+            <div class="chub-tags-popup-list" id="chubTagsPopupList"></div>
         </div>
     `;
     
     document.body.appendChild(popup);
+    renderPopupTags();
     
     // Close button
     popup.querySelector('#chubTagsPopupClose').addEventListener('click', () => {
@@ -13900,24 +19194,11 @@ function openChubTagsPopup() {
         }
     });
     
-    // Tag buttons
-    popup.querySelectorAll('.chub-popup-tag-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.getElementById('chubSearchInput').value = btn.dataset.tag;
-            popup.remove();
-            performChubSearch();
-        });
-    });
-    
-    // Filter tags as user types
+    // Filter tags as user types (debounced)
     const searchInput = popup.querySelector('#chubTagsPopupSearch');
-    searchInput.addEventListener('input', (e) => {
-        const filter = e.target.value.toLowerCase();
-        popup.querySelectorAll('.chub-popup-tag-btn').forEach(btn => {
-            const tag = btn.dataset.tag.toLowerCase();
-            btn.style.display = tag.includes(filter) ? '' : 'none';
-        });
-    });
+    searchInput.addEventListener('input', debounce(() => {
+        renderPopupTags();
+    }, 100));
     
     searchInput.focus();
 }
@@ -14056,10 +19337,7 @@ async function loadChubTimeline(forceRefresh = false) {
             debugLog('[ChubTimeline] Loading next page with cursor');
         }
         
-        const headers = {
-            'Accept': 'application/json',
-            'Authorization': `Bearer ${chubToken}`
-        };
+        const headers = getChubHeaders(true);
         
         debugLog('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
         
@@ -14263,14 +19541,11 @@ async function supplementTimelineWithAuthorFetches() {
                     const url = `${CHUB_API_BASE}/search?${params.toString()}`;
                     
                     const response = await fetch(url, {
-                        headers: {
-                            'Accept': 'application/json',
-                            'Authorization': `Bearer ${chubToken}`
-                        }
+                        headers: getChubHeaders(true)
                     });
                     
                     if (!response.ok) {
-                        console.log(`[ChubTimeline] Error from ${author}: ${response.status}`);
+                        debugLog(`[ChubTimeline] Error from ${author}: ${response.status}`);
                         return [];
                     }
                     
@@ -14278,7 +19553,7 @@ async function supplementTimelineWithAuthorFetches() {
                     const nodes = data.nodes || data.data?.nodes || [];
                     return nodes;
                 } catch (e) {
-                    console.log(`[ChubTimeline] Error fetching from ${author}:`, e.message);
+                    debugLog(`[ChubTimeline] Error fetching from ${author}:`, e.message);
                     return [];
                 }
             });
@@ -14561,10 +19836,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
     try {
         // First get our own username from account
         const accountResp = await fetch(`${CHUB_API_BASE}/api/account`, {
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${chubToken}`
-            }
+            headers: getChubHeaders(true)
         });
         
         if (!accountResp.ok) {
@@ -14585,10 +19857,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         
         // Now get who we follow
         const followsResp = await fetch(`${CHUB_API_BASE}/api/follows/${myUsername}?page=1`, {
-            headers: {
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${chubToken}`
-            }
+            headers: getChubHeaders(true)
         });
         
         if (!followsResp.ok) {
@@ -14617,10 +19886,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         let page = 2;
         while (followedUsernames.size < totalCount && page <= 20) {
             const moreResp = await fetch(`${CHUB_API_BASE}/api/follows/${myUsername}?page=${page}`, {
-                headers: {
-                    'Accept': 'application/json',
-                    'Authorization': `Bearer ${chubToken}`
-                }
+                headers: getChubHeaders(true)
             });
             
             if (!moreResp.ok) break;
@@ -14704,13 +19970,12 @@ async function toggleFollowAuthor() {
         // ChubAI follow API: POST to follow, DELETE to unfollow
         // Correct endpoint: /api/follow/{username}
         const method = chubIsFollowingCurrentAuthor ? 'DELETE' : 'POST';
+        const headers = getChubHeaders(true);
+        headers['Content-Type'] = 'application/json';
+        
         const response = await fetch(`${CHUB_API_BASE}/api/follow/${chubAuthorFilter}`, {
             method: method,
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${chubToken}`
-            }
+            headers
         });
         
         if (!response.ok) {
@@ -14868,15 +20133,7 @@ async function loadChubCharacters(forceRefresh = false) {
         
         debugLog('[ChubAI] Search params:', params.toString());
         
-        const headers = {
-            'Accept': 'application/json',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        };
-        
-        // Add Authorization header if token available (URQL_TOKEN from chub.ai)
-        if (chubToken) {
-            headers['Authorization'] = `Bearer ${chubToken}`;
-        }
+        const headers = getChubHeaders(true);
         
         const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
             method: 'GET',
@@ -15355,6 +20612,8 @@ async function openChubCharPreview(char) {
             if (def.scenario) {
                 scenarioSection.style.display = 'block';
                 scenarioEl.innerHTML = formatRichText(def.scenario, char.name, true);
+                // Store full content for expand view
+                scenarioEl.dataset.fullContent = def.scenario;
             }
             
             // First message preview (truncated) - ChubAI uses first_message, not first_mes
@@ -15365,6 +20624,13 @@ async function openChubCharPreview(char) {
                     ? firstMsg.substring(0, 800) + '...' 
                     : firstMsg;
                 firstMsgEl.innerHTML = formatRichText(truncatedMsg, char.name, true);
+                // Store full content for expand view
+                firstMsgEl.dataset.fullContent = firstMsg;
+            }
+            
+            // Store full content for description/personality too
+            if (def.personality) {
+                descEl.dataset.fullContent = def.personality;
             }
             
             // Update greetings count if we have better data
@@ -15565,6 +20831,9 @@ async function downloadChubCharacter() {
     downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
     downloadBtn.disabled = true;
     
+    // Will be set if we're replacing an existing character, to inherit their gallery folder
+    let inheritedGalleryId = null;
+    
     try {
         // Use the same method as the working importChubCharacter function
         const fullPath = chubSelectedChar.fullPath;
@@ -15607,6 +20876,13 @@ async function downloadChubCharacter() {
                 // Delete the first (highest confidence) match before importing
                 const toReplace = duplicateMatches[0].char;
                 
+                // IMPORTANT: Capture the existing character's gallery_id BEFORE deleting
+                // so we can inherit it and keep using the same gallery folder
+                inheritedGalleryId = getCharacterGalleryId(toReplace);
+                if (inheritedGalleryId) {
+                    debugLog('[ChubDownload] Inheriting gallery_id from replaced character:', inheritedGalleryId);
+                }
+                
                 downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Replacing...';
                 
                 // Use the proper delete function that syncs with ST
@@ -15636,22 +20912,93 @@ async function downloadChubCharacter() {
             linkedAt: new Date().toISOString()
         };
         
+        // Add unique gallery_id if unique gallery folders are enabled
+        // Inherit from replaced character if available, otherwise generate new
+        if (getSetting('uniqueGalleryFolders')) {
+            if (inheritedGalleryId) {
+                characterCard.data.extensions.gallery_id = inheritedGalleryId;
+                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
+            } else {
+                characterCard.data.extensions.gallery_id = generateGalleryId();
+                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
+            }
+        }
+        
         debugLog('[ChubDownload] Character card built:', {
             name: characterCard.data.name,
             first_mes_length: characterCard.data.first_mes?.length,
-            description_length: characterCard.data.description?.length
+            description_length: characterCard.data.description?.length,
+            gallery_id: characterCard.data.extensions.gallery_id
         });
         
-        // Fetch the PNG image from avatars CDN
-        const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
-        const response = await fetch(pngUrl);
+        // Try multiple image URLs in order of preference
+        // Include avatar_url from API if available, chara_card_v2.png is ideal but not all characters have it
+        const imageUrls = [];
         
-        if (!response.ok) {
-            throw new Error(`Image download failed: ${response.status}`);
+        // Add PNG card URL first (has embedded data already)
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
+        
+        // Add avatar URL from selected character if available
+        if (chubSelectedChar.avatar_url) {
+            imageUrls.push(chubSelectedChar.avatar_url);
         }
         
-        // Get the PNG as ArrayBuffer
-        const pngBuffer = await response.arrayBuffer();
+        // Add avatar URL from metadata if available
+        if (metadata.avatar_url) {
+            imageUrls.push(metadata.avatar_url);
+        }
+        
+        // Add standard avatar URLs as fallback
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar`);
+        
+        // De-duplicate URLs
+        const uniqueUrls = [...new Set(imageUrls)];
+        
+        debugLog('[ChubDownload] Will try these image URLs:', uniqueUrls);
+        
+        let imageBuffer = null;
+        let needsConversion = false;
+        
+        for (const url of uniqueUrls) {
+            debugLog('[ChubDownload] Trying image URL:', url);
+            try {
+                // Try direct fetch first
+                let response = await fetch(url);
+                debugLog('[ChubDownload] Direct fetch result:', response.status, response.statusText);
+                
+                if (!response.ok) {
+                    // Try proxy fallback
+                    debugLog('[ChubDownload] Trying proxy...');
+                    const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+                    response = await fetch(proxyUrl);
+                    debugLog('[ChubDownload] Proxy fetch result:', response.status, response.statusText);
+                }
+                
+                if (response.ok) {
+                    imageBuffer = await response.arrayBuffer();
+                    needsConversion = url.endsWith('.webp') || response.headers.get('content-type')?.includes('webp');
+                    debugLog('[ChubDownload] Successfully fetched from:', url, 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
+                    break;
+                } else {
+                    debugLog('[ChubDownload] URL failed:', url, response.status);
+                }
+            } catch (e) {
+                debugLog('[ChubDownload] Failed to fetch', url, ':', e.message);
+            }
+        }
+        
+        if (!imageBuffer) {
+            throw new Error('Could not download character image from any available URL');
+        }
+        
+        // Convert WebP to PNG if needed using canvas
+        let pngBuffer = imageBuffer;
+        if (needsConversion) {
+            debugLog('[ChubDownload] Converting WebP to PNG...');
+            pngBuffer = await convertImageToPng(imageBuffer);
+        }
         
         // Embed character data into PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
@@ -15719,14 +21066,35 @@ async function downloadChubCharacter() {
         }
         
         // Refresh the gallery (force API fetch since we just imported)
-        fetchCharacters(true);
+        await fetchCharacters(true);
+        
+        // Register gallery folder override for the new character if unique folders enabled
+        if (getSetting('uniqueGalleryFolders') && characterCard.data.extensions?.gallery_id) {
+            // Find the newly imported character by name (it should now be in allCharacters)
+            const newChar = allCharacters.find(c => 
+                c.name === characterCard.data.name && 
+                getCharacterGalleryId(c) === characterCard.data.extensions.gallery_id
+            );
+            if (newChar) {
+                registerGalleryFolderOverride(newChar);
+                debugLog('[ChubDownload] Registered gallery folder override for:', newChar.name, buildUniqueGalleryFolderName(newChar));
+            } else {
+                debugWarn('[ChubDownload] Could not find newly imported character to register folder override');
+            }
+        }
         
         // Check for embedded media
         const mediaUrls = findCharacterMediaUrls(characterCard);
         
+        // Get the local avatar filename from the import result
+        const localAvatarFileName = result.file_name || fileName;
+        
         // Show import summary modal if there's anything to report (and setting enabled)
         const hasGallery = metadata.hasGallery || false;
         const hasMedia = mediaUrls.length > 0;
+        
+        // Get the gallery_id we assigned (for direct folder resolution)
+        const assignedGalleryId = characterCard.data.extensions?.gallery_id || null;
         
         if ((hasGallery || hasMedia) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
@@ -15734,12 +21102,16 @@ async function downloadChubCharacter() {
                     name: characterName,
                     fullPath: fullPath,
                     chubId: metadata.id || null,
-                    url: `https://chub.ai/characters/${fullPath}`
+                    url: `https://chub.ai/characters/${fullPath}`,
+                    avatar: localAvatarFileName,  // Local avatar filename for folder resolution
+                    galleryId: assignedGalleryId  // Include gallery_id for direct folder name construction
                 }] : [],
                 mediaCharacters: hasMedia ? [{
                     name: characterName,
-                    avatar: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
-                    mediaUrls: mediaUrls
+                    avatar: localAvatarFileName,  // Use local avatar filename, not Chub URL
+                    avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,  // Keep for display
+                    mediaUrls: mediaUrls,
+                    galleryId: assignedGalleryId  // Include gallery_id for direct folder name construction
                 }] : []
             });
         }
