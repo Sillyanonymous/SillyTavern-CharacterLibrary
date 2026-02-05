@@ -626,6 +626,19 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load card-updates module:', err);
     }
     
+    try {
+        const gallerySyncModule = await import('./gallery-sync.js');
+        ModuleLoader.register('gallery-sync', gallerySyncModule.default);
+        
+        // Expose gallery sync functions for library.js to use
+        window.auditGalleryIntegrity = gallerySyncModule.auditGalleryIntegrity;
+        window.fullGallerySync = gallerySyncModule.fullSync;
+        window.cleanupOrphanedMappings = gallerySyncModule.cleanupOrphanedMappings;
+        window.updateGallerySyncWarning = gallerySyncModule.updateWarningIndicator;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load gallery-sync module:', err);
+    }
+    
     // Initialize all modules
     await ModuleLoader.initAll(dependencies);
     

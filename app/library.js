@@ -723,6 +723,81 @@ function setupSettingsModal() {
                 return;
             }
             
+            // Use gallery-sync module if available
+            if (typeof window.fullGallerySync === 'function') {
+                const audit = window.auditGalleryIntegrity();
+                const needsId = audit.issues.missingIds;
+                const needsMapping = audit.issues.missingMappings;
+                
+                if (needsId === 0 && needsMapping === 0) {
+                    showToast('All characters already have gallery IDs and folder overrides!', 'info');
+                    updateGalleryMigrationStatus();
+                    return;
+                }
+                
+                let confirmMsg = '';
+                if (needsId > 0) {
+                    confirmMsg = `This will assign unique gallery IDs to ${needsId} character(s).\n\n`;
+                }
+                if (needsMapping > 0) {
+                    confirmMsg += `${needsMapping} character(s) need folder override registration.\n\n`;
+                }
+                confirmMsg += `• Gallery IDs are stored in character data (data.extensions.gallery_id)\n` +
+                    `• Folder overrides will be registered in SillyTavern settings\n` +
+                    `• Existing gallery images are NOT moved (they remain accessible)\n\n` +
+                    `Continue?`;
+                
+                if (!confirm(confirmMsg)) return;
+                
+                const originalText = migrateGalleryFoldersBtn.innerHTML;
+                migrateGalleryFoldersBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
+                migrateGalleryFoldersBtn.disabled = true;
+                
+                try {
+                    const result = await window.fullGallerySync({
+                        assignIds: true,
+                        createMappings: true,
+                        cleanupOrphans: false, // Don't cleanup during initial migration
+                        onProgress: (phase, current, total) => {
+                            if (galleryMigrationStatusText) {
+                                const phaseNames = { assignIds: 'Assigning IDs', createMappings: 'Creating mappings' };
+                                galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${phaseNames[phase] || phase}... ${current}/${total}`;
+                            }
+                        }
+                    });
+                    
+                    // Build result message
+                    let resultMsg = '';
+                    const idCount = result.assignedIds?.success || 0;
+                    const mapCount = result.createdMappings?.success || 0;
+                    const idErrors = result.assignedIds?.failed || 0;
+                    const mapErrors = result.createdMappings?.failed || 0;
+                    
+                    if (idCount > 0) resultMsg += `${idCount} IDs assigned`;
+                    if (mapCount > 0) resultMsg += (resultMsg ? ', ' : '') + `${mapCount} folder overrides synced`;
+                    if (idErrors > 0) resultMsg += (resultMsg ? ', ' : '') + `${idErrors} ID errors`;
+                    if (mapErrors > 0) resultMsg += (resultMsg ? ', ' : '') + `${mapErrors} sync failures`;
+                    
+                    if (idErrors === 0 && mapErrors === 0) {
+                        showToast(resultMsg || 'Migration complete!', 'success');
+                        setTimeout(() => {
+                            showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
+                        }, 1500);
+                    } else {
+                        showToast(resultMsg + '. Check console for details.', 'error');
+                    }
+                } catch (err) {
+                    console.error('[GalleryMigration] Failed:', err);
+                    showToast('Migration failed - check console', 'error');
+                }
+                
+                migrateGalleryFoldersBtn.innerHTML = originalText;
+                migrateGalleryFoldersBtn.disabled = false;
+                updateGalleryMigrationStatus();
+                return;
+            }
+            
+            // Fallback to old implementation if module not loaded
             const needsId = countCharactersNeedingGalleryId();
             const needsRegistration = countCharactersNeedingFolderRegistration();
             
@@ -1015,6 +1090,243 @@ function setupSettingsModal() {
     if (browseOrphanedFoldersBtn) {
         browseOrphanedFoldersBtn.onclick = () => {
             showOrphanedFoldersModal();
+        };
+    }
+    
+    // Gallery Sync - Audit button handler
+    const gallerySyncAuditBtn = document.getElementById('gallerySyncAuditBtn');
+    const gallerySyncFullBtn = document.getElementById('gallerySyncFullBtn');
+    const gallerySyncCleanupBtn = document.getElementById('gallerySyncCleanupBtn');
+    const gallerySyncStatus = document.getElementById('gallerySyncStatus');
+    
+    // Helper to update sync status UI
+    const updateSyncStatusUI = (audit) => {
+        if (!gallerySyncStatus) return;
+        
+        const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
+        const statusClass = totalIssues === 0 ? 'healthy' : 'issues';
+        
+        // Build expandable details for each issue type
+        const buildMissingIdsDetails = () => {
+            if (audit.missingGalleryId.length === 0) return '';
+            const items = audit.missingGalleryId.slice(0, 20).map(({ avatar, name }) => 
+                `<div class="sync-detail-item"><span class="sync-detail-name">${escapeHtml(name)}</span><span class="sync-detail-avatar">${escapeHtml(avatar)}</span></div>`
+            ).join('');
+            const moreCount = audit.missingGalleryId.length - 20;
+            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
+        };
+        
+        const buildMissingMappingsDetails = () => {
+            if (audit.missingMapping.length === 0) return '';
+            const items = audit.missingMapping.slice(0, 20).map(({ avatar, name, galleryId }) => 
+                `<div class="sync-detail-item"><span class="sync-detail-name">${escapeHtml(name)}</span><span class="sync-detail-id">ID: ${escapeHtml(galleryId)}</span></div>`
+            ).join('');
+            const moreCount = audit.missingMapping.length - 20;
+            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
+        };
+        
+        const buildOrphanedDetails = () => {
+            if (audit.orphanedMappings.length === 0) return '';
+            const items = audit.orphanedMappings.slice(0, 20).map(({ avatar, folder }) => 
+                `<div class="sync-detail-item"><span class="sync-detail-avatar">${escapeHtml(avatar)}</span><span class="sync-detail-folder">→ ${escapeHtml(folder)}</span></div>`
+            ).join('');
+            const moreCount = audit.orphanedMappings.length - 20;
+            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
+        };
+        
+        gallerySyncStatus.innerHTML = `
+            <div class="sync-result">
+                <div class="sync-result-header ${statusClass}">
+                    <i class="fa-solid ${totalIssues === 0 ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
+                    <span>${totalIssues === 0 ? 'All Synced' : `${totalIssues} Issue${totalIssues !== 1 ? 's' : ''} Found`}</span>
+                </div>
+                ${totalIssues > 0 ? `
+                <div class="sync-issues-list">
+                    ${audit.issues.missingIds > 0 ? `
+                        <details class="sync-issue-details">
+                            <summary class="sync-issue-item">
+                                <i class="fa-solid fa-id-card"></i>
+                                <span>${audit.issues.missingIds} missing gallery_id</span>
+                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
+                            </summary>
+                            ${buildMissingIdsDetails()}
+                        </details>
+                    ` : ''}
+                    ${audit.issues.missingMappings > 0 ? `
+                        <details class="sync-issue-details">
+                            <summary class="sync-issue-item">
+                                <i class="fa-solid fa-folder-open"></i>
+                                <span>${audit.issues.missingMappings} missing folder mapping</span>
+                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
+                            </summary>
+                            ${buildMissingMappingsDetails()}
+                        </details>
+                    ` : ''}
+                    ${audit.issues.orphaned > 0 ? `
+                        <details class="sync-issue-details">
+                            <summary class="sync-issue-item">
+                                <i class="fa-solid fa-ghost"></i>
+                                <span>${audit.issues.orphaned} orphaned mapping${audit.issues.orphaned !== 1 ? 's' : ''}</span>
+                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
+                            </summary>
+                            ${buildOrphanedDetails()}
+                        </details>
+                    ` : ''}
+                </div>
+                ` : ''}
+                <div class="sync-stats">
+                    <span><i class="fa-solid fa-users"></i> ${audit.totalCharacters} chars</span>
+                    <span><i class="fa-solid fa-folder"></i> ${audit.totalMappings} mappings</span>
+                    <span><i class="fa-solid fa-check"></i> ${audit.healthy.length} healthy</span>
+                </div>
+            </div>
+        `;
+    };
+    
+    if (gallerySyncAuditBtn) {
+        gallerySyncAuditBtn.onclick = () => {
+            if (typeof window.auditGalleryIntegrity !== 'function') {
+                showToast('Gallery sync module not loaded', 'error');
+                return;
+            }
+            
+            gallerySyncStatus.innerHTML = '<div class="sync-loading"><i class="fa-solid fa-spinner fa-spin"></i> Running audit...</div>';
+            
+            setTimeout(() => {
+                try {
+                    const audit = window.auditGalleryIntegrity();
+                    updateSyncStatusUI(audit);
+                    showToast('Audit complete', 'success');
+                } catch (err) {
+                    console.error('[GallerySync] Audit failed:', err);
+                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: #e74c3c;"></i><span>Audit failed - check console</span></div>';
+                    showToast('Audit failed', 'error');
+                }
+            }, 100);
+        };
+    }
+    
+    if (gallerySyncFullBtn) {
+        gallerySyncFullBtn.onclick = async () => {
+            if (typeof window.fullGallerySync !== 'function') {
+                showToast('Gallery sync module not loaded', 'error');
+                return;
+            }
+            
+            // Feature must be enabled
+            if (!getSetting('uniqueGalleryFolders')) {
+                showToast('Enable "Use unique gallery folder names" first!', 'error');
+                return;
+            }
+            
+            // Run audit first to check scope
+            const audit = window.auditGalleryIntegrity();
+            const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
+            
+            if (totalIssues === 0) {
+                showToast('Everything is already in sync!', 'info');
+                updateSyncStatusUI(audit);
+                return;
+            }
+            
+            // Confirm before making changes
+            const confirmMsg = `This will:\n` +
+                (audit.issues.missingIds > 0 ? `• Assign gallery_id to ${audit.issues.missingIds} character(s)\n` : '') +
+                (audit.issues.missingMappings > 0 ? `• Create ${audit.issues.missingMappings} folder mapping(s)\n` : '') +
+                (audit.issues.orphaned > 0 ? `• Remove ${audit.issues.orphaned} orphaned mapping(s)\n` : '') +
+                `\nContinue?`;
+            
+            if (!confirm(confirmMsg)) return;
+            
+            const originalText = gallerySyncFullBtn.innerHTML;
+            gallerySyncFullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
+            gallerySyncFullBtn.disabled = true;
+            
+            gallerySyncStatus.innerHTML = '<div class="sync-loading"><i class="fa-solid fa-spinner fa-spin"></i> Running full sync...</div>';
+            
+            try {
+                const result = await window.fullGallerySync({
+                    onProgress: (phase, current, total, item) => {
+                        const phaseNames = {
+                            assignIds: 'Assigning IDs',
+                            createMappings: 'Creating mappings'
+                        };
+                        gallerySyncStatus.innerHTML = `
+                            <div class="sync-progress">
+                                <div class="sync-progress-text">
+                                    <i class="fa-solid fa-spinner fa-spin"></i> ${phaseNames[phase] || phase}: ${current}/${total}
+                                </div>
+                                <div class="sync-progress-bar">
+                                    <div class="sync-progress-bar-fill" style="width: ${(current/total)*100}%"></div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+                
+                // Build result message
+                const parts = [];
+                if (result.assignedIds?.success > 0) parts.push(`${result.assignedIds.success} IDs assigned`);
+                if (result.createdMappings?.success > 0) parts.push(`${result.createdMappings.success} mappings created`);
+                if (result.cleanedOrphans?.removed > 0) parts.push(`${result.cleanedOrphans.removed} orphans removed`);
+                
+                showToast(parts.length > 0 ? parts.join(', ') : 'Sync complete', 'success');
+                
+                // Re-run audit to show updated status
+                const newAudit = window.auditGalleryIntegrity();
+                updateSyncStatusUI(newAudit);
+                
+                // Update warning indicator in top bar
+                if (typeof window.updateGallerySyncWarning === 'function') {
+                    window.updateGallerySyncWarning(newAudit);
+                }
+                
+            } catch (err) {
+                console.error('[GallerySync] Full sync failed:', err);
+                showToast('Sync failed - check console', 'error');
+            }
+            
+            gallerySyncFullBtn.innerHTML = originalText;
+            gallerySyncFullBtn.disabled = false;
+        };
+    }
+    
+    if (gallerySyncCleanupBtn) {
+        gallerySyncCleanupBtn.onclick = () => {
+            if (typeof window.cleanupOrphanedMappings !== 'function') {
+                showToast('Gallery sync module not loaded', 'error');
+                return;
+            }
+            
+            // Run audit first
+            const audit = window.auditGalleryIntegrity();
+            
+            if (audit.issues.orphaned === 0) {
+                showToast('No orphaned mappings to clean up', 'info');
+                updateSyncStatusUI(audit);
+                return;
+            }
+            
+            if (!confirm(`Remove ${audit.issues.orphaned} orphaned mapping(s)?\n\nThese are folder mappings for characters that no longer exist.`)) {
+                return;
+            }
+            
+            try {
+                const result = window.cleanupOrphanedMappings();
+                showToast(`Removed ${result.removed} orphaned mapping${result.removed !== 1 ? 's' : ''}`, 'success');
+                
+                // Re-run audit and update UI
+                const newAudit = window.auditGalleryIntegrity();
+                updateSyncStatusUI(newAudit);
+                
+                // Update warning indicator in top bar
+                if (typeof window.updateGallerySyncWarning === 'function') {
+                    window.updateGallerySyncWarning(newAudit);
+                }
+            } catch (err) {
+                console.error('[GallerySync] Cleanup failed:', err);
+                showToast('Cleanup failed', 'error');
+            }
         };
     }
 }
@@ -1586,10 +1898,50 @@ function showFolderMappingModal() {
     // Also get all characters with gallery IDs for reference
     const charsWithGalleryIds = allCharacters.filter(c => getCharacterGalleryId(c));
     
+    // Get orphaned mappings if gallery-sync module is available
+    let orphanedMappings = [];
+    if (typeof window.auditGalleryIntegrity === 'function') {
+        const audit = window.auditGalleryIntegrity();
+        orphanedMappings = audit.orphanedMappings || [];
+    }
+    
     // Build modal content
     let contentHtml = '';
     
-    if (sharedNames.size === 0 && charsWithGalleryIds.length === 0) {
+    // Show orphaned mappings first (issues that need attention)
+    if (orphanedMappings.length > 0) {
+        contentHtml += `
+            <div style="margin-bottom: 20px;">
+                <h4 style="margin: 0 0 10px 0; color: #e74c3c; display: flex; align-items: center; gap: 8px;">
+                    <i class="fa-solid fa-ghost"></i>
+                    Orphaned Mappings (${orphanedMappings.length})
+                </h4>
+                <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
+                    These folder mappings point to characters that no longer exist. They can be safely removed with "Cleanup Orphans" in Integrity Check.
+                </p>
+                <div style="max-height: 200px; overflow-y: auto; background: rgba(231, 76, 60, 0.05); border: 1px solid rgba(231, 76, 60, 0.2); border-radius: 6px; padding: 10px;">
+                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
+                        <thead>
+                            <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                <th style="text-align: left; padding: 6px;">Avatar (deleted)</th>
+                                <th style="text-align: left; padding: 6px;">Folder Mapping</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${orphanedMappings.map(({ avatar, folder }) => `
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                                    <td style="padding: 6px; color: #e74c3c; font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
+                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${escapeHtml(folder)}</code></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    if (sharedNames.size === 0 && charsWithGalleryIds.length === 0 && orphanedMappings.length === 0) {
         contentHtml = `
             <div class="empty-state" style="padding: 30px; text-align: center;">
                 <i class="fa-solid fa-folder-open" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
@@ -5583,6 +5935,11 @@ async function showDeleteConfirmation(char) {
     const galleryInfo = await getCharacterGalleryInfo(char);
     const hasImages = galleryInfo.count > 0;
     
+    // Only offer gallery deletion for unique galleries (with gallery_id)
+    // Shared galleries (standard name-based) should NOT be deleted as they may contain other characters' images
+    const hasUniqueGallery = !!getCharacterGalleryId(char);
+    const canDeleteGallery = hasImages && hasUniqueGallery;
+    
     // Create delete confirmation modal
     const deleteModal = document.createElement('div');
     deleteModal.className = 'confirm-modal';
@@ -5605,17 +5962,34 @@ async function showDeleteConfirmation(char) {
                     <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
                 </div>
                 
-                ${hasImages ? `
+                ${canDeleteGallery ? `
+                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                            <i class="fa-solid fa-images"></i>
+                            <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                                <span><strong>Keep gallery files</strong> - Leave in folder</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                                <span><strong>Delete gallery files</strong> - Remove all images</span>
+                            </label>
+                        </div>
+                    </div>
+                ` : (hasImages ? `
                     <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
                         <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
                             <i class="fa-solid fa-images"></i>
                             <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
                         </div>
                         <p style="margin: 8px 0 0 0; color: var(--text-secondary); font-size: 13px;">
-                            The gallery folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 11px;">${escapeHtml(galleryInfo.folder)}</code> will remain after deletion.
+                            Shared gallery folder will remain after deletion.
                         </p>
                     </div>
-                ` : ''}
+                ` : '')}
                 
                 <p style="color: var(--text-secondary); margin-bottom: 15px;">
                     Are you sure you want to delete this character? This action cannot be undone.
@@ -5657,9 +6031,40 @@ async function showDeleteConfirmation(char) {
     
     confirmBtn.addEventListener('click', async () => {
         const deleteChats = deleteModal.querySelector('#deleteChatsCheckbox').checked;
+        const galleryAction = deleteModal.querySelector('input[name="galleryAction"]:checked')?.value || 'keep';
+        
         confirmBtn.disabled = true;
         confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
         
+        // Delete gallery files if requested (only possible for unique galleries)
+        if (canDeleteGallery && galleryAction === 'delete') {
+            confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting gallery...';
+            let deleted = 0;
+            let errors = 0;
+            
+            const safeFolderName = sanitizeFolderName(galleryInfo.folder);
+            for (const fileName of galleryInfo.files) {
+                try {
+                    const deletePath = `/user/images/${safeFolderName}/${fileName}`;
+                    const response = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
+                        path: deletePath
+                    });
+                    if (response.ok) {
+                        deleted++;
+                    } else {
+                        errors++;
+                    }
+                } catch (e) {
+                    errors++;
+                }
+            }
+            
+            if (deleted > 0) {
+                debugLog(`[Delete] Deleted ${deleted} gallery image${deleted !== 1 ? 's' : ''}`);
+            }
+        }
+        
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting character...';
         const success = await deleteCharacter(char, deleteChats);
         
         if (success) {
@@ -10405,7 +10810,7 @@ async function importChubCharacter(fullPath) {
         characterCard.data.extensions.chub = {
             ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
             id: metadata.id || existingChub.id || null,
-            fullPath: fullPath,
+            full_path: fullPath,
             linkedAt: new Date().toISOString()
         };
         
@@ -11173,7 +11578,18 @@ on('importSummaryDownloadBtn', 'click', async () => {
 function getChubLinkInfo(char) {
     if (!char) return null;
     const extensions = char.data?.extensions || char.extensions;
-    return extensions?.chub || null;
+    const chub = extensions?.chub;
+    if (!chub) return null;
+    
+    // Normalize: native ChubAI cards use full_path (snake_case), we use fullPath (camelCase)
+    const fullPath = chub.fullPath || chub.full_path;
+    if (!fullPath) return null;
+    
+    return {
+        id: chub.id || null,
+        fullPath: fullPath,
+        linkedAt: chub.linkedAt || null
+    };
 }
 
 /**
@@ -11191,7 +11607,7 @@ function setChubLinkInfo(char, chubInfo) {
     if (chubInfo) {
         char.data.extensions.chub = {
             id: chubInfo.id,
-            fullPath: chubInfo.fullPath,
+            full_path: chubInfo.fullPath,
             linkedAt: chubInfo.linkedAt || new Date().toISOString()
         };
     } else {
@@ -11614,9 +12030,17 @@ async function saveChubLink(char, chubInfo) {
     
     // IMPORTANT: Preserve all existing extensions when updating chub link
     const existingExtensions = char.data?.extensions || {};
+    
+    // Normalize to snake_case for server storage (matches native ChubAI format)
+    const normalizedChubInfo = chubInfo ? {
+        id: chubInfo.id,
+        full_path: chubInfo.fullPath,
+        linkedAt: chubInfo.linkedAt || new Date().toISOString()
+    } : null;
+    
     const updatedExtensions = {
         ...existingExtensions,
-        chub: chubInfo
+        chub: normalizedChubInfo
     };
     
     // Save to server via merge-attributes API
@@ -16242,6 +16666,10 @@ async function deleteDuplicateChar(avatar, groupIdx) {
     const galleryInfo = await getCharacterGalleryInfo(char);
     const hasImages = galleryInfo.count > 0;
     
+    // Only offer gallery deletion/transfer for unique galleries (with gallery_id)
+    // Shared galleries should NOT be modified as they may contain other characters' images
+    const hasUniqueGallery = !!getCharacterGalleryId(char);
+    
     // Find other characters this could be transferred to (same name or in same duplicate group)
     const currentGroup = duplicateScanCache.groups?.[groupIdx];
     const transferTargets = [];
@@ -16266,101 +16694,32 @@ async function deleteDuplicateChar(avatar, groupIdx) {
     
     // Check if unique gallery folders is enabled - critical for delete safety
     const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders');
-    const sharesFolder = !uniqueFoldersEnabled && transferTargets.length > 0;
+    // Use hasUniqueGallery instead of global setting - this character MUST have its own gallery_id
+    const canModifyGallery = hasUniqueGallery;
     
     // Build transfer targets HTML with more details
     let transferTargetsHtml = '';
-    if (hasImages && transferTargets.length > 0) {
-        // Warning message if folders are shared
-        const sharedFolderWarning = sharesFolder ? `
-            <div class="dup-delete-shared-warning">
-                <i class="fa-solid fa-triangle-exclamation"></i>
-                <span><strong>Shared folder detected:</strong> Unique Gallery Folders is OFF. These characters share the same gallery folder, so images belong to both.</span>
-            </div>
-        ` : '';
-        
+    if (hasImages && hasUniqueGallery && transferTargets.length > 0) {
+        // Has unique gallery AND transfer targets - show all options
         transferTargetsHtml = `
             <div class="dup-delete-transfer-section">
                 <div class="dup-delete-transfer-header">
                     <i class="fa-solid fa-images"></i>
                     <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
                 </div>
-                ${sharedFolderWarning}
                 <div class="dup-delete-image-options">
-                    ${sharesFolder ? `
-                        <label class="dup-delete-option-radio selected" data-action="keep">
-                            <input type="radio" name="imageAction" value="keep" checked>
-                            <div class="option-content">
-                                <i class="fa-solid fa-folder-open"></i>
-                                <div class="option-text">
-                                    <strong>Keep images</strong>
-                                    <span>Images remain available to the other character</span>
-                                </div>
+                    <label class="dup-delete-option-radio selected" data-action="transfer">
+                        <input type="radio" name="imageAction" value="transfer" checked>
+                        <div class="option-content">
+                            <i class="fa-solid fa-arrow-right-arrow-left"></i>
+                            <div class="option-text">
+                                <strong>Transfer images</strong>
+                                <span>Move to another character's gallery</span>
                             </div>
-                        </label>
-                    ` : `
-                        <label class="dup-delete-option-radio selected" data-action="transfer">
-                            <input type="radio" name="imageAction" value="transfer" checked>
-                            <div class="option-content">
-                                <i class="fa-solid fa-arrow-right-arrow-left"></i>
-                                <div class="option-text">
-                                    <strong>Transfer images</strong>
-                                    <span>Move to another character's gallery</span>
-                                </div>
-                            </div>
-                        </label>
-                        <label class="dup-delete-option-radio" data-action="delete">
-                            <input type="radio" name="imageAction" value="delete">
-                            <div class="option-content">
-                                <i class="fa-solid fa-trash-can"></i>
-                                <div class="option-text">
-                                    <strong>Delete images</strong>
-                                    <span>Permanently remove all gallery images</span>
-                                </div>
-                            </div>
-                        </label>
-                        <label class="dup-delete-option-radio" data-action="keep">
-                            <input type="radio" name="imageAction" value="keep">
-                            <div class="option-content">
-                                <i class="fa-solid fa-folder-open"></i>
-                                <div class="option-text">
-                                    <strong>Keep images</strong>
-                                    <span>Leave in folder (can reassign later)</span>
-                                </div>
-                            </div>
-                        </label>
-                    `}
-                </div>
-                ${!sharesFolder ? `
-                    <div class="dup-delete-transfer-target" id="transferTargetWrapper">
-                        <label>Transfer to:</label>
-                        <div class="dup-delete-transfer-select-wrapper">
-                            ${transferTargets.map((t, idx) => {
-                                const tName = getCharField(t, 'name') || t.avatar;
-                                const tAvatar = getCharacterAvatarUrl(t.avatar);
-                                return `
-                                    <label class="dup-delete-transfer-radio ${idx === 0 ? 'selected' : ''}" data-avatar="${escapeHtml(t.avatar)}">
-                                        <input type="radio" name="transferTarget" value="${escapeHtml(t.avatar)}" ${idx === 0 ? 'checked' : ''}>
-                                        <img src="${tAvatar}" onerror="this.src='/img/ai4.png'" alt="">
-                                        <span>${escapeHtml(tName)}</span>
-                                    </label>
-                                `;
-                            }).join('')}
                         </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-    } else if (hasImages) {
-        transferTargetsHtml = `
-            <div class="dup-delete-transfer-section warning-only">
-                <div class="dup-delete-transfer-header">
-                    <i class="fa-solid fa-images"></i>
-                    <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
-                </div>
-                <div class="dup-delete-image-options">
-                    <label class="dup-delete-option-radio selected" data-action="delete">
-                        <input type="radio" name="imageAction" value="delete" checked>
+                    </label>
+                    <label class="dup-delete-option-radio" data-action="delete">
+                        <input type="radio" name="imageAction" value="delete">
                         <div class="option-content">
                             <i class="fa-solid fa-trash-can"></i>
                             <div class="option-text">
@@ -16379,6 +16738,68 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                             </div>
                         </div>
                     </label>
+                </div>
+                <div class="dup-delete-transfer-target" id="transferTargetWrapper">
+                    <label>Transfer to:</label>
+                    <div class="dup-delete-transfer-select-wrapper">
+                        ${transferTargets.map((t, idx) => {
+                            const tName = getCharField(t, 'name') || t.avatar;
+                            const tAvatar = getCharacterAvatarUrl(t.avatar);
+                            return `
+                                <label class="dup-delete-transfer-radio ${idx === 0 ? 'selected' : ''}" data-avatar="${escapeHtml(t.avatar)}">
+                                    <input type="radio" name="transferTarget" value="${escapeHtml(t.avatar)}" ${idx === 0 ? 'checked' : ''}>
+                                    <img src="${tAvatar}" onerror="this.src='/img/ai4.png'" alt="">
+                                    <span>${escapeHtml(tName)}</span>
+                                </label>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    } else if (hasImages && hasUniqueGallery) {
+        // Has unique gallery but no transfer targets - show delete/keep options
+        transferTargetsHtml = `
+            <div class="dup-delete-transfer-section warning-only">
+                <div class="dup-delete-transfer-header">
+                    <i class="fa-solid fa-images"></i>
+                    <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                </div>
+                <div class="dup-delete-image-options">
+                    <label class="dup-delete-option-radio selected" data-action="keep">
+                        <input type="radio" name="imageAction" value="keep" checked>
+                        <div class="option-content">
+                            <i class="fa-solid fa-folder-open"></i>
+                            <div class="option-text">
+                                <strong>Keep images</strong>
+                                <span>Leave in folder (can reassign later)</span>
+                            </div>
+                        </div>
+                    </label>
+                    <label class="dup-delete-option-radio" data-action="delete">
+                        <input type="radio" name="imageAction" value="delete">
+                        <div class="option-content">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <div class="option-text">
+                                <strong>Delete images</strong>
+                                <span>Permanently remove all gallery images</span>
+                            </div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+        `;
+    } else if (hasImages) {
+        // Shared gallery (no gallery_id) - just show info, no delete option
+        transferTargetsHtml = `
+            <div class="dup-delete-transfer-section warning-only">
+                <div class="dup-delete-transfer-header">
+                    <i class="fa-solid fa-images"></i>
+                    <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
+                </div>
+                <div class="dup-delete-shared-warning">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span><strong>Shared gallery:</strong> This character doesn't have a unique gallery ID. Gallery files may belong to other characters and will not be deleted.</span>
                 </div>
             </div>
         `;
@@ -16482,8 +16903,8 @@ async function deleteDuplicateChar(avatar, groupIdx) {
         
         const imageAction = deleteModal.querySelector('input[name="imageAction"]:checked')?.value || 'keep';
         
-        // Handle images based on selected action
-        if (hasImages && imageAction === 'transfer') {
+        // Handle images based on selected action (only possible for unique galleries)
+        if (hasUniqueGallery && imageAction === 'transfer') {
             // Transfer images to selected target
             const selectedRadio = deleteModal.querySelector('input[name="transferTarget"]:checked');
             if (selectedRadio?.value) {
@@ -16515,8 +16936,8 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                     }
                 }
             }
-        } else if (hasImages && imageAction === 'delete') {
-            // Delete all gallery images
+        } else if (hasUniqueGallery && imageAction === 'delete') {
+            // Delete all gallery images (only for unique galleries)
             confirmBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Deleting images...`;
             let deleted = 0;
             let errors = 0;
@@ -21466,7 +21887,7 @@ async function downloadChubCharacter() {
         characterCard.data.extensions.chub = {
             ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
             id: metadata.id || existingChub.id || null,
-            fullPath: fullPath,
+            full_path: fullPath,
             linkedAt: new Date().toISOString()
         };
         
@@ -21711,6 +22132,9 @@ window.fetchCharacters = fetchCharacters;
 window.getTags = getTags;
 window.getAllAvailableTags = getAllAvailableTags;
 window.getGalleryFolderName = getGalleryFolderName;
+window.getCharacterGalleryInfo = getCharacterGalleryInfo;
+window.getCharacterGalleryId = getCharacterGalleryId;
+window.removeGalleryFolderOverride = removeGalleryFolderOverride;
 
 // UI / Modals
 window.openModal = openModal;

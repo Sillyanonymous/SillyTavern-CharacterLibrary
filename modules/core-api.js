@@ -168,6 +168,33 @@ export function sanitizeFolderName(name) {
     return (name || '').replace(/[\\/:*?"<>|]/g, '').trim();
 }
 
+/**
+ * Get gallery info for a character (folder name, files, count)
+ * @param {Object} char - Character object
+ * @returns {Promise<{folder: string, files: string[], count: number}>}
+ */
+export function getCharacterGalleryInfo(char) {
+    return window.getCharacterGalleryInfo?.(char) || Promise.resolve({ folder: '', files: [], count: 0 });
+}
+
+/**
+ * Get the unique gallery ID for a character (if assigned)
+ * @param {Object} char - Character object
+ * @returns {string|null} The gallery_id or null if not set
+ */
+export function getCharacterGalleryId(char) {
+    return window.getCharacterGalleryId?.(char) || char?.data?.extensions?.gallery_id || null;
+}
+
+/**
+ * Remove a gallery folder override for a character
+ * Cleans up the extensionSettings.gallery.folders mapping when a character is deleted
+ * @param {string} avatar - Character avatar filename
+ */
+export function removeGalleryFolderOverride(avatar) {
+    window.removeGalleryFolderOverride?.(avatar);
+}
+
 // ========================================
 // API REQUESTS
 // ========================================
@@ -425,7 +452,18 @@ export function emit(event, data) {
 export function getChubLinkInfo(char) {
     if (!char) return null;
     const extensions = char.data?.extensions || char.extensions;
-    return extensions?.chub || null;
+    const chub = extensions?.chub;
+    if (!chub) return null;
+    
+    // Normalize: native ChubAI cards use full_path (snake_case), we use fullPath (camelCase)
+    const fullPath = chub.fullPath || chub.full_path;
+    if (!fullPath) return null;
+    
+    return {
+        id: chub.id || null,
+        fullPath: fullPath,
+        linkedAt: chub.linkedAt || null
+    };
 }
 
 /**
@@ -492,6 +530,9 @@ export default {
     // Gallery
     getGalleryFolderName,
     sanitizeFolderName,
+    getCharacterGalleryInfo,
+    getCharacterGalleryId,
+    removeGalleryFolderOverride,
     
     // Multi-select
     isMultiSelectEnabled,

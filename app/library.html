@@ -83,6 +83,19 @@
                 <button id="refreshBtn" class="glass-btn icon-only" title="Refresh">
                     <i class="fa-solid fa-sync"></i>
                 </button>
+                <div class="gallery-sync-container">
+                    <button id="gallerySyncStatusBtn" class="glass-btn icon-only gallery-sync-btn" title="Gallery sync status">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <span class="warning-badge hidden"></span>
+                    </button>
+                    <div id="gallerySyncDropdown" class="dropdown-menu gallery-sync-dropdown hidden">
+                        <div class="sync-dropdown-content">
+                            <div class="sync-dropdown-loading">
+                                <i class="fa-solid fa-spinner fa-spin"></i> Checking...
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 <div class="more-options-container">
                     <button id="moreOptionsBtn" class="glass-btn icon-only" title="More Options">
                         <i class="fa-solid fa-ellipsis-vertical"></i>
@@ -1700,6 +1713,33 @@ https://chub.ai/characters/author/another-character
                                 <span class="settings-hint">Find and redistribute images from old legacy folders.</span>
                             </div>
                         </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-stethoscope"></i> Integrity Check</div>
+                            <span class="settings-hint">Ensure gallery IDs and folder mappings are properly synchronized.</span>
+                            
+                            <div id="gallerySyncStatus" class="gallery-sync-status-box" style="margin-top: 10px;">
+                                <div class="sync-status-placeholder">
+                                    <i class="fa-solid fa-circle-question"></i>
+                                    <span>Click "Run Audit" to check integrity</span>
+                                </div>
+                            </div>
+                            
+                            <div class="settings-row gallery-sync-buttons" style="margin-top: 10px;">
+                                <button id="gallerySyncAuditBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-magnifying-glass"></i> Run Audit
+                                </button>
+                                <button id="gallerySyncFullBtn" class="action-btn primary small">
+                                    <i class="fa-solid fa-rotate"></i> Full Sync
+                                </button>
+                                <button id="gallerySyncCleanupBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-broom"></i> Cleanup Orphans
+                                </button>
+                            </div>
+                            <div class="settings-row settings-sub-note" style="margin-top: 8px;">
+                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Full Sync assigns missing IDs, creates missing mappings, and removes orphaned entries.</span>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Developer Section -->
@@ -1742,7 +1782,7 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.1.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.1.1</span>
                             </div>
                         </div>
                     </div>

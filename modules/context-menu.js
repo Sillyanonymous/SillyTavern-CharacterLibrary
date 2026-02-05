@@ -238,12 +238,9 @@ function buildSingleMenuItems(char, cardElement) {
     const isSelected = CoreAPI.isCharacterSelected(char.avatar);
     const multiSelectEnabled = CoreAPI.isMultiSelectEnabled();
     
-    // Check for ChubAI link - uses fullPath (camelCase) as stored by gallery.js
-    const chubInfo = char.data?.extensions?.chub;
-    const chubId = chubInfo?.fullPath || 
-                   chubInfo?.full_path ||
-                   char.chub_id ||
-                   char.data?.extensions?.risuai?.source?.match(/chub\.ai\/characters\/([^/]+\/[^/]+)/)?.[1];
+    // Check for ChubAI link - getChubLinkInfo normalizes full_path vs fullPath
+    const chubInfo = CoreAPI.getChubLinkInfo(char);
+    const chubId = chubInfo?.fullPath || char.chub_id;
     
     const items = [];
     
@@ -594,50 +591,185 @@ async function bulkDelete() {
     const selected = CoreAPI.getSelectedCharacters();
     if (selected.length === 0) return;
     
-    // Confirmation dialog
+    // Check which characters have gallery images AND unique gallery IDs
+    // Only characters with gallery_id can have their files safely deleted
+    const galleryInfos = await Promise.all(
+        selected.map(async char => ({
+            char,
+            info: await CoreAPI.getCharacterGalleryInfo(char),
+            hasUniqueGallery: !!CoreAPI.getCharacterGalleryId(char)
+        }))
+    );
+    
+    // Only count characters with unique galleries for deletion option
+    const charsWithUniqueGallery = galleryInfos.filter(g => g.info.count > 0 && g.hasUniqueGallery);
+    const charsWithSharedGallery = galleryInfos.filter(g => g.info.count > 0 && !g.hasUniqueGallery);
+    const totalUniqueGalleryFiles = charsWithUniqueGallery.reduce((sum, g) => sum + g.info.count, 0);
+    
+    // Build character list preview
     const names = selected.slice(0, 5).map(c => c.name).join(', ');
     const andMore = selected.length > 5 ? ` and ${selected.length - 5} more` : '';
     
-    if (!confirm(`Are you sure you want to delete ${selected.length} characters?\n\n${names}${andMore}\n\nThis cannot be undone!`)) {
-        return;
-    }
+    // Create confirmation modal
+    const modal = document.createElement('div');
+    modal.className = 'confirm-modal';
+    modal.id = 'bulkDeleteConfirmModal';
+    modal.innerHTML = `
+        <div class="confirm-modal-content" style="max-width: 480px;">
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
+                <h3 style="border: none; padding: 0; margin: 0;">
+                    <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>
+                    Delete ${selected.length} Characters
+                </h3>
+                <button class="close-confirm-btn" id="closeBulkDeleteModal">&times;</button>
+            </div>
+            <div class="confirm-modal-body">
+                <p style="color: var(--text-secondary); margin-bottom: 15px;">
+                    <strong>${names}</strong>${andMore}
+                </p>
+                
+                ${totalUniqueGalleryFiles > 0 ? `
+                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                            <i class="fa-solid fa-images"></i>
+                            <strong>${charsWithUniqueGallery.length} character${charsWithUniqueGallery.length !== 1 ? 's have' : ' has'} unique gallery files (${totalUniqueGalleryFiles} total)</strong>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                                <span><strong>Keep gallery files</strong> - Leave in folders</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                                <span><strong>Delete gallery files</strong> - Remove all images</span>
+                            </label>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                ${charsWithSharedGallery.length > 0 ? `
+                    <div style="background: rgba(150, 150, 150, 0.15); border: 1px solid rgba(150, 150, 150, 0.4); border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 13px;">
+                        <i class="fa-solid fa-info-circle" style="color: #888;"></i>
+                        <span style="color: var(--text-secondary);">${charsWithSharedGallery.length} character${charsWithSharedGallery.length !== 1 ? 's have' : ' has'} shared galleries (files will be kept)</span>
+                    </div>
+                ` : ''}
+                
+                <p style="color: var(--text-secondary);">
+                    <i class="fa-solid fa-exclamation-circle" style="color: #e74c3c;"></i>
+                    This action cannot be undone!
+                </p>
+            </div>
+            <div class="confirm-modal-footer">
+                <button class="action-btn secondary" id="cancelBulkDeleteBtn">
+                    <i class="fa-solid fa-xmark"></i> Cancel
+                </button>
+                <button class="action-btn primary" id="confirmBulkDeleteBtn" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);">
+                    <i class="fa-solid fa-trash"></i> Delete All
+                </button>
+            </div>
+        </div>
+    `;
     
-    CoreAPI.showToast(`Deleting ${selected.length} characters...`, 'info');
+    document.body.appendChild(modal);
     
-    let successCount = 0;
-    let failCount = 0;
+    // Event handlers
+    const closeModal = () => modal.remove();
     
-    for (const char of selected) {
-        try {
-            const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
-                avatar: char.avatar
-            });
+    modal.querySelector('#closeBulkDeleteModal').addEventListener('click', closeModal);
+    modal.querySelector('#cancelBulkDeleteBtn').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) closeModal();
+    });
+    
+    modal.querySelector('#confirmBulkDeleteBtn').addEventListener('click', async () => {
+        const confirmBtn = modal.querySelector('#confirmBulkDeleteBtn');
+        const galleryAction = modal.querySelector('input[name="galleryAction"]:checked')?.value || 'keep';
+        
+        confirmBtn.disabled = true;
+        confirmBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Deleting...';
+        
+        let successCount = 0;
+        let failCount = 0;
+        let galleryDeleted = 0;
+        
+        for (let i = 0; i < selected.length; i++) {
+            const char = selected[i];
+            const galleryData = galleryInfos.find(g => g.char.avatar === char.avatar);
             
-            if (response.ok) {
-                // Remove card from DOM
-                const card = CoreAPI.findCardElement(char.avatar);
-                card?.remove();
-                successCount++;
-            } else {
+            confirmBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${i + 1}/${selected.length}...`;
+            
+            try {
+                // Delete gallery files if requested AND character has unique gallery
+                if (galleryAction === 'delete' && galleryData?.hasUniqueGallery && galleryData?.info?.count > 0) {
+                    const safeFolderName = CoreAPI.sanitizeFolderName(galleryData.info.folder);
+                    for (const fileName of galleryData.info.files) {
+                        try {
+                            const deletePath = `/user/images/${safeFolderName}/${fileName}`;
+                            await CoreAPI.apiRequest('/images/delete', 'POST', { path: deletePath });
+                            galleryDeleted++;
+                        } catch (e) {
+                            // Continue even if image deletion fails
+                        }
+                    }
+                }
+                
+                // Delete character
+                const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
+                    avatar_url: char.avatar,
+                    delete_chats: false
+                });
+                
+                if (response.ok) {
+                    // Clean up gallery folder override if character had unique gallery
+                    if (galleryData?.hasUniqueGallery) {
+                        CoreAPI.removeGalleryFolderOverride(char.avatar);
+                    }
+                    
+                    const card = CoreAPI.findCardElement(char.avatar);
+                    card?.remove();
+                    successCount++;
+                } else {
+                    failCount++;
+                }
+            } catch (err) {
+                console.error('[ContextMenu] Delete failed for:', char.name, err);
                 failCount++;
             }
-        } catch (err) {
-            console.error('[ContextMenu] Delete failed for:', char.name, err);
-            failCount++;
         }
-    }
-    
-    // Clear selection
-    CoreAPI.clearSelection();
-    
-    if (failCount === 0) {
-        CoreAPI.showToast(`Deleted ${successCount} characters`, 'success');
-    } else {
-        CoreAPI.showToast(`Deleted ${successCount}, failed ${failCount}`, 'warning');
-    }
-    
-    // Refresh character list
-    CoreAPI.refreshCharacters();
+        
+        closeModal();
+        CoreAPI.clearSelection();
+        
+        // Show results
+        let message = `Deleted ${successCount} character${successCount !== 1 ? 's' : ''}`;
+        if (galleryDeleted > 0) {
+            message += ` and ${galleryDeleted} gallery file${galleryDeleted !== 1 ? 's' : ''}`;
+        }
+        if (failCount > 0) {
+            message += `, ${failCount} failed`;
+            CoreAPI.showToast(message, 'warning');
+        } else {
+            CoreAPI.showToast(message, 'success');
+        }
+        
+        // Sync main ST window's character list
+        try {
+            if (window.opener && !window.opener.closed) {
+                const context = window.opener.SillyTavern?.getContext?.();
+                if (context?.getCharacters) {
+                    await context.getCharacters();
+                }
+                if (typeof window.opener.printCharactersDebounced === 'function') {
+                    window.opener.printCharactersDebounced();
+                }
+            }
+        } catch (e) {
+            console.warn('[ContextMenu] Could not sync main window:', e);
+        }
+        
+        // Force refresh character list from server
+        await CoreAPI.refreshCharacters(true);
+    });
 }
 
 /**

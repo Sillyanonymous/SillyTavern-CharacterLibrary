@@ -89,9 +89,13 @@ function analyzeSelectedTags(characters) {
     
     for (const char of characters) {
         const tags = getCharacterTags(char);
+        // Deduplicate tags per character (case-insensitive) to avoid double-counting
+        const seenInThisChar = new Set();
+        
         for (const tag of tags) {
             const normalizedTag = tag.trim().toLowerCase();
-            if (normalizedTag) {
+            if (normalizedTag && !seenInThisChar.has(normalizedTag)) {
+                seenInThisChar.add(normalizedTag);
                 if (!tagCounts[normalizedTag]) {
                     tagCounts[normalizedTag] = { name: tag.trim(), count: 0 };
                 }
@@ -128,8 +132,19 @@ function analyzeSelectedTags(characters) {
  * @returns {Array} Array of tag strings
  */
 function getCharacterTags(char) {
-    // Tags can be in multiple places
-    let tags = char.tags || char.data?.tags || [];
+    // Tags can be in multiple places - check for non-empty arrays
+    // Note: empty arrays are truthy, so we need explicit length checks
+    let tags = [];
+    
+    if (Array.isArray(char.tags) && char.tags.length > 0) {
+        tags = char.tags;
+    } else if (Array.isArray(char.data?.tags) && char.data.tags.length > 0) {
+        tags = char.data.tags;
+    } else if (typeof char.tags === 'string' && char.tags.trim()) {
+        tags = char.tags;
+    } else if (typeof char.data?.tags === 'string' && char.data.tags.trim()) {
+        tags = char.data.tags;
+    }
     
     // Could be a comma-separated string or an array
     if (typeof tags === 'string') {
@@ -151,7 +166,7 @@ function renderExistingTags(analysis) {
     
     if (analysis.all.length > 0) {
         html += `<div class="bt-group">
-            <div class="bt-group-label">Tags on ALL selected (${analysis.all.length}):</div>
+            <div class="bt-group-label">Tags on ALL ${analysis.total} selected:</div>
             <div class="bt-group-pills">
                 ${analysis.all.map(tag => `
                     <span class="cl-tag cl-tag-success" data-tag="${CoreAPI.escapeHtml(tag)}" title="Click to add to removal list">
@@ -168,7 +183,7 @@ function renderExistingTags(analysis) {
             <div class="bt-group-pills">
                 ${analysis.some.map(t => `
                     <span class="cl-tag cl-tag-warning" data-tag="${CoreAPI.escapeHtml(t.name)}" title="${t.count}/${analysis.total} characters - Click to add to removal list">
-                        ${CoreAPI.escapeHtml(t.name)} <span class="bt-count">(${t.count})</span>
+                        ${CoreAPI.escapeHtml(t.name)} <span class="bt-count">(${t.count}/${analysis.total})</span>
                     </span>
                 `).join('')}
             </div>

@@ -141,7 +141,18 @@ export async function checkSelectedCharacters() {
 function getChubLinkInfo(char) {
     if (!char) return null;
     const extensions = char.data?.extensions || char.extensions;
-    return extensions?.chub || null;
+    const chub = extensions?.chub;
+    if (!chub) return null;
+    
+    // Normalize: native ChubAI cards use full_path (snake_case), we use fullPath (camelCase)
+    const fullPath = chub.fullPath || chub.full_path;
+    if (!fullPath) return null;
+    
+    return {
+        id: chub.id || null,
+        fullPath: fullPath,
+        linkedAt: chub.linkedAt || null
+    };
 }
 
 /**
