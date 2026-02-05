@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="gallery.css?v=47">
+    <link rel="stylesheet" href="library.css?v=48">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -56,8 +56,10 @@
                 <select id="sortSelect" class="glass-select">
                     <option value="name_asc">Name (A-Z)</option>
                     <option value="name_desc">Name (Z-A)</option>
-                    <option value="date_new">Date Added (Newest)</option>
-                    <option value="date_old">Date Added (Oldest)</option>
+                    <option value="date_new">Last Modified (Newest)</option>
+                    <option value="date_old">Last Modified (Oldest)</option>
+                    <option value="created_new">Date Created (Newest)</option>
+                    <option value="created_old">Date Created (Oldest)</option>
                 </select>
                 <button id="favoritesFilterBtn" class="glass-btn favorites-filter-btn" title="Show favorites only">
                     <i class="fa-solid fa-star"></i>
@@ -180,10 +182,52 @@
                         </select>
                     </div>
                     
-                    <!-- Content Toggles -->
-                    <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
-                        <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
-                    </button>
+                    <!-- Tags & Advanced Filters -->
+                    <div class="chub-tags-dropdown-container" style="position: relative;">
+                        <button id="chubTagsBtn" class="glass-btn" title="Tag filters and advanced options">
+                            <i class="fa-solid fa-tags"></i> <span id="chubTagsBtnLabel">Tags</span>
+                        </button>
+                        <div id="chubTagsDropdown" class="dropdown-menu chub-tags-dropdown hidden">
+                            <!-- Tag Search -->
+                            <div class="chub-tags-search-row">
+                                <input type="text" id="chubTagsSearchInput" placeholder="Search tags...">
+                                <button id="chubTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
+                                    <i class="fa-solid fa-rotate-left"></i>
+                                </button>
+                            </div>
+                            
+                            <!-- Tag List (tri-state) -->
+                            <div class="chub-tags-list" id="chubTagsList">
+                                <div class="chub-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>
+                            </div>
+                            
+                            <hr style="margin: 10px 0; border-color: var(--glass-border);">
+                            
+                            <!-- Advanced Options -->
+                            <div class="dropdown-section-title"><i class="fa-solid fa-gear"></i> Advanced Options</div>
+                            
+                            <!-- Sort Direction -->
+                            <div class="chub-advanced-option">
+                                <label><i class="fa-solid fa-arrow-down-wide-short"></i> Sort Direction</label>
+                                <select id="chubSortDirection" class="glass-select-small">
+                                    <option value="desc" selected>Descending</option>
+                                    <option value="asc">Ascending</option>
+                                </select>
+                            </div>
+                            
+                            <!-- Min Tokens -->
+                            <div class="chub-advanced-option">
+                                <label><i class="fa-solid fa-text-width"></i> Min Tokens</label>
+                                <input type="number" id="chubMinTokens" class="glass-input-small" value="50" min="0" max="100000" step="100">
+                            </div>
+                            
+                            <!-- Max Tokens -->
+                            <div class="chub-advanced-option">
+                                <label><i class="fa-solid fa-text-width"></i> Max Tokens</label>
+                                <input type="number" id="chubMaxTokens" class="glass-input-small" value="100000" min="0" max="500000" step="1000">
+                            </div>
+                        </div>
+                    </div>
                     
                     <!-- Feature Filters -->
                     <div class="chub-more-filters" style="position: relative;">
@@ -204,6 +248,11 @@
                             <label class="filter-checkbox"><input type="checkbox" id="chubFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                         </div>
                     </div>
+                    
+                    <!-- Content Toggles -->
+                    <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
+                        <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
+                    </button>
                     
                     <!-- Account & Refresh -->
                     <button id="chubLoginBtn" class="glass-btn icon-only" title="ChubAI Login Settings">
@@ -261,9 +310,6 @@
                                     <i class="fa-solid fa-arrow-right"></i>
                                 </button>
                             </div>
-                        </div>
-                        <div class="chub-popular-tags" id="chubPopularTags">
-                            <!-- Popular tags injected here -->
                         </div>
                     </div>
                     
@@ -1028,7 +1074,6 @@ https://chub.ai/characters/author/another-character
                 </div>
             </div>
             <div class="confirm-modal-footer">
-                <button id="cancelImportBtn" class="action-btn secondary"><i class="fa-solid fa-times"></i> Cancel</button>
                 <button id="startImportBtn" class="action-btn primary"><i class="fa-solid fa-download"></i> Import</button>
             </div>
         </div>
@@ -1429,8 +1474,10 @@ https://chub.ai/characters/author/another-character
                                 <select id="settingsDefaultSort" class="glass-select">
                                     <option value="name_asc">Name (A-Z)</option>
                                     <option value="name_desc">Name (Z-A)</option>
-                                    <option value="date_new">Date Added (Newest)</option>
-                                    <option value="date_old">Date Added (Oldest)</option>
+                                    <option value="date_new">Last Modified (Newest)</option>
+                                    <option value="date_old">Last Modified (Oldest)</option>
+                                    <option value="created_new">Date Created (Newest)</option>
+                                    <option value="created_old">Date Created (Oldest)</option>
                                 </select>
                             </div>
                         </div>
@@ -1683,9 +1730,19 @@ https://chub.ai/characters/author/another-character
                         </div>
                         
                         <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental Features</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsEnableUpdateCheck"> Enable "Check for Updates" (WIP)
+                                </label>
+                                <span class="settings-hint">Compare ChubAI-linked cards with remote versions and selectively apply changes</span>
+                            </div>
+                        </div>
+                        
+                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.0.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.1.0</span>
                             </div>
                         </div>
                     </div>
@@ -1699,6 +1756,7 @@ https://chub.ai/characters/author/another-character
     </div>
 
     <!-- Scripts -->
-    <script src="gallery.js?v=72"></script>
+    <script src="library.js?v=74"></script>
+    <script type="module" src="../modules/module-loader.js?v=2"></script>
 </body>
 </html>

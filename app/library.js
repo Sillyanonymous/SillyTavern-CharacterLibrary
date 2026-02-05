@@ -121,6 +121,8 @@ const DEFAULT_SETTINGS = {
     uniqueGalleryFolders: false,
     // Show Info tab in character modal (debugging/metadata info)
     showInfoTab: false,
+    // Enable "Check for Updates" feature for ChubAI linked characters (experimental/WIP)
+    enableUpdateCheck: false,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -399,6 +401,7 @@ function setupSettingsModal() {
     // Developer
     const debugModeCheckbox = document.getElementById('settingsDebugMode');
     const showInfoTabCheckbox = document.getElementById('settingsShowInfoTab');
+    const enableUpdateCheckCheckbox = document.getElementById('settingsEnableUpdateCheck');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
@@ -461,6 +464,9 @@ function setupSettingsModal() {
         }
         if (showInfoTabCheckbox) {
             showInfoTabCheckbox.checked = getSetting('showInfoTab') || false;
+        }
+        if (enableUpdateCheckCheckbox) {
+            enableUpdateCheckCheckbox.checked = getSetting('enableUpdateCheck') || false;
         }
         
         // Appearance
@@ -549,6 +555,7 @@ function setupSettingsModal() {
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
             showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
+            enableUpdateCheck: enableUpdateCheckCheckbox ? enableUpdateCheckCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
         });
         
@@ -646,6 +653,12 @@ function setupSettingsModal() {
         }
         if (uniqueGalleryFoldersCheckbox) {
             uniqueGalleryFoldersCheckbox.checked = DEFAULT_SETTINGS.uniqueGalleryFolders;
+        }
+        if (showInfoTabCheckbox) {
+            showInfoTabCheckbox.checked = DEFAULT_SETTINGS.showInfoTab;
+        }
+        if (enableUpdateCheckCheckbox) {
+            enableUpdateCheckCheckbox.checked = DEFAULT_SETTINGS.enableUpdateCheck;
         }
         
         // Apply default highlight color immediately
@@ -2503,10 +2516,15 @@ async function assignGalleryIdToCharacter(char) {
     
     try {
         // Save to character via merge-attributes API
+        // IMPORTANT: Spread existing data to avoid wiping other fields
+        const existingData = char.data || {};
         const payload = {
             avatar: char.avatar,
+            create_date: char.create_date,
             data: {
-                extensions: updatedExtensions
+                ...existingData,
+                extensions: updatedExtensions,
+                create_date: char.create_date
             }
         };
         
@@ -3057,7 +3075,7 @@ async function migrateCharacterImagesToUniqueFolder(char) {
         }
         
         // Filter to media files (images, audio, video)
-        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm'];
+        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'];
         const mediaFiles = files.filter(f => {
             const fileName = typeof f === 'string' ? f : f.name;
             if (!fileName) return false;
@@ -3142,7 +3160,7 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
         }
         
         // Filter to media files
-        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm'];
+        const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'];
         const mediaFiles = files.filter(f => {
             const fileName = typeof f === 'string' ? f : f.name;
             if (!fileName) return false;
@@ -3846,9 +3864,9 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     
     // Add missing cards in order
     // We need to maintain DOM order for proper grid layout
-    const fragment = document.createDocumentFragment();
     const sortedIndices = Array.from(neededIndices).sort((a, b) => a - b);
     
+    // Create any missing cards
     for (const index of sortedIndices) {
         if (!activeCards.has(index)) {
             const char = currentCharsList[index];
@@ -3860,15 +3878,22 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
         }
     }
     
-    // Rebuild grid content in correct order
-    // This is simpler than trying to insert at correct positions
-    const orderedCards = sortedIndices
-        .map(i => activeCards.get(i))
-        .filter(card => card);
+    // Check if we need to rebuild the grid (cards added/removed, not just scrolling)
+    const currentChildren = Array.from(grid.children);
+    const currentIndices = currentChildren.map(c => parseInt(c.dataset.virtualIndex)).filter(i => !isNaN(i));
+    const needsRebuild = currentIndices.length !== sortedIndices.length || 
+                         !sortedIndices.every((idx, i) => currentIndices[i] === idx);
     
-    grid.innerHTML = '';
-    grid.style.paddingTop = `${paddingTop}px`;
-    orderedCards.forEach(card => grid.appendChild(card));
+    if (needsRebuild) {
+        // Only rebuild if card set has changed - preserves hover states during pure scroll
+        const orderedCards = sortedIndices
+            .map(i => activeCards.get(i))
+            .filter(card => card);
+        
+        grid.innerHTML = '';
+        grid.style.paddingTop = `${paddingTop}px`;
+        orderedCards.forEach(card => grid.appendChild(card));
+    }
     
     // Preload images further ahead
     const preloadStartRow = Math.floor((scrollTop + clientHeight) / (cardHeight + GRID_GAP));
@@ -3972,7 +3997,20 @@ function createCharacterCard(char) {
         </div>
     `;
     
-    card.onclick = () => openModal(char);
+    // Store avatar for multi-select lookup
+    card.dataset.avatar = char.avatar;
+    
+    card.onclick = () => {
+        // Check if multi-select mode is active (from module-loader.js)
+        if (window.handleCardClickForMultiSelect && window.handleCardClickForMultiSelect(char, card)) {
+            return; // Multi-select handled it
+        }
+        openModal(char);
+    };
+    
+    // Context menu is handled via event delegation in module-loader.js
+    // No per-card attachment needed
+    
     return card;
 }
 
@@ -4055,8 +4093,9 @@ function renderGalleryImages(files, folderName) {
         return;
     }
 
-    // Separate images and audio files
+    // Separate images, videos, and audio files
     const imageFiles = [];
+    const videoFiles = [];
     const audioFiles = [];
     
     files.forEach(file => {
@@ -4065,6 +4104,8 @@ function renderGalleryImages(files, folderName) {
         
         if (fileName.match(/\.(png|jpg|jpeg|webp|gif|bmp)$/i)) {
             imageFiles.push(fileName);
+        } else if (fileName.match(/\.(mp4|webm|mov|avi|mkv|m4v)$/i)) {
+            videoFiles.push(fileName);
         } else if (fileName.match(/\.(mp3|wav|ogg|m4a|flac|aac)$/i)) {
             audioFiles.push(fileName);
         }
@@ -4105,27 +4146,87 @@ function renderGalleryImages(files, folderName) {
         grid.appendChild(audioSection);
     }
     
-    // Render images
-    if (imageFiles.length > 0) {
+    // Combine images and videos for the visual media section
+    const visualMedia = [
+        ...imageFiles.map(fileName => ({ fileName, type: 'image' })),
+        ...videoFiles.map(fileName => ({ fileName, type: 'video' }))
+    ];
+    
+    // Render visual media (images + videos)
+    if (visualMedia.length > 0) {
         const imagesSection = document.createElement('div');
         imagesSection.className = 'gallery-images-section';
         
-        if (audioFiles.length > 0) {
-            // Add images section title if we also have audio
-            imagesSection.innerHTML = `<div class="gallery-section-title"><i class="fa-solid fa-images"></i> Images (${imageFiles.length})</div>`;
+        const hasOtherMedia = audioFiles.length > 0;
+        const imageCount = imageFiles.length;
+        const videoCount = videoFiles.length;
+        
+        if (hasOtherMedia) {
+            // Add section title if we also have audio
+            let titleText = '';
+            if (imageCount > 0 && videoCount > 0) {
+                titleText = `Images & Videos (${imageCount} + ${videoCount})`;
+            } else if (videoCount > 0) {
+                titleText = `Videos (${videoCount})`;
+            } else {
+                titleText = `Images (${imageCount})`;
+            }
+            imagesSection.innerHTML = `<div class="gallery-section-title"><i class="fa-solid fa-photo-film"></i> ${titleText}</div>`;
         }
         
         const imagesGrid = document.createElement('div');
         imagesGrid.className = 'gallery-sprites-grid';
         
-        imageFiles.forEach(fileName => {
-            const imgUrl = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
-            const imgContainer = document.createElement('div');
-            imgContainer.className = 'sprite-item';
-            imgContainer.innerHTML = `
-                <img src="${imgUrl}" loading="lazy" onclick="window.open(this.src, '_blank')" title="${escapeHtml(fileName)}">
-            `;
-            imagesGrid.appendChild(imgContainer);
+        // Build media data for the viewer (images and videos together)
+        const galleryMedia = visualMedia.map(({ fileName, type }) => ({
+            name: fileName,
+            url: `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`,
+            type: type
+        }));
+        
+        visualMedia.forEach(({ fileName, type }, index) => {
+            const mediaUrl = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
+            const mediaContainer = document.createElement('div');
+            mediaContainer.className = 'sprite-item';
+            
+            if (type === 'video') {
+                // Video thumbnail with play icon overlay
+                mediaContainer.innerHTML = `
+                    <div class="video-thumbnail" title="${escapeHtml(fileName)}">
+                        <video src="${mediaUrl}" preload="metadata" muted></video>
+                        <div class="video-play-overlay">
+                            <i class="fa-solid fa-play"></i>
+                        </div>
+                    </div>
+                `;
+                
+                // Click handler to open gallery viewer at this video
+                mediaContainer.querySelector('.video-thumbnail').addEventListener('click', () => {
+                    if (window.openGalleryViewerWithImages) {
+                        const charName = activeChar?.name || 'Gallery';
+                        window.openGalleryViewerWithImages(galleryMedia, index, charName);
+                    } else {
+                        window.open(mediaUrl, '_blank');
+                    }
+                });
+            } else {
+                // Image thumbnail
+                mediaContainer.innerHTML = `
+                    <img src="${mediaUrl}" loading="lazy" title="${escapeHtml(fileName)}">
+                `;
+                
+                // Click handler to open gallery viewer at this image
+                mediaContainer.querySelector('img').addEventListener('click', () => {
+                    if (window.openGalleryViewerWithImages) {
+                        const charName = activeChar?.name || 'Gallery';
+                        window.openGalleryViewerWithImages(galleryMedia, index, charName);
+                    } else {
+                        window.open(mediaUrl, '_blank');
+                    }
+                });
+            }
+            
+            imagesGrid.appendChild(mediaContainer);
         });
         
         imagesSection.appendChild(imagesGrid);
@@ -4133,7 +4234,7 @@ function renderGalleryImages(files, folderName) {
     }
     
     // Show empty state if no media at all
-    if (imageFiles.length === 0 && audioFiles.length === 0) {
+    if (imageFiles.length === 0 && videoFiles.length === 0 && audioFiles.length === 0) {
         renderSimpleEmpty(grid, 'No media found.');
     }
 }
@@ -4938,12 +5039,23 @@ function populateInfoTab(char) {
     </div>`;
     
     // Section: Date Info
-    let dateLastChat = char.date_last_chat ? new Date(Number(char.date_last_chat)).toLocaleString() : null;
+    const dateCreated = char.create_date ? new Date(char.create_date) : null;
+    const dateModified = char.date_added ? new Date(Number(char.date_added)) : null;
+    const dateLastChat = char.date_last_chat ? new Date(Number(char.date_last_chat)) : null;
+    
     html += `<div class="info-section">
         <div class="info-section-title"><i class="fa-solid fa-calendar"></i> Dates</div>
         <div class="info-row">
-            <span class="info-label">Last Updated</span>
-            <span class="info-value">${dateLastChat || '(not available)'}</span>
+            <span class="info-label">Date Created</span>
+            <span class="info-value">${dateCreated && !isNaN(dateCreated.getTime()) ? dateCreated.toLocaleString() : '(not available)'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Last Modified</span>
+            <span class="info-value">${dateModified && !isNaN(dateModified.getTime()) ? dateModified.toLocaleString() : '(not available)'}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Last Chat</span>
+            <span class="info-value">${dateLastChat && !isNaN(dateLastChat.getTime()) ? dateLastChat.toLocaleString() : '(not available)'}</span>
         </div>
     </div>`;
     
@@ -5924,13 +6036,23 @@ function showSaveConfirmation() {
     }
     
     // Store pending payload for actual save
-    // SillyTavern's merge-attributes API expects data in the character card v2 format
+    // SillyTavern's merge-attributes API expects data in the character card v2/v3 format
     // with fields both at root level (for backwards compat) and under 'data' object
     // IMPORTANT: Preserve existing extensions (like gallery_id, favorites, chub link) to avoid wiping them
-    const existingExtensions = activeChar.data?.extensions || {};
+    const existingExtensions = activeChar.data?.extensions || activeChar.extensions || {};
+    // IMPORTANT: Preserve create_date to maintain original import timestamp
+    const existingCreateDate = activeChar.create_date;
+    // IMPORTANT: Preserve spec and spec_version to avoid unwanted version upgrades
+    const existingSpec = activeChar.spec || activeChar.data?.spec;
+    const existingSpecVersion = activeChar.spec_version || activeChar.data?.spec_version;
+    // IMPORTANT: Preserve the entire original data object to keep V3 fields (assets, nickname, depth_prompt, group_only_greetings, etc.)
+    const existingData = activeChar.data || {};
     
     pendingPayload = {
         avatar: activeChar.avatar,
+        // Preserve spec info at root level
+        ...(existingSpec && { spec: existingSpec }),
+        ...(existingSpecVersion && { spec_version: existingSpecVersion }),
         name: currentValues.name,
         description: currentValues.description,
         first_mes: currentValues.first_mes,
@@ -5945,8 +6067,14 @@ function showSaveConfirmation() {
         tags: currentValues.tagsArray,
         alternate_greetings: currentValues.alternate_greetings,
         character_book: currentValues.character_book,
-        // Also include under 'data' for proper v2 card format
+        // Preserve original create_date
+        create_date: existingCreateDate,
+        // Include under 'data' for proper v2/v3 card format
+        // CRITICAL: Spread existing data FIRST, then override with edited fields
+        // This preserves V3 fields like assets, nickname, depth_prompt, group_only_greetings, etc.
         data: {
+            ...existingData,
+            // Override with edited fields
             name: currentValues.name,
             description: currentValues.description,
             first_mes: currentValues.first_mes,
@@ -5961,6 +6089,8 @@ function showSaveConfirmation() {
             tags: currentValues.tagsArray,
             alternate_greetings: currentValues.alternate_greetings,
             character_book: currentValues.character_book,
+            // Preserve original create_date
+            create_date: existingCreateDate,
             // CRITICAL: Include existing extensions to preserve gallery_id, favorites, chub link, etc.
             extensions: existingExtensions
         }
@@ -6322,6 +6452,69 @@ function cancelEditing() {
 }
 
 // ==============================================
+// DATE UTILITIES
+// ==============================================
+
+/**
+ * Get the date a character was added to SillyTavern (file system time).
+ * This changes whenever the character file is edited/rewritten.
+ * 
+ * @param {object} char - Character object
+ * @returns {number} Timestamp in milliseconds for sorting
+ */
+function getCharacterDateAdded(char) {
+    if (!char) return 0;
+    if (char.date_added) {
+        return Number(char.date_added) || 0;
+    }
+    return 0;
+}
+
+/**
+ * Get the original creation date of a character (from PNG metadata).
+ * This is stable and doesn't change when the character is edited.
+ * 
+ * @param {object} char - Character object
+ * @returns {number} Timestamp in milliseconds for sorting
+ */
+function getCharacterCreateDate(char) {
+    if (!char) return 0;
+    if (char.create_date) {
+        const d = new Date(char.create_date);
+        if (!isNaN(d.getTime())) return d.getTime();
+    }
+    return 0;
+}
+
+/**
+ * Get a stable date value for sorting characters.
+ * Uses create_date (stored in PNG metadata) which doesn't change on edits,
+ * falling back to date_added (file system ctime) if create_date is unavailable.
+ * 
+ * Note: date_added comes from file system ctime and changes whenever the file is rewritten.
+ * create_date is stored in the PNG metadata and remains stable across edits.
+ * 
+ * @param {object} char - Character object
+ * @returns {number} Timestamp in milliseconds for sorting
+ */
+function getCharacterDate(char) {
+    if (!char) return 0;
+    
+    // Prefer create_date (stored in PNG, stable across edits)
+    if (char.create_date) {
+        const d = new Date(char.create_date);
+        if (!isNaN(d.getTime())) return d.getTime();
+    }
+    
+    // Fallback to date_added (file system ctime, changes on edit)
+    if (char.date_added) {
+        return Number(char.date_added) || 0;
+    }
+    
+    return 0;
+}
+
+// ==============================================
 // FAVORITES SYSTEM
 // ==============================================
 
@@ -6354,19 +6547,22 @@ async function toggleCharacterFavorite(char) {
     const currentFavStatus = isCharacterFavorite(char);
     const newFavStatus = !currentFavStatus;
     
-    // IMPORTANT: Preserve all existing extensions when updating favorites
-    const existingExtensions = char.data?.extensions || {};
-    const updatedExtensions = {
-        ...existingExtensions,
-        fav: newFavStatus
-    };
-    
     try {
+        // IMPORTANT: SillyTavern reads fav from data.extensions.fav
+        // Must include data object while preserving existing data fields
+        const existingData = char.data || {};
+        const existingExtensions = existingData.extensions || {};
+        
         const response = await apiRequest('/characters/merge-attributes', 'POST', {
             avatar: char.avatar,
             fav: newFavStatus,
+            create_date: char.create_date,
             data: {
-                extensions: updatedExtensions
+                ...existingData,
+                extensions: {
+                    ...existingExtensions,
+                    fav: newFavStatus
+                }
             }
         });
         
@@ -8000,8 +8196,10 @@ function performSearch() {
     const sorted = [...filtered].sort((a, b) => {
         if (sortType === 'name_asc') return a.name.localeCompare(b.name);
         if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-        if (sortType === 'date_new') return (b.date_added || 0) - (a.date_added || 0); 
-        if (sortType === 'date_old') return (a.date_added || 0) - (b.date_added || 0);
+        if (sortType === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a); 
+        if (sortType === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
+        if (sortType === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
+        if (sortType === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
         return 0;
     });
     
@@ -8156,8 +8354,10 @@ function setupEventListeners() {
         currentCharacters.sort((a, b) => {
             if (type === 'name_asc') return a.name.localeCompare(b.name);
             if (type === 'name_desc') return b.name.localeCompare(a.name);
-            if (type === 'date_new') return (b.date_added || 0) - (a.date_added || 0); 
-            if (type === 'date_old') return (a.date_added || 0) - (b.date_added || 0);
+            if (type === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a); 
+            if (type === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
+            if (type === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
+            if (type === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
             return 0;
         });
         renderGrid(currentCharacters);
@@ -9087,7 +9287,6 @@ async function uploadImages(files) {
 const importModal = document.getElementById('importModal');
 const importBtn = document.getElementById('importBtn');
 const closeImportModal = document.getElementById('closeImportModal');
-const cancelImportBtn = document.getElementById('cancelImportBtn');
 const startImportBtn = document.getElementById('startImportBtn');
 const importUrlsInput = document.getElementById('importUrlsInput');
 const importProgress = document.getElementById('importProgress');
@@ -9106,19 +9305,12 @@ importBtn?.addEventListener('click', () => {
     startImportBtn.disabled = false;
     startImportBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
     startImportBtn.classList.remove('success');
-    cancelImportBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Cancel';
     // Hide stats when opening fresh
     const importStats = document.getElementById('importStats');
     if (importStats) importStats.classList.add('hidden');
 });
 
 closeImportModal?.addEventListener('click', () => {
-    if (!isImporting) {
-        importModal.classList.add('hidden');
-    }
-});
-
-cancelImportBtn?.addEventListener('click', () => {
     if (!isImporting) {
         importModal.classList.add('hidden');
     }
@@ -9875,6 +10067,99 @@ function createTextChunk(keyword, text) {
     return chunk;
 }
 
+/**
+ * Extract character card data from a PNG file
+ * Reads the 'chara' tEXt/iTXt chunk and decodes the base64 JSON
+ * @param {ArrayBuffer} pngBuffer - The PNG file data
+ * @returns {Object|null} The parsed character card object, or null if not found/invalid
+ */
+function extractCharacterDataFromPng(pngBuffer) {
+    try {
+        const bytes = new Uint8Array(pngBuffer);
+        
+        // Verify PNG signature
+        const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        for (let i = 0; i < 8; i++) {
+            if (bytes[i] !== pngSignature[i]) {
+                debugLog('[PNG Extract] Invalid PNG signature');
+                return null;
+            }
+        }
+        
+        // Parse chunks looking for tEXt/iTXt with 'chara' keyword
+        let pos = 8;
+        
+        while (pos < bytes.length) {
+            const view = new DataView(bytes.buffer, pos);
+            const length = view.getUint32(0, false);
+            const typeBytes = bytes.slice(pos + 4, pos + 8);
+            const type = String.fromCharCode(...typeBytes);
+            const chunkEnd = pos + 12 + length;
+            
+            if (type === 'tEXt' || type === 'iTXt') {
+                // Check keyword (null-terminated string at start of data)
+                const dataStart = pos + 8;
+                let keyword = '';
+                let keywordEnd = dataStart;
+                
+                for (let i = dataStart; i < dataStart + Math.min(20, length); i++) {
+                    if (bytes[i] === 0) {
+                        keywordEnd = i;
+                        break;
+                    }
+                    keyword += String.fromCharCode(bytes[i]);
+                }
+                
+                if (keyword === 'chara') {
+                    debugLog('[PNG Extract] Found chara chunk, type:', type);
+                    
+                    // Extract the base64 data after the null terminator
+                    let textStart = keywordEnd + 1;
+                    
+                    // For iTXt, skip compression flag, compression method, language tag, and translated keyword
+                    if (type === 'iTXt') {
+                        // Skip compression flag (1 byte) and compression method (1 byte)
+                        textStart += 2;
+                        // Skip language tag (null-terminated)
+                        while (textStart < dataStart + length && bytes[textStart] !== 0) textStart++;
+                        textStart++; // Skip the null
+                        // Skip translated keyword (null-terminated)
+                        while (textStart < dataStart + length && bytes[textStart] !== 0) textStart++;
+                        textStart++; // Skip the null
+                    }
+                    
+                    const textEnd = dataStart + length;
+                    const base64Data = String.fromCharCode(...bytes.slice(textStart, textEnd));
+                    
+                    try {
+                        // Decode base64 to JSON
+                        const jsonString = decodeURIComponent(escape(atob(base64Data)));
+                        const cardData = JSON.parse(jsonString);
+                        debugLog('[PNG Extract] Successfully extracted card data:', {
+                            spec: cardData.spec,
+                            spec_version: cardData.spec_version,
+                            name: cardData.data?.name
+                        });
+                        return cardData;
+                    } catch (decodeError) {
+                        debugLog('[PNG Extract] Failed to decode chara data:', decodeError.message);
+                        return null;
+                    }
+                }
+            }
+            
+            pos = chunkEnd;
+        }
+        
+        debugLog('[PNG Extract] No chara chunk found in PNG');
+        return null;
+        
+    } catch (error) {
+        debugLog('[PNG Extract] Error extracting character data:', error.message);
+        return null;
+    }
+}
+
 // Embed character data into PNG (removes existing chara chunk first)
 function embedCharacterDataInPng(pngBuffer, characterJson) {
     const bytes = new Uint8Array(pngBuffer);
@@ -10010,44 +10295,11 @@ async function importChubCharacter(fullPath) {
         const hasGallery = metadata.hasGallery || false;
         const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
         
-        // Build the character card JSON from API data
-        const characterCard = buildCharacterCardFromChub(metadata);
-        
-        // Add ChubAI link metadata to extensions (Option A: auto on import)
-        if (!characterCard.data.extensions) {
-            characterCard.data.extensions = {};
-        }
-        characterCard.data.extensions.chub = {
-            id: metadata.id || null,
-            fullPath: fullPath,
-            linkedAt: new Date().toISOString()
-        };
-        
-        // Add unique gallery_id if unique gallery folders are enabled
-        // This ensures new characters start using unique folders from day one
-        if (getSetting('uniqueGalleryFolders')) {
-            characterCard.data.extensions.gallery_id = generateGalleryId();
-            debugLog('[Chub Import] Assigned gallery_id:', characterCard.data.extensions.gallery_id);
-        }
-        
-        debugLog('[Chub Import] Character card built:', {
-            name: characterCard.data.name,
-            first_mes_length: characterCard.data.first_mes?.length,
-            alternate_greetings_count: characterCard.data.alternate_greetings?.length,
-            description_length: characterCard.data.description?.length,
-            full_card: characterCard
-        });
-        
-        // Verify the data before embedding
-        if (!characterCard.data.first_mes || characterCard.data.first_mes.length < 100) {
-            console.warn('[Chub Import] WARNING: first_mes seems too short:', characterCard.data.first_mes?.length);
-        }
-        
         // Try multiple image URLs in order of preference
-        // Include avatar_url from metadata if available
+        // IMPORTANT: Try PNG card URL FIRST since it has embedded data we want to preserve
         const imageUrls = [];
         
-        // Add PNG card URL first (has embedded data already)
+        // Add PNG card URL first (has embedded data already - preserves original spec version)
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
         
         // Add avatar URL from metadata if available
@@ -10067,6 +10319,7 @@ async function importChubCharacter(fullPath) {
         
         let imageBuffer = null;
         let needsConversion = false;
+        let downloadedUrl = null;
         
         for (const url of uniqueUrls) {
             debugLog('[Chub Import] Trying image URL:', url);
@@ -10084,8 +10337,13 @@ async function importChubCharacter(fullPath) {
                 
                 if (response.ok) {
                     imageBuffer = await response.arrayBuffer();
-                    needsConversion = url.endsWith('.webp') || response.headers.get('content-type')?.includes('webp');
-                    debugLog('[Chub Import] Successfully fetched from:', url, 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
+                    const contentType = response.headers.get('content-type') || '';
+                    needsConversion = url.endsWith('.webp') || contentType.includes('webp');
+                    downloadedUrl = url;
+                    console.log('[Chub Import] Downloaded from:', url.includes('chara_card') ? 'chara_card PNG' : url.split('/').pop(), 
+                        'size:', imageBuffer.byteLength, 'bytes',
+                        'content-type:', contentType,
+                        'needsConversion:', needsConversion);
                     break;
                 } else {
                     debugLog('[Chub Import] URL failed:', url, response.status);
@@ -10102,11 +10360,79 @@ async function importChubCharacter(fullPath) {
         // Convert WebP to PNG if needed using canvas
         let pngBuffer = imageBuffer;
         if (needsConversion) {
-            debugLog('[Chub Import] Converting WebP to PNG...');
+            console.log('[Chub Import] Converting WebP to PNG - extraction will be skipped');
             pngBuffer = await convertImageToPng(imageBuffer);
         }
         
-        // Embed character data into PNG
+        // Try to extract existing character data from the PNG
+        // This preserves the original spec version and all fields
+        let characterCard = null;
+        let usedExtractedData = false;
+        
+        if (!needsConversion) {
+            // Only try extraction if we have a PNG (not converted from WebP)
+            console.log('[Chub Import] Attempting to extract embedded card data from PNG...');
+            const extractedCard = extractCharacterDataFromPng(pngBuffer);
+            if (extractedCard && extractedCard.data) {
+                console.log('[Chub Import] ✓ Extracted card data:', {
+                    spec: extractedCard.spec,
+                    spec_version: extractedCard.spec_version,
+                    name: extractedCard.data?.name,
+                    character_version: extractedCard.data?.character_version,
+                    has_depth_prompt: !!extractedCard.data?.extensions?.depth_prompt
+                });
+                characterCard = extractedCard;
+                usedExtractedData = true;
+            } else {
+                console.log('[Chub Import] ✗ No embedded data found in PNG, will use API metadata');
+            }
+        }
+        
+        // Fall back to building from API data if extraction failed
+        if (!characterCard) {
+            console.log('[Chub Import] Building card from API metadata');
+            characterCard = buildCharacterCardFromChub(metadata);
+        }
+        
+        // Ensure extensions object exists
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        
+        // Add/update ChubAI link metadata
+        // Preserve existing chub data if present, but update with our link info
+        const existingChub = characterCard.data.extensions.chub || {};
+        characterCard.data.extensions.chub = {
+            ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
+            id: metadata.id || existingChub.id || null,
+            fullPath: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        // Add unique gallery_id if unique gallery folders are enabled
+        // Only add if not already present (preserve existing)
+        if (getSetting('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
+            characterCard.data.extensions.gallery_id = generateGalleryId();
+            debugLog('[Chub Import] Assigned gallery_id:', characterCard.data.extensions.gallery_id);
+        }
+        
+        debugLog('[Chub Import] Final character card:', {
+            spec: characterCard.spec,
+            spec_version: characterCard.spec_version,
+            name: characterCard.data.name,
+            usedExtractedData: usedExtractedData,
+            first_mes_length: characterCard.data.first_mes?.length,
+            alternate_greetings_count: characterCard.data.alternate_greetings?.length,
+            character_version: characterCard.data.character_version,
+            extensions_keys: Object.keys(characterCard.data.extensions || {})
+        });
+        
+        // Verify the data before embedding
+        if (!characterCard.data.first_mes || characterCard.data.first_mes.length < 100) {
+            console.warn('[Chub Import] WARNING: first_mes seems too short:', characterCard.data.first_mes?.length);
+        }
+        
+        // Embed character data into PNG (re-embed to ensure our extensions are included)
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
         debugLog('[Chub Import] PNG embedded, size:', embeddedPng.length, 'bytes');
@@ -10230,6 +10556,12 @@ function updateLogEntry(entry, message, status) {
 
 // Start import process
 startImportBtn?.addEventListener('click', async () => {
+    // If in "Done" state, just close the modal
+    if (startImportBtn.classList.contains('success')) {
+        importModal.classList.add('hidden');
+        return;
+    }
+    
     const text = importUrlsInput.value.trim();
     if (!text) {
         showToast('Please enter at least one URL', 'warning');
@@ -10261,7 +10593,6 @@ startImportBtn?.addEventListener('click', async () => {
     isImporting = true;
     startImportBtn.disabled = true;
     startImportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
-    cancelImportBtn.disabled = true;
     importUrlsInput.disabled = true;
     
     importProgress.classList.remove('hidden');
@@ -10455,8 +10786,6 @@ startImportBtn?.addEventListener('click', async () => {
     startImportBtn.disabled = false;
     startImportBtn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
     startImportBtn.classList.add('success');
-    cancelImportBtn.disabled = false;
-    cancelImportBtn.innerHTML = '<i class="fa-solid fa-xmark"></i> Close';
     importUrlsInput.disabled = false;
     
     // Hide media progress
@@ -11291,10 +11620,15 @@ async function saveChubLink(char, chubInfo) {
     };
     
     // Save to server via merge-attributes API
+    // IMPORTANT: Spread existing data to avoid wiping other fields
+    const existingData = char.data || {};
     const response = await apiRequest('/characters/merge-attributes', 'POST', {
         avatar: char.avatar,
+        create_date: char.create_date,
         data: {
-            extensions: updatedExtensions
+            ...existingData,
+            extensions: updatedExtensions,
+            create_date: char.create_date
         }
     });
     
@@ -17548,6 +17882,12 @@ let chubFilterGreetings = false;
 let chubFilterFavorites = false;
 let chubFilterHideOwned = false;
 
+// Advanced ChubAI filters (Tags dropdown)
+let chubTagFilters = new Map(); // Map<tagName, 'include' | 'exclude'>
+let chubSortAscending = false; // false = descending (default), true = ascending
+let chubMinTokens = 50; // Minimum tokens (API default)
+let chubMaxTokens = 100000; // Maximum tokens
+
 // ChubAI View mode and author filter
 let chubViewMode = 'browse'; // 'browse' or 'timeline'
 let chubAuthorFilter = null; // Username to filter by
@@ -18539,9 +18879,6 @@ function initChubView() {
     // Also sync NSFW toggle state
     updateNsfwToggleState();
     
-    // Render popular tags
-    renderChubPopularTags();
-    
     // Favorite button in character modal
     on('chubCharFavoriteBtn', 'click', toggleChubCharFavorite);
     
@@ -18606,8 +18943,6 @@ function initChubView() {
         }
         // Hide the clear button
         document.getElementById('chubClearSearchBtn')?.classList.add('hidden');
-        // Re-render tags to remove active states
-        renderChubPopularTags();
         // Perform search (will show default results)
         performChubSearch();
     });
@@ -18632,6 +18967,8 @@ function initChubView() {
     // More filters dropdown toggle
     on('chubFiltersBtn', 'click', (e) => {
         e.stopPropagation();
+        // Close Tags dropdown when opening Features
+        document.getElementById('chubTagsDropdown')?.classList.add('hidden');
         document.getElementById('chubFiltersDropdown')?.classList.toggle('hidden');
     });
     
@@ -18690,6 +19027,9 @@ function initChubView() {
             }
         });
     });
+    
+    // === Tags Dropdown Handlers ===
+    initChubTagsDropdown();
     
     // NSFW toggle - single button toggle
     on('chubNsfwToggle', 'click', () => {
@@ -18915,57 +19255,66 @@ function openChubTokenModal() {
 
 /**
  * Fetch popular tags from ChubAI API by aggregating tags from top characters
- * Uses a single request to get tags from the most popular characters
+ * Uses multiple requests to get a diverse set of tags from different character rankings
  */
 async function fetchChubPopularTags() {
     if (chubTagsLoading || chubTagsLoaded) return;
     
     chubTagsLoading = true;
-    renderChubPopularTags(); // Show loading state
     
     try {
-        // Fetch top 500 most downloaded characters - they'll have the most representative tags
-        const params = new URLSearchParams({
-            search: '',
-            first: '500',
-            sort: 'download_count',
-            nsfw: 'true',
-            nsfl: 'true',
-            include_forks: 'false',
-            min_tokens: '50'
-        });
-        
         const headers = getChubHeaders(true);
-        
-        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
-            method: 'GET',
-            headers
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        const characters = extractNodes(data);
-        
-        // Aggregate tags from all characters
         const tagCounts = new Map();
-        for (const char of characters) {
-            const topics = char.topics || [];
-            for (const tag of topics) {
-                const normalizedTag = tag.toLowerCase().trim();
-                if (normalizedTag && normalizedTag.length > 1 && normalizedTag.length < 30) {
-                    tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
+        
+        // Fetch from multiple sort orders to get diverse tags
+        const sortOrders = ['download_count', 'id', 'rating', 'default'];
+        
+        for (const sortOrder of sortOrders) {
+            try {
+                const params = new URLSearchParams({
+                    search: '',
+                    first: '500',
+                    sort: sortOrder,
+                    nsfw: 'true',
+                    nsfl: 'true',
+                    include_forks: 'false',
+                    min_tokens: '50'
+                });
+                
+                const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers
+                });
+                
+                if (!response.ok) continue;
+                
+                const data = await response.json();
+                const characters = extractNodes(data);
+                
+                // Aggregate tags from these characters
+                for (const char of characters) {
+                    const topics = char.topics || [];
+                    for (const tag of topics) {
+                        const normalizedTag = tag.toLowerCase().trim();
+                        if (normalizedTag && normalizedTag.length > 1 && normalizedTag.length < 40) {
+                            tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
+                        }
+                    }
                 }
+                
+                debugLog(`[ChubTags] Fetched tags from ${characters.length} characters (sort: ${sortOrder})`);
+                
+                // Small delay between requests
+                await new Promise(resolve => setTimeout(resolve, 200));
+            } catch (err) {
+                console.warn(`[ChubTags] Failed to fetch with sort ${sortOrder}:`, err);
             }
         }
         
-        // Sort by frequency and take top 200 tags
+        // Sort by frequency and take top 500 tags
         const sortedTags = [...tagCounts.entries()]
-            .filter(([_, count]) => count >= 2) // At least 2 uses
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 200)
+            .slice(0, 500)
             .map(([tag]) => tag);
         
         if (sortedTags.length > 0) {
@@ -18973,106 +19322,13 @@ async function fetchChubPopularTags() {
             chubTagsLoaded = true;
         }
         
-        debugLog(`[ChubTags] Loaded ${chubPopularTags.length} popular tags from ${characters.length} characters`);
+        debugLog(`[ChubTags] Loaded ${chubPopularTags.length} unique tags total`);
         
     } catch (error) {
         console.error('[ChubTags] Error fetching popular tags:', error);
     } finally {
         chubTagsLoading = false;
-        renderChubPopularTags();
     }
-}
-
-/**
- * Add a tag to the search input (appending to existing search)
- */
-function addTagToChubSearch(tag) {
-    const input = document.getElementById('chubSearchInput');
-    if (!input) return;
-    
-    const currentValue = input.value.trim();
-    
-    // Check if tag is already in the search
-    const existingTags = currentValue.split(/\s+/).filter(t => t);
-    if (existingTags.includes(tag)) {
-        // Tag already present - remove it (toggle behavior)
-        input.value = existingTags.filter(t => t !== tag).join(' ');
-    } else {
-        // Add tag to search
-        input.value = currentValue ? `${currentValue} ${tag}` : tag;
-    }
-    
-    // Update clear button visibility
-    const clearBtn = document.getElementById('chubClearSearchBtn');
-    if (clearBtn) {
-        clearBtn.classList.toggle('hidden', !input.value.trim());
-    }
-    
-    performChubSearch();
-}
-
-/**
- * Check if a tag is currently in the search input
- */
-function isTagInChubSearch(tag) {
-    const input = document.getElementById('chubSearchInput');
-    if (!input) return false;
-    
-    const currentTags = input.value.trim().toLowerCase().split(/\s+/).filter(t => t);
-    return currentTags.includes(tag.toLowerCase());
-}
-
-function renderChubPopularTags() {
-    const container = document.getElementById('chubPopularTags');
-    if (!container) return;
-    
-    // Show loading state
-    if (chubTagsLoading) {
-        container.innerHTML = `
-            <span class="chub-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</span>
-        `;
-        return;
-    }
-    
-    // No tags available
-    if (chubPopularTags.length === 0) {
-        container.innerHTML = `
-            <span class="chub-tags-empty">No tags available</span>
-            <button class="chub-tag-btn chub-more-tags-btn" title="Retry loading tags">
-                <i class="fa-solid fa-rotate"></i> Retry
-            </button>
-        `;
-        container.querySelector('.chub-more-tags-btn')?.addEventListener('click', () => {
-            chubTagsLoaded = false;
-            fetchChubPopularTags();
-        });
-        return;
-    }
-    
-    // Show top tags with active state for selected ones
-    const tagsToShow = chubPopularTags.slice(0, 12);
-    
-    container.innerHTML = `
-        ${tagsToShow.map(tag => {
-            const isActive = isTagInChubSearch(tag);
-            return `<button class="chub-tag-btn${isActive ? ' active' : ''}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
-        }).join('')}
-        <button class="chub-tag-btn chub-more-tags-btn" title="Browse all tags">
-            <i class="fa-solid fa-ellipsis"></i> More
-        </button>
-    `;
-    
-    container.querySelectorAll('.chub-tag-btn:not(.chub-more-tags-btn)').forEach(btn => {
-        btn.addEventListener('click', () => {
-            addTagToChubSearch(btn.dataset.tag);
-            renderChubPopularTags(); // Re-render to update active states
-        });
-    });
-    
-    // More tags button opens the tag browser popup
-    container.querySelector('.chub-more-tags-btn')?.addEventListener('click', () => {
-        openChubTagsPopup();
-    });
 }
 
 /**
@@ -19080,8 +19336,8 @@ function renderChubPopularTags() {
  * Supplements existing tags if not fully loaded yet
  */
 function extractChubTagsFromResults(characters) {
-    // If we already have 200 tags loaded from API, don't update
-    if (chubTagsLoaded && chubPopularTags.length >= 150) return;
+    // If we already have 250+ tags loaded from API, don't update
+    if (chubTagsLoaded && chubPopularTags.length >= 250) return;
     
     const tagCounts = new Map();
     
@@ -19100,107 +19356,15 @@ function extractChubTagsFromResults(characters) {
         }
     }
     
-    // Sort by frequency and take top 200 tags
+    // Sort by frequency and take top 300 tags
     const sortedTags = [...tagCounts.entries()]
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 200)
+        .slice(0, 300)
         .map(([tag]) => tag);
     
     if (sortedTags.length > chubPopularTags.length) {
         chubPopularTags = sortedTags;
-        renderChubPopularTags();
     }
-}
-
-/**
- * Open a popup to browse all ChubAI tags
- */
-function openChubTagsPopup() {
-    // Remove existing popup if any
-    document.getElementById('chubTagsPopup')?.remove();
-    
-    // If tags not loaded yet, try to fetch them
-    if (chubPopularTags.length === 0 && !chubTagsLoading) {
-        fetchChubPopularTags();
-    }
-    
-    const popup = document.createElement('div');
-    popup.id = 'chubTagsPopup';
-    popup.className = 'chub-tags-popup';
-    
-    const renderPopupTags = () => {
-        const listContainer = popup.querySelector('#chubTagsPopupList');
-        if (!listContainer) return;
-        
-        if (chubTagsLoading) {
-            listContainer.innerHTML = `<div class="chub-tags-popup-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>`;
-            return;
-        }
-        
-        if (chubPopularTags.length === 0) {
-            listContainer.innerHTML = `<div class="chub-tags-popup-empty">No tags available. <button class="retry-btn">Retry</button></div>`;
-            listContainer.querySelector('.retry-btn')?.addEventListener('click', () => {
-                chubTagsLoaded = false;
-                fetchChubPopularTags().then(() => renderPopupTags());
-            });
-            return;
-        }
-        
-        const filter = popup.querySelector('#chubTagsPopupSearch')?.value?.toLowerCase() || '';
-        const filteredTags = filter 
-            ? chubPopularTags.filter(tag => tag.includes(filter))
-            : chubPopularTags;
-        
-        listContainer.innerHTML = filteredTags.map(tag => {
-            const isActive = isTagInChubSearch(tag);
-            return `<button class="chub-popup-tag-btn${isActive ? ' active' : ''}" data-tag="${escapeHtml(tag)}">${escapeHtml(tag)}</button>`;
-        }).join('');
-        
-        // Re-attach click handlers
-        listContainer.querySelectorAll('.chub-popup-tag-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                addTagToChubSearch(btn.dataset.tag);
-                btn.classList.toggle('active');
-                renderChubPopularTags(); // Update main tag bar
-            });
-        });
-    };
-    
-    popup.innerHTML = `
-        <div class="chub-tags-popup-content">
-            <div class="chub-tags-popup-header">
-                <h3><i class="fa-solid fa-tags"></i> Browse Tags (${chubPopularTags.length})</h3>
-                <button class="close-btn" id="chubTagsPopupClose">&times;</button>
-            </div>
-            <div class="chub-tags-popup-search">
-                <input type="text" id="chubTagsPopupSearch" placeholder="Filter tags...">
-            </div>
-            <div class="chub-tags-popup-list" id="chubTagsPopupList"></div>
-        </div>
-    `;
-    
-    document.body.appendChild(popup);
-    renderPopupTags();
-    
-    // Close button
-    popup.querySelector('#chubTagsPopupClose').addEventListener('click', () => {
-        popup.remove();
-    });
-    
-    // Click outside to close
-    popup.addEventListener('click', (e) => {
-        if (e.target === popup) {
-            popup.remove();
-        }
-    });
-    
-    // Filter tags as user types (debounced)
-    const searchInput = popup.querySelector('#chubTagsPopupSearch');
-    searchInput.addEventListener('input', debounce(() => {
-        renderPopupTags();
-    }, 100));
-    
-    searchInput.focus();
 }
 
 function updateChubFiltersButtonState() {
@@ -19240,6 +19404,266 @@ function updateNsfwToggleState() {
 }
 
 // ============================================================================
+// CHUBAI TAGS DROPDOWN (Tri-state tag filters + advanced options)
+// ============================================================================
+
+/**
+ * Initialize the Tags dropdown with event handlers
+ */
+function initChubTagsDropdown() {
+    const btn = document.getElementById('chubTagsBtn');
+    const dropdown = document.getElementById('chubTagsDropdown');
+    const searchInput = document.getElementById('chubTagsSearchInput');
+    const clearBtn = document.getElementById('chubTagsClearBtn');
+    
+    if (!btn || !dropdown) return;
+    
+    // Toggle dropdown
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const wasHidden = dropdown.classList.contains('hidden');
+        // Close Features dropdown when opening Tags
+        document.getElementById('chubFiltersDropdown')?.classList.add('hidden');
+        dropdown.classList.toggle('hidden');
+        
+        // Populate tags when opening
+        if (wasHidden) {
+            renderChubTagsDropdownList();
+            searchInput?.focus();
+        }
+    });
+    
+    // Close when clicking elsewhere
+    document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target) && e.target !== btn && !btn.contains(e.target)) {
+            dropdown.classList.add('hidden');
+        }
+    });
+    
+    // Prevent dropdown from closing when clicking inside
+    dropdown.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+    
+    // Tag search filtering
+    searchInput?.addEventListener('input', debounce(() => {
+        renderChubTagsDropdownList(searchInput.value);
+    }, 150));
+    
+    // Clear all tag filters
+    clearBtn?.addEventListener('click', () => {
+        chubTagFilters.clear();
+        // Also clear the search input
+        if (searchInput) searchInput.value = '';
+        renderChubTagsDropdownList('');
+        updateChubTagsButtonState();
+        triggerChubReload();
+    });
+    
+    // Advanced options handlers
+    const sortDir = document.getElementById('chubSortDirection');
+    const minTokens = document.getElementById('chubMinTokens');
+    const maxTokens = document.getElementById('chubMaxTokens');
+    
+    sortDir?.addEventListener('change', (e) => {
+        chubSortAscending = e.target.value === 'asc';
+        triggerChubReload();
+    });
+    
+    minTokens?.addEventListener('change', (e) => {
+        chubMinTokens = parseInt(e.target.value) || 50;
+        triggerChubReload();
+    });
+    
+    maxTokens?.addEventListener('change', (e) => {
+        chubMaxTokens = parseInt(e.target.value) || 100000;
+        triggerChubReload();
+    });
+}
+
+/**
+ * Trigger a reload of ChubAI characters
+ */
+function triggerChubReload() {
+    if (chubViewMode === 'timeline') {
+        renderChubTimeline();
+    } else {
+        chubCharacters = [];
+        chubCurrentPage = 1;
+        loadChubCharacters();
+    }
+}
+
+// Debounce timeout for tag filter changes
+let chubTagFilterDebounceTimeout = null;
+
+/**
+ * Debounced version of triggerChubReload for tag filtering
+ * Waits 500ms after the last change before reloading
+ */
+function triggerChubReloadDebounced() {
+    if (chubTagFilterDebounceTimeout) {
+        clearTimeout(chubTagFilterDebounceTimeout);
+    }
+    chubTagFilterDebounceTimeout = setTimeout(() => {
+        chubTagFilterDebounceTimeout = null;
+        triggerChubReload();
+    }, 500);
+}
+
+/**
+ * Render the tag list in the dropdown with tri-state buttons
+ */
+function renderChubTagsDropdownList(filter = '') {
+    const container = document.getElementById('chubTagsList');
+    if (!container) return;
+    
+    // Show loading if tags not loaded
+    if (chubTagsLoading) {
+        container.innerHTML = '<div class="chub-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>';
+        return;
+    }
+    
+    // Try to load tags if not available
+    if (chubPopularTags.length === 0) {
+        if (!chubTagsLoaded) {
+            fetchChubPopularTags().then(() => renderChubTagsDropdownList(filter));
+        } else {
+            container.innerHTML = '<div class="chub-tags-empty">No tags available</div>';
+        }
+        return;
+    }
+    
+    // Filter tags
+    const filterLower = filter.toLowerCase();
+    const filteredTags = filter 
+        ? chubPopularTags.filter(tag => tag.toLowerCase().includes(filterLower))
+        : chubPopularTags;
+    
+    if (filteredTags.length === 0) {
+        container.innerHTML = '<div class="chub-tags-empty">No matching tags</div>';
+        return;
+    }
+    
+    // Sort: active filters first, then alphabetically
+    const sortedTags = [...filteredTags].sort((a, b) => {
+        const aState = chubTagFilters.get(a);
+        const bState = chubTagFilters.get(b);
+        // Active filters (include/exclude) come first
+        if (aState && !bState) return -1;
+        if (!aState && bState) return 1;
+        // Then sort alphabetically
+        return a.localeCompare(b);
+    });
+    
+    container.innerHTML = sortedTags.map(tag => {
+        const state = chubTagFilters.get(tag) || 'neutral';
+        const stateClass = `state-${state}`;
+        const stateIcon = state === 'include' ? '<i class="fa-solid fa-check"></i>' 
+                        : state === 'exclude' ? '<i class="fa-solid fa-minus"></i>' 
+                        : '';
+        const stateTitle = state === 'include' ? 'Included - click to exclude'
+                        : state === 'exclude' ? 'Excluded - click to clear'
+                        : 'Neutral - click to include';
+        
+        return `
+            <div class="chub-tag-filter-item" data-tag="${escapeHtml(tag)}">
+                <button class="chub-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
+                <span class="tag-label">${escapeHtml(tag)}</span>
+            </div>
+        `;
+    }).join('');
+    
+    // Attach click handlers
+    container.querySelectorAll('.chub-tag-filter-item').forEach(item => {
+        const tag = item.dataset.tag;
+        const stateBtn = item.querySelector('.chub-tag-state-btn');
+        const label = item.querySelector('.tag-label');
+        
+        const cycleState = () => {
+            const current = chubTagFilters.get(tag) || 'neutral';
+            let newState;
+            
+            // Cycle: neutral -> include -> exclude -> neutral
+            if (current === 'neutral') {
+                newState = 'include';
+                chubTagFilters.set(tag, 'include');
+            } else if (current === 'include') {
+                newState = 'exclude';
+                chubTagFilters.set(tag, 'exclude');
+            } else {
+                newState = 'neutral';
+                chubTagFilters.delete(tag);
+            }
+            
+            // Update button appearance
+            updateChubTagStateButton(stateBtn, newState);
+            updateChubTagsButtonState();
+            triggerChubReloadDebounced();
+        };
+        
+        stateBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cycleState();
+        });
+        
+        label?.addEventListener('click', cycleState);
+    });
+}
+
+/**
+ * Update a single tag state button's appearance
+ */
+function updateChubTagStateButton(btn, state) {
+    if (!btn) return;
+    
+    btn.className = 'chub-tag-state-btn';
+    if (state === 'include') {
+        btn.classList.add('state-include');
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.title = 'Included - click to exclude';
+    } else if (state === 'exclude') {
+        btn.classList.add('state-exclude');
+        btn.innerHTML = '<i class="fa-solid fa-minus"></i>';
+        btn.title = 'Excluded - click to clear';
+    } else {
+        btn.classList.add('state-neutral');
+        btn.innerHTML = '';
+        btn.title = 'Neutral - click to include';
+    }
+}
+
+/**
+ * Update the Tags button to show active filter count
+ */
+function updateChubTagsButtonState() {
+    const btn = document.getElementById('chubTagsBtn');
+    const label = document.getElementById('chubTagsBtnLabel');
+    if (!btn || !label) return;
+    
+    const includeCount = Array.from(chubTagFilters.values()).filter(v => v === 'include').length;
+    const excludeCount = Array.from(chubTagFilters.values()).filter(v => v === 'exclude').length;
+    
+    // Check if any advanced options are non-default
+    const hasAdvanced = chubSortAscending || chubMinTokens !== 50 || chubMaxTokens !== 100000;
+    
+    // Build label
+    let text = 'Tags';
+    const parts = [];
+    if (includeCount > 0) parts.push(`+${includeCount}`);
+    if (excludeCount > 0) parts.push(`-${excludeCount}`);
+    if (parts.length > 0) {
+        text += ` (${parts.join('/')})`;
+    }
+    
+    label.textContent = text;
+    
+    // Visual indicator for active filters
+    const hasFilters = includeCount > 0 || excludeCount > 0 || hasAdvanced;
+    btn.classList.toggle('has-filters', hasFilters);
+}
+
+// ============================================================================
 // CHUBAI VIEW MODE SWITCHING (Browse/Timeline)
 // ============================================================================
 
@@ -19262,8 +19686,10 @@ async function switchChubViewMode(mode) {
         // Show browse-specific filters, hide timeline sort
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
         const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
+        const tagsDropdownContainer = document.querySelector('.chub-tags-dropdown-container');
         if (discoveryPreset) discoveryPreset.classList.remove('chub-filter-hidden');
         if (timelineSortHeader) timelineSortHeader.classList.add('chub-filter-hidden');
+        if (tagsDropdownContainer) tagsDropdownContainer.classList.remove('chub-filter-hidden');
         
         // Clear the browse grid immediately and show loading state
         const grid = document.getElementById('chubGrid');
@@ -19282,8 +19708,10 @@ async function switchChubViewMode(mode) {
         // Hide browse-specific filters, show timeline sort in header
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
         const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
+        const tagsDropdownContainer = document.querySelector('.chub-tags-dropdown-container');
         if (discoveryPreset) discoveryPreset.classList.add('chub-filter-hidden');
         if (timelineSortHeader) timelineSortHeader.classList.remove('chub-filter-hidden');
+        if (tagsDropdownContainer) tagsDropdownContainer.classList.add('chub-filter-hidden');
         
         // If favorites filter is enabled, fetch the favorite IDs first
         if (chubFilterFavorites && chubToken) {
@@ -20087,7 +20515,6 @@ async function loadChubCharacters(forceRefresh = false) {
         params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
         params.set('include_forks', 'true'); // Include forked characters
         params.set('venus', 'false');
-        params.set('min_tokens', '50');
         
         if (chubCurrentSearch) {
             params.set('search', chubCurrentSearch);
@@ -20127,6 +20554,36 @@ async function loadChubCharacters(forceRefresh = false) {
         }
         if (chubFilterGreetings) {
             params.set('require_alternate_greetings', 'true');
+        }
+        
+        // === Advanced Tag Filters ===
+        // Include tags (topics)
+        const includeTags = [];
+        const excludeTags = [];
+        for (const [tag, state] of chubTagFilters) {
+            if (state === 'include') includeTags.push(tag);
+            else if (state === 'exclude') excludeTags.push(tag);
+        }
+        if (includeTags.length > 0) {
+            params.set('topics', includeTags.join(','));
+        }
+        if (excludeTags.length > 0) {
+            params.set('excludetopics', excludeTags.join(','));
+        }
+        
+        // Sort direction
+        if (chubSortAscending) {
+            params.set('asc', 'true');
+        }
+        
+        // Token limits (only set if different from defaults)
+        if (chubMinTokens !== 50) {
+            params.set('min_tokens', chubMinTokens.toString());
+        } else {
+            params.set('min_tokens', '50');
+        }
+        if (chubMaxTokens !== 100000) {
+            params.set('max_tokens', chubMaxTokens.toString());
         }
         
         // Note: Favorites filter is now handled by loadChubFavorites() using gateway API
@@ -20899,43 +21356,11 @@ async function downloadChubCharacter() {
         
         downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
         
-        // Build the character card JSON from API data
-        const characterCard = buildCharacterCardFromChub(metadata);
-        
-        // Add ChubAI link metadata to extensions
-        if (!characterCard.data.extensions) {
-            characterCard.data.extensions = {};
-        }
-        characterCard.data.extensions.chub = {
-            id: metadata.id || null,
-            fullPath: fullPath,
-            linkedAt: new Date().toISOString()
-        };
-        
-        // Add unique gallery_id if unique gallery folders are enabled
-        // Inherit from replaced character if available, otherwise generate new
-        if (getSetting('uniqueGalleryFolders')) {
-            if (inheritedGalleryId) {
-                characterCard.data.extensions.gallery_id = inheritedGalleryId;
-                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
-            } else {
-                characterCard.data.extensions.gallery_id = generateGalleryId();
-                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
-            }
-        }
-        
-        debugLog('[ChubDownload] Character card built:', {
-            name: characterCard.data.name,
-            first_mes_length: characterCard.data.first_mes?.length,
-            description_length: characterCard.data.description?.length,
-            gallery_id: characterCard.data.extensions.gallery_id
-        });
-        
         // Try multiple image URLs in order of preference
-        // Include avatar_url from API if available, chara_card_v2.png is ideal but not all characters have it
+        // IMPORTANT: Try PNG card URL FIRST since it has embedded data we want to preserve
         const imageUrls = [];
         
-        // Add PNG card URL first (has embedded data already)
+        // Add PNG card URL first (has embedded data already - preserves original spec version)
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
         
         // Add avatar URL from selected character if available
@@ -21000,7 +21425,74 @@ async function downloadChubCharacter() {
             pngBuffer = await convertImageToPng(imageBuffer);
         }
         
-        // Embed character data into PNG
+        // Try to extract existing character data from the PNG
+        // This preserves the original spec version (v2/v3) and all fields
+        let characterCard = null;
+        let usedExtractedData = false;
+        
+        if (!needsConversion) {
+            // Only try extraction if we have a PNG (not converted from WebP)
+            console.log('[ChubDownload] Attempting to extract embedded card data from PNG...');
+            const extractedCard = extractCharacterDataFromPng(pngBuffer);
+            if (extractedCard && extractedCard.data) {
+                console.log('[ChubDownload] ✓ Extracted card data from PNG:', {
+                    spec: extractedCard.spec,
+                    spec_version: extractedCard.spec_version,
+                    name: extractedCard.data?.name,
+                    character_version: extractedCard.data?.character_version,
+                    has_depth_prompt: !!extractedCard.data?.extensions?.depth_prompt
+                });
+                characterCard = extractedCard;
+                usedExtractedData = true;
+            } else {
+                console.log('[ChubDownload] ✗ No embedded data found in PNG, will use API metadata');
+            }
+        }
+        
+        // Fall back to building from API data if extraction failed
+        if (!characterCard) {
+            console.log('[ChubDownload] Building card from API metadata');
+            characterCard = buildCharacterCardFromChub(metadata);
+        }
+        
+        // Ensure extensions object exists
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        
+        // Add/update ChubAI link metadata
+        // Preserve existing chub data if present, but update with our link info
+        const existingChub = characterCard.data.extensions.chub || {};
+        characterCard.data.extensions.chub = {
+            ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
+            id: metadata.id || existingChub.id || null,
+            fullPath: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        // Add unique gallery_id if unique gallery folders are enabled
+        // Inherit from replaced character if available, otherwise preserve existing or generate new
+        if (getSetting('uniqueGalleryFolders')) {
+            if (inheritedGalleryId) {
+                characterCard.data.extensions.gallery_id = inheritedGalleryId;
+                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
+            } else if (!characterCard.data.extensions.gallery_id) {
+                characterCard.data.extensions.gallery_id = generateGalleryId();
+                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
+            }
+        }
+        
+        debugLog('[ChubDownload] Final character card:', {
+            spec: characterCard.spec,
+            spec_version: characterCard.spec_version,
+            name: characterCard.data.name,
+            usedExtractedData: usedExtractedData,
+            first_mes_length: characterCard.data.first_mes?.length,
+            character_version: characterCard.data.character_version,
+            gallery_id: characterCard.data.extensions.gallery_id
+        });
+        
+        // Embed character data into PNG (re-embed to ensure our extensions are included)
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
         debugLog('[ChubDownload] PNG embedded, size:', embeddedPng.length, 'bytes');
@@ -21174,4 +21666,175 @@ document.addEventListener('keydown', (e) => {
             scrollContainer.scrollTo({ top: scrollContainer.scrollHeight, behavior: 'smooth' });
             break;
     }
+});
+
+// ========================================
+// CORE API BRIDGE - DO NOT USE DIRECTLY FROM MODULES
+// ========================================
+// 
+// ARCHITECTURE NOTE:
+// These window.* properties are the BRIDGE between library.js (monolith) and CoreAPI.
+// 
+// ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+// │   library.js    │ --> │ window.* bridge │ <-- │    core-api.js  │ <-- modules
+// │   (monolith)    │     │ (this section)  │     │ (abstraction)   │
+// └─────────────────┘     └─────────────────┘     └─────────────────┘
+//
+// MODULES MUST NOT:
+// - Import from library.js directly
+// - Access window.* properties directly (except through CoreAPI)
+// - Use dependencies.* pattern
+//
+// MODULES MUST:
+// - Import from core-api.js for all library functionality
+// - Import from shared-styles.js for CSS injection
+//
+// When adding new functionality for modules:
+// 1. Expose the function here on window.*
+// 2. Add a wrapper function in core-api.js
+// 3. Export it from CoreAPI
+// 4. Use CoreAPI.functionName() in modules
+//
+// This prevents modules from becoming tightly coupled to library.js internals,
+// making future refactoring possible without breaking all modules.
+// ========================================
+
+// API & Utilities
+window.apiRequest = apiRequest;
+window.showToast = showToast;
+window.escapeHtml = escapeHtml;
+window.getCSRFToken = getCSRFToken;
+window.sanitizeFolderName = sanitizeFolderName;
+
+// Character Data
+window.fetchCharacters = fetchCharacters;
+window.getTags = getTags;
+window.getAllAvailableTags = getAllAvailableTags;
+window.getGalleryFolderName = getGalleryFolderName;
+
+// UI / Modals
+window.openModal = openModal;
+window.closeModal = closeModal;
+window.openChubLinkModal = openChubLinkModal;
+
+// Settings
+window.getSetting = getSetting;
+window.setSetting = setSetting;
+
+// ChubAI Integration
+window.fetchChubMetadata = fetchChubMetadata;
+window.extractCharacterDataFromPng = extractCharacterDataFromPng;
+
+/**
+ * Apply field updates to a character card
+ * Used by card-updates module to apply selective field changes
+ * @param {string} avatar - Character avatar filename
+ * @param {Object} fieldUpdates - Object with field paths as keys (supports dot notation like 'depth_prompt.prompt')
+ * @returns {Promise<boolean>} Success status
+ */
+window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
+    const char = allCharacters.find(c => c.avatar === avatar);
+    if (!char) {
+        console.error('[applyCardFieldUpdates] Character not found:', avatar);
+        return false;
+    }
+    
+    try {
+        // Build update payload preserving all existing data
+        const existingExtensions = char.data?.extensions || char.extensions || {};
+        const existingCreateDate = char.create_date;
+        const existingSpec = char.spec || char.data?.spec;
+        const existingSpecVersion = char.spec_version || char.data?.spec_version;
+        const existingData = char.data || {};
+        
+        // Helper to set nested value
+        const setNestedValue = (obj, path, value) => {
+            const keys = path.split('.');
+            const lastKey = keys.pop();
+            const target = keys.reduce((o, k) => {
+                if (o[k] === undefined) o[k] = {};
+                return o[k];
+            }, obj);
+            target[lastKey] = value;
+        };
+        
+        // Start with existing data
+        const updatedData = { ...existingData };
+        
+        // Apply each field update
+        for (const [field, value] of Object.entries(fieldUpdates)) {
+            setNestedValue(updatedData, field, value);
+        }
+        
+        // Ensure extensions are preserved
+        updatedData.extensions = { ...existingExtensions, ...(updatedData.extensions || {}) };
+        
+        const payload = {
+            avatar: avatar,
+            ...(existingSpec && { spec: existingSpec }),
+            ...(existingSpecVersion && { spec_version: existingSpecVersion }),
+            name: updatedData.name,
+            description: updatedData.description,
+            first_mes: updatedData.first_mes,
+            personality: updatedData.personality,
+            scenario: updatedData.scenario,
+            mes_example: updatedData.mes_example,
+            system_prompt: updatedData.system_prompt,
+            post_history_instructions: updatedData.post_history_instructions,
+            creator_notes: updatedData.creator_notes,
+            creator: updatedData.creator,
+            character_version: updatedData.character_version,
+            tags: updatedData.tags,
+            alternate_greetings: updatedData.alternate_greetings,
+            character_book: updatedData.character_book,
+            create_date: existingCreateDate,
+            data: updatedData
+        };
+        
+        const response = await apiRequest('/characters/merge-attributes', 'POST', payload);
+        
+        if (response.ok) {
+            // Update local data
+            const charIndex = allCharacters.findIndex(c => c.avatar === avatar);
+            if (charIndex !== -1) {
+                // Update the data object
+                allCharacters[charIndex].data = updatedData;
+                
+                // Also update root-level fields for compatibility
+                for (const [field, value] of Object.entries(fieldUpdates)) {
+                    if (!field.includes('.')) {
+                        allCharacters[charIndex][field] = value;
+                    }
+                }
+            }
+            
+            console.log('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
+            return true;
+        } else {
+            console.error('[applyCardFieldUpdates] API error:', response.status);
+            return false;
+        }
+    } catch (error) {
+        console.error('[applyCardFieldUpdates] Error:', error);
+        return false;
+    }
+};
+
+// Expose allCharacters as a getter so CoreAPI always gets current value
+Object.defineProperty(window, 'allCharacters', {
+    get: () => allCharacters,
+    configurable: true
+});
+
+// Expose currentCharacters as a getter for filtered/displayed characters
+Object.defineProperty(window, 'currentCharacters', {
+    get: () => currentCharacters,
+    configurable: true
+});
+
+// Expose activeChar with getter/setter for CoreAPI (used by openChubLinkModal)
+Object.defineProperty(window, 'activeChar', {
+    get: () => activeChar,
+    set: (char) => { activeChar = char; },
+    configurable: true
 });

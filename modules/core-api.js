@@ -1,0 +1,528 @@
+/**
+ * Core API - The single interface between modules and the gallery monolith
+ * 
+ * ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║                           MODULE ARCHITECTURE RULE                        ║
+ * ╠═══════════════════════════════════════════════════════════════════════════╣
+ * ║                                                                           ║
+ * ║  🚫 MODULES CANNOT:                                                       ║
+ * ║     - Import from gallery.js directly                                     ║
+ * ║     - Use window.allCharacters, window.openModal, window.showToast, etc.  ║
+ * ║     - Access monolith internal state or functions directly                ║
+ * ║     - Use the `dependencies` object passed to init() for core features    ║
+ * ║                                                                           ║
+ * ║  ✅ MODULES CAN ONLY:                                                     ║
+ * ║     - Import from core-api.js (this file)                                 ║
+ * ║     - Import from shared-styles.js                                        ║
+ * ║     - Import other modules via CoreAPI.getModule()                        ║
+ * ║     - Use standard browser APIs (window.open, document.*, fetch, etc.)    ║
+ * ║                                                                           ║
+ * ║  WHY: This abstraction layer allows the monolith to be refactored         ║
+ * ║  without breaking modules. CoreAPI is the contract - if internals         ║
+ * ║  change, update CoreAPI once, not every module.                           ║
+ * ║                                                                           ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝
+ * 
+ * @module CoreAPI
+ * @version 1.0.0
+ */
+
+// ========================================
+// STATE ACCESS
+// ========================================
+
+/**
+ * Get all loaded characters
+ * @returns {Array} All character objects
+ */
+export function getAllCharacters() {
+    return window.allCharacters || [];
+}
+
+/**
+ * Get currently filtered/displayed characters
+ * @returns {Array} Current character objects
+ */
+export function getCurrentCharacters() {
+    return window.currentCharacters || [];
+}
+
+/**
+ * Find a character by avatar filename
+ * @param {string} avatar - Avatar filename
+ * @returns {Object|undefined} Character object or undefined
+ */
+export function getCharacterByAvatar(avatar) {
+    return getAllCharacters().find(c => c.avatar === avatar);
+}
+
+/**
+ * Get a gallery setting
+ * @param {string} key - Setting key
+ * @returns {*} Setting value
+ */
+export function getSetting(key) {
+    return window.getSetting?.(key);
+}
+
+/**
+ * Set a gallery setting
+ * @param {string} key - Setting key
+ * @param {*} value - Setting value
+ */
+export function setSetting(key, value) {
+    window.setSetting?.(key, value);
+}
+
+// ========================================
+// UI ACTIONS
+// ========================================
+
+/**
+ * Open the character detail modal
+ * @param {Object} char - Character object
+ */
+export function openCharacterModal(char) {
+    window.openModal?.(char);
+}
+
+/**
+ * Close the character detail modal
+ */
+export function closeCharacterModal() {
+    window.closeModal?.();
+}
+
+/**
+ * Open the ChubAI link modal for a character
+ * Sets the active character and opens the modal
+ * @param {Object} char - Character object
+ */
+export function openChubLinkModal(char) {
+    if (char) {
+        window.activeChar = char;
+    }
+    window.openChubLinkModal?.();
+}
+
+/**
+ * Get the currently active character (in modal view)
+ * @returns {Object|null} Active character or null
+ */
+export function getActiveChar() {
+    return window.activeChar || null;
+}
+
+/**
+ * Set the active character (for modal operations)
+ * @param {Object} char - Character object
+ */
+export function setActiveChar(char) {
+    window.activeChar = char;
+}
+
+/**
+ * Show a toast notification
+ * @param {string} message - Message to display
+ * @param {string} type - 'success' | 'error' | 'warning' | 'info'
+ * @param {number} duration - Duration in ms (default 3000)
+ */
+export function showToast(message, type = 'info', duration = 3000) {
+    window.showToast?.(message, type, duration);
+}
+
+/**
+ * Refresh the character list from server
+ * @param {boolean} forceRefresh - Bypass cache
+ * @returns {Promise<Array>} Updated characters
+ */
+export function refreshCharacters(forceRefresh = false) {
+    return window.fetchCharacters?.(forceRefresh) || Promise.resolve([]);
+}
+
+// ========================================
+// GALLERY FUNCTIONS
+// ========================================
+
+/**
+ * Get the gallery folder name for a character
+ * Handles unique gallery folder names if enabled in settings
+ * @param {Object} char - Character object
+ * @returns {string} Gallery folder name
+ */
+export function getGalleryFolderName(char) {
+    return window.getGalleryFolderName?.(char) || char?.name || '';
+}
+
+/**
+ * Sanitize a folder name for safe use in paths
+ * Removes illegal characters for Windows/file systems
+ * @param {string} name - Folder name to sanitize
+ * @returns {string} Sanitized folder name
+ */
+export function sanitizeFolderName(name) {
+    if (window.sanitizeFolderName) {
+        return window.sanitizeFolderName(name);
+    }
+    // Fallback: remove illegal Windows path characters
+    return (name || '').replace(/[\\/:*?"<>|]/g, '').trim();
+}
+
+// ========================================
+// API REQUESTS
+// ========================================
+
+/**
+ * Make an API request to SillyTavern server
+ * @param {string} endpoint - API endpoint (without /api prefix)
+ * @param {string} method - HTTP method
+ * @param {Object} data - Request body
+ * @param {Object} options - Additional fetch options
+ * @returns {Promise<Response>} Fetch response
+ */
+export function apiRequest(endpoint, method = 'GET', data = null, options = {}) {
+    if (window.apiRequest) {
+        return window.apiRequest(endpoint, method, data, options);
+    }
+    
+    // Fallback implementation
+    return fetch(`/api${endpoint}`, {
+        method,
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': getCSRFToken()
+        },
+        body: data ? JSON.stringify(data) : undefined,
+        ...options
+    });
+}
+
+/**
+ * Get CSRF token for API requests
+ * @returns {string} CSRF token
+ */
+export function getCSRFToken() {
+    return window.getCSRFToken?.() || '';
+}
+
+// ========================================
+// MULTI-SELECT SYSTEM
+// ========================================
+
+/**
+ * Check if multi-select mode is enabled
+ * @returns {boolean}
+ */
+export function isMultiSelectEnabled() {
+    return window.MultiSelect?.enabled || false;
+}
+
+/**
+ * Enable multi-select mode
+ */
+export function enableMultiSelect() {
+    window.MultiSelect?.enable();
+}
+
+/**
+ * Disable multi-select mode
+ */
+export function disableMultiSelect() {
+    window.MultiSelect?.disable();
+}
+
+/**
+ * Get all selected characters
+ * @returns {Array} Selected character objects
+ */
+export function getSelectedCharacters() {
+    return window.MultiSelect?.getSelected() || [];
+}
+
+/**
+ * Get count of selected characters
+ * @returns {number}
+ */
+export function getSelectionCount() {
+    return window.MultiSelect?.getCount() || 0;
+}
+
+/**
+ * Check if a character is selected
+ * @param {string} avatar - Character avatar
+ * @returns {boolean}
+ */
+export function isCharacterSelected(avatar) {
+    return window.MultiSelect?.isSelected(avatar) || false;
+}
+
+/**
+ * Toggle selection of a character
+ * @param {Object} char - Character object
+ * @param {HTMLElement} cardElement - Card DOM element
+ */
+export function toggleCharacterSelection(char, cardElement) {
+    window.MultiSelect?.toggle(char, cardElement);
+}
+
+/**
+ * Clear all selections
+ */
+export function clearSelection() {
+    window.MultiSelect?.clearSelection();
+}
+
+/**
+ * Select all visible characters
+ */
+export function selectAllVisible() {
+    window.MultiSelect?.selectAll();
+}
+
+// ========================================
+// MODULE SYSTEM
+// ========================================
+
+/**
+ * Get a loaded module by name
+ * @param {string} name - Module name
+ * @returns {Object|null} Module instance or null
+ */
+export function getModule(name) {
+    return window.ModuleLoader?.get(name) || null;
+}
+
+/**
+ * Check if a module is loaded
+ * @param {string} name - Module name
+ * @returns {boolean}
+ */
+export function hasModule(name) {
+    return getModule(name) !== null;
+}
+
+// ========================================
+// UTILITIES
+// ========================================
+
+/**
+ * Escape HTML to prevent XSS
+ * @param {string} text - Text to escape
+ * @returns {string} Escaped text
+ */
+export function escapeHtml(text) {
+    if (window.escapeHtml) {
+        return window.escapeHtml(text);
+    }
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/**
+ * Get tags for a character (normalized)
+ * @param {Object} char - Character object
+ * @returns {Array<string>} Tags array
+ */
+export function getCharacterTags(char) {
+    return window.getTags?.(char) || [];
+}
+
+/**
+ * Get all unique tags across all characters
+ * @returns {Array<string>} Sorted array of all unique tags
+ */
+export function getAllTags() {
+    return window.getAllAvailableTags?.() || [];
+}
+
+// ========================================
+// DOM HELPERS
+// ========================================
+
+/**
+ * Find a character card element by avatar
+ * @param {string} avatar - Character avatar
+ * @returns {HTMLElement|null}
+ */
+export function findCardElement(avatar) {
+    return document.querySelector(`.char-card[data-avatar="${avatar}"]`);
+}
+
+/**
+ * Find all currently rendered card elements
+ * @returns {NodeList}
+ */
+export function findAllCardElements() {
+    return document.querySelectorAll('.char-card');
+}
+
+// ========================================
+// EVENT SYSTEM (Future expansion)
+// ========================================
+
+const eventListeners = new Map();
+
+/**
+ * Subscribe to a core event
+ * @param {string} event - Event name
+ * @param {Function} callback - Event handler
+ * @returns {Function} Unsubscribe function
+ */
+export function on(event, callback) {
+    if (!eventListeners.has(event)) {
+        eventListeners.set(event, new Set());
+    }
+    eventListeners.get(event).add(callback);
+    
+    // Return unsubscribe function
+    return () => eventListeners.get(event)?.delete(callback);
+}
+
+/**
+ * Emit a core event
+ * @param {string} event - Event name
+ * @param {*} data - Event data
+ */
+export function emit(event, data) {
+    const listeners = eventListeners.get(event);
+    if (listeners) {
+        listeners.forEach(cb => {
+            try {
+                cb(data);
+            } catch (err) {
+                console.error(`[CoreAPI] Event handler error for "${event}":`, err);
+            }
+        });
+    }
+}
+
+// ========================================
+// KNOWN EVENTS (documentation)
+// ========================================
+/**
+ * Events that can be emitted:
+ * - 'characters:loaded' - Characters fetched from server
+ * - 'characters:refreshed' - Character list updated
+ * - 'character:selected' - Character selected in multi-select
+ * - 'character:deselected' - Character deselected
+ * - 'character:updated' - Character data modified
+ * - 'character:deleted' - Character removed
+ * - 'modal:opened' - Character modal opened
+ * - 'modal:closed' - Character modal closed
+ * - 'selection:changed' - Multi-select selection changed
+ */
+
+// ========================================
+// CHUB INTEGRATION
+// ========================================
+
+/**
+ * Get Chub link info for a character
+ * @param {Object} char - Character object
+ * @returns {Object|null} { id, fullPath, linkedAt } or null if not linked
+ */
+export function getChubLinkInfo(char) {
+    if (!char) return null;
+    const extensions = char.data?.extensions || char.extensions;
+    return extensions?.chub || null;
+}
+
+/**
+ * Get all characters linked to ChubAI
+ * @returns {Array} Characters with Chub links
+ */
+export function getChubLinkedCharacters() {
+    return getAllCharacters().filter(c => getChubLinkInfo(c)?.fullPath);
+}
+
+/**
+ * Fetch ChubAI metadata for a character
+ * @param {string} fullPath - Chub full path (creator/slug)
+ * @returns {Promise<Object|null>} Chub metadata or null
+ */
+export function fetchChubMetadata(fullPath) {
+    return window.fetchChubMetadata?.(fullPath) || Promise.resolve(null);
+}
+
+/**
+ * Extract character data from PNG buffer
+ * @param {ArrayBuffer} pngBuffer - PNG file data
+ * @returns {Object|null} Parsed character card or null
+ */
+export function extractCharacterDataFromPng(pngBuffer) {
+    return window.extractCharacterDataFromPng?.(pngBuffer) || null;
+}
+
+/**
+ * Apply field updates to a character card
+ * @param {string} avatar - Character avatar filename
+ * @param {Object} fieldUpdates - Object with field paths as keys and new values
+ * @returns {Promise<boolean>} Success status
+ */
+export function applyCardFieldUpdates(avatar, fieldUpdates) {
+    return window.applyCardFieldUpdates?.(avatar, fieldUpdates) || Promise.resolve(false);
+}
+
+// ========================================
+// DEFAULT EXPORT - Convenience object
+// ========================================
+
+export default {
+    // State
+    getAllCharacters,
+    getCurrentCharacters,
+    getCharacterByAvatar,
+    getSetting,
+    setSetting,
+    
+    // UI
+    openCharacterModal,
+    closeCharacterModal,
+    openChubLinkModal,
+    getActiveChar,
+    setActiveChar,
+    showToast,
+    refreshCharacters,
+    
+    // API
+    apiRequest,
+    getCSRFToken,
+    
+    // Gallery
+    getGalleryFolderName,
+    sanitizeFolderName,
+    
+    // Multi-select
+    isMultiSelectEnabled,
+    enableMultiSelect,
+    disableMultiSelect,
+    getSelectedCharacters,
+    getSelectionCount,
+    isCharacterSelected,
+    toggleCharacterSelection,
+    clearSelection,
+    selectAllVisible,
+    
+    // Modules
+    getModule,
+    hasModule,
+    
+    // Utils
+    escapeHtml,
+    getCharacterTags,
+    getAllTags,
+    findCardElement,
+    findAllCardElements,
+    
+    // Events
+    on,
+    emit,
+    
+    // Chub
+    getChubLinkInfo,
+    getChubLinkedCharacters,
+    fetchChubMetadata,
+    extractCharacterDataFromPng,
+    applyCardFieldUpdates
+};

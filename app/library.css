@@ -47,7 +47,7 @@ body {
     align-items: center;
     padding: 0 20px;
     gap: 15px;
-    z-index: 10;
+    z-index: 100;
 }
 
 .logo-area {
@@ -2578,6 +2578,49 @@ textarea.glass-input {
     object-fit: cover;
 }
 
+/* Video Thumbnail Styles */
+.video-thumbnail {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    cursor: pointer;
+}
+
+.video-thumbnail video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+}
+
+.video-play-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    transition: background 0.2s;
+}
+
+.video-play-overlay i {
+    font-size: 2rem;
+    color: rgba(255, 255, 255, 0.9);
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+    transition: transform 0.2s;
+}
+
+.sprite-item:hover .video-play-overlay {
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.sprite-item:hover .video-play-overlay i {
+    transform: scale(1.1);
+}
+
 /* Gallery Section Titles */
 .gallery-section-title {
     display: flex;
@@ -2720,7 +2763,7 @@ textarea.glass-input {
     padding: 10px;
     min-width: 180px;
     box-shadow: 0 5px 15px rgba(0,0,0,0.5);
-    z-index: 100;
+    z-index: 1000;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -7890,179 +7933,6 @@ textarea.glass-input {
     transform: scale(1.05);
 }
 
-/* Popular Tags */
-.chub-popular-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-
-.chub-tags-loading,
-.chub-tags-empty {
-    color: var(--text-secondary);
-    font-size: 0.85rem;
-    padding: 6px 12px;
-}
-
-.chub-tag-btn {
-    background: rgba(74, 158, 255, 0.1);
-    border: 1px solid rgba(74, 158, 255, 0.2);
-    color: var(--accent);
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.chub-tag-btn:hover {
-    background: rgba(74, 158, 255, 0.2);
-    border-color: var(--accent);
-}
-
-.chub-tag-btn.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
-}
-
-.chub-tag-btn.active:hover {
-    background: rgba(74, 158, 255, 0.8);
-}
-
-.chub-more-tags-btn {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.1);
-    color: var(--text-secondary);
-}
-
-.chub-more-tags-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary);
-}
-
-/* ChubAI Tags Popup */
-.chub-tags-popup {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    backdrop-filter: blur(5px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-}
-
-.chub-tags-popup-content {
-    background: var(--glass-bg);
-    border: 1px solid var(--glass-border);
-    border-radius: 16px;
-    width: 90%;
-    max-width: 600px;
-    max-height: 80vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-}
-
-.chub-tags-popup-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--glass-border);
-}
-
-.chub-tags-popup-header h3 {
-    margin: 0;
-    font-size: 1.1rem;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.chub-tags-popup-search {
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--glass-border);
-}
-
-.chub-tags-popup-search input {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--glass-border);
-    border-radius: 8px;
-    padding: 10px 14px;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-}
-
-.chub-tags-popup-search input::placeholder {
-    color: var(--text-secondary);
-}
-
-.chub-tags-popup-list {
-    padding: 16px 20px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    overflow-y: auto;
-    max-height: 400px;
-}
-
-.chub-tags-popup-loading,
-.chub-tags-popup-empty {
-    width: 100%;
-    text-align: center;
-    color: var(--text-secondary);
-    padding: 40px 20px;
-}
-
-.chub-tags-popup-empty .retry-btn {
-    background: var(--accent);
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 8px;
-    cursor: pointer;
-    margin-top: 12px;
-}
-
-.chub-tags-popup-empty .retry-btn:hover {
-    background: rgba(74, 158, 255, 0.8);
-}
-
-.chub-popup-tag-btn {
-    background: rgba(74, 158, 255, 0.1);
-    border: 1px solid rgba(74, 158, 255, 0.2);
-    color: var(--accent);
-    padding: 8px 14px;
-    border-radius: 20px;
-    font-size: 0.9rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.chub-popup-tag-btn:hover {
-    background: rgba(74, 158, 255, 0.25);
-    border-color: var(--accent);
-    transform: translateY(-1px);
-}
-
-.chub-popup-tag-btn.active {
-    background: var(--accent);
-    color: white;
-    border-color: var(--accent);
-}
-
-.chub-popup-tag-btn.active:hover {
-    background: rgba(74, 158, 255, 0.8);
-}
-
 /* ChubAI Grid */
 .chub-grid {
     display: grid;
@@ -8702,6 +8572,207 @@ textarea.glass-input {
     accent-color: var(--accent);
     width: 16px;
     height: 16px;
+}
+
+/* ========================================
+   ChubAI Tags Dropdown (Tri-state filters)
+   ======================================== */
+.chub-tags-dropdown {
+    width: 320px;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+}
+
+.chub-tags-search-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.chub-tags-search-row input {
+    flex: 1;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border);
+    color: white;
+    border-radius: 6px;
+    font-size: 0.85rem;
+}
+
+.chub-tags-search-row input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.chub-tags-search-row .glass-btn.icon-only {
+    padding: 6px 10px;
+    min-width: unset;
+}
+
+.chub-tags-list {
+    max-height: 200px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-right: 4px;
+}
+
+.chub-tags-list::-webkit-scrollbar {
+    width: 6px;
+}
+
+.chub-tags-list::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.chub-tags-list::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.chub-tags-loading,
+.chub-tags-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+/* Tri-state tag item */
+.chub-tag-filter-item {
+    display: flex;
+    align-items: center;
+    padding: 5px 6px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    border-radius: 4px;
+    gap: 8px;
+}
+
+.chub-tag-filter-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.chub-tag-filter-item .tag-label {
+    flex: 1;
+    font-size: 0.85rem;
+    user-select: none;
+    color: var(--text-primary);
+}
+
+/* Tri-state button for chub tags */
+.chub-tag-state-btn {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    border-radius: 4px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 11px;
+    color: white;
+    padding: 0;
+}
+
+.chub-tag-state-btn:hover {
+    border-color: var(--accent);
+}
+
+.chub-tag-state-btn.state-neutral {
+    border-color: rgba(255, 255, 255, 0.25);
+    background: transparent;
+}
+
+.chub-tag-state-btn.state-include {
+    border-color: #4ade80;
+    background: rgba(74, 222, 128, 0.25);
+    color: #4ade80;
+}
+
+.chub-tag-state-btn.state-exclude {
+    border-color: #f87171;
+    background: rgba(248, 113, 113, 0.25);
+    color: #f87171;
+}
+
+/* Advanced options section */
+.chub-advanced-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 4px;
+    gap: 12px;
+}
+
+.chub-advanced-option label {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.chub-advanced-option label i {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    width: 14px;
+}
+
+.glass-select-small,
+.glass-input-small {
+    padding: 5px 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--glass-border);
+    color: white;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    min-width: 100px;
+}
+
+.glass-select-small:focus,
+.glass-input-small:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.glass-input-small {
+    width: 80px;
+    text-align: right;
+}
+
+/* Hide number input spinners */
+.glass-input-small[type="number"]::-webkit-outer-spin-button,
+.glass-input-small[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.glass-input-small[type="number"] {
+    -moz-appearance: textfield;
+}
+
+/* Tags button with active filters indicator */
+#chubTagsBtn.has-filters {
+    background: rgba(52, 152, 219, 0.2);
+    border-color: rgba(52, 152, 219, 0.4);
+}
+
+#chubTagsBtn.has-filters i {
+    color: #3498db;
+}
+
+/* Active tag counts in button */
+#chubTagsBtnLabel .tag-count {
+    font-size: 0.75rem;
+    opacity: 0.8;
 }
 
 #chubTimeSelect {

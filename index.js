@@ -41,7 +41,7 @@ async function openGallery() {
     const baseUrl = getExtensionUrl();
     const token = await getCsrfToken();
     // Pass token in URL to be safe, though cookies should work cross-tab on same origin
-    const url = `${baseUrl}/gallery.html?csrf=${encodeURIComponent(token)}`;
+    const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}`;
     window.open(url, '_blank');
 }
 
