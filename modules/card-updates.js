@@ -27,7 +27,10 @@ const COMPARABLE_FIELDS = {
     'post_history_instructions': 'Post History Instructions',
     'creator_notes': 'Creator Notes',
     'creator': 'Creator',
-    'character_version': 'Version',
+    // Note: character_version is NOT provided by the Chub API.
+    // ST's own downloadChubCharacter() hardcodes it to ''. Comparing it
+    // would always show a false diff (local "main" vs remote ""), so we
+    // intentionally exclude it.
     'tags': 'Tags',
     'alternate_greetings': 'Alternate Greetings',
     // V3 additions
@@ -171,9 +174,42 @@ function getChubLinkedCharacters() {
  */
 async function fetchRemoteCard(fullPath) {
     try {
-        // First try to get the actual PNG with embedded data (most accurate)
+        // Prefer API metadata — it always returns the LATEST version.
+        // The chara_card_v2.png on Chub is stale (original upload, never updated).
+        const metadata = await CoreAPI.fetchChubMetadata(fullPath);
+        if (metadata?.definition) {
+            const def = metadata.definition;
+            // Build a card-like structure from API data
+            // IMPORTANT: Chub API uses its own field names, NOT V2 spec names.
+            // This mapping matches SillyTavern's downloadChubCharacter() exactly.
+            console.log('[CardUpdates] Built card from API metadata for:', fullPath);
+            return {
+                spec: 'chara_card_v2',
+                spec_version: '2.0',
+                data: {
+                    name: def.name || metadata.name,
+                    description: def.personality || '',
+                    personality: def.tavern_personality || '',
+                    scenario: def.scenario || '',
+                    first_mes: def.first_message || '',
+                    mes_example: def.example_dialogs || '',
+                    system_prompt: def.system_prompt || '',
+                    post_history_instructions: def.post_history_instructions || '',
+                    creator_notes: def.description || '',
+                    creator: metadata.fullPath?.split('/')[0] || '',
+                    character_version: def.character_version || '',
+                    tags: metadata.topics || [],
+                    alternate_greetings: def.alternate_greetings || [],
+                    extensions: def.extensions || {},
+                    character_book: def.embedded_lorebook || undefined,
+                }
+            };
+        }
+
+        // Fallback: try PNG extraction (may have stale data but better than nothing)
+        console.log('[CardUpdates] API failed, trying PNG extraction for:', fullPath);
         const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
-        
+
         let response;
         try {
             response = await fetch(pngUrl);
@@ -181,7 +217,7 @@ async function fetchRemoteCard(fullPath) {
             // Try proxy
             response = await fetch(`/proxy/${encodeURIComponent(pngUrl)}`);
         }
-        
+
         if (response.ok) {
             const buffer = await response.arrayBuffer();
             const cardData = CoreAPI.extractCharacterDataFromPng(buffer);
@@ -189,33 +225,6 @@ async function fetchRemoteCard(fullPath) {
                 console.log('[CardUpdates] Extracted card data from PNG for:', fullPath);
                 return cardData;
             }
-        }
-        
-        // Fallback: use API metadata
-        console.log('[CardUpdates] PNG extraction failed, trying API for:', fullPath);
-        const metadata = await CoreAPI.fetchChubMetadata(fullPath);
-        if (metadata?.definition) {
-            // Build a card-like structure from API data
-            return {
-                spec: 'chara_card_v2',
-                spec_version: '2.0',
-                data: {
-                    name: metadata.definition.name || metadata.name,
-                    description: metadata.definition.description || '',
-                    personality: metadata.definition.personality || '',
-                    scenario: metadata.definition.scenario || '',
-                    first_mes: metadata.definition.first_mes || '',
-                    mes_example: metadata.definition.mes_example || '',
-                    system_prompt: metadata.definition.system_prompt || '',
-                    post_history_instructions: metadata.definition.post_history_instructions || '',
-                    creator_notes: metadata.definition.creator_notes || '',
-                    creator: metadata.definition.creator || metadata.fullPath?.split('/')[0] || '',
-                    character_version: metadata.definition.character_version || '',
-                    tags: metadata.definition.tags || [],
-                    alternate_greetings: metadata.definition.alternate_greetings || [],
-                    extensions: metadata.definition.extensions || {}
-                }
-            };
         }
         
         return null;

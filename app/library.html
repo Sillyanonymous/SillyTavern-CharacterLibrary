@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
     <link rel="stylesheet" href="library.css?v=48">
+    <link rel="stylesheet" href="library-mobile.css?v=1" media="screen and (max-width: 768px)">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- DOMPurify for HTML sanitization -->
@@ -856,6 +857,18 @@
                                 </label>
                             </div>
                         </div>
+                        <div class="gallery-id-warning hidden" id="galleryIdWarning">
+                            <div class="gallery-id-warning-content">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                <div class="gallery-id-warning-text">
+                                    <strong>No Gallery ID assigned</strong>
+                                    <span>This character doesn't have a unique gallery ID. Without one, characters with the same name will share a gallery folder.</span>
+                                </div>
+                                <button id="assignGalleryIdBtn" class="action-btn small" title="Assign a unique gallery ID to this character">
+                                    <i class="fa-solid fa-fingerprint"></i> Assign ID
+                                </button>
+                            </div>
+                        </div>
                         <div class="gallery-sprites-grid" id="spritesGrid">
                             <!-- User images for this character -->
                         </div>
@@ -1570,6 +1583,16 @@ https://chub.ai/characters/author/another-character
                                 <span class="settings-hint">Token location: DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
                             </div>
                         </div>
+                        
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Card Updates</div>
+                            <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+                                <span class="settings-hint" style="margin-bottom: 4px;">Check all Chub-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
+                                <button id="batchCheckUpdatesBtn" class="glass-btn" style="white-space: nowrap;">
+                                    <i class="fa-solid fa-arrows-rotate"></i> Check All for Updates
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Media Section -->
@@ -1769,20 +1792,12 @@ https://chub.ai/characters/author/another-character
                             </div>
                         </div>
                         
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental Features</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsEnableUpdateCheck"> Enable "Check for Updates" (WIP)
-                                </label>
-                                <span class="settings-hint">Compare ChubAI-linked cards with remote versions and selectively apply changes</span>
-                            </div>
-                        </div>
+
                         
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.1.1</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.2.0</span>
                             </div>
                         </div>
                     </div>
@@ -1798,5 +1813,6 @@ https://chub.ai/characters/author/another-character
     <!-- Scripts -->
     <script src="library.js?v=74"></script>
     <script type="module" src="../modules/module-loader.js?v=2"></script>
+    <script src="library-mobile.js?v=1"></script>
 </body>
 </html>

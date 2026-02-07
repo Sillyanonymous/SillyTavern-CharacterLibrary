@@ -45,55 +45,253 @@ async function openGallery() {
     window.open(url, '_blank');
 }
 
-jQuery(async () => {
-    // add a delay to ensure the UI is loaded
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
+// ==============================================
+// Launcher Dropdown — hijacks ST's Characters button, offers both native characters and characterlibrary options
+// ==============================================
+
+function injectLauncherStyles() {
+    if (document.getElementById('charlib-launcher-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'charlib-launcher-styles';
+    style.textContent = `
+        /* ---- Launcher dropdown ---- */
+        .charlib-launcher-dropdown {
+            position: fixed;
+            z-index: 30000;
+            min-width: 210px;
+            background: var(--SmartThemeBlurTintColor, rgba(20, 22, 28, 0.95));
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.55);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            padding: 6px;
+            opacity: 0;
+            transform: translateY(-8px) scale(0.96);
+            pointer-events: none;
+            transition: opacity 0.18s ease, transform 0.18s ease;
+        }
+        .charlib-launcher-dropdown.visible {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+            pointer-events: auto;
+        }
+        .charlib-launcher-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            border-radius: 7px;
+            cursor: pointer;
+            color: var(--SmartThemeBodyColor, #dcdfe4);
+            font-size: 13.5px;
+            font-family: inherit;
+            transition: background 0.14s ease;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .charlib-launcher-item:hover {
+            background: rgba(255,255,255,0.08);
+        }
+        .charlib-launcher-item:active {
+            background: rgba(255,255,255,0.13);
+        }
+        .charlib-launcher-item i {
+            width: 20px;
+            text-align: center;
+            font-size: 15px;
+            opacity: 0.85;
+        }
+        .charlib-launcher-item[data-action="library"] i {
+            color: var(--SmartThemeQuoteColor, #b4a0ff);
+        }
+        .charlib-launcher-divider {
+            height: 1px;
+            margin: 4px 8px;
+            background: rgba(255,255,255,0.08);
+        }
+        /* Small chevron badge on the Characters icon */
+        .charlib-chevron-badge {
+            position: absolute;
+            bottom: 2px;
+            right: 0px;
+            font-size: 7px;
+            opacity: 0.5;
+            pointer-events: none;
+            color: var(--SmartThemeBodyColor, #dcdfe4);
+        }
+        /* Scrim overlay */
+        .charlib-launcher-scrim {
+            position: fixed;
+            inset: 0;
+            z-index: 29999;
+            display: none;
+        }
+        .charlib-launcher-scrim.visible {
+            display: block;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+/**
+ * Attempt to hijack ST's Characters button with a launcher dropdown.
+ * Returns true if successful, false if the Characters button wasn't found.
+ */
+function setupLauncherDropdown() {
+    const drawerToggle = document.getElementById('unimportantYes');
+    const drawerIcon = document.getElementById('rightNavDrawerIcon');
+
+    if (!drawerToggle || !drawerIcon) {
+        console.warn(`${EXTENSION_NAME}: Characters button not found, falling back to standalone button`);
+        return false;
+    }
+
+    injectLauncherStyles();
+
+    // ---- Build dropdown DOM ----
+    const dropdown = document.createElement('div');
+    dropdown.id = 'charlib-launcher-dropdown';
+    dropdown.className = 'charlib-launcher-dropdown';
+    dropdown.innerHTML = `
+        <div class="charlib-launcher-item" data-action="native">
+            <i class="fa-solid fa-address-card"></i>
+            <span>Character Management</span>
+        </div>
+        <div class="charlib-launcher-divider"></div>
+        <div class="charlib-launcher-item" data-action="library">
+            <i class="fa-solid fa-photo-film"></i>
+            <span>Character Library</span>
+        </div>
+    `;
+
+    const scrim = document.createElement('div');
+    scrim.className = 'charlib-launcher-scrim';
+
+    document.body.appendChild(scrim);
+    document.body.appendChild(dropdown);
+
+    // ---- Add chevron indicator to the icon ----
+    if (getComputedStyle(drawerIcon).position === 'static') {
+        drawerIcon.style.position = 'relative';
+    }
+    const chevron = document.createElement('i');
+    chevron.className = 'fa-solid fa-caret-down charlib-chevron-badge';
+    drawerIcon.appendChild(chevron);
+
+    // ---- State ----
+    let isOpen = false;
+    let bypassIntercept = false;
+
+    function positionDropdown() {
+        const rect = drawerIcon.getBoundingClientRect();
+        dropdown.style.top = (rect.bottom + 6) + 'px';
+        // Right-align so it doesn't overflow off-screen
+        dropdown.style.right = Math.max(8, window.innerWidth - rect.right - 10) + 'px';
+        dropdown.style.left = 'auto';
+    }
+
+    function show() {
+        positionDropdown();
+        scrim.classList.add('visible');
+        dropdown.classList.add('visible');
+        isOpen = true;
+    }
+
+    function hide() {
+        scrim.classList.remove('visible');
+        dropdown.classList.remove('visible');
+        isOpen = false;
+    }
+
+    // ---- Intercept clicks on the Characters drawer toggle ----
+    // Uses capturing phase at the document level so we fire before ST's handlers.
+    document.addEventListener('click', (e) => {
+        if (!drawerToggle.contains(e.target)) return;        // Not our button
+
+        if (bypassIntercept) {
+            bypassIntercept = false;
+            return;                                          // Let through to ST
+        }
+
+        e.stopPropagation();
+        e.preventDefault();
+
+        if (isOpen) {
+            hide();
+        } else {
+            show();
+        }
+    }, true);   // true = capture phase
+
+    // ---- Scrim click closes dropdown ----
+    scrim.addEventListener('click', () => hide());
+
+    // ---- Handle dropdown item selection ----
+    dropdown.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-action]');
+        if (!item) return;
+
+        e.stopPropagation();
+        hide();
+
+        if (item.dataset.action === 'native') {
+            bypassIntercept = true;
+            drawerToggle.click();               // Replay click to ST's handler
+        } else if (item.dataset.action === 'library') {
+            openGallery();
+        }
+    });
+
+    // ---- Escape key closes dropdown ----
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && isOpen) {
+            e.stopPropagation();
+            hide();
+        }
+    });
+
+    console.log(`${EXTENSION_NAME}: Launcher dropdown attached to Characters button`);
+    return true;
+}
+
+/**
+ * Fallback: create a standalone gallery button in the top bar
+ */
+function createStandaloneGalleryButton() {
     const galleryBtn = $(`
     <div id="st-gallery-btn" class="interactable" title="Open Character Library" style="cursor: pointer; display: flex; align-items: center; justify-content: center; height: 100%; padding: 0 10px;">
         <i class="fa-solid fa-photo-film" style="font-size: 1.2em;"></i>
     </div>
     `);
 
-    // Event listener
     galleryBtn.on('click', function(e) {
         e.preventDefault();
         e.stopPropagation();
         openGallery();
     });
 
-    // Injection Strategy: Place after the Character Management panel (rightNavHolder) for better centering
-    // Priority: After character panel drawer, or in top-settings-holder center area
     let injected = false;
     
-    // Try to insert after the Character Management drawer (rightNavHolder)
     const rightNavHolder = $('#rightNavHolder');
     if (rightNavHolder.length) {
         rightNavHolder.after(galleryBtn);
-        console.log(`${EXTENSION_NAME}: Added after #rightNavHolder (Character Management)`);
+        console.log(`${EXTENSION_NAME}: Standalone button added after #rightNavHolder`);
         injected = true;
     }
     
-    // Fallback to other locations
     if (!injected) {
-        const fallbackTargets = [
-            '#top-settings-holder',   // Settings container
-            '#top-bar',               // Direct top bar
-        ];
-        
+        const fallbackTargets = ['#top-settings-holder', '#top-bar'];
         for (const selector of fallbackTargets) {
             const target = $(selector);
             if (target.length) {
-                // Insert in middle of container for better centering
                 const children = target.children();
                 if (children.length > 1) {
-                    // Insert after first half of children
-                    const midPoint = Math.floor(children.length / 2);
-                    $(children[midPoint]).after(galleryBtn);
+                    $(children[Math.floor(children.length / 2)]).after(galleryBtn);
                 } else {
                     target.append(galleryBtn);
                 }
-                console.log(`${EXTENSION_NAME}: Added to ${selector}`);
+                console.log(`${EXTENSION_NAME}: Standalone button added to ${selector}`);
                 injected = true;
                 break;
             }
@@ -101,27 +299,35 @@ jQuery(async () => {
     }
     
     if (!injected) {
-         console.warn(`${EXTENSION_NAME}: Could not find Top Bar. Creating floating button.`);
-         galleryBtn.css({
-             'position': 'fixed',
-             'top': '2px', // Align with top bar
-             'right': '250px', // Move it left of the hamburger/drawer
-             'z-index': '20000',
-             'background': 'rgba(0,0,0,0.5)',
-             'border': '1px solid rgba(255,255,255,0.2)',
-             'padding': '5px',
-             'height': '40px',
-             'width': '40px',
-             'display': 'flex',
-             'align-items': 'center',
-             'justify-content': 'center',
-             'border-radius': '5px'
-         });
-         // Add to body
-         $('body').append(galleryBtn);
+        console.warn(`${EXTENSION_NAME}: Could not find Top Bar. Creating floating button.`);
+        galleryBtn.css({
+            position: 'fixed', top: '2px', right: '250px', 'z-index': '20000',
+            background: 'rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.2)',
+            padding: '5px', height: '40px', width: '40px',
+            display: 'flex', 'align-items': 'center', 'justify-content': 'center',
+            'border-radius': '5px'
+        });
+        $('body').append(galleryBtn);
+    }
+}
+
+// ==============================================
+// Main Init
+// ==============================================
+
+jQuery(async () => {
+    // Delay to ensure ST's UI is fully loaded
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Try to hijack ST's Characters button with a launcher dropdown
+    const hijacked = setupLauncherDropdown();
+    
+    if (!hijacked) {
+        // Fallback: standalone button in the top bar
+        createStandaloneGalleryButton();
     }
     
-    // Fallback: Add a slash command
+    // Slash command fallback
     if (window.SlashCommandParser) {
         window.SlashCommandParser.addCommandObject(Interact.SlashCommand.fromProps({
             name: 'gallery',

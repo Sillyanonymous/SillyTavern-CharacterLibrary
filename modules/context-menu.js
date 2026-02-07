@@ -163,19 +163,17 @@ function buildBulkMenuItems(count) {
         }
     });
     
-    // Bulk check for updates (ChubAI linked only) - experimental feature
-    if (CoreAPI.getSetting('enableUpdateCheck')) {
-        items.push({
-            icon: 'fa-solid fa-arrows-rotate',
-            label: 'Check for Updates',
-            action: () => {
-                const cardUpdates = CoreAPI.getModule('card-updates');
-                if (cardUpdates?.checkSelectedCharacters) {
-                    cardUpdates.checkSelectedCharacters();
-                }
+    // Bulk check for updates (ChubAI linked only)
+    items.push({
+        icon: 'fa-solid fa-arrows-rotate',
+        label: 'Check for Updates',
+        action: () => {
+            const cardUpdates = CoreAPI.getModule('card-updates');
+            if (cardUpdates?.checkSelectedCharacters) {
+                cardUpdates.checkSelectedCharacters();
             }
-        });
-    }
+        }
+    });
     
     items.push({ type: 'separator' });
     
@@ -286,19 +284,17 @@ function buildSingleMenuItems(char, cardElement) {
             action: () => CoreAPI.openChubLinkModal(char)
         });
         
-        // Check for updates (only for linked characters) - experimental feature
-        if (CoreAPI.getSetting('enableUpdateCheck')) {
-            items.push({
-                icon: 'fa-solid fa-arrows-rotate',
-                label: 'Check for Updates',
-                action: () => {
-                    const cardUpdates = CoreAPI.getModule('card-updates');
-                    if (cardUpdates?.checkSingleCharacter) {
-                        cardUpdates.checkSingleCharacter(char);
-                    }
+        // Check for updates
+        items.push({
+            icon: 'fa-solid fa-arrows-rotate',
+            label: 'Check for Updates',
+            action: () => {
+                const cardUpdates = CoreAPI.getModule('card-updates');
+                if (cardUpdates?.checkSingleCharacter) {
+                    cardUpdates.checkSingleCharacter(char);
                 }
-            });
-        }
+            }
+        });
     } else {
         items.push({
             icon: 'fa-solid fa-link',
@@ -592,7 +588,9 @@ async function bulkDelete() {
     if (selected.length === 0) return;
     
     // Check which characters have gallery images AND unique gallery IDs
-    // Only characters with gallery_id can have their files safely deleted
+    // Only offer gallery deletion when unique folders feature is ENABLED
+    const uniqueFoldersEnabled = CoreAPI.getSetting('uniqueGalleryFolders') || false;
+    
     const galleryInfos = await Promise.all(
         selected.map(async char => ({
             char,
@@ -601,9 +599,11 @@ async function bulkDelete() {
         }))
     );
     
-    // Only count characters with unique galleries for deletion option
-    const charsWithUniqueGallery = galleryInfos.filter(g => g.info.count > 0 && g.hasUniqueGallery);
-    const charsWithSharedGallery = galleryInfos.filter(g => g.info.count > 0 && !g.hasUniqueGallery);
+    // Only count characters with unique galleries for deletion option (when feature is enabled)
+    const charsWithUniqueGallery = uniqueFoldersEnabled 
+        ? galleryInfos.filter(g => g.info.count > 0 && g.hasUniqueGallery)
+        : [];
+    const charsWithSharedGallery = galleryInfos.filter(g => g.info.count > 0 && (!g.hasUniqueGallery || !uniqueFoldersEnabled));
     const totalUniqueGalleryFiles = charsWithUniqueGallery.reduce((sum, g) => sum + g.info.count, 0);
     
     // Build character list preview
@@ -833,7 +833,8 @@ function confirmDelete(char) {
 async function deleteCharacter(char) {
     try {
         const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
-            avatar: char.avatar
+            avatar_url: char.avatar,
+            delete_chats: false
         });
         
         if (response.ok) {

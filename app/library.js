@@ -93,7 +93,9 @@ const DEFAULT_SETTINGS = {
     chubToken: null,
     chubRememberToken: false,
     // Add more settings here as needed
-    lastUsedSort: 'name_asc',
+    defaultSort: 'name_asc',
+    // Include ChubAI gallery images in character galleries
+    includeChubGallery: true,
     searchInName: true,
     searchInTags: true,
     searchInAuthor: false,
@@ -121,8 +123,6 @@ const DEFAULT_SETTINGS = {
     uniqueGalleryFolders: false,
     // Show Info tab in character modal (debugging/metadata info)
     showInfoTab: false,
-    // Enable "Check for Updates" feature for ChubAI linked characters (experimental/WIP)
-    enableUpdateCheck: false,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -171,9 +171,10 @@ function getSTContext() {
  * @param {string} path - Dot-separated path like 'gallery.folders'
  * @param {string} key - The key to set
  * @param {*} value - The value to set
+ * @param {boolean} [immediate=false] - If true, use saveSettings() instead of saveSettingsDebounced() for critical operations
  * @returns {boolean} True if successful
  */
-function setSTExtensionSetting(path, key, value) {
+function setSTExtensionSetting(path, key, value, immediate = false) {
     try {
         if (!window.opener || window.opener.closed) {
             debugWarn('[ST Settings] window.opener not available');
@@ -200,8 +201,10 @@ function setSTExtensionSetting(path, key, value) {
         // Set the value
         current[key] = value;
         
-        // Trigger save
-        if (typeof stContext.saveSettingsDebounced === 'function') {
+        // Trigger save - use immediate save for critical operations to avoid race conditions
+        if (immediate && typeof stContext.saveSettings === 'function') {
+            stContext.saveSettings();
+        } else if (typeof stContext.saveSettingsDebounced === 'function') {
             stContext.saveSettingsDebounced();
         }
         
@@ -261,23 +264,47 @@ function getPersonaName() {
 }
 
 /**
- * Load settings from SillyTavern's extension settings (server-side)
- * Falls back to localStorage if ST unavailable
+ * Load settings from SillyTavern's settings.json on disk via API
+ * Falls back to opener's in-memory extensionSettings, then localStorage
  */
-function loadGallerySettings() {
-    // Try to load from SillyTavern extension settings first
+async function loadGallerySettings() {
+    // Try to load fresh from disk via ST's settings API (authoritative source)
+    try {
+        const response = await apiRequest('/settings/get', 'POST');
+        if (response.ok) {
+            const data = await response.json();
+            // ST returns the settings field as a raw JSON string
+            const parsedSettings = JSON.parse(data.settings);
+            // Key in settings.json on disk is snake_case "extension_settings"
+            // (ST's context API uses camelCase "extensionSettings", but the raw file doesn't)
+            if (parsedSettings?.extension_settings?.[SETTINGS_KEY]) {
+                gallerySettings = { ...DEFAULT_SETTINGS, ...parsedSettings.extension_settings[SETTINGS_KEY] };
+                console.log('[Settings] Loaded fresh from disk via /api/settings/get', gallerySettings);
+                // Also sync to opener's in-memory state so saves work correctly
+                const context = getSTContext();
+                if (context && context.extensionSettings) {
+                    context.extensionSettings[SETTINGS_KEY] = { ...gallerySettings };
+                }
+                return;
+            }
+            console.log('[Settings] No extension settings found on disk for key:', SETTINGS_KEY, 'keys found:', Object.keys(parsedSettings?.extension_settings || {}));
+        }
+    } catch (e) {
+        console.warn('[Settings] Failed to load from API, trying fallbacks:', e);
+    }
+
+    // Fallback: opener's in-memory extensionSettings
     const context = getSTContext();
     if (context && context.extensionSettings) {
         if (!context.extensionSettings[SETTINGS_KEY]) {
-            // Initialize settings in ST if not present
             context.extensionSettings[SETTINGS_KEY] = { ...DEFAULT_SETTINGS };
         }
         gallerySettings = { ...DEFAULT_SETTINGS, ...context.extensionSettings[SETTINGS_KEY] };
-        debugLog('[Settings] Loaded from SillyTavern extensionSettings');
+        debugLog('[Settings] Loaded from SillyTavern extensionSettings (in-memory fallback)');
         return;
     }
     
-    // Fallback to localStorage
+    // Final fallback: localStorage
     try {
         const stored = localStorage.getItem(SETTINGS_KEY);
         if (stored) {
@@ -401,7 +428,6 @@ function setupSettingsModal() {
     // Developer
     const debugModeCheckbox = document.getElementById('settingsDebugMode');
     const showInfoTabCheckbox = document.getElementById('settingsShowInfoTab');
-    const enableUpdateCheckCheckbox = document.getElementById('settingsEnableUpdateCheck');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
@@ -464,9 +490,6 @@ function setupSettingsModal() {
         }
         if (showInfoTabCheckbox) {
             showInfoTabCheckbox.checked = getSetting('showInfoTab') || false;
-        }
-        if (enableUpdateCheckCheckbox) {
-            enableUpdateCheckCheckbox.checked = getSetting('enableUpdateCheck') || false;
         }
         
         // Appearance
@@ -555,7 +578,6 @@ function setupSettingsModal() {
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
             showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
-            enableUpdateCheck: enableUpdateCheckCheckbox ? enableUpdateCheckCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
         });
         
@@ -637,7 +659,7 @@ function setupSettingsModal() {
         searchTagsCheckbox.checked = DEFAULT_SETTINGS.searchInTags;
         searchAuthorCheckbox.checked = DEFAULT_SETTINGS.searchInAuthor;
         searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
-        defaultSortSelect.value = DEFAULT_SETTINGS.lastUsedSort;
+        defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
         if (highlightColorInput) {
             highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
@@ -656,9 +678,6 @@ function setupSettingsModal() {
         }
         if (showInfoTabCheckbox) {
             showInfoTabCheckbox.checked = DEFAULT_SETTINGS.showInfoTab;
-        }
-        if (enableUpdateCheckCheckbox) {
-            enableUpdateCheckCheckbox.checked = DEFAULT_SETTINGS.enableUpdateCheck;
         }
         
         // Apply default highlight color immediately
@@ -684,7 +703,7 @@ function setupSettingsModal() {
         if (searchTags) searchTags.checked = DEFAULT_SETTINGS.searchInTags;
         if (searchAuthor) searchAuthor.checked = DEFAULT_SETTINGS.searchInAuthor;
         if (searchNotes) searchNotes.checked = DEFAULT_SETTINGS.searchInNotes;
-        if (sortSelect) sortSelect.value = DEFAULT_SETTINGS.lastUsedSort;
+        if (sortSelect) sortSelect.value = DEFAULT_SETTINGS.defaultSort;
         
         showToast('Settings restored to defaults', 'success');
     };
@@ -712,6 +731,18 @@ function setupSettingsModal() {
         } else {
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> ${hasId}/${total} characters have gallery IDs. ${needsId} need assignment.`;
         }
+    }
+    
+    // Batch check for updates button
+    const batchCheckUpdatesBtn = document.getElementById('batchCheckUpdatesBtn');
+    if (batchCheckUpdatesBtn) {
+        batchCheckUpdatesBtn.onclick = () => {
+            if (typeof window.checkAllCardUpdates === 'function') {
+                window.checkAllCardUpdates();
+            } else {
+                showToast('Card updates module not loaded', 'error');
+            }
+        };
     }
     
     // Migration button handler
@@ -1553,9 +1584,10 @@ function buildUniqueGalleryFolderName(char) {
  * Register or update the gallery folder override in SillyTavern's extensionSettings
  * This tells ST to use our unique folder instead of just the character name
  * @param {object} char - Character object with avatar and gallery_id
+ * @param {boolean} [immediate=false] - If true, save immediately instead of debounced (use for critical operations)
  * @returns {boolean} True if successfully registered
  */
-function registerGalleryFolderOverride(char) {
+function registerGalleryFolderOverride(char, immediate = false) {
     if (!getSetting('uniqueGalleryFolders')) return false;
     
     const avatar = char?.avatar;
@@ -1566,10 +1598,10 @@ function registerGalleryFolderOverride(char) {
         return false;
     }
     
-    const success = setSTExtensionSetting('gallery.folders', avatar, uniqueFolder);
+    const success = setSTExtensionSetting('gallery.folders', avatar, uniqueFolder, immediate);
     
     if (success) {
-        debugLog(`[GalleryFolder] Registered: ${avatar} -> ${uniqueFolder}`);
+        debugLog(`[GalleryFolder] Registered: ${avatar} -> ${uniqueFolder}${immediate ? ' (immediate save)' : ''}`);
     } else {
         debugWarn(`[GalleryFolder] Failed to register: ${avatar}`);
     }
@@ -1592,6 +1624,70 @@ function removeGalleryFolderOverride(avatar) {
             debugLog(`[GalleryFolder] Removed folder override for: ${avatar}`);
         }
     }
+}
+
+/**
+ * Show or hide the per-character gallery ID warning on the Gallery tab.
+ * Displays when uniqueGalleryFolders is enabled and the character has no gallery_id.
+ * Wires up the 1-click "Assign ID" button to generate + save an ID immediately.
+ * @param {object} char - Character object
+ */
+function updateGalleryIdWarning(char) {
+    const warningEl = document.getElementById('galleryIdWarning');
+    const assignBtn = document.getElementById('assignGalleryIdBtn');
+    if (!warningEl || !assignBtn) return;
+
+    const needsWarning = getSetting('uniqueGalleryFolders') && !getCharacterGalleryId(char);
+
+    if (!needsWarning) {
+        warningEl.classList.add('hidden');
+        return;
+    }
+
+    warningEl.classList.remove('hidden');
+
+    // Wire up the assign button (replace handler each time to capture current char)
+    assignBtn.onclick = async () => {
+        assignBtn.disabled = true;
+        assignBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Assigning...';
+
+        try {
+            const galleryId = generateGalleryId();
+            const success = await window.applyCardFieldUpdates(char.avatar, {
+                'extensions.gallery_id': galleryId
+            });
+
+            if (success) {
+                // Update local char object so subsequent reads see the new ID
+                if (!char.data) char.data = {};
+                if (!char.data.extensions) char.data.extensions = {};
+                char.data.extensions.gallery_id = galleryId;
+
+                // Register the folder override in ST settings
+                registerGalleryFolderOverride(char, true);
+
+                // Update gallery sync warning (audit may be stale)
+                if (typeof window.auditGalleryIntegrity === 'function' &&
+                    typeof window.updateGallerySyncWarning === 'function') {
+                    const audit = window.auditGalleryIntegrity();
+                    window.updateGallerySyncWarning(audit);
+                }
+
+                // Hide warning and refresh gallery with the new unique folder
+                warningEl.classList.add('hidden');
+                fetchCharacterImages(char);
+                showToast(`Gallery ID assigned: ${galleryId}`, 'success');
+            } else {
+                showToast('Failed to assign gallery ID. Check console for details.', 'error');
+            }
+        } catch (err) {
+            console.error('[GalleryIdWarning] Error assigning gallery_id:', err);
+            showToast('Error assigning gallery ID.', 'error');
+        } finally {
+            assignBtn.disabled = false;
+            assignBtn.innerHTML = '<i class="fa-solid fa-fingerprint"></i> Assign ID';
+        }
+    };
 }
 
 /**
@@ -3565,7 +3661,7 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
     // Load settings first to ensure defaults are available
-    loadGallerySettings();
+    await loadGallerySettings();
     
     // Apply saved highlight color
     applyHighlightColor(getSetting('highlightColor'));
@@ -3573,7 +3669,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Reset filters and search on page load
     resetFiltersAndSearch();
     
-    await fetchCharacters();
+    // Always use API for initial load to get authoritative data from disk.
+    // The opener's in-memory character list may be stale if another client
+    // (e.g. mobile) imported characters since the opener last refreshed.
+    await fetchCharacters(true);
     setupEventListeners();
 });
 
@@ -3801,7 +3900,7 @@ async function loadCharInMain(charOrAvatar) {
 }
 
 // Data Fetching
-// forceRefresh: if true, try to refresh from main window first, then fall back to API
+// forceRefresh: if true, fetch directly from API (authoritative) and refresh main window in background
 async function fetchCharacters(forceRefresh = false) {
     // Clear computation cache on refresh to prevent stale token estimates, etc.
     if (forceRefresh) {
@@ -3810,20 +3909,12 @@ async function fetchCharacters(forceRefresh = false) {
     
     try {
         // Method 1: Try to get data directly from the opener (Main Window)
-        // This is preferred even on refresh because it has full character data including extensions
-        if (window.opener && !window.opener.closed) {
+        // Only used for non-forced fetches — the opener's in-memory data may be stale
+        // after imports. forceRefresh always goes to the API for authoritative disk data.
+        if (!forceRefresh && window.opener && !window.opener.closed) {
             try {
                 debugLog("Attempting to read characters from window.opener...");
                 let openerChars = null;
-                
-                // If forceRefresh, trigger a refresh in the main window first
-                if (forceRefresh && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                    const context = window.opener.SillyTavern.getContext();
-                    if (context && typeof context.getCharacters === 'function') {
-                        debugLog("Triggering character refresh in main window...");
-                        await context.getCharacters();
-                    }
-                }
                 
                 if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                     const context = window.opener.SillyTavern.getContext();
@@ -3841,7 +3932,11 @@ async function fetchCharacters(forceRefresh = false) {
             }
         }
 
-        // Method 2: Fallback to API Fetch with multiple endpoint attempts
+        if (forceRefresh) {
+            debugLog('Force refresh: fetching directly from API (bypassing opener)...');
+        }
+
+        // Method 2: API Fetch with multiple endpoint attempts
         // Try standard endpoint
         let url = '/characters';
         debugLog(`Fetching characters from: ${API_BASE}${url}`);
@@ -3917,10 +4012,69 @@ function processAndRender(data) {
     // Build lookup for ChubAI "in library" matching
     buildLocalLibraryLookup();
     
-    // Use performSearch to apply current sort/filter settings instead of rendering unsorted
-    performSearch();
+    // Apply current sort/filter settings and render the grid.
+    // If the characters view isn't active (e.g. we're on the ChubAI view after a download),
+    // the grid is hidden and rendering now would use stale dimensions. In that case just
+    // sort/update currentCharacters without rendering — switchView('characters') will call
+    // performSearch() again with correct dimensions when the user navigates back.
+    if (currentView === 'characters') {
+        performSearch();
+    } else {
+        // Still sort currentCharacters so the data is ready when the user switches views,
+        // but don't render to a hidden grid (avoids wrong dimensions / stale virtual scroll).
+        const sortSelect = document.getElementById('sortSelect');
+        const sortType = sortSelect ? sortSelect.value : 'name_asc';
+        currentCharacters.sort((a, b) => {
+            if (sortType === 'name_asc') return a.name.localeCompare(b.name);
+            if (sortType === 'name_desc') return b.name.localeCompare(a.name);
+            if (sortType === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a);
+            if (sortType === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
+            if (sortType === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
+            if (sortType === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
+            return 0;
+        });
+    }
     
     document.getElementById('loading').style.display = 'none';
+    
+    // Sync gallery folder overrides to opener's settings after every character list refresh.
+    // This ensures the opener's in-memory extensionSettings.gallery.folders is up-to-date,
+    // even if another client (e.g. mobile) imported characters and the opener's settings are stale.
+    if (getSetting('uniqueGalleryFolders')) {
+        try {
+            syncAllGalleryFolderOverrides();
+        } catch (e) {
+            console.warn('[processAndRender] Gallery folder sync failed:', e);
+        }
+    }
+    
+    // Re-audit and update the warning indicator AFTER sync.
+    // This overwrites any stale initial audit that may have fired before syncAll completed.
+    // Also clean up any orphaned mappings (e.g. from tempChar registrations with wrong avatar keys).
+    try {
+        if (typeof window.auditGalleryIntegrity === 'function' &&
+            typeof window.updateGallerySyncWarning === 'function') {
+            const freshAudit = window.auditGalleryIntegrity();
+            
+            // Auto-cleanup orphaned mappings silently
+            if (freshAudit.issues.orphaned > 0 && typeof window.cleanupOrphanedMappings === 'function') {
+                const cleanup = window.cleanupOrphanedMappings();
+                if (cleanup.removed > 0) {
+                    debugLog(`[processAndRender] Auto-cleaned ${cleanup.removed} orphaned mapping(s)`);
+                    // Re-audit after cleanup for accurate indicator
+                    const cleanAudit = window.auditGalleryIntegrity();
+                    window.updateGallerySyncWarning(cleanAudit);
+                } else {
+                    window.updateGallerySyncWarning(freshAudit);
+                }
+            } else {
+                window.updateGallerySyncWarning(freshAudit);
+            }
+            window._gallerySyncAuditDone = true; // flag so initial audit can skip
+        }
+    } catch (e) {
+        // Module may not be loaded yet on first render — that's fine
+    }
 }
 
 // Tag filter states: Map<tagName, 'include' | 'exclude'>
@@ -4277,6 +4431,11 @@ function setupVirtualScrollListener(grid, scrollContainer) {
     if (currentScrollHandler) {
         scrollContainer.removeEventListener('scroll', currentScrollHandler);
     }
+    
+    // Cancel any pending stale scroll timeout from previous render
+    // (e.g. from a hidden-grid render during ChubAI download)
+    clearTimeout(scrollTimeout);
+    scrollTimeout = null;
     
     currentScrollHandler = () => {
         if (!isScrolling) {
@@ -4878,6 +5037,16 @@ async function showLegacyFolderModal(char) {
 }
 
 function openModal(char) {
+    if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+        const modal = document.getElementById('charModal');
+        if (modal) {
+            const modalBody = modal.querySelector('.modal-body');
+            if (modalBody) modalBody.scrollTop = 0;
+            modal.querySelectorAll('.tab-pane').forEach(pane => {
+                pane.scrollTop = 0;
+            });
+        }
+    }
     activeChar = char;
     // ... existing ... 
     const imgPath = getCharacterAvatarUrl(char.avatar);
@@ -4917,17 +5086,18 @@ function openModal(char) {
         }
     }
 
-    // ... existing date logic ...
     // Dates/Tokens
-    // ... (restored previous logic in your mind, but I'll write the essential parts to match existing file structure) ...
     let dateDisplay = 'Unknown';
     if (char.date_added) {
         const d = new Date(Number(char.date_added));
         if (!isNaN(d.getTime())) dateDisplay = d.toLocaleDateString();
-    } else if (char.create_date) {
-        const d = new Date(char.create_date);
-         if (!isNaN(d.getTime())) dateDisplay = d.toLocaleDateString();
-         else if (char.create_date.length < 20) dateDisplay = char.create_date;
+    } else {
+        const rawCreateDate = getCharacterCreateDateValue(char);
+        if (rawCreateDate) {
+            const d = new Date(rawCreateDate);
+            if (!isNaN(d.getTime())) dateDisplay = formatDateTime(rawCreateDate);
+            else if (rawCreateDate.length < 20) dateDisplay = rawCreateDate;
+        }
     }
     
     document.getElementById('modalDate').innerText = dateDisplay;
@@ -5130,6 +5300,9 @@ function openModal(char) {
             
             // Check for legacy folder images (async, updates button visibility)
             updateLegacyFolderButton(char);
+
+            // Show warning if uniqueGalleryFolders is enabled but character has no gallery_id
+            updateGalleryIdWarning(char);
         };
     }
     
@@ -5391,7 +5564,8 @@ function populateInfoTab(char) {
     </div>`;
     
     // Section: Date Info
-    const dateCreated = char.create_date ? new Date(char.create_date) : null;
+    const createDateRaw = getCharacterCreateDateValue(char);
+    const dateCreated = createDateRaw ? new Date(createDateRaw) : null;
     const dateModified = char.date_added ? new Date(Number(char.date_added)) : null;
     const dateLastChat = char.date_last_chat ? new Date(Number(char.date_last_chat)) : null;
     
@@ -5399,15 +5573,15 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-calendar"></i> Dates</div>
         <div class="info-row">
             <span class="info-label">Date Created</span>
-            <span class="info-value">${dateCreated && !isNaN(dateCreated.getTime()) ? dateCreated.toLocaleString() : '(not available)'}</span>
+            <span class="info-value">${formatDateTime(createDateRaw)}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Last Modified</span>
-            <span class="info-value">${dateModified && !isNaN(dateModified.getTime()) ? dateModified.toLocaleString() : '(not available)'}</span>
+            <span class="info-value">${dateModified && !isNaN(dateModified.getTime()) ? formatDateTime(dateModified.getTime()) : '(not available)'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Last Chat</span>
-            <span class="info-value">${dateLastChat && !isNaN(dateLastChat.getTime()) ? dateLastChat.toLocaleString() : '(not available)'}</span>
+            <span class="info-value">${dateLastChat && !isNaN(dateLastChat.getTime()) ? formatDateTime(dateLastChat.getTime()) : '(not available)'}</span>
         </div>
     </div>`;
     
@@ -5935,10 +6109,13 @@ async function showDeleteConfirmation(char) {
     const galleryInfo = await getCharacterGalleryInfo(char);
     const hasImages = galleryInfo.count > 0;
     
-    // Only offer gallery deletion for unique galleries (with gallery_id)
-    // Shared galleries (standard name-based) should NOT be deleted as they may contain other characters' images
+    // Only offer gallery deletion when:
+    // 1. Unique gallery folders feature is ENABLED
+    // 2. Character has a gallery_id (unique gallery)
+    // 3. Gallery has images
+    const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders') || false;
     const hasUniqueGallery = !!getCharacterGalleryId(char);
-    const canDeleteGallery = hasImages && hasUniqueGallery;
+    const canDeleteGallery = uniqueFoldersEnabled && hasImages && hasUniqueGallery;
     
     // Create delete confirmation modal
     const deleteModal = document.createElement('div');
@@ -5986,7 +6163,9 @@ async function showDeleteConfirmation(char) {
                             <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
                         </div>
                         <p style="margin: 8px 0 0 0; color: var(--text-secondary); font-size: 13px;">
-                            Shared gallery folder will remain after deletion.
+                            ${!uniqueFoldersEnabled 
+                                ? 'Unique gallery folders feature is disabled. Gallery files will not be deleted.'
+                                : 'Gallery folder will remain after deletion.'}
                         </p>
                     </div>
                 ` : '')}
@@ -6532,6 +6711,9 @@ async function performSave() {
         if (response.ok) {
             showToast("Character saved successfully!", "success");
             
+            // Close confirmation immediately so it doesn't wait on folder rename / grid refresh
+            document.getElementById('confirmSaveModal').classList.add('hidden');
+            
             // Handle gallery folder rename if name changed and character has unique gallery folder
             if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
                 await handleGalleryFolderRename(activeChar, oldName, newName, galleryId);
@@ -6593,6 +6775,15 @@ async function performSave() {
                 // Ensure activeChar points to the array entry
                 activeChar = allCharacters[charIndex];
             }
+
+            // Update last modified timestamp locally so sort by "Last Modified" reflects the change immediately.
+            const nowMs = Date.now();
+            activeChar.date_added = nowMs;
+            if (activeChar._meta) activeChar._meta.date_added = nowMs;
+            if (charIndex !== -1) {
+                allCharacters[charIndex].date_added = nowMs;
+                if (allCharacters[charIndex]._meta) allCharacters[charIndex]._meta.date_added = nowMs;
+            }
             
             // Update original values to reflect saved state
             originalValues = collectEditValues();
@@ -6603,13 +6794,13 @@ async function performSave() {
             // Force re-render the grid to show updated data immediately
             performSearch();
             
-            // Close confirmation and lock editing
-            document.getElementById('confirmSaveModal').classList.add('hidden');
+            // Lock editing and clean up
             setEditLock(true);
             pendingPayload = null;
             
             // Also fetch from server to ensure full sync (in background)
-            fetchCharacters();
+            // Use forceRefresh to avoid stale opener data overwriting recent changes.
+            fetchCharacters(true);
         } else {
             const err = await response.text();
             showToast("Error saving: " + err, "error");
@@ -6861,6 +7052,79 @@ function cancelEditing() {
 // ==============================================
 
 /**
+ * Resolve a character's create_date value from any supported location.
+ * Some sources store it at the top level, others under _meta or data.
+ *
+ * @param {object} char - Character object
+ * @returns {string} Date string or empty string
+ */
+function getCharacterCreateDateValue(char) {
+    if (!char) return '';
+    const candidates = [
+        char._meta?.create_date,
+        char.create_date,
+        char.data?.create_date,
+    ].filter(Boolean);
+    const withTime = candidates.find(value =>
+        typeof value === 'number' || /T\d{2}:\d{2}:\d{2}/.test(String(value))
+    );
+    return withTime || candidates[0] || '';
+}
+
+/**
+ * Parse a date string or number into a Date object.
+ * Falls back to manual ISO parsing to avoid Date() misparsing in some runtimes.
+ *
+ * @param {string|number} rawValue - Date value
+ * @returns {Date|null} Parsed Date or null
+ */
+function parseDateValue(rawValue) {
+    if (rawValue === undefined || rawValue === null || rawValue === '') return null;
+    if (typeof rawValue === 'number') {
+        const d = new Date(rawValue);
+        return isNaN(d.getTime()) ? null : d;
+    }
+    const rawString = String(rawValue).trim();
+    const isoMatch = rawString.match(
+        /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(?:Z)?$/
+    );
+    if (isoMatch) {
+        const year = Number(isoMatch[1]);
+        const month = Number(isoMatch[2]) - 1;
+        const day = Number(isoMatch[3]);
+        const hour = Number(isoMatch[4]);
+        const minute = Number(isoMatch[5]);
+        const second = Number(isoMatch[6]);
+        const ms = isoMatch[7] ? Number(isoMatch[7].padEnd(3, '0')) : 0;
+        const d = new Date(Date.UTC(year, month, day, hour, minute, second, ms));
+        return isNaN(d.getTime()) ? null : d;
+    }
+    const d = new Date(rawString);
+    return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Format a date string/number into a locale date+time string.
+ * Falls back to the raw value if parsing fails.
+ *
+ * @param {string|number} rawValue - Date value
+ * @returns {string} Formatted date string
+ */
+function formatDateTime(rawValue) {
+    if (!rawValue) return '(not available)';
+    const d = parseDateValue(rawValue);
+    if (!d) return String(rawValue);
+    return new Intl.DateTimeFormat(undefined, {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit'
+    }).format(d);
+}
+
+/**
  * Get the date a character was added to SillyTavern (file system time).
  * This changes whenever the character file is edited/rewritten.
  * 
@@ -6884,9 +7148,10 @@ function getCharacterDateAdded(char) {
  */
 function getCharacterCreateDate(char) {
     if (!char) return 0;
-    if (char.create_date) {
-        const d = new Date(char.create_date);
-        if (!isNaN(d.getTime())) return d.getTime();
+    const rawCreateDate = getCharacterCreateDateValue(char);
+    if (rawCreateDate) {
+        const d = parseDateValue(rawCreateDate);
+        if (d) return d.getTime();
     }
     return 0;
 }
@@ -6906,9 +7171,10 @@ function getCharacterDate(char) {
     if (!char) return 0;
     
     // Prefer create_date (stored in PNG, stable across edits)
-    if (char.create_date) {
-        const d = new Date(char.create_date);
-        if (!isNaN(d.getTime())) return d.getTime();
+    const rawCreateDate = getCharacterCreateDateValue(char);
+    if (rawCreateDate) {
+        const d = parseDateValue(rawCreateDate);
+        if (d) return d.getTime();
     }
     
     // Fallback to date_added (file system ctime, changes on edit)
@@ -8391,8 +8657,9 @@ async function openChat(char, chatFile) {
         
         // IMPORTANT: Register the gallery folder override BEFORE opening the chat
         // This ensures index.js can find the correct folder for media localization
+        // Use immediate save since we're about to switch context to main window
         if (getSetting('uniqueGalleryFolders') && getCharacterGalleryId(char)) {
-            registerGalleryFolderOverride(char);
+            registerGalleryFolderOverride(char, true);
         }
         
         if (window.opener && !window.opener.closed) {
@@ -8493,6 +8760,10 @@ function performSearch() {
     const creatorMatch = rawQuery.match(/^creator:(.+)$/i);
     const creatorFilter = creatorMatch ? creatorMatch[1].trim().toLowerCase() : null;
     
+    // Check for version: prefix
+    const versionMatch = rawQuery.match(/^version:(.+)$/i);
+    const versionFilter = versionMatch ? versionMatch[1].trim().toLowerCase() : null;
+    
     // Check for favorite: prefix (favorite:yes, favorite:no, fav:yes, fav:no)
     const favoriteMatch = rawQuery.match(/^(?:favorite|fav):(yes|no|true|false)$/i);
     const favoriteFilter = favoriteMatch ? favoriteMatch[1].toLowerCase() : null;
@@ -8508,6 +8779,7 @@ function performSearch() {
     // Clean query: remove special prefixes
     let query = rawQuery.toLowerCase();
     if (creatorFilter) query = '';
+    if (versionFilter) query = '';
     if (favoriteFilter !== null) query = '';
     if (chubFilter !== null) query = '';
 
@@ -8518,6 +8790,15 @@ function performSearch() {
         if (creatorFilter) {
             const author = (c.creator || (c.data ? c.data.creator : "") || "").toLowerCase();
             return author === creatorFilter || author.includes(creatorFilter);
+        }
+        
+        // Special version: filter - match character_version field
+        if (versionFilter) {
+            const version = (c.character_version || (c.data ? c.data.character_version : "") || "").toLowerCase();
+            if (versionFilter === 'none' || versionFilter === 'empty') {
+                return !version;
+            }
+            return version === versionFilter || version.includes(versionFilter);
         }
         
         // Special favorite: filter from search bar
@@ -8607,6 +8888,11 @@ function performSearch() {
         if (sortType === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
         return 0;
     });
+    
+    // Keep currentCharacters in sync with sorted/filtered result
+    // This ensures the sort change handler (and any other consumer) works with 
+    // the same data that was just rendered, preventing stale-order bugs.
+    currentCharacters = sorted;
     
     renderGrid(sorted);
 }
@@ -8753,19 +9039,11 @@ function setupEventListeners() {
         });
     }
 
-    // Sort - updates currentCharacters to keep filter/sort state in sync
-    on('sortSelect', 'change', (e) => {
-        const type = e.target.value;
-        currentCharacters.sort((a, b) => {
-            if (type === 'name_asc') return a.name.localeCompare(b.name);
-            if (type === 'name_desc') return b.name.localeCompare(a.name);
-            if (type === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a); 
-            if (type === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
-            if (type === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
-            if (type === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
-            return 0;
-        });
-        renderGrid(currentCharacters);
+    // Sort — delegate to performSearch so there is ONE sort+render codepath.
+    // This eliminates the dual-sort bug where the sort handler and performSearch
+    // could produce different results from stale/divergent data.
+    on('sortSelect', 'change', () => {
+        performSearch();
     });
     
     // Favorites Filter Toggle
@@ -8786,6 +9064,19 @@ function setupEventListeners() {
         // Don't reset filters - just refresh the data
         document.getElementById('characterGrid').innerHTML = '';
         document.getElementById('loading').style.display = 'block';
+        
+        // Also force the opener to re-read its character list so its in-memory
+        // state is current. This prevents a stale opener from overwriting
+        // settings on its next save.
+        try {
+            if (window.opener && !window.opener.closed && window.opener.SillyTavern?.getContext) {
+                const ctx = window.opener.SillyTavern.getContext();
+                if (typeof ctx?.getCharacters === 'function') {
+                    ctx.getCharacters().catch(e => console.warn('[Refresh] Opener refresh failed:', e));
+                }
+            }
+        } catch (e) { /* opener unavailable */ }
+        
         await fetchCharacters(true); // Force refresh from API
         // Re-apply current search/filters after fetch
         performSearch();
@@ -10654,43 +10945,61 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
 }
 
 // Build character card V2 spec from Chub API data
+// IMPORTANT: The Chub API uses its OWN field names that differ from the V2 spec.
+// This mapping matches EXACTLY what SillyTavern's own downloadChubCharacter() does
+// in src/endpoints/content-manager.js.
 function buildCharacterCardFromChub(apiData) {
     const def = apiData.definition || {};
     
-    // Build V2 spec character card
+    // Chub API field → V2 spec field mapping (from ST source):
+    //   definition.personality      → data.description
+    //   definition.tavern_personality → data.personality
+    //   definition.first_message    → data.first_mes
+    //   definition.example_dialogs  → data.mes_example
+    //   definition.description      → data.creator_notes
+    //   definition.scenario         → data.scenario (same name)
+    //   definition.system_prompt    → data.system_prompt (same name)
+    //   definition.post_history_instructions → data.post_history_instructions (same name)
+    //   definition.alternate_greetings → data.alternate_greetings (same name)
+    //   definition.extensions       → data.extensions (same name)
+    //   definition.embedded_lorebook → data.character_book
+    //   metadata.topics             → data.tags (NOT definition.tags)
+    //   creatorName (from path)     → data.creator
     const characterCard = {
         spec: 'chara_card_v2',
         spec_version: '2.0',
         data: {
             name: def.name || apiData.name || 'Unknown',
             description: def.personality || '',
-            personality: '',
+            personality: def.tavern_personality || '',
             scenario: def.scenario || '',
             first_mes: def.first_message || '',
             mes_example: def.example_dialogs || '',
-            creator_notes: def.description || apiData.description || '',
+            creator_notes: def.description || '',
             system_prompt: def.system_prompt || '',
             post_history_instructions: def.post_history_instructions || '',
             alternate_greetings: def.alternate_greetings || [],
             tags: apiData.topics || [],
             creator: apiData.fullPath?.split('/')[0] || '',
-            character_version: '',
+            character_version: def.character_version || '',
             extensions: def.extensions || {},
+            character_book: def.embedded_lorebook || undefined,
         }
     };
-    
-    // Handle embedded lorebook if present
-    if (def.embedded_lorebook) {
-        characterCard.data.character_book = def.embedded_lorebook;
-    }
     
     return characterCard;
 }
 
 // Import a single character from Chub
+// Mirrors SillyTavern's own downloadChubCharacter() approach:
+// 1. Fetch character definition from API (always latest version)
+// 2. Download avatar IMAGE separately (just the picture, not the card PNG)
+// 3. Build V2 card from API metadata with correct field mapping
+// 4. Embed card data into avatar PNG
+// 5. Send to ST's import endpoint
 async function importChubCharacter(fullPath) {
     try {
-        // Fetch complete character data from the API
+        // Fetch complete character data from the API (always returns latest version)
         const metadata = await fetchChubMetadata(fullPath);
         
         if (!metadata || !metadata.definition) {
@@ -10700,22 +11009,47 @@ async function importChubCharacter(fullPath) {
         const hasGallery = metadata.hasGallery || false;
         const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
         
-        // Try multiple image URLs in order of preference
-        // IMPORTANT: Try PNG card URL FIRST since it has embedded data we want to preserve
+        // Build the character card from API metadata (uses ST's exact field mapping)
+        const characterCard = buildCharacterCardFromChub(metadata);
+        
+        // Ensure extensions object exists
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        
+        // Add ChubAI link metadata
+        const existingChub = characterCard.data.extensions.chub || {};
+        characterCard.data.extensions.chub = {
+            ...existingChub,
+            id: metadata.id || existingChub.id || null,
+            full_path: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        // Add unique gallery_id if enabled
+        if (getSetting('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
+            characterCard.data.extensions.gallery_id = generateGalleryId();
+            debugLog('[Chub Import] Assigned gallery_id:', characterCard.data.extensions.gallery_id);
+        }
+        
+        // Download avatar IMAGE (not the card PNG — that may have stale data)
+        // Priority: max_res_url (highest quality) > avatar URLs > chara_card_v2.png (last resort)
         const imageUrls = [];
         
-        // Add PNG card URL first (has embedded data already - preserves original spec version)
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
+        // ST uses metadata.node.max_res_url for the highest quality avatar
+        if (metadata.max_res_url) {
+            imageUrls.push(metadata.max_res_url);
+        }
         
-        // Add avatar URL from metadata if available
+        // Standard avatar URLs
         if (metadata.avatar_url) {
             imageUrls.push(metadata.avatar_url);
         }
-        
-        // Add standard avatar URLs as fallback
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar`);
+        
+        // Last resort: chara_card_v2.png (works as an image even if card data is stale)
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
         
         // De-duplicate URLs
         const uniqueUrls = [...new Set(imageUrls)];
@@ -10724,34 +11058,24 @@ async function importChubCharacter(fullPath) {
         
         let imageBuffer = null;
         let needsConversion = false;
-        let downloadedUrl = null;
         
         for (const url of uniqueUrls) {
             debugLog('[Chub Import] Trying image URL:', url);
             try {
-                // Try direct fetch first
                 let response = await fetch(url);
-                debugLog('[Chub Import] Direct fetch result:', response.status);
-                
                 if (!response.ok) {
-                    // Try proxy fallback
                     const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
                     response = await fetch(proxyUrl);
-                    debugLog('[Chub Import] Proxy fetch result:', response.status);
                 }
                 
                 if (response.ok) {
                     imageBuffer = await response.arrayBuffer();
                     const contentType = response.headers.get('content-type') || '';
                     needsConversion = url.endsWith('.webp') || contentType.includes('webp');
-                    downloadedUrl = url;
-                    console.log('[Chub Import] Downloaded from:', url.includes('chara_card') ? 'chara_card PNG' : url.split('/').pop(), 
+                    console.log('[Chub Import] Avatar downloaded from:', url.split('/').pop(), 
                         'size:', imageBuffer.byteLength, 'bytes',
-                        'content-type:', contentType,
                         'needsConversion:', needsConversion);
                     break;
-                } else {
-                    debugLog('[Chub Import] URL failed:', url, response.status);
                 }
             } catch (e) {
                 debugLog('[Chub Import] Failed to fetch', url, ':', e.message);
@@ -10759,108 +11083,41 @@ async function importChubCharacter(fullPath) {
         }
         
         if (!imageBuffer) {
-            throw new Error('Could not download character image from any available URL');
+            throw new Error('Could not download character avatar from any available URL');
         }
         
-        // Convert WebP to PNG if needed using canvas
+        // Convert to PNG if needed (WebP can't hold text chunks)
         let pngBuffer = imageBuffer;
         if (needsConversion) {
-            console.log('[Chub Import] Converting WebP to PNG - extraction will be skipped');
+            console.log('[Chub Import] Converting WebP avatar to PNG');
             pngBuffer = await convertImageToPng(imageBuffer);
         }
         
-        // Try to extract existing character data from the PNG
-        // This preserves the original spec version and all fields
-        let characterCard = null;
-        let usedExtractedData = false;
-        
-        if (!needsConversion) {
-            // Only try extraction if we have a PNG (not converted from WebP)
-            console.log('[Chub Import] Attempting to extract embedded card data from PNG...');
-            const extractedCard = extractCharacterDataFromPng(pngBuffer);
-            if (extractedCard && extractedCard.data) {
-                console.log('[Chub Import] ✓ Extracted card data:', {
-                    spec: extractedCard.spec,
-                    spec_version: extractedCard.spec_version,
-                    name: extractedCard.data?.name,
-                    character_version: extractedCard.data?.character_version,
-                    has_depth_prompt: !!extractedCard.data?.extensions?.depth_prompt
-                });
-                characterCard = extractedCard;
-                usedExtractedData = true;
-            } else {
-                console.log('[Chub Import] ✗ No embedded data found in PNG, will use API metadata');
-            }
-        }
-        
-        // Fall back to building from API data if extraction failed
-        if (!characterCard) {
-            console.log('[Chub Import] Building card from API metadata');
-            characterCard = buildCharacterCardFromChub(metadata);
-        }
-        
-        // Ensure extensions object exists
-        if (!characterCard.data.extensions) {
-            characterCard.data.extensions = {};
-        }
-        
-        // Add/update ChubAI link metadata
-        // Preserve existing chub data if present, but update with our link info
-        const existingChub = characterCard.data.extensions.chub || {};
-        characterCard.data.extensions.chub = {
-            ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
-            id: metadata.id || existingChub.id || null,
-            full_path: fullPath,
-            linkedAt: new Date().toISOString()
-        };
-        
-        // Add unique gallery_id if unique gallery folders are enabled
-        // Only add if not already present (preserve existing)
-        if (getSetting('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
-            characterCard.data.extensions.gallery_id = generateGalleryId();
-            debugLog('[Chub Import] Assigned gallery_id:', characterCard.data.extensions.gallery_id);
-        }
-        
-        debugLog('[Chub Import] Final character card:', {
-            spec: characterCard.spec,
-            spec_version: characterCard.spec_version,
+        debugLog('[Chub Import] Character card built from API:', {
             name: characterCard.data.name,
-            usedExtractedData: usedExtractedData,
             first_mes_length: characterCard.data.first_mes?.length,
             alternate_greetings_count: characterCard.data.alternate_greetings?.length,
-            character_version: characterCard.data.character_version,
+            has_character_book: !!characterCard.data.character_book,
             extensions_keys: Object.keys(characterCard.data.extensions || {})
         });
         
-        // Verify the data before embedding
-        if (!characterCard.data.first_mes || characterCard.data.first_mes.length < 100) {
-            console.warn('[Chub Import] WARNING: first_mes seems too short:', characterCard.data.first_mes?.length);
-        }
-        
-        // Embed character data into PNG (re-embed to ensure our extensions are included)
+        // Embed character card into the avatar PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
-        debugLog('[Chub Import] PNG embedded, size:', embeddedPng.length, 'bytes');
-        
-        // Create a Blob and File from the embedded PNG
+        // Create file for ST import
         const blob = new Blob([embeddedPng], { type: 'image/png' });
         const fileName = fullPath.split('/').pop() + '.png';
         const file = new File([blob], fileName, { type: 'image/png' });
         
-        // Create FormData for SillyTavern import
         const formData = new FormData();
         formData.append('avatar', file);
         formData.append('file_type', 'png');
         
-        // Get CSRF token
         const csrfToken = getCSRFToken();
         
-        // Import to SillyTavern
         const importResponse = await fetch('/api/characters/import', {
             method: 'POST',
-            headers: {
-                'X-CSRF-Token': csrfToken
-            },
+            headers: { 'X-CSRF-Token': csrfToken },
             body: formData
         });
         
@@ -10878,15 +11135,12 @@ async function importChubCharacter(fullPath) {
             throw new Error(`Invalid JSON response: ${responseText}`);
         }
         
-        // Check for error in response body
         if (result.error) {
             throw new Error('Import failed: Server returned error');
         }
         
         // Check for embedded media URLs in the character card
         const mediaUrls = findCharacterMediaUrls(characterCard);
-        
-        // Get the gallery_id we assigned (if any)
         const galleryId = characterCard.data.extensions?.gallery_id || null;
         
         return { 
@@ -10898,7 +11152,7 @@ async function importChubCharacter(fullPath) {
             fullPath: fullPath,
             avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
             embeddedMediaUrls: mediaUrls,
-            galleryId: galleryId  // Include the gallery_id for immediate use
+            galleryId: galleryId
         };
         
     } catch (error) {
@@ -11099,18 +11353,11 @@ startImportBtn?.addEventListener('click', async () => {
                 const safeName = result.characterName.replace(/[<>:"/\\|?*]/g, '_').trim();
                 folderName = `${safeName}_${result.galleryId}`;
                 debugLog('[Import] Using unique gallery folder:', folderName);
-                
-                // Register the gallery folder override immediately so media can be downloaded there
-                // Create a minimal char-like object for the registration function
-                if (result.fileName) {
-                    const tempChar = {
-                        avatar: result.fileName,
-                        name: result.characterName,
-                        data: { extensions: { gallery_id: result.galleryId } }
-                    };
-                    registerGalleryFolderOverride(tempChar);
-                    debugLog('[Import] Registered gallery folder override:', result.fileName, '->', folderName);
-                }
+                // NOTE: We do NOT register a gallery folder override here with a tempChar.
+                // The result.fileName from the server may not exactly match the final avatar
+                // filename in allCharacters, which would create an orphaned mapping.
+                // Instead, syncAllGalleryFolderOverrides() is called after fetchCharacters(true)
+                // at the end of the batch import, using authoritative avatar keys.
             } else {
                 // Fall back to character name-based folder
                 folderName = resolveGalleryFolderName(result.fileName || result.characterName);
@@ -11209,27 +11456,26 @@ startImportBtn?.addEventListener('click', async () => {
         
         // Only refresh if we actually imported something
         if (successCount > 0) {
-            // Try to refresh the main SillyTavern window's character list
+            // Refresh the gallery directly from API (forceRefresh=true bypasses opener)
+            await fetchCharacters(true);
+            
+            // Register gallery folder overrides for newly imported characters
+            if (getSetting('uniqueGalleryFolders')) {
+                syncAllGalleryFolderOverrides();
+                debugLog('[BatchImport] Synced gallery folder overrides for newly imported characters');
+            }
+            
+            // Also refresh the main SillyTavern window's character list (fire-and-forget)
             try {
                 if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
                     const context = window.opener.SillyTavern.getContext();
                     if (context && typeof context.getCharacters === 'function') {
                         debugLog('Triggering character refresh in main window...');
-                        await context.getCharacters();
+                        context.getCharacters().catch(e => console.warn('Main window refresh failed:', e));
                     }
                 }
             } catch (e) {
                 console.warn('Could not refresh main window characters:', e);
-            }
-            
-            // Refresh the gallery (force API fetch since we just imported)
-            await fetchCharacters(true);
-            
-            // Register gallery folder overrides for newly imported characters
-            if (getSetting('uniqueGalleryFolders')) {
-                // Sync all overrides - this ensures newly imported chars with gallery_id are registered
-                syncAllGalleryFolderOverrides();
-                debugLog('[BatchImport] Synced gallery folder overrides for newly imported characters');
             }
             
             // NOTE: Import summary modal is NOT shown here - it's only for ChubAI browser downloads
@@ -16310,7 +16556,7 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
             <div class="char-dup-card-meta">
                 <div class="char-dup-card-meta-item ${dateClass}"><i class="fa-solid fa-calendar"></i> ${dateStr}</div>
                 <div class="char-dup-card-meta-item ${tokenClass}"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
-                <div class="char-dup-card-meta-item gallery-count-item" id="${galleryCountId}" title="Gallery images"><i class="fa-solid fa-images"></i> <span class="gallery-count-value">...</span></div>
+                <div class="char-dup-card-meta-item gallery-count-item" id="${galleryCountId}" data-avatar="${escapeHtml(char.avatar)}" onclick="viewDupCharGallery(this)" title="Gallery images"><i class="fa-solid fa-images"></i> <span class="gallery-count-value">...</span></div>
             </div>
             <div class="char-dup-card-actions">
                 <button class="action-btn secondary small" onclick="viewCharFromDuplicates('${escapeHtml(char.avatar)}')">
@@ -16527,6 +16773,51 @@ function renderDuplicateGroups(groups) {
 }
 
 /**
+ * Open the gallery viewer for a character from the duplicate scanner
+ * @param {HTMLElement} el - The clicked gallery-count-item element
+ */
+async function viewDupCharGallery(el) {
+    const avatar = el?.dataset?.avatar;
+    if (!avatar) return;
+
+    const char = allCharacters.find(c => c.avatar === avatar);
+    if (!char) {
+        showToast('Character not found', 'error');
+        return;
+    }
+
+    const countValue = el.querySelector('.gallery-count-value');
+    const count = parseInt(countValue?.textContent, 10);
+    if (!count || count <= 0) {
+        showToast('No gallery images for this character', 'info');
+        return;
+    }
+
+    try {
+        const info = await getCharacterGalleryInfo(char);
+        if (!info.files || info.files.length === 0) {
+            showToast('No gallery images found', 'info');
+            return;
+        }
+
+        const images = info.files.map(fileName => ({
+            name: fileName,
+            url: `/user/images/${encodeURIComponent(info.folder)}/${encodeURIComponent(fileName)}`
+        }));
+
+        if (window.openGalleryViewerWithImages) {
+            window.openGalleryViewerWithImages(images, 0, char.name || 'Gallery');
+        } else {
+            showToast('Gallery viewer not available', 'error');
+        }
+    } catch (err) {
+        console.error('[Duplicates] Error opening gallery:', err);
+        showToast('Failed to load gallery', 'error');
+    }
+}
+window.viewDupCharGallery = viewDupCharGallery;
+
+/**
  * Load and display gallery image counts for all characters in duplicate groups
  * @param {Array} groups - The duplicate groups
  */
@@ -16692,14 +16983,15 @@ async function deleteDuplicateChar(avatar, groupIdx) {
     deleteModal.className = 'confirm-modal';
     deleteModal.id = 'deleteDuplicateModal';
     
-    // Check if unique gallery folders is enabled - critical for delete safety
-    const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders');
-    // Use hasUniqueGallery instead of global setting - this character MUST have its own gallery_id
-    const canModifyGallery = hasUniqueGallery;
+    // Only allow gallery modification when:
+    // 1. Unique gallery folders feature is ENABLED
+    // 2. Character has a gallery_id (unique gallery)
+    const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders') || false;
+    const canModifyGallery = uniqueFoldersEnabled && hasUniqueGallery;
     
     // Build transfer targets HTML with more details
     let transferTargetsHtml = '';
-    if (hasImages && hasUniqueGallery && transferTargets.length > 0) {
+    if (hasImages && canModifyGallery && transferTargets.length > 0) {
         // Has unique gallery AND transfer targets - show all options
         transferTargetsHtml = `
             <div class="dup-delete-transfer-section">
@@ -16757,7 +17049,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                 </div>
             </div>
         `;
-    } else if (hasImages && hasUniqueGallery) {
+    } else if (hasImages && canModifyGallery) {
         // Has unique gallery but no transfer targets - show delete/keep options
         transferTargetsHtml = `
             <div class="dup-delete-transfer-section warning-only">
@@ -16790,7 +17082,10 @@ async function deleteDuplicateChar(avatar, groupIdx) {
             </div>
         `;
     } else if (hasImages) {
-        // Shared gallery (no gallery_id) - just show info, no delete option
+        // Shared/unmanaged gallery - just show info, no delete option
+        const reason = !uniqueFoldersEnabled 
+            ? 'Unique gallery folders feature is disabled.'
+            : "This character doesn't have a unique gallery ID.";
         transferTargetsHtml = `
             <div class="dup-delete-transfer-section warning-only">
                 <div class="dup-delete-transfer-header">
@@ -16798,8 +17093,8 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                     <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
                 </div>
                 <div class="dup-delete-shared-warning">
-                    <i class="fa-solid fa-triangle-exclamation"></i>
-                    <span><strong>Shared gallery:</strong> This character doesn't have a unique gallery ID. Gallery files may belong to other characters and will not be deleted.</span>
+                    <i class="fa-solid fa-info-circle"></i>
+                    <span>${reason} Gallery files will not be deleted.</span>
                 </div>
             </div>
         `;
@@ -17258,8 +17553,11 @@ function switchView(view) {
         }
         show('characterGrid');
         
-        // Re-apply current filters and sort when returning to characters view
-        performSearch();
+        // Re-apply current filters and sort when returning to characters view.
+        // Defer to next animation frame so the grid has fully reflowed after
+        // removing the 'hidden' class — otherwise clientWidth/clientHeight can
+        // still report 0 and the virtual scroll renders nothing.
+        requestAnimationFrame(() => performSearch());
     } else if (view === 'chats') {
         if (chatFilters) chatFilters.style.display = 'flex';
         if (importBtn) importBtn.style.display = 'none';
@@ -19544,8 +19842,7 @@ function initChubView() {
 // ============================================================================
 
 function loadChubToken() {
-    // First ensure gallery settings are loaded
-    loadGallerySettings();
+    // Gallery settings are already loaded by DOMContentLoaded init
     
     // Get token from settings (server-side persistent)
     const savedToken = getSetting('chubToken');
@@ -21777,12 +22074,43 @@ async function downloadChubCharacter() {
         
         downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
         
-        // Try multiple image URLs in order of preference
-        // IMPORTANT: Try PNG card URL FIRST since it has embedded data we want to preserve
+        // Build the character card from API metadata (uses ST's exact field mapping)
+        // This always has the LATEST version data, unlike chara_card_v2.png which may be stale
+        const characterCard = buildCharacterCardFromChub(metadata);
+        
+        // Ensure extensions object exists
+        if (!characterCard.data.extensions) {
+            characterCard.data.extensions = {};
+        }
+        
+        // Add ChubAI link metadata
+        const existingChub = characterCard.data.extensions.chub || {};
+        characterCard.data.extensions.chub = {
+            ...existingChub,
+            id: metadata.id || existingChub.id || null,
+            full_path: fullPath,
+            linkedAt: new Date().toISOString()
+        };
+        
+        // Add unique gallery_id if enabled (inherit from replaced character if available)
+        if (getSetting('uniqueGalleryFolders')) {
+            if (inheritedGalleryId) {
+                characterCard.data.extensions.gallery_id = inheritedGalleryId;
+                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
+            } else if (!characterCard.data.extensions.gallery_id) {
+                characterCard.data.extensions.gallery_id = generateGalleryId();
+                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
+            }
+        }
+        
+        // Download avatar IMAGE (not the card PNG — that may have stale data)
+        // Priority: max_res_url > avatar URLs > chara_card_v2.png (last resort)
         const imageUrls = [];
         
-        // Add PNG card URL first (has embedded data already - preserves original spec version)
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
+        // ST uses metadata.node.max_res_url for highest quality avatar
+        if (metadata.max_res_url) {
+            imageUrls.push(metadata.max_res_url);
+        }
         
         // Add avatar URL from selected character if available
         if (chubSelectedChar.avatar_url) {
@@ -21797,7 +22125,9 @@ async function downloadChubCharacter() {
         // Add standard avatar URLs as fallback
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar`);
+        
+        // Last resort: chara_card_v2.png (works as an image)
+        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
         
         // De-duplicate URLs
         const uniqueUrls = [...new Set(imageUrls)];
@@ -21810,25 +22140,17 @@ async function downloadChubCharacter() {
         for (const url of uniqueUrls) {
             debugLog('[ChubDownload] Trying image URL:', url);
             try {
-                // Try direct fetch first
                 let response = await fetch(url);
-                debugLog('[ChubDownload] Direct fetch result:', response.status, response.statusText);
-                
                 if (!response.ok) {
-                    // Try proxy fallback
-                    debugLog('[ChubDownload] Trying proxy...');
                     const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
                     response = await fetch(proxyUrl);
-                    debugLog('[ChubDownload] Proxy fetch result:', response.status, response.statusText);
                 }
                 
                 if (response.ok) {
                     imageBuffer = await response.arrayBuffer();
                     needsConversion = url.endsWith('.webp') || response.headers.get('content-type')?.includes('webp');
-                    debugLog('[ChubDownload] Successfully fetched from:', url, 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
+                    debugLog('[ChubDownload] Avatar fetched from:', url.split('/').pop(), 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
                     break;
-                } else {
-                    debugLog('[ChubDownload] URL failed:', url, response.status);
                 }
             } catch (e) {
                 debugLog('[ChubDownload] Failed to fetch', url, ':', e.message);
@@ -21836,111 +22158,44 @@ async function downloadChubCharacter() {
         }
         
         if (!imageBuffer) {
-            throw new Error('Could not download character image from any available URL');
+            throw new Error('Could not download character avatar from any available URL');
         }
         
-        // Convert WebP to PNG if needed using canvas
+        // Convert to PNG if needed (WebP can't hold text chunks)
         let pngBuffer = imageBuffer;
         if (needsConversion) {
-            debugLog('[ChubDownload] Converting WebP to PNG...');
+            debugLog('[ChubDownload] Converting WebP avatar to PNG...');
             pngBuffer = await convertImageToPng(imageBuffer);
         }
         
-        // Try to extract existing character data from the PNG
-        // This preserves the original spec version (v2/v3) and all fields
-        let characterCard = null;
-        let usedExtractedData = false;
-        
-        if (!needsConversion) {
-            // Only try extraction if we have a PNG (not converted from WebP)
-            console.log('[ChubDownload] Attempting to extract embedded card data from PNG...');
-            const extractedCard = extractCharacterDataFromPng(pngBuffer);
-            if (extractedCard && extractedCard.data) {
-                console.log('[ChubDownload] ✓ Extracted card data from PNG:', {
-                    spec: extractedCard.spec,
-                    spec_version: extractedCard.spec_version,
-                    name: extractedCard.data?.name,
-                    character_version: extractedCard.data?.character_version,
-                    has_depth_prompt: !!extractedCard.data?.extensions?.depth_prompt
-                });
-                characterCard = extractedCard;
-                usedExtractedData = true;
-            } else {
-                console.log('[ChubDownload] ✗ No embedded data found in PNG, will use API metadata');
-            }
-        }
-        
-        // Fall back to building from API data if extraction failed
-        if (!characterCard) {
-            console.log('[ChubDownload] Building card from API metadata');
-            characterCard = buildCharacterCardFromChub(metadata);
-        }
-        
-        // Ensure extensions object exists
-        if (!characterCard.data.extensions) {
-            characterCard.data.extensions = {};
-        }
-        
-        // Add/update ChubAI link metadata
-        // Preserve existing chub data if present, but update with our link info
-        const existingChub = characterCard.data.extensions.chub || {};
-        characterCard.data.extensions.chub = {
-            ...existingChub,  // Preserve any existing fields (preset, custom_css, expressions, etc.)
-            id: metadata.id || existingChub.id || null,
-            full_path: fullPath,
-            linkedAt: new Date().toISOString()
-        };
-        
-        // Add unique gallery_id if unique gallery folders are enabled
-        // Inherit from replaced character if available, otherwise preserve existing or generate new
-        if (getSetting('uniqueGalleryFolders')) {
-            if (inheritedGalleryId) {
-                characterCard.data.extensions.gallery_id = inheritedGalleryId;
-                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
-            } else if (!characterCard.data.extensions.gallery_id) {
-                characterCard.data.extensions.gallery_id = generateGalleryId();
-                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
-            }
-        }
-        
-        debugLog('[ChubDownload] Final character card:', {
-            spec: characterCard.spec,
-            spec_version: characterCard.spec_version,
+        debugLog('[ChubDownload] Character card built from API:', {
             name: characterCard.data.name,
-            usedExtractedData: usedExtractedData,
             first_mes_length: characterCard.data.first_mes?.length,
-            character_version: characterCard.data.character_version,
-            gallery_id: characterCard.data.extensions.gallery_id
+            alternate_greetings_count: characterCard.data.alternate_greetings?.length,
+            has_character_book: !!characterCard.data.character_book,
+            gallery_id: characterCard.data.extensions?.gallery_id
         });
         
-        // Embed character data into PNG (re-embed to ensure our extensions are included)
+        // Embed character card into avatar PNG
         const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
         
-        debugLog('[ChubDownload] PNG embedded, size:', embeddedPng.length, 'bytes');
-        
-        // Create a Blob and File from the embedded PNG (match importChubCharacter exactly)
+        // Create file for ST import
         const blob = new Blob([embeddedPng], { type: 'image/png' });
         const fileName = fullPath.split('/').pop() + '.png';
         const file = new File([blob], fileName, { type: 'image/png' });
         
-        // Create FormData for SillyTavern import
         const formData = new FormData();
         formData.append('avatar', file);
         formData.append('file_type', 'png');
         
-        // Get CSRF token
         const csrfToken = getCSRFToken();
         
-        // Import to SillyTavern (use exact same endpoint as importChubCharacter)
         const importResponse = await fetch('/api/characters/import', {
             method: 'POST',
-            headers: {
-                'X-CSRF-Token': csrfToken
-            },
+            headers: { 'X-CSRF-Token': csrfToken },
             body: formData
         });
         
-        // Read response as text first, then parse (same as importChubCharacter)
         const responseText = await importResponse.text();
         debugLog('[ChubDownload] Import response:', importResponse.status, responseText);
         
@@ -21955,7 +22210,6 @@ async function downloadChubCharacter() {
             throw new Error(`Invalid JSON response: ${responseText}`);
         }
         
-        // Check for error in response body
         if (result.error) {
             throw new Error('Import failed: Server returned error');
         }
@@ -21965,49 +22219,13 @@ async function downloadChubCharacter() {
         
         showToast(`Downloaded "${characterName}" successfully!`, 'success');
         
-        // Try to refresh the main SillyTavern window's character list
-        try {
-            if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                const context = window.opener.SillyTavern.getContext();
-                if (context && typeof context.getCharacters === 'function') {
-                    debugLog('[ChubDownload] Triggering character refresh in main window...');
-                    await context.getCharacters();
-                }
-            }
-        } catch (e) {
-            console.warn('[ChubDownload] Could not refresh main window characters:', e);
-        }
-        
-        // Refresh the gallery (force API fetch since we just imported)
-        await fetchCharacters(true);
-        
-        // Register gallery folder override for the new character if unique folders enabled
-        if (getSetting('uniqueGalleryFolders') && characterCard.data.extensions?.gallery_id) {
-            // Find the newly imported character by name (it should now be in allCharacters)
-            const newChar = allCharacters.find(c => 
-                c.name === characterCard.data.name && 
-                getCharacterGalleryId(c) === characterCard.data.extensions.gallery_id
-            );
-            if (newChar) {
-                registerGalleryFolderOverride(newChar);
-                debugLog('[ChubDownload] Registered gallery folder override for:', newChar.name, buildUniqueGalleryFolderName(newChar));
-            } else {
-                debugWarn('[ChubDownload] Could not find newly imported character to register folder override');
-            }
-        }
-        
-        // Check for embedded media
-        const mediaUrls = findCharacterMediaUrls(characterCard);
-        
         // Get the local avatar filename from the import result
         const localAvatarFileName = result.file_name || fileName;
+        const assignedGalleryId = characterCard.data.extensions?.gallery_id || null;
         
-        // Show import summary modal if there's anything to report (and setting enabled)
+        const mediaUrls = findCharacterMediaUrls(characterCard);
         const hasGallery = metadata.hasGallery || false;
         const hasMedia = mediaUrls.length > 0;
-        
-        // Get the gallery_id we assigned (for direct folder resolution)
-        const assignedGalleryId = characterCard.data.extensions?.gallery_id || null;
         
         if ((hasGallery || hasMedia) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
@@ -22016,17 +22234,39 @@ async function downloadChubCharacter() {
                     fullPath: fullPath,
                     chubId: metadata.id || null,
                     url: `https://chub.ai/characters/${fullPath}`,
-                    avatar: localAvatarFileName,  // Local avatar filename for folder resolution
-                    galleryId: assignedGalleryId  // Include gallery_id for direct folder name construction
+                    avatar: localAvatarFileName,
+                    galleryId: assignedGalleryId
                 }] : [],
                 mediaCharacters: hasMedia ? [{
                     name: characterName,
-                    avatar: localAvatarFileName,  // Use local avatar filename, not Chub URL
-                    avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,  // Keep for display
+                    avatar: localAvatarFileName,
+                    avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
                     mediaUrls: mediaUrls,
-                    galleryId: assignedGalleryId  // Include gallery_id for direct folder name construction
+                    galleryId: assignedGalleryId
                 }] : []
             });
+        }
+        
+        // === REFRESH + SYNC ===
+        await fetchCharacters(true);
+        
+        // Register gallery folder mappings using actual avatar filenames.
+        if (getSetting('uniqueGalleryFolders') && assignedGalleryId) {
+            syncAllGalleryFolderOverrides();
+            debugLog('[ChubDownload] Synced gallery folder overrides after refresh');
+        }
+        
+        // Also refresh main ST window's character list (fire-and-forget)
+        try {
+            if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
+                const context = window.opener.SillyTavern.getContext();
+                if (context && typeof context.getCharacters === 'function') {
+                    debugLog('[ChubDownload] Triggering character refresh in main window...');
+                    context.getCharacters().catch(e => console.warn('[ChubDownload] Main window refresh failed:', e));
+                }
+            }
+        } catch (e) {
+            console.warn('[ChubDownload] Could not access main window:', e);
         }
         
     } catch (e) {

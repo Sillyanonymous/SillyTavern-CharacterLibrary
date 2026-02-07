@@ -3230,6 +3230,59 @@ textarea.glass-input {
     gap: 10px;
 }
 
+/* Gallery ID Warning Banner */
+.gallery-id-warning {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 152, 0, 0.12);
+    border: 1px solid rgba(255, 152, 0, 0.35);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    gap: 14px;
+}
+
+.gallery-id-warning.hidden {
+    display: none;
+}
+
+.gallery-id-warning > i {
+    font-size: 1.3em;
+    color: #ff9800;
+    flex-shrink: 0;
+}
+
+.gallery-id-warning-content {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+}
+
+.gallery-id-warning-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.gallery-id-warning-text strong {
+    color: #ffb74d;
+    font-size: 0.92em;
+}
+
+.gallery-id-warning-text span {
+    color: var(--text-secondary);
+    font-size: 0.82em;
+    line-height: 1.4;
+}
+
+.gallery-id-warning .action-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .gallery-actions {
     display: flex;
     gap: 8px;
@@ -4391,6 +4444,13 @@ textarea.glass-input {
     background: rgba(241, 196, 15, 0.25);
     border: 1px solid rgba(241, 196, 15, 0.5);
     color: #f1c40f;
+    cursor: pointer;
+}
+
+.char-dup-card-meta-item.gallery-count-item.has-images:hover {
+    background: rgba(241, 196, 15, 0.4);
+    border-color: rgba(241, 196, 15, 0.7);
+    transform: scale(1.05);
 }
 
 .char-dup-card-meta-item .gallery-count-value {
@@ -5785,11 +5845,13 @@ textarea.glass-input {
 /* Import Modal */
 .import-modal-content {
     max-width: 650px;
+    max-height: 90vh;
 }
 
 .import-urls-textarea {
     width: 100%;
-    min-height: 150px;
+    height: 252px;
+    min-height: 200px;
     resize: vertical;
     font-family: monospace;
     font-size: 0.9rem;

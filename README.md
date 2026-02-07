@@ -44,8 +44,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Beautiful grid view** with progressive lazy-loading
 - **Powerful search** across name, tags, author, and creator's notes
 - **Tag filtering** with include/exclude/neutral tri-state logic  
-- **Sort** by name, date added, recent chats, or chat frequency
-- **Preferences auto-save** between sessions
+- **Sort** by name, last modified, or date created
 
 ### 🎨 Character Details & Editing
 
@@ -55,9 +54,10 @@ Click any character for a **rich tabbed interface**:
 |-----|-------------|
 | **Details** | Rich markdown/HTML/CSS rendering, embedded images, creator notes in secure sandboxed iframe, alternate greetings, embedded lorebooks |
 | **Edit** | Full character card editor with change tracking and visual diff preview |
-| **Media** | All images (PNG/JPG/WebP/GIF) and audio (MP3/WAV/OGG/M4A) with built-in players |
+| **Gallery** | All images (PNG/JPG/WebP/GIF) and audio (MP3/WAV/OGG/M4A) with built-in players |
 | **Chats** | All conversations with message counts; resume any chat directly |
 | **Related** | Smart recommendations based on shared tags, creator, or content keywords |
+| **Info (Optional)** | Debug/metadata panel for power users (enable in Settings) |
 
 **Edit Lock** prevents accidental changes.
 
@@ -83,19 +83,54 @@ Click any character for a **rich tabbed interface**:
 - **Unified gallery** for all character images and audio
 - **Batch download** embedded media from creator notes and greetings
 - **Audio support**  MP3, WAV, OGG, M4A with built-in player
-- **Duplicate detection** via file hashing
 
 ### 🎴 On-the-Fly Media Localization
 
 Many character cards embed images from external hosts (Imgur, ImageShack, Catbox, etc.) which can be slow or unreliable. Media Localization solves this:
 
-1. Download embedded media via the **Media tab** → **"Download Embedded Media"**
+1. Download embedded media via the **Gallery tab** → **"Download Embedded Media"**
 2. Enable **"Media Localization"** in Settings (globally or per-character)
 3. Remote URLs are automatically replaced with local files in:
    - Character Library detail views (creator notes, greetings, descriptions)
    - **SillyTavern chat messages** — live in your conversations!
 
 **Your original character cards stay untouched** — replacement happens dynamically at display time. Fast, private, and offline-friendly!
+
+### ♻️ Card Updates (WIP)
+
+Keep Chub-linked characters in sync:
+
+1. Run **Check for Updates** (single character or batch)
+2. Review side-by-side diffs for each field
+3. Apply selected fields or apply all in batch
+
+Updates are pulled from the Chub API first (with PNG fallback) and only change the fields you choose.
+Please review fields carefully before applying. If you manually tag your characters, don't synch tags. This feature will be expanded with field filtering (ie. user can decide to never compare tags, creator's notes etc)
+
+### ✅ Gallery Integrity & Sync
+
+Keep unique gallery mappings healthy:
+
+- **Status indicator** with audit results and warnings
+- **Integrity checks** for missing/orphaned mappings
+- **Cleanup tools** to assign and or remove orphaned mappings safely
+- **ST import warning + 1-click fix**  If Unique Gallery Folders is enabled and you add a card directly in SillyTavern, a warning appears with a one-click repair to assign the missing `gallery_id` and sync mappings
+
+### ⚡ Bulk Media Localization
+
+Batch-download embedded media across your whole library:
+
+- **Bulk localization** from Settings with progress and abort
+- **History tracking** to skip already-processed characters
+- **Optional Chub gallery download** when linked
+
+### 📱 Mobile UI Enhancements (New!)
+
+Now optimized for small screens:
+
+- **Mobile-friendly modal layout** and tap targets
+- **Improved scrolling and navigation** for long content
+- **Touch-optimized gallery viewer** (pinch/zoom, swipe)
 
 ### 🔗 Related Character Discovery
 
@@ -106,7 +141,7 @@ Automatically finds similar characters via:
 
 Shows relationship strength and reasoning for each suggestion.
 
-### 🗂️ Unique Gallery Folders (Experimental)
+### 🗂️ Unique Gallery Folders
 
 > ⚠️ **Experimental Feature** — Enable in Settings → Gallery Folders
 
@@ -196,9 +231,10 @@ Unlock additional features:
 - **Timeline view** — New releases from followed authors
 - **Favorites filtering** — Show only your saved favorites
 - **Toggle favorites** — Add/remove characters from your ChubAI favorites
+- **Follow/Unfollow authors** — Track creators you like
 - **Restricted content** — Access private listings
 
-### 🔗 Character Linking (New!)
+### 🔗 Character Linking
 Link your local characters to their ChubAI counterparts:
 - **Manual linking** — Search and link via the ChubAI indicator in character details
 - **Bulk link scanner** — Automatically scan your library and match unlinked characters
@@ -228,7 +264,9 @@ Link your local characters to their ChubAI counterparts:
 |-----|--------|
 | `Page Up/Down` | Scroll through character grid |
 | `Home/End` | Jump to top/bottom |
-| `Escape` | Close modals |
+| `Escape` | Close modals, overlays, and expanded editors |
+| `Enter` | Add tag (when tag input is focused) |
+| `Arrow Down` | Focus first tag suggestion (when tag input is focused) |
 
 ---
 
@@ -237,7 +275,7 @@ Link your local characters to their ChubAI counterparts:
 - **Quick creator filter** - Type `creator:AuthorName` in search
 - **Filter by ChubAI link** - Type `chub:yes` or `chub:no` to filter linked/unlinked characters
 - **Batch import** - Paste multiple ChubAI URLs in the import dialog
-- **Media tab** - See all character images and audio in one place
+- **Gallery tab** - See all character images and audio in one place
 - **Bulk link scanner** - Use ⋮ menu → "Bulk Link to ChubAI" to auto-match your library
 - **Duplicate cleanup** - Use Find Duplicates to clean up your library
 
@@ -245,7 +283,6 @@ Link your local characters to their ChubAI counterparts:
 
 ## 🚧 TODO
 
-- Better icon placement in SillyTavern's topbar
+- Finalize current WIP features
 - Performance improvements for very large libraries
 - Thumbnail caching
-- Mobile mode (still in planning/consideration phase)

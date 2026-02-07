@@ -277,6 +277,10 @@ function injectMultiSelectToolbar() {
                 <i class="fa-solid fa-download"></i>
                 <span>Export</span>
             </button>
+            <button id="multiSelectCheckUpdatesBtn" class="ms-btn" title="Check selected characters for updates on ChubAI">
+                <i class="fa-solid fa-arrows-rotate"></i>
+                <span>Updates</span>
+            </button>
             
             <div class="ms-divider"></div>
             
@@ -334,6 +338,13 @@ function injectMultiSelectToolbar() {
     document.getElementById('multiSelectDeleteBtn')?.addEventListener('click', () => {
         const contextMenu = ModuleLoader.get('context-menu');
         contextMenu?.bulkDelete?.();
+    });
+    
+    document.getElementById('multiSelectCheckUpdatesBtn')?.addEventListener('click', () => {
+        const cardUpdates = ModuleLoader.get('card-updates');
+        if (cardUpdates?.checkSelectedCharacters) {
+            cardUpdates.checkSelectedCharacters();
+        }
     });
 }
 
@@ -431,6 +442,8 @@ function injectMultiSelectStyles() {
             gap: 16px;
             backdrop-filter: blur(10px);
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+            flex-wrap: nowrap;
+            overflow-x: auto;
         }
         
         .multi-select-toolbar.hidden {
@@ -472,6 +485,7 @@ function injectMultiSelectStyles() {
             gap: 6px;
             flex: 1;
             justify-content: center;
+            flex-wrap: nowrap;
         }
         
         .multi-select-right {
@@ -555,6 +569,29 @@ function injectMultiSelectStyles() {
             }
             .multi-select-label {
                 display: none;
+            }
+        }
+        
+        @media (max-width: 600px) {
+            .multi-select-toolbar {
+                padding: 8px 10px;
+                gap: 8px;
+            }
+            .multi-select-actions {
+                gap: 4px;
+            }
+            .ms-btn {
+                padding: 7px 8px;
+                font-size: 0.8em;
+            }
+            .ms-divider {
+                margin: 0 2px;
+                height: 20px;
+            }
+            .multi-select-badge {
+                padding: 5px 10px;
+                font-size: 0.85em;
+                gap: 6px;
             }
         }
         

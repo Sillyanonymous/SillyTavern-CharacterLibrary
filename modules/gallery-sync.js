@@ -207,9 +207,13 @@ export async function createMissingMappings(options = {}) {
         }
     }
     
-    // Save settings
-    if (result.success > 0 && typeof context.saveSettingsDebounced === 'function') {
-        context.saveSettingsDebounced();
+    // Save settings immediately (not debounced) to ensure persistence
+    if (result.success > 0) {
+        if (typeof context.saveSettings === 'function') {
+            context.saveSettings();
+        } else if (typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
+        }
     }
     
     return result;
@@ -238,8 +242,13 @@ export function cleanupOrphanedMappings() {
         result.removed++;
     }
     
-    if (result.removed > 0 && typeof context.saveSettingsDebounced === 'function') {
-        context.saveSettingsDebounced();
+    if (result.removed > 0) {
+        // Save immediately to ensure orphan cleanup persists
+        if (typeof context.saveSettings === 'function') {
+            context.saveSettings();
+        } else if (typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
+        }
     }
     
     return result;
@@ -323,10 +332,15 @@ function getSTContext() {
 }
 
 /**
- * Generate a unique gallery ID
+ * Generate a unique gallery ID (12-character alphanumeric, matching library.js format)
  */
 function generateGalleryId() {
-    return `gal_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < 12; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
 }
 
 /**
@@ -726,8 +740,14 @@ export async function init(dependencies = {}) {
         });
     }
     
-    // Run initial audit (non-blocking)
+    // Run initial audit (non-blocking, deferred)
+    // processAndRender() now runs its own audit+sync after fetchCharacters completes.
+    // This timer is a safety net only — if processAndRender already ran, skip it.
     setTimeout(() => {
+        if (window._gallerySyncAuditDone) {
+            console.log('[GallerySync] Initial audit skipped — already done by processAndRender');
+            return;
+        }
         try {
             const audit = auditGalleryIntegrity();
             const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
@@ -740,7 +760,7 @@ export async function init(dependencies = {}) {
         } catch (err) {
             console.error('[GallerySync] Initial audit failed:', err);
         }
-    }, 2000);
+    }, 5000);
     
     isInitialized = true;
     console.log('[GallerySync] Module initialized');
