@@ -352,6 +352,23 @@
         padding: 0;
         -webkit-tap-highlight-color: rgba(255,255,255,0.1);
     }
+    #modalChatBtn {
+        padding: 6px 8px;
+        font-size: 0;
+        gap: 0;
+        border-radius: 10px;
+        margin-right: 10px;
+        background: transparent;
+        border: 1px solid rgba(var(--accent-rgb), 0.85);
+        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45), inset 0 0 6px rgba(var(--accent-rgb), 0.25);
+    }
+    #modalChatBtn i {
+        font-size: 0.95rem;
+        color: var(--accent);
+    }
+    .mobile-chat-hidden {
+        display: none !important;
+    }
 
     /* ---------------------------------------------------
        HIDE DESKTOP-ONLY CONTROLS IN ALL MODAL TYPES
@@ -439,7 +456,7 @@
     /* ---------------------------------------------------
        CHARACTER DETAIL MODAL  (#charModal)
        --------------------------------------------------- */
-    #charModal .modal-controls > *:not(#modalClose) {
+    #charModal .modal-controls > *:not(#modalClose):not(#modalChatBtn) {
         display: none !important;
     }
 

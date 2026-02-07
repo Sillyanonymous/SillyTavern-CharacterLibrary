@@ -5278,6 +5278,8 @@ function openModal(char) {
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
     document.querySelector('.tab-btn[data-tab="details"]').classList.add('active');
     document.getElementById('pane-details').classList.add('active');
+
+    updateMobileChatButtonVisibility();
     
     // Reset scroll positions to top
     document.querySelectorAll('.tab-pane').forEach(p => p.scrollTop = 0);
@@ -8897,6 +8899,20 @@ function performSearch() {
     renderGrid(sorted);
 }
 
+function updateMobileChatButtonVisibility() {
+    const chatBtn = document.getElementById('modalChatBtn');
+    if (!chatBtn) return;
+
+    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    if (!isMobile) {
+        chatBtn.classList.remove('mobile-chat-hidden');
+        return;
+    }
+
+    const isDetailsActive = document.querySelector('.tab-btn[data-tab="details"]')?.classList.contains('active');
+    chatBtn.classList.toggle('mobile-chat-hidden', !isDetailsActive);
+}
+
 /**
  * Filter local cards view by creator name
  * Sets the search to "creator:Name" and ensures Author filter is checked
@@ -9111,6 +9127,8 @@ function setupEventListeners() {
             
             // Reset scroll position when switching tabs
             pane.scrollTop = 0;
+
+            updateMobileChatButtonVisibility();
         });
     });
     
@@ -9123,6 +9141,8 @@ function setupEventListeners() {
             }
         }
     };
+
+    updateMobileChatButtonVisibility();
     
     // Save Button
     document.getElementById('saveEditBtn').onclick = saveCharacter;
