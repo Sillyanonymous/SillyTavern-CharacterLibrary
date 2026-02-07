@@ -3593,7 +3593,8 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
             // Old folder doesn't exist or can't be read - might be empty, that's fine
             debugLog(`[GalleryRename] Old folder "${oldFolderName}" doesn't exist or is empty`);
             // Still update the mapping for future use
-            registerGalleryFolderOverride(char);
+            const tempChar = { ...char, name: newName };
+            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
@@ -3602,7 +3603,8 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
         
         if (!files || files.length === 0) {
             debugLog(`[GalleryRename] Old folder "${oldFolderName}" is empty`);
-            registerGalleryFolderOverride(char);
+            const tempChar = { ...char, name: newName };
+            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
@@ -3618,7 +3620,8 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
         
         if (mediaFiles.length === 0) {
             debugLog(`[GalleryRename] No media files to move`);
-            registerGalleryFolderOverride(char);
+            const tempChar = { ...char, name: newName };
+            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
@@ -22425,6 +22428,7 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
     
     try {
         // Build update payload preserving all existing data
+        const oldName = char.data?.name || char.name || '';
         const existingExtensions = char.data?.extensions || char.extensions || {};
         const existingCreateDate = char.create_date;
         const existingSpec = char.spec || char.data?.spec;
@@ -22490,6 +22494,13 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
                         allCharacters[charIndex][field] = value;
                     }
                 }
+            }
+
+            const newName = updatedData.name || oldName;
+            const nameChanged = oldName && newName && oldName !== newName;
+            const galleryId = getCharacterGalleryId(char);
+            if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
+                await handleGalleryFolderRename(char, oldName, newName, galleryId);
             }
             
             console.log('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
