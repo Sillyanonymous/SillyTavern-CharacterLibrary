@@ -9,6 +9,12 @@
 import * as SharedStyles from './shared-styles.js';
 import * as CoreAPI from './core-api.js';
 
+const debugLog = (...args) => {
+    if (CoreAPI.getSetting?.('debugMode')) {
+        console.log(...args);
+    }
+};
+
 // Module state
 let isInitialized = false;
 let currentTagAnalysis = null; // Store current tag analysis for remove suggestions
@@ -36,7 +42,7 @@ export function init(deps) {
     setupEventListeners();
     
     isInitialized = true;
-    console.log('[BatchTagging] Module initialized');
+    debugLog('[BatchTagging] Module initialized');
 }
 
 /**

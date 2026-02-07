@@ -298,11 +298,6 @@
         const container = document.createElement('div');
         container.className = 'mobile-search-container';
 
-        const cancelBtn = document.createElement('button');
-        cancelBtn.className = 'mobile-search-cancel';
-        cancelBtn.textContent = 'Cancel';
-
-        container.appendChild(cancelBtn);
         overlay.appendChild(container);
         document.body.appendChild(overlay);
 
@@ -312,7 +307,7 @@
         function openSearch() {
             if (searchBox) {
                 // Move original search box into the overlay to preserve bindings
-                container.insertBefore(searchBox, cancelBtn);
+                container.appendChild(searchBox);
             }
             overlay.classList.remove('hidden');
             // Focus after transition
@@ -331,8 +326,6 @@
         }
 
         btn.addEventListener('click', openSearch);
-        cancelBtn.addEventListener('click', closeSearch);
-
         // Close on backdrop tap (but not on the container itself)
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) closeSearch();

@@ -1,6 +1,6 @@
 /* ========================================
    SillyTavern Character Library – Mobile
-   Holistic mobile-first overrides
+   Mobile specific overrides
    ======================================== */
 
 /* ----------------------------------------
@@ -60,6 +60,12 @@
         border-radius: 8px;
         color: var(--text-primary);
         cursor: pointer;
+    }
+    #mobileSettingsBtn {
+        margin-left: auto;
+    }
+    #mobileMenuBtn {
+        margin-left: 6px;
     }
 
     /* --- Hide desktop-only chrome --- */
@@ -126,7 +132,10 @@
        --------------------------------------------------- */
     .mobile-search-overlay {
         position: fixed;
-        inset: 0;
+        top: calc(env(safe-area-inset-top, 0px) + 52px);
+        right: 0;
+        bottom: 0;
+        left: 0;
         background: rgba(0, 0, 0, 0.85);
         z-index: 1200;
         padding: 12px;
@@ -147,15 +156,6 @@
         display: flex;
         gap: 10px;
         align-items: center;
-    }
-    .mobile-search-cancel {
-        background: none;
-        border: none;
-        color: var(--accent);
-        font-size: 0.95rem;
-        padding: 10px 5px;
-        white-space: nowrap;
-        cursor: pointer;
     }
 
     /* ---------------------------------------------------
@@ -355,7 +355,7 @@
 
     /* ---------------------------------------------------
        HIDE DESKTOP-ONLY CONTROLS IN ALL MODAL TYPES
-       One rule to catch every variant
+       One rule to catch every variantt
        --------------------------------------------------- */
 
     /* Size controls (compact/normal/wide) – hide everywhere */
@@ -468,6 +468,16 @@
         font-size: 0.78rem;
         white-space: nowrap;
         flex-shrink: 0;
+    }
+
+    /* Info tab: icon-only on mobile */
+    #infoTabBtn {
+        font-size: 0;
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+    #infoTabBtn i {
+        font-size: 0.78rem;
     }
 
     /* ---------------------------------------------------
@@ -724,11 +734,10 @@
 
     /* ---------------------------------------------------
        TOAST NOTIFICATIONS – top-anchored on mobile
-       Keeps toasts out of the way of bottom buttons,
-       modals, and the nav bar.
+       Keeps toasts out of the way of bottom buttons
        --------------------------------------------------- */
     .toast-container {
-        top: calc(env(safe-area-inset-top, 0px) + 12px) !important;
+        top: calc(env(safe-area-inset-top, 0px) + 54px) !important;
         bottom: auto !important;
         right: 12px !important;
         left: 12px !important;

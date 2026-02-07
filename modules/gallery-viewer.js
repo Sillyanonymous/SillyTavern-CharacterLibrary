@@ -13,6 +13,12 @@
 
 import * as CoreAPI from './core-api.js';
 
+const debugLog = (...args) => {
+    if (CoreAPI.getSetting?.('debugMode')) {
+        console.log(...args);
+    }
+};
+
 // Module state
 let isInitialized = false;
 let currentImages = [];
@@ -34,7 +40,7 @@ export function init() {
     setupEventListeners();
     
     isInitialized = true;
-    console.log('[GalleryViewer] Module initialized');
+    debugLog('[GalleryViewer] Module initialized');
 }
 
 /**
@@ -167,7 +173,7 @@ export function closeViewer() {
 async function fetchGalleryImages(char) {
     const folderName = CoreAPI.getGalleryFolderName(char);
     
-    console.log('[GalleryViewer] Fetching images for folder:', folderName);
+    debugLog('[GalleryViewer] Fetching images for folder:', folderName);
     
     const response = await CoreAPI.apiRequest('/images/list', 'POST', {
         folder: folderName,
@@ -179,7 +185,7 @@ async function fetchGalleryImages(char) {
     }
     
     const files = await response.json();
-    console.log('[GalleryViewer] Files received:', files);
+    debugLog('[GalleryViewer] Files received:', files);
     
     // Filter to image and video files and build URLs
     const mediaFiles = (files || []).filter(f => 

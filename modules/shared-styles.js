@@ -8,6 +8,12 @@
 
 let isInjected = false;
 
+const debugLog = (...args) => {
+    if (window.getSetting?.('debugMode')) {
+        console.log(...args);
+    }
+};
+
 /**
  * Inject shared styles into the document
  * Safe to call multiple times - will only inject once
@@ -363,7 +369,7 @@ export function inject() {
     
     document.head.insertAdjacentHTML('beforeend', styles);
     isInjected = true;
-    console.log('[SharedStyles] Injected shared module styles');
+    debugLog('[SharedStyles] Injected shared module styles');
 }
 
 /**
