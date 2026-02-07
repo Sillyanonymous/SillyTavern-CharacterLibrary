@@ -19608,7 +19608,9 @@ function initContentExpandHandlers() {
     }
 }
 
-function initChubView() {
+async function initChubView() {
+    // Ensure settings are loaded before reading token/state.
+    await loadGallerySettings();
     // Sync dropdown values with JS state (browser may cache old form values)
     const discoveryPresetEl = document.getElementById('chubDiscoveryPreset');
     const timelineSortEl = document.getElementById('chubTimelineSortHeader');
