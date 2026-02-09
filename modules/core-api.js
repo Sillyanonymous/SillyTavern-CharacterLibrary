@@ -300,7 +300,7 @@ export function clearSelection() {
 }
 
 /**
- * Select all visible characters
+ * Select all filtered characters
  */
 export function selectAllVisible() {
     window.MultiSelect?.selectAll();

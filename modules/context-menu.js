@@ -33,6 +33,12 @@ export function init(deps) {
     
     // Setup global event listeners
     setupGlobalListeners();
+
+    // Bridge for legacy card creation paths
+    window.attachCardContextMenu = function(cardElement, char) {
+        if (!cardElement || !char) return;
+        attachToCard(cardElement, char);
+    };
     
     isInitialized = true;
     console.log('[ContextMenu] Module initialized');

@@ -332,6 +332,12 @@
         min-width: 0;
     }
 
+    .chub-tagline-row {
+        font-size: 0.85rem;
+        margin: -10px 0 16px 0;
+        padding: 0 12px 0 3px;
+    }
+
     /* Mobile avatar injected into header by JS */
     .modal-header .mobile-header-avatar {
         width: 32px; height: 32px;
@@ -727,7 +733,20 @@
     .chub-char-header-info h2 { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .chub-char-meta { font-size: 0.75rem; overflow: hidden; }
     .chub-char-body { overflow-x: hidden !important; padding: 12px; }
+    .chub-char-body { gap: 12px; }
+    .chub-char-tagline {
+        padding: 10px 12px;
+        border-radius: 10px;
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+    .chub-tagline-text { font-size: 0.85rem; }
+    .chub-char-meta-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
     .chub-char-stats {
+        display: flex;
         flex-wrap: wrap;
         gap: 8px 12px;
         padding: 8px 10px;
@@ -735,7 +754,9 @@
     }
     .chub-stat { gap: 5px; font-size: 0.8rem; white-space: nowrap; }
     .chub-char-tags { gap: 5px; }
+    .chub-char-tags { --chub-tags-max-height: 56px; }
     .chub-tag { font-size: 0.75rem; padding: 3px 8px; }
+    .chub-tags-more { font-size: 0.7rem; padding: 2px 6px; }
     .chub-char-section { padding: 10px 12px; }
     .chub-section-title {
         font-size: 0.85rem;
@@ -744,9 +765,175 @@
         display: flex;
         align-items: center;
     }
+    .chub-section-count { font-size: 0.75rem; }
     .scrolling-text {
         font-size: 0.85rem;
         line-height: 1.6;
+    }
+    .chub-alt-greeting summary { padding: 8px 10px; gap: 8px; }
+    .chub-alt-greeting-index { font-size: 0.7rem; padding: 2px 6px; }
+    .chub-alt-greeting-preview { font-size: 0.78rem; }
+    .chub-alt-greeting-body { font-size: 0.85rem; }
+
+    /* Card updates modal (mobile) */
+    .card-update-modal .cl-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+    }
+    .card-update-modal .cl-modal-header {
+        padding: 10px 12px;
+        gap: 8px;
+        flex-wrap: wrap;
+        position: sticky;
+        top: 0;
+        background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
+        z-index: 1;
+    }
+    .card-update-modal .cl-modal-body {
+        max-height: calc(100vh - 120px);
+        padding: 12px;
+        -webkit-overflow-scrolling: touch;
+    }
+    .card-update-modal .cl-modal-footer {
+        padding: 10px 12px;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .card-update-field-select {
+        padding: 12px;
+        border-radius: 14px;
+        background: linear-gradient(140deg, rgba(40, 50, 90, 0.55), rgba(20, 20, 30, 0.75));
+        border: 1px solid rgba(90, 140, 210, 0.35);
+    }
+    .card-update-field-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .card-update-field-actions {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+    }
+    .card-update-field-actions .cl-btn {
+        padding: 6px 8px;
+        font-size: 0.8rem;
+    }
+    .card-update-field-count {
+        grid-column: 1 / -1;
+        text-align: center;
+    }
+    .card-update-field-grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    .card-update-field-option {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .card-update-batch-list {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        overflow-x: hidden;
+        max-height: none;
+        overflow-y: visible;
+    }
+    .card-update-batch-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 12px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        width: 100%;
+    }
+    .card-update-batch-item-info {
+        width: 100%;
+        min-width: 0;
+    }
+    .card-update-batch-item-name { font-size: 0.95rem; }
+    .card-update-batch-item-path { font-size: 0.75rem; }
+    .card-update-batch-item-name,
+    .card-update-batch-item-path {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        word-break: break-word;
+        overflow-wrap: anywhere;
+    }
+    .card-update-batch-item-status {
+        width: 100%;
+        justify-content: flex-start;
+        gap: 10px;
+        flex-wrap: wrap;
+    }
+    .card-update-batch-view-btn {
+        width: 100%;
+        justify-content: center;
+        padding: 8px 12px;
+        border-radius: 8px;
+    }
+
+    .card-update-diff-item.short {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .card-update-diff-values {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+        align-items: center;
+        gap: 6px;
+    }
+    .card-update-diff-values .local-value,
+    .card-update-diff-values .remote-value {
+        white-space: normal;
+        max-width: none;
+        width: auto;
+        display: block;
+    }
+
+    .card-update-array-diff {
+        grid-template-columns: 1fr;
+    }
+    .card-update-array-list {
+        max-height: none;
+        overflow: visible;
+    }
+    .card-update-pill {
+        font-size: 0.78em;
+        padding: 3px 8px;
+    }
+
+    .card-update-diff-sidebyside {
+        grid-template-columns: 1fr;
+    }
+    .card-update-diff-panel.local {
+        border-right: none;
+        border-bottom: 1px solid rgba(80,80,80,0.3);
+    }
+    .card-update-diff-panel-content {
+        max-height: none;
+        overflow: visible;
+    }
+    .card-update-batch-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .card-update-batch-actions .cl-btn,
+    #cardUpdateBatchStartBtn {
+        width: 100%;
     }
 
     /* ---------------------------------------------------
@@ -1801,6 +1988,225 @@
     .chub-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 6px;
+    }
+
+    /* ---- Inline Tags Row in Edit tab ---- */
+    .edit-tags-row {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .edit-tags-row > label {
+        display: flex;
+        align-items: center;
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+
+    .edit-tags-preview {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-height: 28px;
+        align-items: center;
+    }
+
+    .edit-tags-preview:empty::before {
+        content: 'No tags';
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        font-style: italic;
+    }
+
+    .edit-tags-preview .modal-tag {
+        font-size: 0.75rem;
+        padding: 3px 8px;
+        opacity: 0.85;
+    }
+
+    .edit-tags-btn {
+        align-self: flex-start;
+        font-size: 0.8rem !important;
+        padding: 6px 14px !important;
+        gap: 6px !important;
+    }
+
+    /* ---- Tag Editor Sheet (slide-up panel) ---- */
+    .tag-editor-sheet {
+        position: fixed;
+        inset: 0;
+        z-index: 250;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+    }
+
+    .tag-editor-sheet.hidden { display: none; }
+
+    .tag-editor-sheet-backdrop {
+        position: absolute;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(3px);
+    }
+
+    .tag-editor-sheet-panel {
+        position: relative;
+        width: 100%;
+        max-width: 520px;
+        max-height: 85vh;
+        background: var(--modal-bg, rgba(28, 30, 38, 0.98));
+        border: 1px solid var(--glass-border);
+        border-bottom: none;
+        border-radius: 16px 16px 0 0;
+        display: flex;
+        flex-direction: column;
+        box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
+        animation: sheetSlideUp 0.25s ease-out;
+    }
+
+    @keyframes sheetSlideUp {
+        from { transform: translateY(100%); }
+        to   { transform: translateY(0); }
+    }
+
+    .tag-editor-sheet-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--glass-border);
+        flex-shrink: 0;
+    }
+
+    .tag-editor-sheet-header h3 {
+        margin: 0;
+        font-size: 1rem;
+        color: var(--text-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* Body: input at top (order:-1), suggestions inline, tags scroll */
+    .tag-editor-sheet-body {
+        flex: 1;
+        overflow: hidden;
+        min-height: 0;
+        padding: 12px 16px 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+    }
+
+    /* Input row pinned to top via order */
+    .tag-editor-sheet-input-row {
+        order: -1;
+        position: static;
+        flex-shrink: 0;
+        padding: 0 0 6px;
+    }
+
+    .tag-editor-sheet-footer {
+        display: flex;
+        justify-content: flex-end;
+        padding: 12px 18px;
+        border-top: 1px solid var(--glass-border);
+        flex-shrink: 0;
+    }
+
+    /* ---- Autocomplete: inline suggestion pills ---- */
+    #tagEditorSheetAutocomplete.tag-autocomplete {
+        position: static;
+        max-height: none;
+        overflow: visible;
+        background: transparent;
+        border: none;
+        border-radius: 0;
+        display: none;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px 0 2px;
+    }
+
+    #tagEditorSheetAutocomplete.tag-autocomplete.visible {
+        display: flex;
+    }
+
+    /* Suggestion pills — dashed border, accent tint */
+    #tagEditorSheetAutocomplete .tag-autocomplete-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 7px 14px;
+        border-radius: 20px;
+        background: rgba(74, 158, 255, 0.08);
+        border: 1.5px dashed rgba(74, 158, 255, 0.35);
+        color: rgba(74, 158, 255, 0.95);
+        font-size: 0.82rem;
+        line-height: 1;
+        cursor: pointer;
+        transition: background 0.15s ease, transform 0.1s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    #tagEditorSheetAutocomplete .tag-autocomplete-item:active {
+        background: rgba(74, 158, 255, 0.22);
+        border-style: solid;
+        transform: scale(0.95);
+    }
+
+    /* "Create new tag" pill — green tint */
+    #tagEditorSheetAutocomplete .tag-autocomplete-item.create-new {
+        border-color: rgba(100, 210, 100, 0.4);
+        color: rgba(100, 210, 100, 0.95);
+        background: rgba(100, 210, 100, 0.08);
+        font-style: normal;
+    }
+
+    #tagEditorSheetAutocomplete .tag-autocomplete-item.create-new:active {
+        background: rgba(100, 210, 100, 0.22);
+    }
+
+    /* ---- Existing tags: scrollable area ---- */
+    .tag-editor-sheet-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        min-height: 48px;
+        flex: 1;
+        overflow-y: auto;
+        padding-top: 10px;
+        margin-top: 6px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .tag-editor-sheet-tags:empty::before {
+        content: 'No tags yet — type above to add.';
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+        font-style: italic;
+    }
+
+    /* Tag pills: larger touch targets, rounded chips */
+    .tag-editor-sheet-tags .modal-tag.editable {
+        padding: 8px 10px 8px 14px;
+        border-radius: 20px;
+        font-size: 0.82rem;
+    }
+
+    .tag-editor-sheet-tags .tag-remove-btn {
+        width: 22px;
+        height: 22px;
+        min-width: 22px;
+        font-size: 10px;
+    }
+
+    /* Scrollable sidebar tag container */
+    .tags-container {
+        max-height: 200px;
+        overflow-y: auto;
     }
 
 }

@@ -13,6 +13,7 @@ import * as CoreAPI from './core-api.js';
 let isInitialized = false;
 let currentUpdateChecks = new Map(); // fullPath -> { local, remote, diffs }
 let abortController = null;
+let pendingBatchCharacters = [];
 
 // Fields to compare (key -> display label)
 const COMPARABLE_FIELDS = {
@@ -33,21 +34,24 @@ const COMPARABLE_FIELDS = {
     // intentionally exclude it.
     'tags': 'Tags',
     'alternate_greetings': 'Alternate Greetings',
+    'extensions.chub.tagline': 'Chub Tagline',
     // V3 additions
-    'nickname': 'Nickname',
-    'group_only_greetings': 'Group Only Greetings',
+    'nickname': 'Nickname', // Not mapped from Chub API yet
+    'group_only_greetings': 'Group Only Greetings', // Not mapped from Chub API yet
     // Depth prompt
-    'depth_prompt.prompt': 'Depth Prompt Text',
-    'depth_prompt.depth': 'Depth Prompt Depth',
-    'depth_prompt.role': 'Depth Prompt Role',
+    'depth_prompt.prompt': 'Depth Prompt Text', // Not mapped from Chub API yet
+    'depth_prompt.depth': 'Depth Prompt Depth', // Not mapped from Chub API yet
+    'depth_prompt.role': 'Depth Prompt Role', // Not mapped from Chub API yet
 };
+
+let batchFieldSelection = new Set(Object.keys(COMPARABLE_FIELDS));
 
 // Fields that should use text diff view
 const LONG_TEXT_FIELDS = new Set([
     'description', 'personality', 'scenario', 'first_mes', 
     'mes_example', 'system_prompt', 'post_history_instructions',
     'creator_notes', 'depth_prompt.prompt', 'alternate_greetings',
-    'group_only_greetings'
+    'group_only_greetings', 'extensions.chub.tagline'
 ]);
 
 /**
@@ -200,7 +204,13 @@ async function fetchRemoteCard(fullPath) {
                     character_version: def.character_version || '',
                     tags: metadata.topics || [],
                     alternate_greetings: def.alternate_greetings || [],
-                    extensions: def.extensions || {},
+                    extensions: {
+                        ...(def.extensions || {}),
+                        chub: {
+                            ...(def.extensions?.chub || {}),
+                            tagline: metadata.tagline || metadata.definition?.tagline || ''
+                        }
+                    },
                     character_book: def.embedded_lorebook || undefined,
                 }
             };
@@ -526,11 +536,14 @@ function computeLineDiff(oldLines, newLines) {
  * @param {Object} remoteCard - Remote card object
  * @returns {Array} Array of { field, label, local, remote, isLongText }
  */
-function compareCards(localData, remoteCard) {
+function compareCards(localData, remoteCard, allowedFields = null) {
     const diffs = [];
     const remoteData = remoteCard?.data || remoteCard;
     
     for (const [field, label] of Object.entries(COMPARABLE_FIELDS)) {
+        if (allowedFields && !allowedFields.has(field)) {
+            continue;
+        }
         const localValue = getNestedValue(localData, field);
         const remoteValue = getNestedValue(remoteData, field);
         
@@ -557,9 +570,18 @@ function compareCards(localData, remoteCard) {
  */
 function normalizeValue(value) {
     if (value === null || value === undefined) return '';
-    if (Array.isArray(value)) return JSON.stringify(value);
+    if (Array.isArray(value)) {
+        // Normalize each string element: trim whitespace and normalize line endings
+        // to avoid false diffs from insignificant whitespace differences
+        const normalized = [...value].map(v =>
+            typeof v === 'string' ? v.replace(/\r\n/g, '\n').trim() : JSON.stringify(v)
+        );
+        // Sort for order-insensitive comparison (e.g. tags)
+        normalized.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        return JSON.stringify(normalized);
+    }
     if (typeof value === 'object') return JSON.stringify(value);
-    return String(value).trim();
+    return String(value).replace(/\r\n/g, '\n').trim();
 }
 
 /**
@@ -661,6 +683,35 @@ function renderDiffItem(diff, charKey, idx) {
     const checkboxId = `diff-${charKey}-${idx}`;
     const localDisplay = formatValueForDisplay(diff.local);
     const remoteDisplay = formatValueForDisplay(diff.remote);
+
+    if (!diff.isLongText && (Array.isArray(diff.local) || Array.isArray(diff.remote))) {
+        const localValues = Array.isArray(diff.local) ? diff.local : [];
+        const remoteValues = Array.isArray(diff.remote) ? diff.remote : [];
+        return `
+            <div class="card-update-diff-item short array">
+                <label>
+                    <input type="checkbox" id="${checkboxId}" data-field="${diff.field}" checked>
+                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}</span>
+                </label>
+                <div class="card-update-array-diff">
+                    <div class="card-update-array-column local">
+                        <div class="card-update-array-header">
+                            <span>Local</span>
+                            <span class="card-update-array-count">${localValues.length}</span>
+                        </div>
+                        ${renderArrayList(localValues, diff.field, remoteValues)}
+                    </div>
+                    <div class="card-update-array-column remote">
+                        <div class="card-update-array-header">
+                            <span>Chub</span>
+                            <span class="card-update-array-count">${remoteValues.length}</span>
+                        </div>
+                        ${renderArrayList(remoteValues, diff.field, localValues)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
     
     if (diff.isLongText) {
         const { localHtml, remoteHtml, stats } = generateSideBySideDiff(diff.local, diff.remote);
@@ -715,6 +766,27 @@ function renderDiffItem(diff, charKey, idx) {
     `;
 }
 
+function renderArrayList(values, field, otherSide = null) {
+    if (!values || values.length === 0) {
+        return '<div class="card-update-array-list"><span class="card-update-empty">(empty)</span></div>';
+    }
+    // Build a Set of normalized values from the other side for highlighting
+    const otherSet = otherSide ? new Set(otherSide.map(v =>
+        (typeof v === 'string' ? v : JSON.stringify(v)).toLowerCase().trim()
+    )) : null;
+    const items = values.map(value => {
+        const text = typeof value === 'string' ? value : JSON.stringify(value);
+        let classes = field === 'tags' ? 'card-update-pill tag' : 'card-update-pill';
+        // Highlight items that exist only on this side (not in the other)
+        if (otherSet && !otherSet.has(text.toLowerCase().trim())) {
+            classes += ' card-update-pill-unique';
+        }
+        return `<span class="${classes}">${CoreAPI.escapeHtml(text)}</span>`;
+    }).join('');
+
+    return `<div class="card-update-array-list">${items}</div>`;
+}
+
 /**
  * Format a value for display
  * @param {*} value - Value to format
@@ -756,40 +828,50 @@ function showBatchCheckModal(characters) {
     const listEl = document.getElementById('cardUpdateBatchList');
     const progressEl = document.getElementById('cardUpdateBatchProgress');
     const actionsEl = document.getElementById('cardUpdateBatchActions');
+    const fieldSelectEl = document.getElementById('cardUpdateBatchFieldSelect');
+    const fieldGridEl = document.getElementById('cardUpdateBatchFieldGrid');
+    const fieldCountEl = document.getElementById('cardUpdateBatchFieldCount');
+    const startBtn = document.getElementById('cardUpdateBatchStartBtn');
     
     countEl.textContent = characters.length;
     progressEl.innerHTML = '';
     actionsEl.style.display = 'none';
     currentUpdateChecks.clear();
+    pendingBatchCharacters = characters;
     
-    // Build initial list
-    listEl.innerHTML = characters.map(char => {
-        const chubInfo = getChubLinkInfo(char);
-        const name = char.data?.name || char.name || 'Unknown';
-        return `
-            <div class="card-update-batch-item" data-avatar="${char.avatar}">
-                <div class="card-update-batch-item-info">
-                    <span class="card-update-batch-item-name">${CoreAPI.escapeHtml(name)}</span>
-                    <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(chubInfo?.fullPath || '')}</span>
-                </div>
-                <div class="card-update-batch-item-status">
-                    <i class="fa-solid fa-clock"></i> Pending
-                </div>
-            </div>
-        `;
-    }).join('');
+    // Build field selection
+    if (fieldGridEl) {
+        fieldGridEl.innerHTML = Object.entries(COMPARABLE_FIELDS).map(([field, label]) => {
+            const isChecked = batchFieldSelection.has(field);
+            return `
+                <label class="card-update-field-option">
+                    <input type="checkbox" data-field="${field}" ${isChecked ? 'checked' : ''}>
+                    <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}</span>
+                </label>
+            `;
+        }).join('');
+    }
+
+    if (fieldCountEl) {
+        fieldCountEl.textContent = `${batchFieldSelection.size}/${Object.keys(COMPARABLE_FIELDS).length}`;
+    }
+
+    if (fieldSelectEl) fieldSelectEl.classList.remove('hidden');
+    listEl.classList.add('hidden');
+    progressEl.classList.add('hidden');
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.style.display = '';
+    }
     
     modal.classList.add('visible');
-    
-    // Start checking
-    performBatchCheck(characters);
 }
 
 /**
  * Perform batch update check
  * @param {Array} characters - Characters to check
  */
-async function performBatchCheck(characters) {
+async function performBatchCheck(characters, allowedFields) {
     const progressEl = document.getElementById('cardUpdateBatchProgress');
     const actionsEl = document.getElementById('cardUpdateBatchActions');
     
@@ -817,7 +899,7 @@ async function performBatchCheck(characters) {
                 errors++;
             } else {
                 const localData = char.data || char;
-                const diffs = compareCards(localData, remoteCard);
+                const diffs = compareCards(localData, remoteCard, allowedFields);
                 
                 if (diffs.length === 0) {
                     if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
@@ -947,9 +1029,18 @@ async function applyAllBatchUpdates() {
         CoreAPI.showToast('No updates to apply', 'info');
         return;
     }
-    
+    const progressWrap = document.getElementById('cardUpdateBatchApplyProgress');
+    const progressText = document.getElementById('cardUpdateBatchApplyText');
+    const progressFill = document.getElementById('cardUpdateBatchApplyFill');
+    const actionsEl = document.getElementById('cardUpdateBatchActions');
+    if (actionsEl) actionsEl.style.display = 'none';
+    if (progressWrap) progressWrap.style.display = 'flex';
+    if (progressFill) progressFill.style.width = '0%';
+
     let successCount = 0;
     let errorCount = 0;
+    let processed = 0;
+    const total = entries.length;
     
     for (const [avatar, checkData] of entries) {
         const { char, diffs, remoteCard } = checkData;
@@ -983,6 +1074,15 @@ async function applyAllBatchUpdates() {
             console.error('[CardUpdates] Batch apply error for:', avatar, error);
             errorCount++;
         }
+
+        processed++;
+        const percent = Math.round((processed / total) * 100);
+        if (progressText) {
+            progressText.textContent = `Applying updates... ${processed}/${total}`;
+        }
+        if (progressFill) {
+            progressFill.style.width = `${percent}%`;
+        }
     }
     
     currentUpdateChecks.clear();
@@ -990,7 +1090,8 @@ async function applyAllBatchUpdates() {
     CoreAPI.showToast(`Updated ${successCount} character${successCount !== 1 ? 's' : ''}${errorCount > 0 ? `, ${errorCount} failed` : ''}`, 
         errorCount > 0 ? 'warning' : 'success');
     
-    document.getElementById('cardUpdateBatchActions').style.display = 'none';
+    if (progressWrap) progressWrap.style.display = 'none';
+    if (progressFill) progressFill.style.width = '0%';
 }
 
 // ========================================
@@ -1005,6 +1106,79 @@ function closeBatchModal() {
     abortController?.abort();
     document.getElementById('cardUpdateBatchModal')?.classList.remove('visible');
     currentUpdateChecks.clear();
+    pendingBatchCharacters = [];
+    const startBtn = document.getElementById('cardUpdateBatchStartBtn');
+    if (startBtn) startBtn.style.display = '';
+}
+
+function updateBatchFieldCount() {
+    const fieldCountEl = document.getElementById('cardUpdateBatchFieldCount');
+    if (!fieldCountEl) return;
+    fieldCountEl.textContent = `${batchFieldSelection.size}/${Object.keys(COMPARABLE_FIELDS).length}`;
+}
+
+function handleBatchFieldSelectionChange(e) {
+    const checkbox = e.target.closest('input[type="checkbox"][data-field]');
+    if (!checkbox) return;
+    const field = checkbox.dataset.field;
+    if (!field) return;
+    if (checkbox.checked) {
+        batchFieldSelection.add(field);
+    } else {
+        batchFieldSelection.delete(field);
+    }
+    updateBatchFieldCount();
+}
+
+function setBatchFieldsChecked(checked) {
+    const grid = document.getElementById('cardUpdateBatchFieldGrid');
+    if (!grid) return;
+    const checkboxes = grid.querySelectorAll('input[type="checkbox"][data-field]');
+    batchFieldSelection.clear();
+    checkboxes.forEach(cb => {
+        cb.checked = checked;
+        if (checked) batchFieldSelection.add(cb.dataset.field);
+    });
+    updateBatchFieldCount();
+}
+
+function startBatchCheck() {
+    if (!pendingBatchCharacters || pendingBatchCharacters.length === 0) return;
+    if (batchFieldSelection.size === 0) {
+        CoreAPI.showToast('Select at least one field to compare', 'warning');
+        return;
+    }
+
+    const listEl = document.getElementById('cardUpdateBatchList');
+    const progressEl = document.getElementById('cardUpdateBatchProgress');
+    const fieldSelectEl = document.getElementById('cardUpdateBatchFieldSelect');
+    const actionsEl = document.getElementById('cardUpdateBatchActions');
+    const startBtn = document.getElementById('cardUpdateBatchStartBtn');
+
+    // Build initial list
+    listEl.innerHTML = pendingBatchCharacters.map(char => {
+        const chubInfo = getChubLinkInfo(char);
+        const name = char.data?.name || char.name || 'Unknown';
+        return `
+            <div class="card-update-batch-item" data-avatar="${char.avatar}">
+                <div class="card-update-batch-item-info">
+                    <span class="card-update-batch-item-name">${CoreAPI.escapeHtml(name)}</span>
+                    <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(chubInfo?.fullPath || '')}</span>
+                </div>
+                <div class="card-update-batch-item-status">
+                    <i class="fa-solid fa-clock"></i> Pending
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    if (fieldSelectEl) fieldSelectEl.classList.add('hidden');
+    listEl.classList.remove('hidden');
+    progressEl.classList.remove('hidden');
+    actionsEl.style.display = 'none';
+    if (startBtn) startBtn.style.display = 'none';
+
+    performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection));
 }
 
 // ========================================
@@ -1051,6 +1225,7 @@ function setupEventListeners() {
     // Apply buttons
     document.getElementById('cardUpdateSingleApplyBtn')?.addEventListener('click', applySingleUpdates);
     document.getElementById('cardUpdateBatchApplyAllBtn')?.addEventListener('click', applyAllBatchUpdates);
+    document.getElementById('cardUpdateBatchStartBtn')?.addEventListener('click', startBatchCheck);
     
     // Close on backdrop click
     document.getElementById('cardUpdateSingleModal')?.addEventListener('click', (e) => {
@@ -1064,6 +1239,11 @@ function setupEventListeners() {
     window.cardUpdatesToggleAll = toggleAllCheckboxes;
     window.cardUpdatesToggleExpand = toggleExpand;
     window.cardUpdatesViewDiffs = viewBatchItemDiffs;
+
+    // Batch field selection
+    document.getElementById('cardUpdateBatchFieldGrid')?.addEventListener('change', handleBatchFieldSelectionChange);
+    document.getElementById('cardUpdateBatchFieldSelectAll')?.addEventListener('click', () => setBatchFieldsChecked(true));
+    document.getElementById('cardUpdateBatchFieldSelectNone')?.addEventListener('click', () => setBatchFieldsChecked(false));
 }
 
 // ========================================
@@ -1112,6 +1292,11 @@ function injectStyles() {
         .card-update-modal .cl-modal-body {
             max-height: 65vh;
             overflow-y: auto;
+        }
+
+        .card-update-batch-list.hidden,
+        .card-update-batch-progress.hidden {
+            display: none;
         }
         
         /* Status line */
@@ -1208,6 +1393,78 @@ function injectStyles() {
             color: var(--cl-text-secondary, #aaa);
             flex-shrink: 0;
             opacity: 0.7;
+        }
+
+        .card-update-array-diff {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            width: 100%;
+        }
+
+        .card-update-array-column {
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--cl-border, rgba(80,80,80,0.35));
+            background: rgba(0,0,0,0.2);
+            min-width: 0;
+        }
+
+        .card-update-array-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.8em;
+            color: var(--cl-text-secondary, #aaa);
+            margin-bottom: 8px;
+        }
+
+        .card-update-array-count {
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            font-size: 0.85em;
+        }
+
+        .card-update-array-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            max-height: 140px;
+            overflow: auto;
+        }
+
+        .card-update-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            font-size: 0.8em;
+        }
+
+        .card-update-pill.tag {
+            color: var(--cl-accent, #4a9eff);
+            border-color: rgba(74, 158, 255, 0.4);
+            background: rgba(74, 158, 255, 0.12);
+        }
+
+        /* Highlight items unique to one side (added/removed) */
+        .card-update-array-column.local .card-update-pill-unique {
+            border-color: rgba(255, 80, 80, 0.6);
+            background: rgba(255, 80, 80, 0.15);
+            color: #ff6b6b;
+        }
+        .card-update-array-column.remote .card-update-pill-unique {
+            border-color: rgba(80, 200, 80, 0.6);
+            background: rgba(80, 200, 80, 0.15);
+            color: #5ec85e;
+        }
+
+        .card-update-empty {
+            color: var(--cl-text-secondary, #888);
+            font-size: 0.85em;
         }
         
         /* Long text diff item */
@@ -1439,6 +1696,125 @@ function injectStyles() {
             border-top: 1px solid var(--cl-border, rgba(80,80,80,0.4));
             margin-top: 12px;
         }
+
+        .card-update-apply-progress {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(74, 158, 255, 0.3);
+            background: rgba(74, 158, 255, 0.08);
+            margin-bottom: 10px;
+        }
+
+        .card-update-apply-text {
+            font-size: 0.9rem;
+            color: var(--cl-text-primary, #eee);
+        }
+
+        .card-update-apply-bar {
+            width: 100%;
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.1);
+            overflow: hidden;
+        }
+
+        .card-update-apply-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, rgba(74, 158, 255, 0.8), rgba(99, 102, 241, 0.9));
+            transition: width 0.2s ease;
+        }
+
+        .card-update-field-select {
+            padding: 14px;
+            border: 1px solid rgba(90, 120, 180, 0.35);
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(30, 40, 70, 0.4), rgba(20, 20, 30, 0.6));
+            margin-bottom: 16px;
+            box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.08);
+        }
+
+        .card-update-field-select.hidden {
+            display: none;
+        }
+
+        .card-update-field-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .card-update-field-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .card-update-field-title i {
+            color: var(--cl-accent, #4a9eff);
+            font-size: 1.1rem;
+        }
+
+        .card-update-field-heading {
+            font-weight: 600;
+        }
+
+        .card-update-field-sub {
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.65);
+        }
+
+        .card-update-field-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .card-update-field-count {
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.75);
+            padding: 4px 8px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .card-update-field-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px;
+        }
+
+        .card-update-field-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .card-update-field-option:hover {
+            border-color: rgba(74, 158, 255, 0.4);
+            background: rgba(74, 158, 255, 0.08);
+        }
+
+        .card-update-field-option input {
+            accent-color: var(--cl-accent, #4a9eff);
+        }
+
+        .card-update-field-label {
+            font-size: 0.9rem;
+        }
+
     `;
     
     document.head.appendChild(style);
@@ -1488,15 +1864,41 @@ function injectModals() {
                     </button>
                 </div>
                 <div class="cl-modal-body">
+                    <div id="cardUpdateBatchFieldSelect" class="card-update-field-select">
+                        <div class="card-update-field-header">
+                            <div class="card-update-field-title">
+                                <i class="fa-solid fa-filter"></i>
+                                <div>
+                                    <div class="card-update-field-heading">Choose fields to compare</div>
+                                    <div class="card-update-field-sub">Unselected fields will be ignored for search and sync.</div>
+                                </div>
+                            </div>
+                            <div class="card-update-field-actions">
+                                <span class="card-update-field-count" id="cardUpdateBatchFieldCount">0/0</span>
+                                <button class="cl-btn cl-btn-secondary" id="cardUpdateBatchFieldSelectAll">All</button>
+                                <button class="cl-btn cl-btn-secondary" id="cardUpdateBatchFieldSelectNone">None</button>
+                            </div>
+                        </div>
+                        <div id="cardUpdateBatchFieldGrid" class="card-update-field-grid"></div>
+                    </div>
                     <div id="cardUpdateBatchList" class="card-update-batch-list"></div>
                     <div id="cardUpdateBatchProgress" class="card-update-batch-progress"></div>
                 </div>
                 <div class="cl-modal-footer">
+                    <div id="cardUpdateBatchApplyProgress" class="card-update-apply-progress" style="display: none;">
+                        <div class="card-update-apply-text" id="cardUpdateBatchApplyText">Applying updates...</div>
+                        <div class="card-update-apply-bar">
+                            <div class="card-update-apply-fill" id="cardUpdateBatchApplyFill"></div>
+                        </div>
+                    </div>
                     <div id="cardUpdateBatchActions" class="card-update-batch-actions" style="display: none;">
                         <button class="cl-btn cl-btn-primary" id="cardUpdateBatchApplyAllBtn">
                             <i class="fa-solid fa-check-double"></i> Apply All Updates
                         </button>
                     </div>
+                    <button class="cl-btn cl-btn-primary" id="cardUpdateBatchStartBtn">
+                        <i class="fa-solid fa-magnifying-glass"></i> Start Check
+                    </button>
                     <button class="cl-btn cl-btn-secondary" onclick="document.getElementById('cardUpdateBatchModal').classList.remove('visible')">Close</button>
                 </div>
             </div>

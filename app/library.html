@@ -502,25 +502,32 @@
                 </div>
             </div>
             <div class="chub-char-body">
-                <div class="chub-char-tags" id="chubCharTags">
-                    <!-- Tags injected here -->
+                <div class="chub-char-tagline" id="chubCharTaglineSection" style="display: none;">
+                    <i class="fa-solid fa-quote-left"></i>
+                    <div id="chubCharTagline" class="chub-tagline-text"></div>
                 </div>
-                <div class="chub-char-stats">
-                    <div class="chub-stat">
-                        <i class="fa-solid fa-message"></i>
-                        <span id="chubCharTokens">0</span> tokens
+
+                <div class="chub-char-meta-grid">
+                    <div class="chub-char-stats">
+                        <div class="chub-stat">
+                            <i class="fa-solid fa-message"></i>
+                            <span id="chubCharTokens">0</span> tokens
+                        </div>
+                        <div class="chub-stat">
+                            <i class="fa-solid fa-calendar"></i>
+                            <span id="chubCharDate">Unknown</span>
+                        </div>
+                        <div class="chub-stat" id="chubCharGreetingsStat" style="display: none;">
+                            <i class="fa-solid fa-comment-dots"></i>
+                            <span id="chubCharGreetingsCount">0</span> greetings
+                        </div>
+                        <div class="chub-stat" id="chubCharLorebookStat" style="display: none;">
+                            <i class="fa-solid fa-book"></i>
+                            Lorebook
+                        </div>
                     </div>
-                    <div class="chub-stat">
-                        <i class="fa-solid fa-calendar"></i>
-                        <span id="chubCharDate">Unknown</span>
-                    </div>
-                    <div class="chub-stat" id="chubCharGreetingsStat" style="display: none;">
-                        <i class="fa-solid fa-comment-dots"></i>
-                        <span id="chubCharGreetingsCount">0</span> greetings
-                    </div>
-                    <div class="chub-stat" id="chubCharLorebookStat" style="display: none;">
-                        <i class="fa-solid fa-book"></i>
-                        Lorebook
+                    <div class="chub-char-tags" id="chubCharTags">
+                        <!-- Tags injected here -->
                     </div>
                 </div>
                 
@@ -532,14 +539,6 @@
                     <div id="chubCharCreatorNotes" class="scrolling-text">
                         No description available.
                     </div>
-                </div>
-                
-                <!-- Tagline Section -->
-                <div class="chub-char-section" id="chubCharTaglineSection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharTagline" data-label="Tagline" data-icon="fa-solid fa-quote-left" title="Click to expand">
-                        <i class="fa-solid fa-quote-left"></i> Tagline
-                    </h3>
-                    <p id="chubCharTagline"></p>
                 </div>
                 
                 <!-- Character Definition Description Section -->
@@ -572,6 +571,14 @@
                         <i class="fa-solid fa-message"></i> First Message
                     </h3>
                     <div id="chubCharFirstMsg" class="scrolling-text first-message-preview"></div>
+                </div>
+
+                <!-- Alternate Greetings Section -->
+                <div class="chub-char-section" id="chubCharAltGreetingsSection" style="display: none;">
+                    <h3 class="chub-section-title" data-section="chubCharAltGreetings" data-label="Alternate Greetings" data-icon="fa-solid fa-comments" title="Click to expand">
+                        <i class="fa-solid fa-comments"></i> Alternate Greetings <span class="chub-section-count" id="chubCharAltGreetingsCount"></span>
+                    </h3>
+                    <div id="chubCharAltGreetings" class="chub-alt-greetings-list"></div>
                 </div>
             </div>
         </div>
@@ -641,6 +648,10 @@
                                 • <i class="fa-solid fa-link"></i> <span class="chub-link-text">ChubAI</span>
                             </span>
                         </p>
+
+                        <div class="chub-tagline-row" id="modalChubTaglineRow" style="display:none;">
+                            <span class="chub-tagline-text" id="modalChubTagline"></span>
+                        </div>
                         
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
                             <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
@@ -712,10 +723,6 @@
                                     <label>Character Version</label>
                                     <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0">
                                 </div>
-                            </div>
-                            <div class="form-group">
-                                <label>Tags <span class="label-hint">(comma-separated)</span></label>
-                                <input type="text" id="editTags" class="glass-input" placeholder="tag1, tag2, tag3">
                             </div>
                         </div>
 
@@ -1017,9 +1024,6 @@
                             <span class="import-summary-row-title">Embedded Remote Media</span>
                             <span id="importSummaryMediaDesc" class="import-summary-row-desc">Remote files that can be saved locally</span>
                         </div>
-                        <button id="importSummaryDownloadBtn" class="action-btn secondary">
-                            <i class="fa-solid fa-download"></i> Download
-                        </button>
                     </div>
                     
                     <!-- Row for ChubAI Gallery (second) -->
@@ -1031,9 +1035,15 @@
                             <span class="import-summary-row-title">ChubAI Gallery Images</span>
                             <span id="importSummaryGalleryDesc" class="import-summary-row-desc">Additional artwork available on ChubAI</span>
                         </div>
-                        <button id="importSummaryGalleryDownloadBtn" class="action-btn secondary" title="Download gallery images">
-                            <i class="fa-solid fa-download"></i> Download
-                        </button>
+                    </div>
+                </div>
+                <div id="importSummaryProgress" class="import-summary-progress hidden">
+                    <div class="import-summary-progress-header">
+                        <span id="importSummaryProgressLabel">Preparing downloads...</span>
+                        <span id="importSummaryProgressCount">0/0</span>
+                    </div>
+                    <div class="import-summary-progress-bar">
+                        <div id="importSummaryProgressFill" class="import-summary-progress-fill"></div>
                     </div>
                 </div>
             </div>
@@ -1521,16 +1531,6 @@ https://chub.ai/characters/author/another-character
                         </div>
                         
                         <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsRichCreatorNotes"> Rich creator's notes rendering
-                                </label>
-                                <span class="settings-hint">Uses sandboxed iframe to render with full CSS/HTML support. May cause issues with unusual formatting.</span>
-                            </div>
-                        </div>
-                        
-                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Appearance</div>
                             <div class="settings-row">
                                 <label for="settingsHighlightColor">Accent Color:</label>
@@ -1545,6 +1545,24 @@ https://chub.ai/characters/author/another-character
                                 </label>
                                 <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
                             </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsRichCreatorNotes"> Rich creator's notes rendering
+                                </label>
+                                <span class="settings-hint">Uses sandboxed iframe to render with full CSS/HTML support. May cause issues with unusual formatting.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsShowChubTagline" checked> Show ChubAI tagline in character details
+                                </label>
+                                <span class="settings-hint">Display the ChubAI tagline below metadata in the Details tab.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsAllowRichTagline"> Allow rich tagline display
+                                </label>
+                                <span class="settings-hint">Render HTML formatting in taglines (sanitized). Use with care.</span>
+                            </div>
                         </div>
                         
                         <div class="settings-group">
@@ -1555,6 +1573,10 @@ https://chub.ai/characters/author/another-character
                                 </label>
                                 <span class="settings-hint">Show notification when imported characters have gallery images or embedded media available</span>
                             </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental</div>
                         </div>
                     </div>
                     
@@ -1797,7 +1819,7 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.2.2</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.3.0</span>
                             </div>
                         </div>
                     </div>

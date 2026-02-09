@@ -206,11 +206,21 @@ function setupLauncherDropdown() {
 
     // ---- Intercept clicks on the Characters drawer toggle ----
     // Uses capturing phase at the document level so we fire before ST's handlers.
+    const rightNavPanel = document.getElementById('right-nav-panel');
+
     document.addEventListener('click', (e) => {
         if (!drawerToggle.contains(e.target)) return;        // Not our button
 
         if (bypassIntercept) {
             bypassIntercept = false;
+            return;                                          // Let through to ST
+        }
+
+        // If ST's character panel is already open, let the click through so ST
+        // can close it.  Without this, mobile users get stuck with the panel
+        // open because our dropdown intercepts the "close" click.
+        if (rightNavPanel && rightNavPanel.classList.contains('openDrawer')) {
+            if (isOpen) hide();                              // Close our dropdown too
             return;                                          // Let through to ST
         }
 

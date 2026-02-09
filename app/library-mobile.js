@@ -274,6 +274,8 @@
         setupChubFilterArea();
         setupGallerySyncDropdown();
         fixRefreshLoadingStuck();
+        preventAutoFocusOnOpen();
+        setupMobileTagEditor();
     }
 
     /* ========================================
@@ -1629,6 +1631,334 @@
             }
         });
         observer.observe(document.body, { childList: true });
+    }
+
+    /* ========================================
+       PREVENT AUTO-FOCUS ON MODAL / SHEET OPEN
+       On mobile, auto-focusing inputs inside modals causes
+       the virtual keyboard to pop open immediately which is
+       jarring and hides content. We blur any input that gets
+       focused inside a modal/sheet within the first 400ms
+       after the container becomes visible.
+       ======================================== */
+    function preventAutoFocusOnOpen() {
+        // Selectors for containers whose auto-focus we want to suppress
+        const containerSelectors = [
+            '#tagEditorSheet',           // Tag Editor Sheet
+            '#greetingsExpandModal',     // Greetings Expand Modal
+            '#expandedFieldEditor',      // Expanded Field Editor
+            '#editMessageModal',         // Edit Message Modal
+            '.chub-tags-dropdown'        // ChubAI Tags dropdown
+        ];
+
+        // Use focusin (bubbles) on document to catch programmatic .focus() calls
+        let suppressUntil = 0;
+
+        // Observe class/attribute changes that signal a container opening
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type !== 'attributes') continue;
+                const target = mutation.target;
+                for (const sel of containerSelectors) {
+                    if (target.matches?.(sel)) {
+                        // Container just became visible (hidden class removed or display changed)
+                        const wasHidden = mutation.oldValue?.includes('hidden') ||
+                                          mutation.oldValue?.includes('display: none') ||
+                                          mutation.oldValue?.includes('display:none');
+                        const isNowVisible = !target.classList.contains('hidden') &&
+                                             target.style.display !== 'none';
+                        if (wasHidden && isNowVisible) {
+                            suppressUntil = Date.now() + 400;
+                        }
+                    }
+                }
+            }
+        });
+
+        // Observe class and style changes on the containers once they exist
+        function observeContainers() {
+            for (const sel of containerSelectors) {
+                const el = document.querySelector(sel);
+                if (el) {
+                    observer.observe(el, {
+                        attributes: true,
+                        attributeFilter: ['class', 'style'],
+                        attributeOldValue: true
+                    });
+                }
+            }
+        }
+
+        // Initial observation + re-observe when new nodes appear (lazy-created modals)
+        observeContainers();
+        const bodyObserver = new MutationObserver(() => observeContainers());
+        bodyObserver.observe(document.body, { childList: true, subtree: true });
+
+        // Intercept focus events during the suppression window
+        document.addEventListener('focusin', (e) => {
+            if (Date.now() > suppressUntil) return;
+            const target = e.target;
+            if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+                // Check if this input is inside one of our containers
+                for (const sel of containerSelectors) {
+                    if (target.closest(sel)) {
+                        target.blur();
+                        return;
+                    }
+                }
+            }
+        }, true);
+    }
+
+    /* ========================================
+       MOBILE TAG EDITOR
+       Complete slide-up tag editor sheet with inline
+       suggestion pills. Injects DOM, wires events,
+       and hooks into addTag/removeTag/setEditLock from
+       the main library.js.
+       ======================================== */
+    function setupMobileTagEditor() {
+
+        // ---- 1. Inject editTagsRow into Edit tab ----
+        const versionField = document.getElementById('editVersion');
+        const formRowParent = versionField?.closest('.form-row');
+        const editSection = formRowParent?.closest('.edit-section');
+        if (editSection) {
+            const row = document.createElement('div');
+            row.className = 'form-group edit-tags-row';
+            row.id = 'editTagsRow';
+            row.innerHTML = `
+                <label><i class="fa-solid fa-tags" style="margin-right:4px; opacity:0.7;"></i>Tags</label>
+                <div class="edit-tags-preview" id="editTagsPreview"></div>
+                <button type="button" id="editTagsBtn" class="action-btn secondary small edit-tags-btn" disabled>
+                    <i class="fa-solid fa-pen"></i> Edit Tags
+                </button>
+            `;
+            // Insert after the form-row (name/version row)
+            formRowParent.insertAdjacentElement('afterend', row);
+        }
+
+        // ---- 2. Inject Tag Editor Sheet ----
+        const sheet = document.createElement('div');
+        sheet.id = 'tagEditorSheet';
+        sheet.className = 'tag-editor-sheet hidden';
+        sheet.innerHTML = `
+            <div class="tag-editor-sheet-backdrop"></div>
+            <div class="tag-editor-sheet-panel">
+                <div class="tag-editor-sheet-header">
+                    <h3><i class="fa-solid fa-tags"></i> Edit Tags</h3>
+                    <button type="button" class="close-btn" id="tagEditorSheetClose">&times;</button>
+                </div>
+                <div class="tag-editor-sheet-body">
+                    <div class="tag-editor-sheet-tags" id="tagEditorSheetTags"></div>
+                    <div class="tag-editor-sheet-input-row">
+                        <input type="text" id="tagEditorSheetInput" class="glass-input tag-input" placeholder="Type a tag and press Enter...">
+                        <div id="tagEditorSheetAutocomplete" class="tag-autocomplete hidden"></div>
+                    </div>
+                </div>
+                <div class="tag-editor-sheet-footer">
+                    <button type="button" id="tagEditorSheetDone" class="action-btn primary small"><i class="fa-solid fa-check"></i> Done</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(sheet);
+
+        // ---- 3. Local rendering helpers ----
+        function esc(text) {
+            return typeof escapeHtml === 'function' ? escapeHtml(text) : text
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function renderEditTagsPreview(tags) {
+            const container = document.getElementById('editTagsPreview');
+            if (!container) return;
+            container.innerHTML = (!tags || tags.length === 0) ? '' :
+                tags.map(t => `<span class="modal-tag">${esc(t)}</span>`).join('');
+        }
+
+        function renderSheetTags(tags) {
+            const container = document.getElementById('tagEditorSheetTags');
+            if (!container) return;
+            if (!tags || tags.length === 0) { container.innerHTML = ''; return; }
+            container.innerHTML = tags.map(t => `
+                <span class="modal-tag editable">
+                    ${esc(t)}
+                    <button class="tag-remove-btn" data-tag="${esc(t)}" title="Remove tag">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
+                </span>
+            `).join('');
+            container.querySelectorAll('.tag-remove-btn').forEach(btn => {
+                btn.onclick = (e) => {
+                    e.stopPropagation();
+                    if (typeof removeTag === 'function') removeTag(btn.dataset.tag);
+                };
+            });
+        }
+
+        function showSheetAutocomplete(filterText) {
+            filterText = filterText || '';
+            const autocomplete = document.getElementById('tagEditorSheetAutocomplete');
+            if (!autocomplete) return;
+
+            const allTags = typeof getAllAvailableTags === 'function' ? getAllAvailableTags() : [];
+            const currentTags = (typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [])
+                .map(t => t.toLowerCase());
+            const filter = filterText.toLowerCase();
+
+            const suggestions = allTags.filter(tag => {
+                const lo = tag.toLowerCase();
+                return lo.includes(filter) && !currentTags.includes(lo);
+            }).slice(0, 10);
+
+            if (suggestions.length === 0 && filterText.trim()) {
+                autocomplete.innerHTML = `
+                    <div class="tag-autocomplete-item create-new" data-tag="${esc(filterText.trim())}">
+                        <i class="fa-solid fa-plus"></i> Create "${esc(filterText.trim())}"
+                    </div>`;
+                autocomplete.classList.add('visible');
+            } else if (suggestions.length > 0) {
+                autocomplete.innerHTML = suggestions.map(tag =>
+                    `<div class="tag-autocomplete-item" data-tag="${esc(tag)}">${esc(tag)}</div>`
+                ).join('');
+                autocomplete.classList.add('visible');
+            } else {
+                hideSheetAutocomplete();
+                return;
+            }
+
+            autocomplete.querySelectorAll('.tag-autocomplete-item').forEach(item => {
+                item.onclick = () => {
+                    if (typeof addTag === 'function') addTag(item.dataset.tag);
+                    // Re-show suggestions immediately (chip-selector pattern)
+                    requestAnimationFrame(() => showSheetAutocomplete(''));
+                };
+            });
+        }
+
+        function hideSheetAutocomplete() {
+            const ac = document.getElementById('tagEditorSheetAutocomplete');
+            if (ac) ac.classList.remove('visible');
+        }
+
+        function openTagEditorSheet() {
+            sheet.classList.remove('hidden');
+            const tags = typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [];
+            renderSheetTags(tags);
+            showSheetAutocomplete('');
+        }
+
+        function closeTagEditorSheet() {
+            sheet.classList.add('hidden');
+            hideSheetAutocomplete();
+        }
+
+        // Make showSheetAutocomplete available globally for the suggestion flow
+        window.showSheetAutocomplete = showSheetAutocomplete;
+
+        // ---- 4. Wire event listeners ----
+        const editTagsBtn = document.getElementById('editTagsBtn');
+        if (editTagsBtn) {
+            editTagsBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                openTagEditorSheet();
+            });
+        }
+
+        document.getElementById('tagEditorSheetClose')
+            ?.addEventListener('click', closeTagEditorSheet);
+        document.getElementById('tagEditorSheetDone')
+            ?.addEventListener('click', closeTagEditorSheet);
+        sheet.querySelector('.tag-editor-sheet-backdrop')
+            ?.addEventListener('click', closeTagEditorSheet);
+
+        const sheetInput = document.getElementById('tagEditorSheetInput');
+        if (sheetInput) {
+            sheetInput.addEventListener('input', (e) => showSheetAutocomplete(e.target.value));
+            sheetInput.addEventListener('focus', () => showSheetAutocomplete(sheetInput.value));
+            sheetInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const v = sheetInput.value.trim();
+                    if (v && typeof addTag === 'function') addTag(v);
+                    sheetInput.value = '';
+                    requestAnimationFrame(() => showSheetAutocomplete(''));
+                } else if (e.key === 'Escape') {
+                    hideSheetAutocomplete();
+                    sheetInput.blur();
+                }
+            });
+
+            // Hide autocomplete when tapping outside input row
+            document.addEventListener('click', (e) => {
+                const inputRow = sheet.querySelector('.tag-editor-sheet-input-row');
+                if (inputRow && !inputRow.contains(e.target)) {
+                    hideSheetAutocomplete();
+                }
+            });
+        }
+
+        // ---- 5. Hook into addTag / removeTag ----
+        // Monkey-patch to also update mobile UI
+        const origAddTag = window.addTag;
+        if (typeof origAddTag === 'function') {
+            window.addTag = function(tag) {
+                origAddTag(tag);
+                const tags = typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [];
+                renderEditTagsPreview(tags);
+                renderSheetTags(tags);
+                // Clear sheet input
+                const si = document.getElementById('tagEditorSheetInput');
+                if (si) si.value = '';
+            };
+        }
+
+        const origRemoveTag = window.removeTag;
+        if (typeof origRemoveTag === 'function') {
+            window.removeTag = function(tag) {
+                origRemoveTag(tag);
+                const tags = typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [];
+                renderEditTagsPreview(tags);
+                renderSheetTags(tags);
+            };
+        }
+
+        // ---- 6. Hook into setEditLock ----
+        // Observe the lock status DOM changes to sync the edit-tags button
+        const lockObserver = new MutationObserver(() => {
+            const btn = document.getElementById('editTagsBtn');
+            if (!btn) return;
+            const lockStatus = document.getElementById('editLockStatus');
+            const isLocked = lockStatus?.textContent?.includes('locked') ||
+                             !document.querySelector('.edit-lock-header.unlocked');
+            btn.disabled = isLocked;
+            const tags = typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [];
+            renderEditTagsPreview(tags);
+        });
+        const lockHeader = document.querySelector('.edit-lock-header');
+        if (lockHeader) {
+            lockObserver.observe(lockHeader, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        // ---- 7. Sync preview when modal opens ----
+        const modalObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.target.id === 'charModal' && !m.target.classList.contains('hidden')) {
+                    const tags = typeof getCurrentTagsArray === 'function' ? getCurrentTagsArray() : [];
+                    renderEditTagsPreview(tags);
+                    const btn = document.getElementById('editTagsBtn');
+                    if (btn) {
+                        const isLocked = !document.querySelector('.edit-lock-header.unlocked');
+                        btn.disabled = isLocked;
+                    }
+                }
+            }
+        });
+        const charModal = document.getElementById('charModal');
+        if (charModal) {
+            modalObserver.observe(charModal, { attributes: true, attributeFilter: ['class'] });
+        }
     }
 
 })();

@@ -123,6 +123,10 @@ const DEFAULT_SETTINGS = {
     uniqueGalleryFolders: false,
     // Show Info tab in character modal (debugging/metadata info)
     showInfoTab: false,
+    // Show ChubAI tagline in character modal
+    showChubTagline: true,
+    // Allow rich HTML/CSS in tagline rendering (sanitized)
+    allowRichTagline: false,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -428,6 +432,8 @@ function setupSettingsModal() {
     // Developer
     const debugModeCheckbox = document.getElementById('settingsDebugMode');
     const showInfoTabCheckbox = document.getElementById('settingsShowInfoTab');
+    const showChubTaglineCheckbox = document.getElementById('settingsShowChubTagline');
+    const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
     
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
@@ -490,6 +496,12 @@ function setupSettingsModal() {
         }
         if (showInfoTabCheckbox) {
             showInfoTabCheckbox.checked = getSetting('showInfoTab') || false;
+        }
+        if (showChubTaglineCheckbox) {
+            showChubTaglineCheckbox.checked = getSetting('showChubTagline') !== false;
+        }
+        if (allowRichTaglineCheckbox) {
+            allowRichTaglineCheckbox.checked = getSetting('allowRichTagline') === true;
         }
         
         // Appearance
@@ -578,6 +590,8 @@ function setupSettingsModal() {
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
             showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
+            showChubTagline: showChubTaglineCheckbox ? showChubTaglineCheckbox.checked : true,
+            allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
         });
         
@@ -602,6 +616,10 @@ function setupSettingsModal() {
         
         // Apply highlight color
         applyHighlightColor(newHighlightColor);
+
+        // Keep import modal defaults in sync with settings
+        syncImportAutoDownloadGallery();
+        syncImportAutoDownloadMedia();
         
         // Also update the current session search checkboxes
         const searchName = document.getElementById('searchName');
@@ -678,6 +696,9 @@ function setupSettingsModal() {
         }
         if (showInfoTabCheckbox) {
             showInfoTabCheckbox.checked = DEFAULT_SETTINGS.showInfoTab;
+        }
+        if (showChubTaglineCheckbox) {
+            showChubTaglineCheckbox.checked = DEFAULT_SETTINGS.showChubTagline;
         }
         
         // Apply default highlight color immediately
@@ -3098,7 +3119,7 @@ async function buildOwnershipFingerprint(char, options = {}) {
             for (const image of galleryImages) {
                 if (shouldAbort && shouldAbort()) break;
                 
-                const downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
+                let downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
                 if (downloadResult.success) {
                     const hash = await calculateHash(downloadResult.arrayBuffer);
                     hashes.add(hash);
@@ -3106,6 +3127,7 @@ async function buildOwnershipFingerprint(char, options = {}) {
                 } else {
                     errors++;
                 }
+                downloadResult = null; // Release immediately
             }
             
             if (onLogUpdate && logEntry) {
@@ -3128,7 +3150,7 @@ async function buildOwnershipFingerprint(char, options = {}) {
             if (shouldAbort && shouldAbort()) break;
             
             try {
-                const downloadResult = await downloadMediaToMemory(url, 30000);
+                let downloadResult = await downloadMediaToMemory(url, 30000);
                 if (downloadResult.success) {
                     const hash = await calculateHash(downloadResult.arrayBuffer);
                     hashes.add(hash);
@@ -3136,6 +3158,7 @@ async function buildOwnershipFingerprint(char, options = {}) {
                 } else {
                     errors++;
                 }
+                downloadResult = null; // Release immediately
             } catch (e) {
                 errors++;
             }
@@ -3225,20 +3248,11 @@ async function moveImageToFolder(sourceFolder, targetFolder, fileName, deleteSou
         
         const arrayBuffer = await response.arrayBuffer();
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
-        const blob = new Blob([arrayBuffer], { type: contentType });
         
         debugLog(`[MoveFile] Downloaded ${fileName}, size: ${arrayBuffer.byteLength}, type: ${contentType}`);
         
-        // Convert to base64
-        const base64Data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64 = reader.result.split(',')[1];
-                resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+        // Convert to base64 directly (avoid Blob+FileReader triple-buffering)
+        const base64Data = arrayBufferToBase64(arrayBuffer);
         
         // Get extension from filename
         const ext = fileName.includes('.') ? fileName.substring(fileName.lastIndexOf('.') + 1).toLowerCase() : 'png';
@@ -3939,30 +3953,16 @@ async function fetchCharacters(forceRefresh = false) {
             debugLog('Force refresh: fetching directly from API (bypassing opener)...');
         }
 
-        // Method 2: API Fetch with multiple endpoint attempts
-        // Try standard endpoint
-        let url = '/characters';
+        // Method 2: API Fetch — use the known correct endpoint first
+        let url = ENDPOINTS.CHARACTERS_ALL;
         debugLog(`Fetching characters from: ${API_BASE}${url}`);
 
-        let response = await apiRequest(url, 'GET');
+        let response = await apiRequest(url, 'POST', {});
         
-        // Fallbacks
+        // Fallback: try GET if POST not supported
         if (response.status === 404 || response.status === 405) {
-            debugLog("GET failed, trying POST...");
-            response = await apiRequest(url, 'POST', {});
-        }
-
-        // Second fallback: try /api/characters/all (some forks/versions)
-        if (response.status === 404) {
-            debugLog("POST failed, trying /api/characters/all...");
-            url = '/characters/all';
-            response = await apiRequest(url, 'POST', {});
-        }
-        
-        // Third fallback: try GET /api/characters/all
-        if (response.status === 404 || response.status === 405) {
-             debugLog("POST /all failed, trying GET /api/characters/all...");
-             response = await apiRequest(url, 'GET');
+            debugLog("POST failed, trying GET...");
+            response = await apiRequest(url, 'GET');
         }
         
         if (!response.ok) {
@@ -3972,8 +3972,9 @@ async function fetchCharacters(forceRefresh = false) {
         }
 
         let data = await response.json();
-        debugLog('Gallery Data:', data);
+        debugLog('Gallery Data: loaded', Array.isArray(data) ? data.length : 'object');
         processAndRender(data);
+        data = null; // Release reference — processAndRender has consumed it into allCharacters
 
     } catch (error) {
         console.error("Failed to fetch characters:", error);
@@ -4241,6 +4242,8 @@ let isScrolling = false;
 let scrollTimeout = null;
 let cachedCardHeight = 0;
 let cachedCardWidth = 0;
+let characterGridDelegatesInitialized = false;
+let currentCharByAvatar = new Map();
 
 // Card dimensions (will be measured from actual cards)
 const CARD_MIN_WIDTH = 200; // Matches CSS minmax(200px, 1fr)
@@ -4256,6 +4259,10 @@ function renderGrid(chars) {
     
     // Store chars reference
     currentCharsList = chars;
+    currentCharByAvatar = new Map();
+    chars.forEach(char => {
+        if (char?.avatar) currentCharByAvatar.set(char.avatar, char);
+    });
     
     // Clear existing content and state
     grid.innerHTML = '';
@@ -4302,19 +4309,21 @@ function updateGridHeight(grid) {
  * Get grid layout metrics
  */
 function getGridMetrics(gridWidth) {
-    // Use cached values if available
-    let cardWidth = cachedCardWidth || CARD_MIN_WIDTH;
-    let cardHeight = cachedCardHeight || Math.round(CARD_MIN_WIDTH / CARD_ASPECT_RATIO);
+    // Use cached values if available (only re-measure when explicitly invalidated)
+    if (cachedCardWidth > 0 && cachedCardHeight > 0) {
+        const cols = Math.max(1, Math.floor((gridWidth + GRID_GAP) / (cachedCardWidth + GRID_GAP)));
+        return { cols, cardWidth: cachedCardWidth, cardHeight: cachedCardHeight };
+    }
     
     // Measure from actual card if available
     const firstCard = document.querySelector('.char-card');
     if (firstCard) {
         cachedCardWidth = firstCard.offsetWidth;
         cachedCardHeight = firstCard.offsetHeight;
-        cardWidth = cachedCardWidth;
-        cardHeight = cachedCardHeight;
     }
     
+    const cardWidth = cachedCardWidth || CARD_MIN_WIDTH;
+    const cardHeight = cachedCardHeight || Math.round(CARD_MIN_WIDTH / CARD_ASPECT_RATIO);
     const cols = Math.max(1, Math.floor((gridWidth + GRID_GAP) / (cardWidth + GRID_GAP)));
     
     return { cols, cardWidth, cardHeight };
@@ -4404,24 +4413,49 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
         orderedCards.forEach(card => grid.appendChild(card));
     }
     
-    // Preload images further ahead
-    const preloadStartRow = Math.floor((scrollTop + clientHeight) / (cardHeight + GRID_GAP));
-    const preloadEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + GRID_GAP));
-    const preloadStartIndex = preloadStartRow * cols;
-    const preloadEndIndex = Math.min(currentCharsList.length, preloadEndRow * cols);
-    
-    preloadImages(preloadStartIndex, preloadEndIndex);
+    // Preload images only on scroll-end (force=true), not during active scrolling.
+    // During fast scroll, every preload batch gets immediately aborted by the next
+    // RAF frame — wasting CPU on AbortController + 12 fetch() calls per frame.
+    if (force) {
+        const preloadStartRow = Math.floor((scrollTop + clientHeight) / (cardHeight + GRID_GAP));
+        const preloadEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + GRID_GAP));
+        const preloadStartIndex = preloadStartRow * cols;
+        const preloadEndIndex = Math.min(currentCharsList.length, preloadEndRow * cols);
+
+        preloadImages(preloadStartIndex, preloadEndIndex);
+    }
 }
 
+// Abort controller for preload fetches — cancels previous batch when a new one starts
+let preloadAbortController = null;
+
 /**
- * Preload avatar images for a range of characters
+ * Preload avatar images for a range of characters.
+ * Uses fetch() to warm the HTTP cache without creating orphaned Image objects
+ * that hold decoded bitmaps in memory indefinitely (critical for mobile).
+ * Limited to a small batch to avoid memory pressure.
+ * Each call aborts any pending preloads from the previous call.
  */
 function preloadImages(startIndex, endIndex) {
-    for (let i = startIndex; i < endIndex; i++) {
+    // Cancel any pending preloads from previous scroll to avoid accumulating
+    // unconsumed response bodies in memory
+    if (preloadAbortController) {
+        preloadAbortController.abort();
+    }
+    preloadAbortController = new AbortController();
+    const signal = preloadAbortController.signal;
+    
+    const MAX_PRELOAD = 12; // Limit concurrent preloads for mobile
+    let count = 0;
+    for (let i = startIndex; i < endIndex && count < MAX_PRELOAD; i++) {
         const char = currentCharsList[i];
         if (char && char.avatar) {
-            const img = new Image();
-            img.src = getCharacterAvatarUrl(char.avatar);
+            // Cache-only fetch — warms browser HTTP cache without decoding image pixels.
+            // Cancel the response body immediately to prevent memory accumulation.
+            fetch(getCharacterAvatarUrl(char.avatar), { mode: 'no-cors', priority: 'low', signal })
+                .then(r => { r.body?.cancel(); })
+                .catch(() => {});
+            count++;
         }
     }
 }
@@ -4440,6 +4474,10 @@ function setupVirtualScrollListener(grid, scrollContainer) {
     clearTimeout(scrollTimeout);
     scrollTimeout = null;
     
+    // Track when the last scroll event occurred for the debounce end-check
+    let lastScrollEventTime = 0;
+    const SCROLL_END_DELAY = 100;
+
     currentScrollHandler = () => {
         if (!isScrolling) {
             window.requestAnimationFrame(() => {
@@ -4449,26 +4487,66 @@ function setupVirtualScrollListener(grid, scrollContainer) {
             isScrolling = true;
         }
         
-        // Debounce for scroll end
-        clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(() => {
-            updateVisibleCards(grid, scrollContainer, true);
-        }, 100);
+        // Debounce for scroll end — uses a single persistent timeout that
+        // re-checks elapsed time instead of clear+reset on every event.
+        // Avoids 300+ clearTimeout/setTimeout pairs during fast scrolling.
+        lastScrollEventTime = performance.now();
+        if (!scrollTimeout) {
+            scrollTimeout = setTimeout(function checkScrollEnd() {
+                if (performance.now() - lastScrollEventTime >= SCROLL_END_DELAY) {
+                    scrollTimeout = null;
+                    updateVisibleCards(grid, scrollContainer, true);
+                } else {
+                    // Scroll still active — re-check after remaining time
+                    scrollTimeout = setTimeout(checkScrollEnd,
+                        SCROLL_END_DELAY - (performance.now() - lastScrollEventTime));
+                }
+            }, SCROLL_END_DELAY);
+        }
     };
     
     scrollContainer.addEventListener('scroll', currentScrollHandler, { passive: true });
 }
 
-// Update grid height on window resize
-window.addEventListener('resize', () => {
-    cachedCardHeight = 0;
-    cachedCardWidth = 0;
+function setupCharacterGridDelegates() {
+    if (characterGridDelegatesInitialized) return;
+
     const grid = document.getElementById('characterGrid');
-    if (grid && currentCharsList.length > 0) {
-        updateGridHeight(grid);
-        const scrollContainer = document.querySelector('.gallery-content');
-        updateVisibleCards(grid, scrollContainer, true);
-    }
+    if (!grid) return;
+
+    grid.addEventListener('click', (e) => {
+        const card = e.target.closest('.char-card');
+        if (!card || !grid.contains(card)) return;
+
+        const avatar = card.dataset.avatar;
+        const char = currentCharByAvatar.get(avatar);
+        if (!char) return;
+
+        // Check if multi-select mode is active (from module-loader.js)
+        if (window.handleCardClickForMultiSelect && window.handleCardClickForMultiSelect(char, card)) {
+            return; // Multi-select handled it
+        }
+        openModal(char);
+    });
+
+    characterGridDelegatesInitialized = true;
+}
+
+// Update grid height on window resize (throttled to avoid jank during drag-resize)
+let resizeRAF = null;
+window.addEventListener('resize', () => {
+    if (resizeRAF) return; // Already scheduled
+    resizeRAF = requestAnimationFrame(() => {
+        resizeRAF = null;
+        cachedCardHeight = 0;
+        cachedCardWidth = 0;
+        const grid = document.getElementById('characterGrid');
+        if (grid && currentCharsList.length > 0) {
+            updateGridHeight(grid);
+            const scrollContainer = document.querySelector('.gallery-content');
+            updateVisibleCards(grid, scrollContainer, true);
+        }
+    });
 });
 
 /**
@@ -4494,7 +4572,12 @@ function createCharacterCard(char) {
     // Use creator_notes as hover tooltip - extract plain text only
     // For ChubAI imports, this contains the public character description (often with HTML/CSS)
     const creatorNotes = char.data?.creator_notes || char.creator_notes || '';
-    const tooltipText = extractPlainText(creatorNotes, 200);
+    const cacheKey = 'plainText:' + char.avatar;
+    let tooltipText = getCached(cacheKey);
+    if (tooltipText === undefined) {
+        tooltipText = extractPlainText(creatorNotes, 200);
+        setCached(cacheKey, tooltipText);
+    }
     if (tooltipText) {
         card.title = tooltipText;
     }
@@ -4513,14 +4596,10 @@ function createCharacterCard(char) {
     
     // Store avatar for multi-select lookup
     card.dataset.avatar = char.avatar;
-    
-    card.onclick = () => {
-        // Check if multi-select mode is active (from module-loader.js)
-        if (window.handleCardClickForMultiSelect && window.handleCardClickForMultiSelect(char, card)) {
-            return; // Multi-select handled it
-        }
-        openModal(char);
-    };
+
+    if (window.MultiSelect?.isSelected?.(char.avatar)) {
+        card.classList.add('selected');
+    }
     
     // Context menu is handled via event delegation in module-loader.js
     // No per-card attachment needed
@@ -4531,6 +4610,33 @@ function createCharacterCard(char) {
 // Modal Logic
 const modal = document.getElementById('charModal');
 let activeChar = null;
+
+// Cached tab element references — these are static DOM nodes, queried once
+let _cachedTabButtons = null;
+let _cachedTabPanes = null;
+
+function getTabButtons() {
+    if (!_cachedTabButtons) _cachedTabButtons = document.querySelectorAll('.tab-btn');
+    return _cachedTabButtons;
+}
+
+function getTabPanes() {
+    if (!_cachedTabPanes) _cachedTabPanes = document.querySelectorAll('.tab-pane');
+    return _cachedTabPanes;
+}
+
+/** Deactivate all tab buttons and panes */
+function deactivateAllTabs() {
+    getTabButtons().forEach(b => b.classList.remove('active'));
+    getTabPanes().forEach(p => p.classList.remove('active'));
+}
+
+/** Reset scroll positions on all tab panes (and sidebar) */
+function resetTabScrollPositions() {
+    getTabPanes().forEach(p => p.scrollTop = 0);
+    const sidebar = document.querySelector('.modal-sidebar');
+    if (sidebar) sidebar.scrollTop = 0;
+}
 
 // Fetch User Images for Character
 // charOrName can be a character object or a character name string
@@ -5045,7 +5151,7 @@ function openModal(char) {
         if (modal) {
             const modalBody = modal.querySelector('.modal-body');
             if (modalBody) modalBody.scrollTop = 0;
-            modal.querySelectorAll('.tab-pane').forEach(pane => {
+            getTabPanes().forEach(pane => {
                 pane.scrollTop = 0;
             });
         }
@@ -5123,6 +5229,28 @@ function openModal(char) {
 
     // ChubAI Link Indicator
     updateChubLinkIndicator(char);
+
+    // ChubAI Tagline (subtle, optional)
+    const taglineRow = document.getElementById('modalChubTaglineRow');
+    const taglineEl = document.getElementById('modalChubTagline');
+    const chubTagline = char?.data?.extensions?.chub?.tagline || char?.extensions?.chub?.tagline || '';
+    if (taglineRow && taglineEl) {
+        taglineRow.classList.remove('expanded');
+        taglineRow.setAttribute('aria-expanded', 'false');
+        taglineRow.setAttribute('role', 'button');
+        taglineRow.onclick = () => {
+            const isExpanded = taglineRow.classList.toggle('expanded');
+            taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+        };
+        const showTagline = getSetting('showChubTagline') !== false;
+        if (showTagline && chubTagline) {
+            taglineEl.innerHTML = sanitizeTaglineHtml(chubTagline, char.name);
+            taglineRow.style.display = 'block';
+        } else {
+            taglineEl.textContent = '';
+            taglineRow.style.display = 'none';
+        }
+    }
 
     // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe
     const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
@@ -5219,18 +5347,18 @@ function openModal(char) {
     const creatorNotesEdit = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
     const charVersion = char.character_version || (char.data ? char.data.character_version : "") || "";
     
-    // Tags can be array or string
-    let tagsValue = "";
+    // Tags: always store as array, never as comma-delimited string
     const rawTags = char.tags || (char.data ? char.data.tags : []) || [];
     if (Array.isArray(rawTags)) {
-        tagsValue = rawTags.join(", ");
+        _editTagsArray = [...rawTags];
     } else if (typeof rawTags === "string") {
-        tagsValue = rawTags;
+        _editTagsArray = rawTags.split(',').map(t => t.trim()).filter(t => t);
+    } else {
+        _editTagsArray = [];
     }
     
     document.getElementById('editCreator').value = author;
     document.getElementById('editVersion').value = charVersion;
-    document.getElementById('editTags').value = tagsValue;
     document.getElementById('editPersonality').value = personality;
     document.getElementById('editScenario').value = scenario;
     document.getElementById('editMesExample').value = mesExample;
@@ -5259,7 +5387,7 @@ function openModal(char) {
         first_mes: document.getElementById('editFirstMes').value,
         creator: document.getElementById('editCreator').value,
         character_version: document.getElementById('editVersion').value,
-        tags: document.getElementById('editTags').value,
+        tagsArray: [..._editTagsArray], // tags stored as array only, no string intermediary
         personality: document.getElementById('editPersonality').value,
         scenario: document.getElementById('editScenario').value,
         mes_example: document.getElementById('editMesExample').value,
@@ -5277,17 +5405,14 @@ function openModal(char) {
     renderSidebarTags(getTags(char));
     
     // Reset Tabs
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    deactivateAllTabs();
     document.querySelector('.tab-btn[data-tab="details"]').classList.add('active');
     document.getElementById('pane-details').classList.add('active');
 
     updateMobileChatButtonVisibility();
     
     // Reset scroll positions to top
-    document.querySelectorAll('.tab-pane').forEach(p => p.scrollTop = 0);
-    const sidebar = document.querySelector('.modal-sidebar');
-    if (sidebar) sidebar.scrollTop = 0;
+    resetTabScrollPositions();
 
     // Trigger Image Fetch for 'Gallery' tab logic
     // We defer this slightly or just prepare it
@@ -5295,8 +5420,7 @@ function openModal(char) {
     if (galleryTabBtn) {
         galleryTabBtn.onclick = () => {
              // Switch tabs
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            deactivateAllTabs();
             galleryTabBtn.classList.add('active');
             document.getElementById('pane-gallery').classList.add('active');
             
@@ -5322,8 +5446,7 @@ function openModal(char) {
     if (chatsTabBtn) {
         chatsTabBtn.onclick = () => {
             // Switch tabs
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            deactivateAllTabs();
             chatsTabBtn.classList.add('active');
             document.getElementById('pane-chats').classList.add('active');
             
@@ -5337,8 +5460,7 @@ function openModal(char) {
     if (relatedTabBtn) {
         relatedTabBtn.onclick = () => {
             // Switch tabs
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            deactivateAllTabs();
             relatedTabBtn.classList.add('active');
             document.getElementById('pane-related').classList.add('active');
             
@@ -5360,8 +5482,7 @@ function openModal(char) {
         
         infoTabBtn.onclick = () => {
             // Switch tabs
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            deactivateAllTabs();
             infoTabBtn.classList.add('active');
             document.getElementById('pane-info').classList.add('active');
             
@@ -5374,11 +5495,7 @@ function openModal(char) {
     modal.classList.remove('hidden');
     
     // Reset scroll positions after modal is visible (using setTimeout to ensure DOM is ready)
-    setTimeout(() => {
-        document.querySelectorAll('.tab-pane').forEach(p => p.scrollTop = 0);
-        const sidebar = document.querySelector('.modal-sidebar');
-        if (sidebar) sidebar.scrollTop = 0;
-    }, 0);
+    setTimeout(() => resetTabScrollPositions(), 0);
 }
 
 function closeModal() {
@@ -5387,6 +5504,25 @@ function closeModal() {
     // Reset edit lock state
     isEditLocked = true;
     originalValues = {};
+    originalRawData = {};
+    
+    // Release window globals holding rich text content (can be large)
+    window.currentCreatorNotesContent = null;
+    window.currentDescriptionContent = null;
+    window.currentFirstMesContent = null;
+    window.currentAltGreetingsContent = null;
+    
+    // Clear alt greetings HTML
+    const altGreetingsEl = document.getElementById('modalAltGreetings');
+    if (altGreetingsEl) altGreetingsEl.innerHTML = '';
+    
+    // Clear creator notes iframe — disconnect ResizeObserver and release its document
+    const creatorNotesEl = document.getElementById('modalCreatorNotes');
+    cleanupCreatorNotesContainer(creatorNotesEl);
+    
+    // Clear tagline content
+    const taglineEl = document.getElementById('modalChubTagline');
+    if (taglineEl) taglineEl.textContent = '';
     
     // Check if we need to restore duplicates modal
     if (duplicateModalState.wasOpen) {
@@ -6339,17 +6475,13 @@ async function deleteCharacter(char, deleteChats = false) {
 
 // Collect current edit values
 function collectEditValues() {
-    const newTagsRaw = document.getElementById('editTags').value;
-    const newTags = newTagsRaw.split(',').map(t => t.trim()).filter(t => t.length > 0);
-    
     return {
         name: document.getElementById('editName').value,
         description: document.getElementById('editDescription').value,
         first_mes: document.getElementById('editFirstMes').value,
         creator: document.getElementById('editCreator').value,
         character_version: document.getElementById('editVersion').value,
-        tags: newTagsRaw,
-        tagsArray: newTags,
+        tagsArray: [..._editTagsArray],
         personality: document.getElementById('editPersonality').value,
         scenario: document.getElementById('editScenario').value,
         mes_example: document.getElementById('editMesExample').value,
@@ -6370,7 +6502,7 @@ function generateChangesDiff(original, current) {
         first_mes: 'First Message',
         creator: 'Creator',
         character_version: 'Version',
-        tags: 'Tags',
+        tagsArray: 'Tags',
         personality: 'Personality',
         scenario: 'Scenario',
         mes_example: 'Example Dialogue',
@@ -6394,6 +6526,29 @@ function generateChangesDiff(original, current) {
     for (const key of Object.keys(fieldLabels)) {
         let oldVal = original[key];
         let newVal = current[key];
+        
+        // Handle tags array comparison
+        if (key === 'tagsArray') {
+            const oldNorm = normalizeStringArray(oldVal || []);
+            const newNorm = normalizeStringArray(newVal || []);
+            // Sort for order-insensitive comparison
+            const oldSorted = [...oldNorm].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            const newSorted = [...newNorm].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+            if (JSON.stringify(oldSorted) !== JSON.stringify(newSorted)) {
+                const added = newNorm.filter(t => !oldNorm.some(o => o.localeCompare(t, undefined, { sensitivity: 'base' }) === 0));
+                const removed = oldNorm.filter(t => !newNorm.some(n => n.localeCompare(t, undefined, { sensitivity: 'base' }) === 0));
+                const parts = [];
+                if (added.length) parts.push(`Added: ${added.join(', ')}`);
+                if (removed.length) parts.push(`Removed: ${removed.join(', ')}`);
+                changes.push({
+                    field: fieldLabels[key],
+                    old: oldNorm.join(', ') || '(none)',
+                    new: newNorm.join(', ') || '(none)',
+                    detail: parts.join(' | ')
+                });
+            }
+            continue;
+        }
         
         // Handle alternate greetings array comparison
         if (key === 'alternate_greetings') {
@@ -6862,6 +7017,28 @@ function refreshModalDisplay() {
         notesBox.style.display = 'none';
         window.currentCreatorNotesContent = null;
     }
+
+    // Update ChubAI Tagline
+    const taglineRow = document.getElementById('modalChubTaglineRow');
+    const taglineEl = document.getElementById('modalChubTagline');
+    const chubTagline = char?.data?.extensions?.chub?.tagline || char?.extensions?.chub?.tagline || '';
+    if (taglineRow && taglineEl) {
+        taglineRow.classList.remove('expanded');
+        taglineRow.setAttribute('aria-expanded', 'false');
+        taglineRow.setAttribute('role', 'button');
+        taglineRow.onclick = () => {
+            const isExpanded = taglineRow.classList.toggle('expanded');
+            taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+        };
+        const showTagline = getSetting('showChubTagline') !== false;
+        if (showTagline && chubTagline) {
+            taglineEl.textContent = chubTagline;
+            taglineRow.style.display = 'block';
+        } else {
+            taglineEl.textContent = '';
+            taglineRow.style.display = 'none';
+        }
+    }
     
     // Update Description/First Message
     const desc = char.description || (char.data ? char.data.description : "") || "";
@@ -7033,7 +7210,6 @@ function cancelEditing() {
     document.getElementById('editFirstMes').value = originalValues.first_mes || '';
     document.getElementById('editCreator').value = originalValues.creator || '';
     document.getElementById('editVersion').value = originalValues.character_version || '';
-    document.getElementById('editTags').value = originalValues.tags || '';
     document.getElementById('editPersonality').value = originalValues.personality || '';
     document.getElementById('editScenario').value = originalValues.scenario || '';
     document.getElementById('editMesExample').value = originalValues.mes_example || '';
@@ -7041,13 +7217,16 @@ function cancelEditing() {
     document.getElementById('editPostHistoryInstructions').value = originalValues.post_history_instructions || '';
     document.getElementById('editCreatorNotes').value = originalValues.creator_notes || '';
     
+    // Restore tag array from original values
+    _editTagsArray = [...(originalValues.tagsArray || [])];
+    
     // Restore alternate greetings from raw data
     populateAltGreetingsEditor(originalRawData.altGreetings || []);
     
     // Restore lorebook from raw data
     populateLorebookEditor(originalRawData.characterBook);
     
-    // Re-lock
+    // Re-lock (this also re-renders sidebar tags via setEditLock)
     setEditLock(true);
     showToast("Changes discarded", "info");
 }
@@ -7371,22 +7550,18 @@ function getAllAvailableTags() {
 }
 
 /**
- * Get current tags from the editTags input as an array
+ * Get current tags from the in-memory backing array
  */
+let _editTagsArray = [];
 function getCurrentTagsArray() {
-    const input = document.getElementById('editTags');
-    if (!input || !input.value.trim()) return [];
-    return input.value.split(',').map(t => t.trim()).filter(t => t);
+    return [..._editTagsArray];
 }
 
 /**
- * Set tags in the editTags input from an array
+ * Set tags in the backing array
  */
 function setTagsFromArray(tagsArray) {
-    const input = document.getElementById('editTags');
-    if (input) {
-        input.value = tagsArray.join(', ');
-    }
+    _editTagsArray = [...tagsArray];
 }
 
 /**
@@ -7408,7 +7583,7 @@ function addTag(tag) {
     setTagsFromArray(currentTags);
     renderSidebarTags(currentTags, true);
     
-    // Clear input
+    // Clear sidebar input
     const tagInput = document.getElementById('tagInput');
     if (tagInput) tagInput.value = '';
     
@@ -7573,6 +7748,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initialize ChubAI expand buttons
     initChubExpandButtons();
+
 });
 
 // ==============================================
@@ -8548,6 +8724,12 @@ function initChubExpandButtons() {
             const sectionId = title.dataset.section;
             const label = title.dataset.label;
             const iconClass = title.dataset.icon;
+            if (sectionId === 'chubCharAltGreetings') {
+                const greetings = window.currentChubAltGreetings || [];
+                const charName = document.getElementById('chubCharName')?.textContent || 'Character';
+                openAltGreetingsFullscreen(greetings, charName);
+                return;
+            }
             openChubExpandedView(sectionId, label, iconClass);
         });
     });
@@ -9118,10 +9300,9 @@ function setupEventListeners() {
     });
 
     // Tabs
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    getTabButtons().forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            deactivateAllTabs();
             
             btn.classList.add('active');
             const tabId = btn.dataset.tab;
@@ -9146,6 +9327,8 @@ function setupEventListeners() {
     };
 
     updateMobileChatButtonVisibility();
+
+    setupCharacterGridDelegates();
     
     // Save Button
     document.getElementById('saveEditBtn').onclick = saveCharacter;
@@ -9326,8 +9509,8 @@ function getAltGreetingsFromEditor() {
     const greetings = [];
     
     inputs.forEach(input => {
-        const value = input.value.trim();
-        if (value) {
+        const value = input.value;
+        if (value.trim()) {  // Skip truly empty entries, but preserve original content
             greetings.push(value);
         }
     });
@@ -9939,13 +10122,84 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     return formatted;
 }
 
+function sanitizeTaglineHtml(content, charName) {
+    if (!content) return '';
+
+    if (getSetting('allowRichTagline') !== true) {
+        return escapeHtml(content);
+    }
+
+    const formatted = formatRichText(content, charName, true);
+    if (typeof DOMPurify === 'undefined') {
+        return formatted;
+    }
+
+    const sanitized = DOMPurify.sanitize(formatted, {
+        ALLOWED_TAGS: [
+            'p', 'br', 'hr', 'div', 'span',
+            'strong', 'b', 'em', 'i', 'u', 's', 'del',
+            'a', 'img', 'ul', 'ol', 'li', 'blockquote',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'center', 'font'
+        ],
+        ALLOWED_ATTR: [
+            'href', 'src', 'alt', 'title', 'target', 'rel', 'class',
+            'color', 'size', 'align', 'style'
+        ],
+        ADD_ATTR: ['target'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'style', 'link'],
+        FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover'],
+        ALLOW_UNKNOWN_PROTOCOLS: false,
+        KEEP_CONTENT: true
+    });
+
+    return sanitizeTaglineStyles(sanitized);
+}
+
+function sanitizeTaglineStyles(html) {
+    if (!html) return '';
+
+    const container = document.createElement('div');
+    container.innerHTML = html;
+
+    const allowedProps = new Set([
+        'color', 'background-color', 'font-size', 'font-weight', 'font-style',
+        'text-align', 'text-decoration', 'line-height',
+        'border', 'border-color', 'border-width', 'border-style', 'border-radius',
+        'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+        'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left'
+    ]);
+
+    const hasUnsafeValue = (value) => {
+        const lower = value.toLowerCase();
+        return lower.includes('expression(') || lower.includes('javascript:') || lower.includes('url(');
+    };
+
+    container.querySelectorAll('[style]').forEach(node => {
+        const style = node.getAttribute('style') || '';
+        const safeParts = [];
+        style.split(';').forEach(part => {
+            const [rawProp, rawValue] = part.split(':');
+            if (!rawProp || !rawValue) return;
+            const prop = rawProp.trim().toLowerCase();
+            const value = rawValue.trim();
+            if (!allowedProps.has(prop)) return;
+            if (!value || hasUnsafeValue(value)) return;
+            safeParts.push(`${prop}: ${value}`);
+        });
+
+        if (safeParts.length > 0) {
+            node.setAttribute('style', safeParts.join('; '));
+        } else {
+            node.removeAttribute('style');
+        }
+    });
+
+    return container.innerHTML;
+}
+
 /* Upload Helpers */
-const toBase64 = file => new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result.split(',')[1]);
-    reader.onerror = error => reject(error);
-});
+const toBase64 = file => file.arrayBuffer().then(buf => arrayBufferToBase64(buf));
 
 async function uploadImages(files) {
     if (!activeChar) {
@@ -10012,6 +10266,8 @@ const importProgress = document.getElementById('importProgress');
 const importProgressCount = document.getElementById('importProgressCount');
 const importProgressFill = document.getElementById('importProgressFill');
 const importLog = document.getElementById('importLog');
+const importAutoDownloadGallery = document.getElementById('importAutoDownloadGallery');
+const importAutoDownloadMedia = document.getElementById('importAutoDownloadMedia');
 
 let isImporting = false;
 
@@ -10024,10 +10280,24 @@ importBtn?.addEventListener('click', () => {
     startImportBtn.disabled = false;
     startImportBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
     startImportBtn.classList.remove('success');
+    syncImportAutoDownloadGallery();
+    syncImportAutoDownloadMedia();
     // Hide stats when opening fresh
     const importStats = document.getElementById('importStats');
     if (importStats) importStats.classList.add('hidden');
 });
+
+function syncImportAutoDownloadGallery() {
+    if (!importAutoDownloadGallery) return;
+    const includeChubGallery = getSetting('includeChubGallery');
+    importAutoDownloadGallery.checked = includeChubGallery !== false;
+}
+
+function syncImportAutoDownloadMedia() {
+    if (!importAutoDownloadMedia) return;
+    const mediaLocalizationEnabled = getSetting('mediaLocalizationEnabled');
+    importAutoDownloadMedia.checked = mediaLocalizationEnabled !== false;
+}
 
 closeImportModal?.addEventListener('click', () => {
     if (!isImporting) {
@@ -10387,6 +10657,7 @@ function extractNodes(data) {
 
 // Cache for ChubAI metadata (longer TTL since it rarely changes)
 const chubMetadataCache = new Map();
+const CHUB_METADATA_CACHE_MAX = 3; // Keep small — full API nodes are large
 const CHUB_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 // Fetch character metadata from Chub API (with caching)
@@ -10434,14 +10705,44 @@ async function fetchChubMetadata(fullPath) {
         const data = await response.json();
         const result = data.node || null;
         
-        // Cache the result
+        // Cache the result (stripped to reduce memory — only fields used by buildCharacterCardFromChub + download)
         if (result) {
-            chubMetadataCache.set(fullPath, { value: result, time: Date.now() });
-            // Limit cache size
-            if (chubMetadataCache.size > 100) {
+            const def = result.definition || {};
+            const strippedResult = {
+                id: result.id,
+                name: result.name,
+                fullPath: result.fullPath,
+                topics: result.topics,
+                tagline: result.tagline,
+                avatar_url: result.avatar_url,
+                max_res_url: result.max_res_url,
+                hasGallery: result.hasGallery,
+                creator: result.creator,
+                definition: {
+                    name: def.name,
+                    personality: def.personality,
+                    tavern_personality: def.tavern_personality,
+                    first_message: def.first_message,
+                    example_dialogs: def.example_dialogs,
+                    description: def.description,
+                    scenario: def.scenario,
+                    system_prompt: def.system_prompt,
+                    post_history_instructions: def.post_history_instructions,
+                    alternate_greetings: def.alternate_greetings,
+                    extensions: def.extensions,
+                    character_version: def.character_version,
+                    tagline: def.tagline,
+                    // embedded_lorebook kept — needed for character_book in card
+                    embedded_lorebook: def.embedded_lorebook,
+                },
+            };
+            // Enforce LRU cap
+            while (chubMetadataCache.size >= CHUB_METADATA_CACHE_MAX) {
                 const firstKey = chubMetadataCache.keys().next().value;
                 chubMetadataCache.delete(firstKey);
             }
+            chubMetadataCache.set(fullPath, { value: strippedResult, time: Date.now() });
+            return strippedResult;
         }
         
         return result;
@@ -10510,7 +10811,7 @@ async function fetchChubGalleryImages(characterId) {
  * @returns {Promise<{success: number, skipped: number, errors: number}>}
  */
 async function downloadChubGalleryForCharacter(folderName, characterId, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
     
     let successCount = 0;
     let errorCount = 0;
@@ -10533,7 +10834,7 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
     
     for (let i = 0; i < galleryImages.length; i++) {
         // Check for abort signal
-        if (shouldAbort && shouldAbort()) {
+        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
             return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: true };
         }
         
@@ -10542,11 +10843,12 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
         const imgLogEntry = onLog ? onLog(`Checking ${displayUrl}`, 'pending') : null;
         
         // Download to memory first to check hash
-        const downloadResult = await downloadMediaToMemory(image.imageUrl, 30000);
+        let downloadResult = await downloadMediaToMemory(image.imageUrl, 30000, abortSignal);
         
         if (!downloadResult.success) {
             errorCount++;
             if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
+            downloadResult = null;
             if (onProgress) onProgress(i + 1, galleryImages.length);
             continue;
         }
@@ -10558,6 +10860,7 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
         const existingFile = existingHashMap.get(contentHash);
         if (existingFile) {
             skippedCount++;
+            downloadResult = null; // Release downloaded data — it's a duplicate
             if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Skipped (duplicate): ${displayUrl}`, 'success');
             debugLog(`[ChubGallery] Duplicate found: ${image.imageUrl} -> ${existingFile.fileName}`);
             if (onProgress) onProgress(i + 1, galleryImages.length);
@@ -10567,6 +10870,7 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
         // Not a duplicate, save the file with chubgallery naming convention
         if (onLogUpdate && imgLogEntry) onLogUpdate(imgLogEntry, `Saving ${displayUrl}...`, 'pending');
         const result = await saveChubGalleryImage(downloadResult, image, folderName, contentHash);
+        downloadResult = null; // Release after save
         
         if (result.success) {
             successCount++;
@@ -10579,6 +10883,10 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
         }
         
         if (onProgress) onProgress(i + 1, galleryImages.length);
+        
+        // Yield to browser for GC between media uploads (critical for mobile)
+        // Each upload peaks at ~12MB; yielding lets the engine collect before the next one
+        await new Promise(r => setTimeout(r, 50));
     }
     
     return { success: successCount, skipped: skippedCount, errors: errorCount, aborted: false };
@@ -10595,7 +10903,6 @@ async function downloadChubGalleryForCharacter(folderName, characterId, options 
 async function saveChubGalleryImage(downloadResult, imageInfo, folderName, contentHash) {
     try {
         const { arrayBuffer, contentType } = downloadResult;
-        const blob = new Blob([arrayBuffer], { type: contentType });
         
         // Determine file extension from content type
         let extension = 'webp'; // Default for Chub gallery
@@ -10647,25 +10954,33 @@ async function saveChubGalleryImage(downloadResult, imageInfo, folderName, conte
         // Generate local filename: chubgallery_{hash}_{originalFilename}
         const filenameBase = `chubgallery_${shortHash}_${sanitizedName}`;
         
-        // Convert blob to base64
-        const base64Data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const result = reader.result;
-                const base64 = result.includes(',') ? result.split(',')[1] : result;
-                resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+        // Convert arrayBuffer to base64 then release the buffer immediately.
+        // This prevents holding both the raw buffer (5MB) and the base64 string (6.7MB)
+        // simultaneously during the upload await — critical for mobile memory.
+        let base64Data = arrayBufferToBase64(arrayBuffer);
+        // Break the reference so the ArrayBuffer can be GC'd during upload
+        downloadResult.arrayBuffer = null;
         
-        // Save file
-        const saveResponse = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+        // Build JSON body, then release the base64 string — the JSON body contains it.
+        const bodyStr = JSON.stringify({
             image: base64Data,
             filename: filenameBase,
             format: extension,
             ch_name: folderName
         });
+        base64Data = null; // Release — serialized into bodyStr
+        
+        // Use fetch directly (instead of apiRequest) so we control the body lifecycle
+        const csrfToken = getCSRFToken();
+        const saveResponse = await fetch(`${API_BASE}${ENDPOINTS.IMAGES_UPLOAD}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: bodyStr
+        });
+        // bodyStr released after fetch consumes it (engine can GC the string)
         
         if (!saveResponse.ok) {
             const errorText = await saveResponse.text();
@@ -10718,12 +11033,13 @@ for (let i = 0; i < 256; i++) {
  */
 async function convertImageToPng(imageBuffer) {
     return new Promise((resolve, reject) => {
-        const blob = new Blob([imageBuffer]);
+        let blob = new Blob([imageBuffer]);
         const url = URL.createObjectURL(blob);
         const img = new Image();
         
         img.onload = () => {
             URL.revokeObjectURL(url);
+            blob = null; // Release source blob — image is decoded, blob no longer needed
             
             const canvas = document.createElement('canvas');
             canvas.width = img.naturalWidth;
@@ -10732,7 +11048,14 @@ async function convertImageToPng(imageBuffer) {
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0);
             
+            // Release decoded image bitmap
+            img.src = '';
+            
             canvas.toBlob((pngBlob) => {
+                // Release canvas backing store (can be 10-20MB for high-res images)
+                canvas.width = 0;
+                canvas.height = 0;
+                
                 if (pngBlob) {
                     pngBlob.arrayBuffer().then(resolve).catch(reject);
                 } else {
@@ -10848,7 +11171,13 @@ function extractCharacterDataFromPng(pngBuffer) {
                     }
                     
                     const textEnd = dataStart + length;
-                    const base64Data = String.fromCharCode(...bytes.slice(textStart, textEnd));
+                    // Build base64 string in chunks (avoid spread operator stack overflow on large data)
+                    let base64Data = '';
+                    const slice = bytes.subarray(textStart, textEnd);
+                    const chunkSz = 32768;
+                    for (let ci = 0; ci < slice.length; ci += chunkSz) {
+                        base64Data += String.fromCharCode.apply(null, slice.subarray(ci, Math.min(ci + chunkSz, slice.length)));
+                    }
                     
                     try {
                         // Decode base64 to JSON
@@ -10891,26 +11220,25 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
         }
     }
     
-    // Parse all chunks, removing any existing 'tEXt' chunks with 'chara' keyword
-    const chunks = [];
+    // First pass: find chunk boundaries and identify which to keep/skip.
+    // Uses subarray views (zero-copy) instead of slice copies.
+    const chunkRanges = []; // [{start, end, type, skip}]
     let pos = 8;
     
     while (pos < bytes.length) {
-        const view = new DataView(bytes.buffer, pos);
+        const view = new DataView(bytes.buffer, bytes.byteOffset + pos);
         const length = view.getUint32(0, false);
-        const typeBytes = bytes.slice(pos + 4, pos + 8);
-        const type = String.fromCharCode(...typeBytes);
+        const type = String.fromCharCode(bytes[pos+4], bytes[pos+5], bytes[pos+6], bytes[pos+7]);
         const chunkEnd = pos + 12 + length;
         
         // Check if this is a tEXt chunk with 'chara' keyword - skip it
         let skipChunk = false;
         if (type === 'tEXt' || type === 'iTXt' || type === 'zTXt') {
-            // Check keyword (null-terminated string at start of data)
             const dataStart = pos + 8;
             let keyword = '';
-            for (let i = dataStart; i < dataStart + Math.min(20, length); i++) {
-                if (bytes[i] === 0) break;
-                keyword += String.fromCharCode(bytes[i]);
+            for (let j = dataStart; j < dataStart + Math.min(20, length); j++) {
+                if (bytes[j] === 0) break;
+                keyword += String.fromCharCode(bytes[j]);
             }
             if (keyword === 'chara') {
                 debugLog(`[PNG] Removing existing '${type}' chunk with 'chara' keyword`);
@@ -10918,18 +11246,12 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
             }
         }
         
-        if (!skipChunk) {
-            chunks.push({
-                type: type,
-                data: bytes.slice(pos, chunkEnd)
-            });
-        }
-        
+        chunkRanges.push({ start: pos, end: chunkEnd, type, skip: skipChunk });
         pos = chunkEnd;
     }
     
     // Find IEND chunk index
-    const iendIndex = chunks.findIndex(c => c.type === 'IEND');
+    const iendIndex = chunkRanges.findIndex(c => c.type === 'IEND');
     if (iendIndex === -1) {
         throw new Error('Invalid PNG: IEND chunk not found');
     }
@@ -10941,27 +11263,27 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
     
     debugLog(`[PNG] Adding new chara chunk: JSON=${jsonString.length} chars, base64=${base64Data.length} chars`);
     
-    // Calculate total size
-    let totalSize = 8; // PNG signature
-    for (let i = 0; i < chunks.length; i++) {
-        if (i === iendIndex) {
-            totalSize += textChunk.length; // Insert before IEND
-        }
-        totalSize += chunks[i].data.length;
+    // Calculate total size (no intermediate copies)
+    let totalSize = 8 + textChunk.length; // PNG signature + new chara chunk
+    for (const range of chunkRanges) {
+        if (!range.skip) totalSize += (range.end - range.start);
     }
     
-    // Build the new PNG
+    // Build the new PNG — write directly from source using subarray views
     const result = new Uint8Array(totalSize);
-    result.set(bytes.slice(0, 8), 0); // PNG signature
+    result.set(bytes.subarray(0, 8), 0); // PNG signature (view, no copy until set)
     
     let offset = 8;
-    for (let i = 0; i < chunks.length; i++) {
+    for (let i = 0; i < chunkRanges.length; i++) {
         if (i === iendIndex) {
             result.set(textChunk, offset);
             offset += textChunk.length;
         }
-        result.set(chunks[i].data, offset);
-        offset += chunks[i].data.length;
+        const range = chunkRanges[i];
+        if (!range.skip) {
+            result.set(bytes.subarray(range.start, range.end), offset);
+            offset += (range.end - range.start);
+        }
     }
     
     return result;
@@ -11023,7 +11345,7 @@ function buildCharacterCardFromChub(apiData) {
 async function importChubCharacter(fullPath) {
     try {
         // Fetch complete character data from the API (always returns latest version)
-        const metadata = await fetchChubMetadata(fullPath);
+        let metadata = await fetchChubMetadata(fullPath);
         
         if (!metadata || !metadata.definition) {
             throw new Error('Could not fetch character data from API');
@@ -11034,6 +11356,12 @@ async function importChubCharacter(fullPath) {
         
         // Build the character card from API metadata (uses ST's exact field mapping)
         const characterCard = buildCharacterCardFromChub(metadata);
+        // Capture fields we need, then release the full metadata object
+        const metadataId = metadata.id || null;
+        const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
+        const metadataMaxResUrl = metadata.max_res_url || null;
+        const metadataAvatarUrl = metadata.avatar_url || null;
+        metadata = null;
         
         // Ensure extensions object exists
         if (!characterCard.data.extensions) {
@@ -11044,8 +11372,9 @@ async function importChubCharacter(fullPath) {
         const existingChub = characterCard.data.extensions.chub || {};
         characterCard.data.extensions.chub = {
             ...existingChub,
-            id: metadata.id || existingChub.id || null,
+            id: metadataId || existingChub.id || null,
             full_path: fullPath,
+            tagline: metadataTagline || existingChub.tagline || '',
             linkedAt: new Date().toISOString()
         };
         
@@ -11060,13 +11389,13 @@ async function importChubCharacter(fullPath) {
         const imageUrls = [];
         
         // ST uses metadata.node.max_res_url for the highest quality avatar
-        if (metadata.max_res_url) {
-            imageUrls.push(metadata.max_res_url);
+        if (metadataMaxResUrl) {
+            imageUrls.push(metadataMaxResUrl);
         }
         
         // Standard avatar URLs
-        if (metadata.avatar_url) {
-            imageUrls.push(metadata.avatar_url);
+        if (metadataAvatarUrl) {
+            imageUrls.push(metadataAvatarUrl);
         }
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
         imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
@@ -11114,6 +11443,7 @@ async function importChubCharacter(fullPath) {
         if (needsConversion) {
             console.log('[Chub Import] Converting WebP avatar to PNG');
             pngBuffer = await convertImageToPng(imageBuffer);
+            imageBuffer = null; // Release original buffer
         }
         
         debugLog('[Chub Import] Character card built from API:', {
@@ -11125,16 +11455,19 @@ async function importChubCharacter(fullPath) {
         });
         
         // Embed character card into the avatar PNG
-        const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
+        let embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
+        pngBuffer = null; // Release source buffer
         
         // Create file for ST import
-        const blob = new Blob([embeddedPng], { type: 'image/png' });
         const fileName = fullPath.split('/').pop() + '.png';
-        const file = new File([blob], fileName, { type: 'image/png' });
+        // Create File directly from Uint8Array (skip intermediate Blob to avoid double copy)
+        let file = new File([embeddedPng], fileName, { type: 'image/png' });
+        embeddedPng = null; // Release — data now lives in file
         
-        const formData = new FormData();
+        let formData = new FormData();
         formData.append('avatar', file);
         formData.append('file_type', 'png');
+        file = null; // FormData now holds the reference
         
         const csrfToken = getCSRFToken();
         
@@ -11143,6 +11476,7 @@ async function importChubCharacter(fullPath) {
             headers: { 'X-CSRF-Token': csrfToken },
             body: formData
         });
+        formData = null; // Release — fetch has consumed the body
         
         const responseText = await importResponse.text();
         debugLog('Import response:', importResponse.status, responseText);
@@ -11166,11 +11500,14 @@ async function importChubCharacter(fullPath) {
         const mediaUrls = findCharacterMediaUrls(characterCard);
         const galleryId = characterCard.data.extensions?.gallery_id || null;
         
+        // Release cached metadata for this character — download is done, free memory
+        chubMetadataCache.delete(fullPath);
+        
         return { 
             success: true, 
             fileName: result.file_name || fileName,
             hasGallery: hasGallery,
-            chubId: metadata.id || null,
+            chubId: metadataId || null,
             characterName: characterName,
             fullPath: fullPath,
             avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
@@ -11363,6 +11700,9 @@ startImportBtn?.addEventListener('click', async () => {
         
         const result = await importChubCharacter(fullPath);
         
+        // Yield to browser for GC + UI updates between imports (critical for mobile)
+        await new Promise(r => setTimeout(r, 50));
+        
         if (result.success) {
             successCount++;
             updateStats();
@@ -11517,6 +11857,43 @@ startImportBtn?.addEventListener('click', async () => {
 let pendingMediaCharacters = [];
 // Store pending gallery characters for download
 let pendingGalleryCharacters = [];
+// Track active import-summary downloads for cancel/cleanup
+let importSummaryDownloadState = {
+    active: false,
+    abort: false,
+    controller: null
+};
+
+function getImportSummaryFolderName(charInfo) {
+    if (charInfo?.galleryId) {
+        const safeName = (charInfo.name || 'Unknown').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 50);
+        return `${safeName}_${charInfo.galleryId}`;
+    }
+    return resolveGalleryFolderName(charInfo?.avatar || charInfo?.name);
+}
+
+function resetImportSummaryDownloads() {
+    importSummaryDownloadState.active = false;
+    importSummaryDownloadState.abort = false;
+    importSummaryDownloadState.controller = null;
+    pendingMediaCharacters = [];
+    pendingGalleryCharacters = [];
+}
+
+function handleImportSummaryCloseRequest() {
+    if (importSummaryDownloadState.active) {
+        const confirmClose = confirm('Downloads are still running. Stop and close?');
+        if (!confirmClose) return;
+        importSummaryDownloadState.abort = true;
+        importSummaryDownloadState.controller?.abort();
+        importSummaryDownloadState.active = false;
+        pendingMediaCharacters = [];
+        pendingGalleryCharacters = [];
+    } else {
+        resetImportSummaryDownloads();
+    }
+    hideModal('importSummaryModal');
+}
 
 /**
  * Show import summary modal with 2 rows: gallery and/or embedded media
@@ -11528,11 +11905,13 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
     const modal = document.getElementById('importSummaryModal');
     const galleryRow = document.getElementById('importSummaryGalleryRow');
     const galleryDesc = document.getElementById('importSummaryGalleryDesc');
-    const galleryDownloadBtn = document.getElementById('importSummaryGalleryDownloadBtn');
     const mediaRow = document.getElementById('importSummaryMediaRow');
     const mediaDesc = document.getElementById('importSummaryMediaDesc');
-    const downloadBtn = document.getElementById('importSummaryDownloadBtn');
     const downloadAllBtn = document.getElementById('importSummaryDownloadAllBtn');
+    const progressWrap = document.getElementById('importSummaryProgress');
+    const progressFill = document.getElementById('importSummaryProgressFill');
+    const progressLabel = document.getElementById('importSummaryProgressLabel');
+    const progressCount = document.getElementById('importSummaryProgressCount');
     
     if (!modal) return;
     
@@ -11545,30 +11924,29 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
     galleryRow?.classList.add('hidden');
     mediaRow?.classList.add('hidden');
     
-    // Show gallery row if there are gallery characters
+    const includeChubGallery = getSetting('includeChubGallery') !== false;
+
+    // Show gallery row if there are gallery characters (disabled when setting off)
     if (galleryCharacters.length > 0 && galleryRow) {
         if (galleryCharacters.length === 1) {
             if (galleryDesc) {
-                galleryDesc.textContent = 'Additional artwork available on ChubAI';
+                galleryDesc.textContent = includeChubGallery
+                    ? 'Additional artwork available on ChubAI'
+                    : 'Additional artwork available on ChubAI (disabled in settings)';
             }
         } else {
             if (galleryDesc) {
-                galleryDesc.textContent = `${galleryCharacters.length} characters have gallery images`;
+                galleryDesc.textContent = includeChubGallery
+                    ? `${galleryCharacters.length} characters have gallery images`
+                    : `${galleryCharacters.length} characters have gallery images (disabled in settings)`;
             }
         }
-        
-        // Reset gallery download button
-        if (galleryDownloadBtn) {
-            galleryDownloadBtn.disabled = false;
-            galleryDownloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
-            galleryDownloadBtn.classList.remove('success');
-        }
-        
+        galleryRow.classList.toggle('disabled', !includeChubGallery);
         galleryRow.classList.remove('hidden');
     }
     
     // Show media row if there are media characters with actual files
-    if (mediaCharacters.length > 0 && mediaRow && downloadBtn) {
+    if (mediaCharacters.length > 0 && mediaRow) {
         // Calculate total file count
         const totalFiles = mediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
         
@@ -11577,11 +11955,6 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
             if (mediaDesc) {
                 mediaDesc.textContent = `${totalFiles} remote file${totalFiles > 1 ? 's' : ''} that can be saved locally`;
             }
-            
-            // Reset download button
-            downloadBtn.disabled = false;
-            downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download';
-            downloadBtn.classList.remove('success');
             
             mediaRow.classList.remove('hidden');
         }
@@ -11593,22 +11966,27 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
         downloadAllBtn.innerHTML = '<i class="fa-solid fa-download"></i> Download All';
         downloadAllBtn.classList.remove('success');
     }
+
+    if (progressWrap && progressFill && progressLabel && progressCount) {
+        progressWrap.classList.add('hidden');
+        progressFill.style.width = '0%';
+        progressLabel.textContent = 'Preparing downloads...';
+        progressCount.textContent = '0/0';
+    }
     
     modal.classList.remove('hidden');
 }
 
 // Import Summary Modal Event Listeners
-on('closeImportSummaryModal', 'click', () => {
-    hideModal('importSummaryModal');
-    pendingMediaCharacters = [];
-    pendingGalleryCharacters = [];
-});
+on('closeImportSummaryModal', 'click', handleImportSummaryCloseRequest);
 
 // Download All button - downloads both gallery and embedded media
 on('importSummaryDownloadAllBtn', 'click', async () => {
     const btn = document.getElementById('importSummaryDownloadAllBtn');
-    const galleryBtn = document.getElementById('importSummaryGalleryDownloadBtn');
-    const mediaBtn = document.getElementById('importSummaryDownloadBtn');
+    const progressWrap = document.getElementById('importSummaryProgress');
+    const progressFill = document.getElementById('importSummaryProgressFill');
+    const progressLabel = document.getElementById('importSummaryProgressLabel');
+    const progressCount = document.getElementById('importSummaryProgressCount');
     
     // If already done, close the modal
     if (btn.classList.contains('success')) {
@@ -11618,7 +11996,7 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
         return;
     }
     
-    const hasGallery = pendingGalleryCharacters.length > 0;
+    const hasGallery = pendingGalleryCharacters.length > 0 && getSetting('includeChubGallery') !== false;
     const hasMedia = pendingMediaCharacters.length > 0;
     
     if (!hasGallery && !hasMedia) {
@@ -11628,44 +12006,65 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
+
+    importSummaryDownloadState.active = true;
+    importSummaryDownloadState.abort = false;
+    importSummaryDownloadState.controller?.abort();
+    importSummaryDownloadState.controller = new AbortController();
     
     let totalGallerySuccess = 0;
     let totalMediaSuccess = 0;
+    let wasAborted = false;
+    let processedMediaFiles = 0;
+    const totalMediaFiles = pendingMediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
+
+    const setProgress = (label, current, total) => {
+        if (!progressWrap || !progressFill || !progressLabel || !progressCount) return;
+        progressWrap.classList.remove('hidden');
+        progressLabel.textContent = label;
+        if (typeof total === 'number' && total > 0) {
+            const pct = Math.min(100, Math.round((current / total) * 100));
+            progressFill.style.width = `${pct}%`;
+            progressCount.textContent = `${current}/${total}`;
+        } else {
+            progressFill.style.width = '20%';
+            progressCount.textContent = current ? String(current) : '0';
+        }
+    };
     
     // Download embedded media FIRST (takes precedence for media localization matching)
     if (hasMedia) {
-        if (mediaBtn) {
-            mediaBtn.disabled = true;
-            mediaBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-        }
-        
+        setProgress('Embedded media', 0, totalMediaFiles || 0);
         for (const charInfo of pendingMediaCharacters) {
-            // Use gallery_id directly if available for UUID folder, otherwise resolve from avatar/name
-            let folderName;
-            if (charInfo.galleryId) {
-                const safeName = (charInfo.name || 'Unknown').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 50);
-                folderName = `${safeName}_${charInfo.galleryId}`;
-            } else {
-                folderName = resolveGalleryFolderName(charInfo.avatar || charInfo.name);
+            if (importSummaryDownloadState.abort) {
+                wasAborted = true;
+                break;
             }
-            const result = await downloadEmbeddedMediaForCharacter(folderName, charInfo.mediaUrls || [], {});
+            const folderName = getImportSummaryFolderName(charInfo);
+            const result = await downloadEmbeddedMediaForCharacter(folderName, charInfo.mediaUrls || [], {
+                shouldAbort: () => importSummaryDownloadState.abort,
+                abortSignal: importSummaryDownloadState.controller.signal
+                ,
+                onProgress: () => {
+                    processedMediaFiles++;
+                    setProgress('Embedded media', processedMediaFiles, totalMediaFiles || 0);
+                }
+            });
+            if (result.aborted) {
+                wasAborted = true;
+                break;
+            }
             totalMediaSuccess += result.success;
-        }
-        
-        if (mediaBtn) {
-            mediaBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-            mediaBtn.classList.add('success');
         }
     }
     
     // Download gallery images SECOND (will skip duplicates already downloaded as embedded media)
-    if (hasGallery) {
-        if (galleryBtn) {
-            galleryBtn.disabled = true;
-            galleryBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-        }
-        
+    if (hasGallery && !wasAborted) {
         for (const charInfo of pendingGalleryCharacters) {
+            if (importSummaryDownloadState.abort) {
+                wasAborted = true;
+                break;
+            }
             let chubId = charInfo.chubId;
             if (!chubId && charInfo.fullPath) {
                 const metadata = await fetchChubMetadata(charInfo.fullPath);
@@ -11674,23 +12073,36 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
                 }
             }
             if (chubId) {
-                // Use gallery_id directly if available for UUID folder, otherwise resolve from avatar/name
-                let folderName;
-                if (charInfo.galleryId) {
-                    const safeName = (charInfo.name || 'Unknown').replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 50);
-                    folderName = `${safeName}_${charInfo.galleryId}`;
-                } else {
-                    folderName = resolveGalleryFolderName(charInfo.avatar || charInfo.name);
+                const folderName = getImportSummaryFolderName(charInfo);
+                const result = await downloadChubGalleryForCharacter(folderName, chubId, {
+                    shouldAbort: () => importSummaryDownloadState.abort,
+                    abortSignal: importSummaryDownloadState.controller.signal,
+                    onProgress: (current, total) => {
+                        const labelName = charInfo.name || 'ChubAI gallery';
+                        setProgress(`ChubAI gallery: ${labelName}`, current, total);
+                    }
+                });
+                if (result.aborted) {
+                    wasAborted = true;
+                    break;
                 }
-                const result = await downloadChubGalleryForCharacter(folderName, chubId, {});
                 totalGallerySuccess += result.success;
             }
         }
-        
-        if (galleryBtn) {
-            galleryBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-            galleryBtn.classList.add('success');
+    }
+    
+    importSummaryDownloadState.active = false;
+    importSummaryDownloadState.controller = null;
+    if (wasAborted) {
+        showToast('Downloads cancelled', 'info');
+        if (progressWrap && progressFill && progressLabel && progressCount) {
+            progressWrap.classList.add('hidden');
+            progressFill.style.width = '0%';
+            progressLabel.textContent = 'Preparing downloads...';
+            progressCount.textContent = '0/0';
         }
+        resetImportSummaryDownloads();
+        return;
     }
     
     btn.disabled = false;
@@ -11704,135 +12116,15 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     } else {
         showToast('All files already exist', 'info');
     }
-    
-    pendingGalleryCharacters = [];
-    pendingMediaCharacters = [];
-});
 
-// Download Chub gallery button
-on('importSummaryGalleryDownloadBtn', 'click', async () => {
-    const btn = document.getElementById('importSummaryGalleryDownloadBtn');
-    
-    if (pendingGalleryCharacters.length === 0) {
-        showToast('No gallery characters to download', 'info');
-        return;
+    if (progressWrap && progressFill && progressLabel && progressCount) {
+        progressWrap.classList.add('hidden');
+        progressFill.style.width = '0%';
+        progressLabel.textContent = 'Preparing downloads...';
+        progressCount.textContent = '0/0';
     }
-    
-    // Disable and show loading
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching...';
-    
-    let totalSuccess = 0;
-    let totalSkipped = 0;
-    let totalErrors = 0;
-    let processedChars = 0;
-    
-    for (const charInfo of pendingGalleryCharacters) {
-        const characterName = charInfo.name;
-        let chubId = charInfo.chubId;
-        
-        // If we don't have chubId, try to fetch it
-        if (!chubId && charInfo.fullPath) {
-            btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${++processedChars}/${pendingGalleryCharacters.length}`;
-            const metadata = await fetchChubMetadata(charInfo.fullPath);
-            if (metadata && metadata.id) {
-                chubId = metadata.id;
-            }
-        }
-        
-        if (!chubId) {
-            debugLog(`[GalleryDownload] Could not find chubId for ${characterName}`);
-            totalErrors++;
-            continue;
-        }
-        
-        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${characterName}...`;
-        
-        // Use avatar if available to resolve unique folder, fallback to name
-        const folderName = resolveGalleryFolderName(charInfo.avatar || characterName);
-        
-        const result = await downloadChubGalleryForCharacter(folderName, chubId, {
-            onProgress: (current, total) => {
-                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${current}/${total}`;
-            }
-        });
-        
-        totalSuccess += result.success;
-        totalSkipped += result.skipped;
-        totalErrors += result.errors;
-    }
-    
-    // Show result
-    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-    btn.classList.add('success');
-    
-    if (totalSuccess > 0) {
-        showToast(`Downloaded ${totalSuccess} gallery image${totalSuccess > 1 ? 's' : ''}`, 'success');
-        fetchCharacters(true);
-    } else if (totalSkipped > 0) {
-        showToast('All gallery images already exist', 'info');
-    } else if (totalErrors > 0) {
-        showToast('Failed to download gallery images', 'error');
-    } else {
-        showToast('No gallery images to download', 'info');
-    }
-    
-    pendingGalleryCharacters = [];
-});
 
-// Download embedded media button
-on('importSummaryDownloadBtn', 'click', async () => {
-    const btn = document.getElementById('importSummaryDownloadBtn');
-    
-    if (pendingMediaCharacters.length === 0) {
-        showToast('No files to download', 'info');
-        return;
-    }
-    
-    // Calculate total files for progress
-    const totalFiles = pendingMediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
-    let processedFiles = 0;
-    
-    // Disable and show loading with progress
-    btn.disabled = true;
-    btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 0/${totalFiles}`;
-    
-    let totalSuccess = 0;
-    let totalSkipped = 0;
-    let totalErrors = 0;
-    
-    for (const charInfo of pendingMediaCharacters) {
-        const characterName = charInfo.name;
-        const mediaUrls = charInfo.mediaUrls || [];
-        
-        // Use avatar if available to resolve unique folder, fallback to name
-        const folderName = resolveGalleryFolderName(charInfo.avatar || characterName);
-        
-        const result = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
-            onProgress: (current, total) => {
-                processedFiles++;
-                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${processedFiles}/${totalFiles}`;
-            }
-        });
-        totalSuccess += result.success;
-        totalSkipped += result.skipped;
-        totalErrors += result.errors;
-    }
-    
-    // Show result
-    btn.innerHTML = '<i class="fa-solid fa-check"></i>';
-    btn.classList.add('success');
-    
-    if (totalSuccess > 0) {
-        showToast(`Downloaded ${totalSuccess} file${totalSuccess > 1 ? 's' : ''}`, 'success');
-        fetchCharacters(true);
-    } else if (totalSkipped > 0) {
-        showToast('All files already exist', 'info');
-    } else {
-        showToast('No new files to download', 'info');
-    }
-    
-    pendingMediaCharacters = [];
+    resetImportSummaryDownloads();
 });
 
 // ==============================================
@@ -13616,7 +13908,7 @@ document.getElementById('closeGalleryInfoModalBtn')?.addEventListener('click', (
  * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
  */
 async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
     
     let successCount = 0;
     let errorCount = 0;
@@ -13635,7 +13927,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
     
     for (let i = 0; i < mediaUrls.length; i++) {
         // Check for abort signal
-        if (shouldAbort && shouldAbort()) {
+        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
             return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, aborted: true };
         }
         
@@ -13647,11 +13939,12 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         const logEntry = onLog ? onLog(`Checking ${displayUrl}`, 'pending') : null;
         
         // Download to memory first to check hash (with 30s timeout)
-        const downloadResult = await downloadMediaToMemory(url, 30000);
+        let downloadResult = await downloadMediaToMemory(url, 30000, abortSignal);
         
         if (!downloadResult.success) {
             errorCount++;
             if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed: ${displayUrl} - ${downloadResult.error}`, 'error');
+            downloadResult = null;
             if (onProgress) onProgress(i + 1, mediaUrls.length);
             continue;
         }
@@ -13698,6 +13991,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             if (needsRename) {
                 // Rename to proper localized_media_* format (pass downloadResult since we have it)
                 const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult);
+                downloadResult = null; // Release after rename
                 if (renameResult.success) {
                     renamedCount++;
                     const action = isChubGalleryFile ? 'Converted' : (hasWrongExtension ? 'Fixed extension' : 'Renamed');
@@ -13708,6 +14002,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
                 }
             } else {
                 skippedCount++;
+                downloadResult = null; // Release — already localized, no action needed
                 if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
             }
             debugLog(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
@@ -13718,6 +14013,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         // Not a duplicate, save the file
         if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saving ${displayUrl}...`, 'pending');
         const result = await saveMediaFromMemory(downloadResult, url, folderName, fileIndex);
+        downloadResult = null; // Release after save
         
         if (result.success) {
             successCount++;
@@ -13730,6 +14026,9 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         }
         
         if (onProgress) onProgress(i + 1, mediaUrls.length);
+        
+        // Yield to browser for GC between media uploads (critical for mobile)
+        await new Promise(r => setTimeout(r, 50));
     }
     
     return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, aborted: false };
@@ -13894,6 +14193,7 @@ async function getExistingFileHashes(characterName) {
         const safeFolderName = sanitizeFolderName(characterName);
         
         // Calculate hash for each existing file
+        // Process one at a time and null the buffer immediately to keep peak memory low
         for (const file of files) {
             const fileName = (typeof file === 'string') ? file : file.name;
             if (!fileName) continue;
@@ -13906,8 +14206,9 @@ async function getExistingFileHashes(characterName) {
             try {
                 const fileResponse = await fetch(localPath);
                 if (fileResponse.ok) {
-                    const buffer = await fileResponse.arrayBuffer();
+                    let buffer = await fileResponse.arrayBuffer();
                     const hash = await calculateHash(buffer);
+                    buffer = null; // Release immediately — critical for mobile memory
                     hashMap.set(hash, { fileName, localPath });
                 }
             } catch (e) {
@@ -14095,15 +14396,52 @@ function validateMediaContent(arrayBuffer, contentType) {
     return { valid: false, detectedType: null, reason: 'Unknown or invalid media format' };
 }
 
-async function downloadMediaToMemory(url, timeoutMs = 30000) {
+/**
+ * Convert ArrayBuffer to base64 string directly without intermediate Blob/FileReader.
+ * Uses chunked btoa: processes 3072-byte groups (multiple of 3 for valid base64),
+ * collects chunk strings, then joins once at the end.
+ *
+ * Memory profile for 5MB input:
+ *   - bytes view: 0 (shares buffer)
+ *   - per-chunk overhead: ~7KB (3KB binary + 4KB base64), immediately GC-eligible
+ *   - parts array: ~1700 string references (~14KB)
+ *   - final join: ~6.67MB result string
+ *   - Peak: ~18MB (buffer + parts + join result)
+ *
+ * Previous Array approach was ~53MB peak for the same input.
+ */
+function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.length;
+    // 3072 bytes = 1024 triplets → 4096 base64 chars per chunk.
+    // Small enough for String.fromCharCode.apply (well under stack limits).
+    const GROUP = 3072;
+    const parts = [];
+    for (let i = 0; i < len; i += GROUP) {
+        const chunk = bytes.subarray(i, Math.min(i + GROUP, len));
+        parts.push(btoa(String.fromCharCode.apply(null, chunk)));
+    }
+    return parts.join('');
+}
+
+async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null) {
     try {
         let response;
         let usedProxy = false;
-        
-        // Create abort controller for timeout
+
+        // Create abort controller for timeout and external abort
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-        
+        let abortListener = null;
+
+        if (abortSignal) {
+            if (abortSignal.aborted) {
+                throw new DOMException('Aborted', 'AbortError');
+            }
+            abortListener = () => controller.abort();
+            abortSignal.addEventListener('abort', abortListener, { once: true });
+        }
+
         try {
             // Try direct fetch first
             try {
@@ -14130,6 +14468,9 @@ async function downloadMediaToMemory(url, timeoutMs = 30000) {
             }
         } finally {
             clearTimeout(timeoutId);
+            if (abortSignal && abortListener) {
+                abortSignal.removeEventListener('abort', abortListener);
+            }
         }
         
         const arrayBuffer = await response.arrayBuffer();
@@ -14177,7 +14518,6 @@ async function downloadMediaToMemory(url, timeoutMs = 30000) {
 async function saveMediaFromMemory(downloadResult, url, folderName, index) {
     try {
         const { arrayBuffer, contentType } = downloadResult;
-        const blob = new Blob([arrayBuffer], { type: contentType });
         
         // Determine file extension from content type (detected via magic bytes)
         let extension = 'png'; // Default for images
@@ -14244,25 +14584,31 @@ async function saveMediaFromMemory(downloadResult, url, folderName, index) {
         // Generate local filename
         const filenameBase = `localized_media_${index}_${sanitizedName}`;
         
-        // Convert blob to base64
-        const base64Data = await new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const result = reader.result;
-                const base64 = result.includes(',') ? result.split(',')[1] : result;
-                resolve(base64);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-        });
+        // Convert arrayBuffer to base64 then release the buffer immediately.
+        // This prevents holding both the raw buffer (5MB) and the base64 string (6.7MB)
+        // simultaneously during the upload await — critical for mobile memory.
+        let base64Data = arrayBufferToBase64(arrayBuffer);
+        // Break the reference so the ArrayBuffer can be GC'd during upload
+        downloadResult.arrayBuffer = null;
         
-        // Get CSRF token
-        // Save file
-        const saveResponse = await apiRequest(ENDPOINTS.IMAGES_UPLOAD, 'POST', {
+        // Build JSON body, then release the base64 string — the JSON body contains it.
+        const bodyStr = JSON.stringify({
             image: base64Data,
             filename: filenameBase,
             format: extension,
             ch_name: folderName
+        });
+        base64Data = null; // Release — serialized into bodyStr
+        
+        // Use fetch directly (instead of apiRequest) so we control the body lifecycle
+        const csrfToken = getCSRFToken();
+        const saveResponse = await fetch(`${API_BASE}${ENDPOINTS.IMAGES_UPLOAD}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: bodyStr
         });
         
         if (!saveResponse.ok) {
@@ -14483,6 +14829,13 @@ localizeMediaBtn?.addEventListener('click', async () => {
     
     // Phase 2: If character is linked to ChubAI, also download gallery
     if (hasChubLink) {
+        const includeChubGallery = getSetting('includeChubGallery') !== false;
+        if (!includeChubGallery) {
+            addLocalizeLogEntry('', 'divider');
+            addLocalizeLogEntry(`ChubAI Gallery (${chubInfo.fullPath})`, 'info');
+            addLocalizeLogEntry('  ⚠ Skipped: disabled in settings (Include ChubAI Gallery)', 'warning');
+            localizeStatus.textContent = 'ChubAI gallery skipped (disabled in settings).';
+        } else {
         addLocalizeLogEntry('', 'divider');
         addLocalizeLogEntry(`ChubAI Gallery (${chubInfo.fullPath})`, 'info');
         localizeStatus.textContent = 'Downloading ChubAI gallery...';
@@ -14521,6 +14874,7 @@ localizeMediaBtn?.addEventListener('click', async () => {
         // Refresh sprites grid - pass character object for unique folder support
         if (result.success > 0 && activeChar) {
             fetchCharacterImages(activeChar);
+        }
         }
     }
     
@@ -18642,6 +18996,12 @@ let chubTimelineSort = 'newest'; // Sort for timeline view (client-side)
 let chubFollowedAuthors = []; // Cache of followed author usernames
 let chubUserFavoriteIds = new Set(); // Cache of user's favorited character IDs
 let chubCurrentUsername = null; // Current logged-in username
+let chubCardLookup = new Map();
+let chubTimelineLookup = new Map();
+let chubDelegatesInitialized = false;
+let chubDetailFetchController = null; // AbortController for in-flight detail fetches
+const chubDetailCache = new Map();
+const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (stripped entries only)
 
 // Local library lookup for marking characters as "In Library"
 let localLibraryLookup = {
@@ -18723,6 +19083,18 @@ function isCharInLocalLibrary(chubChar) {
     }
     
     return false;
+}
+
+function getChubFullPath(char) {
+    return char.fullPath || char.full_path || '';
+}
+
+function buildChubLookup(targetMap, characters) {
+    targetMap.clear();
+    for (const char of characters) {
+        const path = getChubFullPath(char);
+        if (path) targetMap.set(path, char);
+    }
 }
 
 // Dynamic tags - populated from ChubAI API
@@ -19079,6 +19451,8 @@ function setupCreatorNotesResize(iframe) {
             if (typeof ResizeObserver !== 'undefined') {
                 resizeObserver = new ResizeObserver(measureAndApply);
                 resizeObserver.observe(wrapper);
+                // Store on iframe so cleanup can disconnect it
+                iframe._resizeObserver = resizeObserver;
             }
             
             // Handle lazy-loaded images
@@ -19109,8 +19483,31 @@ function setupCreatorNotesResize(iframe) {
  * @param {string} charName - Character name for placeholder replacement
  * @param {HTMLElement} container - Container element to render into
  */
+/**
+ * Clean up an existing creator notes iframe — disconnect observer, blank src, remove DOM
+ * @param {HTMLElement} container - The container holding the iframe
+ */
+function cleanupCreatorNotesContainer(container) {
+    if (!container) return;
+    const iframe = container.querySelector('iframe');
+    if (iframe) {
+        // Disconnect the ResizeObserver to break circular references
+        if (iframe._resizeObserver) {
+            try { iframe._resizeObserver.disconnect(); } catch (e) { /* ignore */ }
+            iframe._resizeObserver = null;
+        }
+        // Clear onload to prevent stale closure from firing
+        iframe.onload = null;
+        try { iframe.src = 'about:blank'; } catch (e) { /* ignore */ }
+    }
+    container.innerHTML = '';
+}
+
 function renderCreatorNotesSecure(content, charName, container) {
     if (!content || !container) return;
+    
+    // Clean up any existing iframe + ResizeObserver before creating a new one
+    cleanupCreatorNotesContainer(container);
     
     // Check if rich rendering is enabled
     if (!getSetting('richCreatorNotes')) {
@@ -19128,7 +19525,6 @@ function renderCreatorNotesSecure(content, charName, container) {
     const iframeDoc = buildCreatorNotesIframeDoc(hardened);
     const iframe = createCreatorNotesIframe(iframeDoc);
     
-    container.innerHTML = '';
     container.appendChild(iframe);
     
     // Setup resize behavior
@@ -19308,8 +19704,13 @@ function initCreatorNotesHandlers() {
     const expandBtn = document.getElementById('creatorNotesExpandBtn');
     
     // Expand button opens fullscreen modal
+    // Use a named handler reference to prevent listener accumulation across modal opens
     if (expandBtn) {
-        expandBtn.addEventListener('click', async (e) => {
+        // Remove any previously attached handler before adding a new one
+        if (expandBtn._creatorNotesHandler) {
+            expandBtn.removeEventListener('click', expandBtn._creatorNotesHandler);
+        }
+        expandBtn._creatorNotesHandler = async (e) => {
             e.preventDefault();
             e.stopPropagation(); // Prevent toggling the details
             
@@ -19328,7 +19729,8 @@ function initCreatorNotesHandlers() {
             } else {
                 showToast('Creator notes not available', 'warning');
             }
-        });
+        };
+        expandBtn.addEventListener('click', expandBtn._creatorNotesHandler);
     }
 }
 
@@ -19440,14 +19842,14 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
         return;
     }
     
-    // Format all greetings with localization
-    const formattedGreetings = greetings.map((g, i) => {
-        let content = (g || '').trim();
+    // Only format the first greeting now; others lazily when navigated to
+    const formatGreeting = (text) => {
+        let content = (text || '').trim();
         if (urlMap && Object.keys(urlMap).length > 0) {
             content = replaceMediaUrlsInText(content, urlMap);
         }
         const formatted = formatRichText(content, charName);
-        const sanitized = DOMPurify.sanitize(formatted, {
+        return DOMPurify.sanitize(formatted, {
             ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 
                            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
                            'ul', 'ol', 'li', 'a', 'img', 'span', 'div', 'hr', 'table', 
@@ -19455,22 +19857,21 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
             ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel', 'width', 'height'],
             ALLOW_DATA_ATTR: false
         });
-        return { index: i + 1, content: sanitized };
-    });
+    };
     
     // Build navigation dots
-    const navHtml = formattedGreetings.map((g, i) => 
-        `<button type="button" class="greeting-nav-btn${i === 0 ? ' active' : ''}" data-index="${i}" title="Greeting #${g.index}">${g.index}</button>`
+    const navHtml = greetings.map((g, i) => 
+        `<button type="button" class="greeting-nav-btn${i === 0 ? ' active' : ''}" data-index="${i}" title="Greeting #${i + 1}">${i + 1}</button>`
     ).join('');
     
-    // Build greeting cards
-    const cardsHtml = formattedGreetings.map((g, i) => `
+    // Build greeting cards — only the first card has content, others render lazily
+    const cardsHtml = greetings.map((g, i) => `
         <div class="greeting-card" data-greeting-index="${i}" style="${i !== 0 ? 'display: none;' : ''}">
             <div class="greeting-header">
-                <div class="greeting-number">${g.index}</div>
+                <div class="greeting-number">${i + 1}</div>
                 <div class="greeting-label">Alternate Greeting</div>
             </div>
-            <div class="greeting-content">${g.content}</div>
+            <div class="greeting-content">${i === 0 ? formatGreeting(g) : ''}</div>
         </div>
     `).join('');
     
@@ -19526,9 +19927,18 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
             greetingNav.querySelectorAll('.greeting-nav-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             
-            // Show selected greeting, hide others
+            // Show selected greeting, hide others — lazy-render on first view
             modal.querySelectorAll('.greeting-card').forEach((card, i) => {
-                card.style.display = i === index ? '' : 'none';
+                if (i === index) {
+                    card.style.display = '';
+                    // Lazy-render if content is empty
+                    const contentEl = card.querySelector('.greeting-content');
+                    if (contentEl && !contentEl.innerHTML.trim()) {
+                        contentEl.innerHTML = formatGreeting(greetings[i]);
+                    }
+                } else {
+                    card.style.display = 'none';
+                }
             });
         });
     }
@@ -19567,9 +19977,13 @@ function initContentExpandHandlers() {
     const charName = document.getElementById('modalCharName')?.textContent || 'Character';
     
     // First Message expand - clickable title
+    // Use stored handler references to prevent listener accumulation across modal opens
     const firstMesTitleExpand = document.getElementById('firstMesTitleExpand');
     if (firstMesTitleExpand) {
-        firstMesTitleExpand.addEventListener('click', async () => {
+        if (firstMesTitleExpand._expandHandler) {
+            firstMesTitleExpand.removeEventListener('click', firstMesTitleExpand._expandHandler);
+        }
+        firstMesTitleExpand._expandHandler = async () => {
             const content = window.currentFirstMesContent;
             if (!content) {
                 showToast('No first message to display', 'warning');
@@ -19582,13 +19996,17 @@ function initContentExpandHandlers() {
                 urlMap = await buildMediaLocalizationMap(folderName, activeChar.avatar);
             }
             openContentFullscreen(content, 'First Message', 'fa-message', charName, urlMap);
-        });
+        };
+        firstMesTitleExpand.addEventListener('click', firstMesTitleExpand._expandHandler);
     }
     
     // Alt Greetings expand button
     const altGreetingsExpandBtn = document.getElementById('altGreetingsExpandBtn');
     if (altGreetingsExpandBtn) {
-        altGreetingsExpandBtn.addEventListener('click', async (e) => {
+        if (altGreetingsExpandBtn._expandHandler) {
+            altGreetingsExpandBtn.removeEventListener('click', altGreetingsExpandBtn._expandHandler);
+        }
+        altGreetingsExpandBtn._expandHandler = async (e) => {
             e.preventDefault();
             e.stopPropagation(); // Prevent toggling the details
             
@@ -19604,7 +20022,8 @@ function initContentExpandHandlers() {
                 urlMap = await buildMediaLocalizationMap(folderName, activeChar.avatar);
             }
             openAltGreetingsFullscreen(greetings, charName, urlMap);
-        });
+        };
+        altGreetingsExpandBtn.addEventListener('click', altGreetingsExpandBtn._expandHandler);
     }
 }
 
@@ -19622,6 +20041,8 @@ async function initChubView() {
     
     // Also sync NSFW toggle state
     updateNsfwToggleState();
+
+    setupChubGridDelegates();
     
     // Favorite button in character modal
     on('chubCharFavoriteBtn', 'click', toggleChubCharFavorite);
@@ -19829,12 +20250,18 @@ async function initChubView() {
     });
     
     // Character modal handlers
-    on('chubCharClose', 'click', () => hideModal('chubCharModal'));
+    on('chubCharClose', 'click', () => {
+        abortChubDetailFetch();
+        cleanupChubCharModal();
+        hideModal('chubCharModal');
+    });
     
     on('chubDownloadBtn', 'click', () => downloadChubCharacter());
     
     on('chubCharModal', 'click', (e) => {
         if (e.target.id === 'chubCharModal') {
+            abortChubDetailFetch();
+            cleanupChubCharModal();
             hideModal('chubCharModal');
         }
     });
@@ -20589,8 +21016,14 @@ async function loadChubTimeline(forceRefresh = false) {
             chubTimelineCharacters = characterNodes;
         } else {
             const existingPaths = new Set(chubTimelineCharacters.map(c => c.fullPath || c.full_path));
-            const newChars = characterNodes.filter(c => !existingPaths.has(c.fullPath || c.full_path));
-            chubTimelineCharacters = [...chubTimelineCharacters, ...newChars];
+            // Push new items instead of spread-copying the entire array
+            for (const c of characterNodes) {
+                const fp = c.fullPath || c.full_path;
+                if (!existingPaths.has(fp)) {
+                    chubTimelineCharacters.push(c);
+                    existingPaths.add(fp);
+                }
+            }
         }
         
         debugLog('[ChubTimeline] Total characters:', chubTimelineCharacters.length);
@@ -20630,8 +21063,8 @@ async function loadChubTimeline(forceRefresh = false) {
             }
         }
         
-        // Limit auto-loading to prevent infinite loops (max 15 pages)
-        if (shouldAutoLoad && chubTimelinePage < 15) {
+        // Limit auto-loading to prevent infinite loops (max 8 pages)
+        if (shouldAutoLoad && chubTimelinePage < 8) {
             debugLog('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
             chubTimelinePage++;
             await loadChubTimeline(false);
@@ -20868,8 +21301,8 @@ function sortTimelineCharacters(characters) {
 function renderChubTimeline() {
     const grid = document.getElementById('chubTimelineGrid');
     
-    // Apply client-side filtering
-    let filteredCharacters = [...chubTimelineCharacters];
+    // Apply client-side filtering (use slice instead of spread to avoid deopt on large arrays)
+    let filteredCharacters = chubTimelineCharacters.slice();
     
     // Feature filters (client-side for timeline)
     if (chubFilterImages) {
@@ -20900,6 +21333,7 @@ function renderChubTimeline() {
     
     // Check if filtering resulted in no characters
     if (sortedCharacters.length === 0 && chubTimelineCharacters.length > 0) {
+        chubTimelineLookup.clear();
         grid.innerHTML = `
             <div class="chub-timeline-empty">
                 <i class="fa-solid fa-filter"></i>
@@ -20909,29 +21343,9 @@ function renderChubTimeline() {
         `;
         return;
     }
-    
+
+    buildChubLookup(chubTimelineLookup, sortedCharacters);
     grid.innerHTML = sortedCharacters.map(char => createChubCard(char, true)).join('');
-    
-    // Add click handlers
-    grid.querySelectorAll('.chub-card').forEach(card => {
-        const fullPath = card.dataset.fullPath;
-        const char = sortedCharacters.find(c => c.fullPath === fullPath);
-        
-        card.addEventListener('click', (e) => {
-            // Don't open preview if clicking on author link
-            if (e.target.closest('.chub-card-creator-link')) return;
-            openChubCharPreview(char);
-        });
-        
-        // Author click handler
-        card.querySelector('.chub-card-creator-link')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const author = e.target.dataset.author;
-            if (author) {
-                filterByAuthor(author);
-            }
-        });
-    });
 }
 
 // ============================================================================
@@ -21365,7 +21779,9 @@ async function loadChubCharacters(forceRefresh = false) {
             // Extract popular tags from search results on first page
             extractChubTagsFromResults(nodes);
         } else {
-            chubCharacters = [...chubCharacters, ...nodes];
+            // Push new items instead of spread-copying the entire array
+            // (spread creates a full copy of all existing items on every "load more")
+            for (const node of nodes) chubCharacters.push(node);
         }
         
         chubHasMore = nodes.length >= 24;
@@ -21511,7 +21927,8 @@ async function loadChubFavorites(forceRefresh = false) {
         if (chubCurrentPage === 1) {
             chubCharacters = nodes;
         } else {
-            chubCharacters = [...chubCharacters, ...nodes];
+            // Push new items instead of spread-copying the entire array
+            for (const node of nodes) chubCharacters.push(node);
         }
         
         // Check if there's more data
@@ -21555,6 +21972,7 @@ function renderChubGrid() {
     }
     
     if (displayCharacters.length === 0) {
+        chubCardLookup.clear();
         const message = chubCharacters.length > 0 && chubFilterHideOwned
             ? 'All characters in this view are already in your library.'
             : 'Try a different search term or adjust your filters.';
@@ -21567,40 +21985,65 @@ function renderChubGrid() {
         `;
         return;
     }
-    
+
+    buildChubLookup(chubCardLookup, displayCharacters);
     grid.innerHTML = displayCharacters.map(char => createChubCard(char)).join('');
-    
-    // Add click handlers
-    grid.querySelectorAll('.chub-card').forEach(card => {
-        const fullPath = card.dataset.fullPath;
-        const char = displayCharacters.find(c => c.fullPath === fullPath);
-        
-        card.addEventListener('click', (e) => {
-            // Don't open preview if clicking on author link
-            if (e.target.closest('.chub-card-creator-link')) return;
-            openChubCharPreview(char);
-        });
-        
-        // Author click handler
-        card.querySelector('.chub-card-creator-link')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const author = e.target.dataset.author;
-            if (author) {
-                filterByAuthor(author);
+}
+
+function setupChubGridDelegates() {
+    if (chubDelegatesInitialized) return;
+
+    const grid = document.getElementById('chubGrid');
+    if (grid) {
+        grid.addEventListener('click', (e) => {
+            const authorLink = e.target.closest('.chub-card-creator-link');
+            if (authorLink) {
+                e.stopPropagation();
+                const author = authorLink.dataset.author;
+                if (author) filterByAuthor(author);
+                return;
             }
+
+            const card = e.target.closest('.chub-card');
+            if (!card) return;
+            const fullPath = card.dataset.fullPath;
+            const char = chubCardLookup.get(fullPath) || chubCharacters.find(c => getChubFullPath(c) === fullPath);
+            if (char) openChubCharPreview(char);
         });
-    });
+    }
+
+    const timelineGrid = document.getElementById('chubTimelineGrid');
+    if (timelineGrid) {
+        timelineGrid.addEventListener('click', (e) => {
+            const authorLink = e.target.closest('.chub-card-creator-link');
+            if (authorLink) {
+                e.stopPropagation();
+                const author = authorLink.dataset.author;
+                if (author) filterByAuthor(author);
+                return;
+            }
+
+            const card = e.target.closest('.chub-card');
+            if (!card) return;
+            const fullPath = card.dataset.fullPath;
+            const char = chubTimelineLookup.get(fullPath) || chubTimelineCharacters.find(c => getChubFullPath(c) === fullPath);
+            if (char) openChubCharPreview(char);
+        });
+    }
+
+    chubDelegatesInitialized = true;
 }
 
 function createChubCard(char, isTimeline = false) {
     const name = char.name || 'Unknown';
-    const creatorName = char.fullPath?.split('/')[0] || 'Unknown';
+    const fullPath = getChubFullPath(char);
+    const creatorName = fullPath.split('/')[0] || 'Unknown';
     const rating = char.rating ? char.rating.toFixed(1) : '0.0';
     const ratingCount = char.ratingCount || 0;
     // ChubAI's weird naming: starCount is actually downloads, n_favorites is the heart/favorite count
     const downloads = formatNumber(char.starCount || 0);
     const favorites = formatNumber(char.n_favorites || char.nFavorites || 0);
-    const avatarUrl = char.avatar_url || `https://avatars.charhub.io/avatars/${char.fullPath}/avatar.webp`;
+    const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
     
     // Check if this character is in local library
     const inLibrary = isCharInLocalLibrary(char);
@@ -21640,7 +22083,7 @@ function createChubCard(char, isTimeline = false) {
     const taglineTooltip = char.tagline ? escapeHtml(char.tagline) : '';
     
     return `
-        <div class="${cardClass}" data-full-path="${escapeHtml(char.fullPath || '')}" ${taglineTooltip ? `title="${taglineTooltip}"` : ''}>
+        <div class="${cardClass}" data-full-path="${escapeHtml(fullPath)}" ${taglineTooltip ? `title="${taglineTooltip}"` : ''}>
             <div class="chub-card-image">
                 <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.src='/img/ai4.png'">
                 ${char.nsfw ? '<span class="chub-nsfw-badge">NSFW</span>' : ''}
@@ -21672,7 +22115,76 @@ function formatNumber(num) {
     return num.toString();
 }
 
+function applyChubTagsClamp(tagsEl) {
+    if (!tagsEl) return;
+
+    const existingToggle = tagsEl.querySelector('.chub-tags-more');
+    if (existingToggle) existingToggle.remove();
+
+    tagsEl.querySelectorAll('.chub-tag-hidden').forEach(tag => {
+        tag.classList.remove('chub-tag-hidden');
+    });
+
+    tagsEl.classList.remove('chub-tags-collapsed', 'chub-tags-expanded');
+
+    const tags = Array.from(tagsEl.querySelectorAll('.chub-tag'));
+    if (!tags.length) return;
+
+    tagsEl.classList.add('chub-tags-collapsed');
+
+    const maxHeightValue = getComputedStyle(tagsEl).getPropertyValue('--chub-tags-max-height').trim();
+    const maxHeight = parseFloat(maxHeightValue) || tagsEl.clientHeight || 64;
+
+    let overflowIndex = -1;
+    for (let i = 0; i < tags.length; i++) {
+        const tag = tags[i];
+        const tagBottom = tag.offsetTop + tag.offsetHeight;
+        if (tagBottom > maxHeight + 2) {
+            overflowIndex = i;
+            break;
+        }
+    }
+
+    if (overflowIndex === -1) {
+        tagsEl.classList.remove('chub-tags-collapsed');
+        return;
+    }
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'chub-tag chub-tags-more';
+    toggle.textContent = '...';
+    toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isCollapsed = tagsEl.classList.contains('chub-tags-collapsed');
+        if (isCollapsed) {
+            tagsEl.classList.remove('chub-tags-collapsed');
+            tagsEl.classList.add('chub-tags-expanded');
+            tagsEl.querySelectorAll('.chub-tag-hidden').forEach(tag => tag.classList.remove('chub-tag-hidden'));
+            tagsEl.appendChild(toggle);
+        } else {
+            applyChubTagsClamp(tagsEl);
+        }
+    });
+
+    const insertIndex = Math.max(overflowIndex - 1, 0);
+    tagsEl.insertBefore(toggle, tags[insertIndex]);
+    for (let i = insertIndex; i < tags.length; i++) {
+        tags[i].classList.add('chub-tag-hidden');
+    }
+}
+
+function abortChubDetailFetch() {
+    if (chubDetailFetchController) {
+        try { chubDetailFetchController.abort(); } catch (e) { /* ignore */ }
+        chubDetailFetchController = null;
+    }
+}
+
 async function openChubCharPreview(char) {
+    // Abort any in-flight detail fetch from a previous preview
+    abortChubDetailFetch();
     chubSelectedChar = char;
     
     const modal = document.getElementById('chubCharModal');
@@ -21704,9 +22216,13 @@ async function openChubCharPreview(char) {
     const scenarioEl = document.getElementById('chubCharScenario');
     const firstMsgSection = document.getElementById('chubCharFirstMsgSection');
     const firstMsgEl = document.getElementById('chubCharFirstMsg');
+    const altGreetingsSection = document.getElementById('chubCharAltGreetingsSection');
+    const altGreetingsEl = document.getElementById('chubCharAltGreetings');
+    const altGreetingsCountEl = document.getElementById('chubCharAltGreetingsCount');
     
-    const avatarUrl = char.avatar_url || `https://avatars.charhub.io/avatars/${char.fullPath}/avatar.webp`;
-    const creatorName = char.fullPath?.split('/')[0] || 'Unknown';
+    const fullPath = getChubFullPath(char);
+    const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
+    const creatorName = fullPath.split('/')[0] || 'Unknown';
     
     avatarImg.src = avatarUrl;
     avatarImg.onerror = () => { avatarImg.src = '/img/ai4.png'; };
@@ -21724,7 +22240,7 @@ async function openChubCharPreview(char) {
     if (creatorExternal) {
         creatorExternal.href = `https://chub.ai/users/${creatorName}`;
     }
-    openInBrowserBtn.href = `https://chub.ai/characters/${char.fullPath}`;
+    openInBrowserBtn.href = `https://chub.ai/characters/${fullPath}`;
     const ratingCount = char.ratingCount || 0;
     ratingEl.innerHTML = `<i class="fa-solid fa-star"></i> ${char.rating ? char.rating.toFixed(1) : '0.0'}`;
     ratingEl.title = `${ratingCount} rating${ratingCount !== 1 ? 's' : ''}`;
@@ -21737,6 +22253,7 @@ async function openChubCharPreview(char) {
     // Tags
     const tags = char.topics || [];
     tagsEl.innerHTML = tags.map(t => `<span class="chub-tag">${escapeHtml(t)}</span>`).join('');
+    requestAnimationFrame(() => applyChubTagsClamp(tagsEl));
     
     // Stats
     tokensEl.textContent = formatNumber(char.nTokens || 0);
@@ -21756,7 +22273,7 @@ async function openChubCharPreview(char) {
     // Tagline
     if (char.tagline && char.tagline !== char.description) {
         taglineSection.style.display = 'block';
-        taglineEl.innerHTML = formatRichText(char.tagline, char.name, true);
+        taglineEl.innerHTML = sanitizeTaglineHtml(char.tagline, char.name);
     } else {
         taglineSection.style.display = 'none';
     }
@@ -21782,66 +22299,161 @@ async function openChubCharPreview(char) {
     personalitySection.style.display = 'none';
     scenarioSection.style.display = 'none';
     firstMsgSection.style.display = 'none';
+    if (altGreetingsSection) altGreetingsSection.style.display = 'none';
+    if (altGreetingsEl) altGreetingsEl.innerHTML = '';
     
     modal.classList.remove('hidden');
     
-    // Try to fetch detailed character info
-    try {
-        const detailUrl = `https://api.chub.ai/api/characters/${char.fullPath}?full=true`;
-        
-        const response = await fetch(detailUrl);
-        if (response.ok) {
-            const detailData = await response.json();
-            const node = detailData.node || detailData;
-            const def = node.definition || {};
-            
-            // Update Creator's Notes if node has better/different description than search result
-            // node.description is the PUBLIC listing description (Creator's Notes)
-            if (node.description && node.description !== char.description) {
-                renderCreatorNotesSecure(node.description, char.name, creatorNotesEl);
-            }
-            
-            // Character Definition (def.personality in ChubAI API = character description/definition for prompt)
-            // This is confusingly named in ChubAI's API - "personality" is actually the main character definition
-            if (def.personality) {
-                descSection.style.display = 'block';
-                descEl.innerHTML = formatRichText(def.personality, char.name, true);
-            }
-            
-            // Scenario  
-            if (def.scenario) {
-                scenarioSection.style.display = 'block';
-                scenarioEl.innerHTML = formatRichText(def.scenario, char.name, true);
-                // Store full content for expand view
-                scenarioEl.dataset.fullContent = def.scenario;
-            }
-            
-            // First message preview (truncated) - ChubAI uses first_message, not first_mes
-            const firstMsg = def.first_message || def.first_mes;
-            if (firstMsg) {
-                firstMsgSection.style.display = 'block';
-                const truncatedMsg = firstMsg.length > 800 
-                    ? firstMsg.substring(0, 800) + '...' 
-                    : firstMsg;
-                firstMsgEl.innerHTML = formatRichText(truncatedMsg, char.name, true);
-                // Store full content for expand view
-                firstMsgEl.dataset.fullContent = firstMsg;
-            }
-            
-            // Store full content for description/personality too
-            if (def.personality) {
-                descEl.dataset.fullContent = def.personality;
-            }
-            
-            // Update greetings count if we have better data
-            if (def.alternate_greetings?.length > 0) {
-                greetingsStat.style.display = 'flex';
-                greetingsCount.textContent = def.alternate_greetings.length + 1;
-            }
+    const renderAltGreetings = (greetings) => {
+        if (!altGreetingsSection || !altGreetingsEl) return;
+        if (!Array.isArray(greetings) || greetings.length === 0) {
+            altGreetingsSection.style.display = 'none';
+            altGreetingsEl.innerHTML = '';
+            if (altGreetingsCountEl) altGreetingsCountEl.textContent = '';
+            window.currentChubAltGreetings = [];
+            return;
         }
-    } catch (e) {
-        debugLog('[ChubAI] Could not fetch detailed character info:', e.message);
-        // Modal still works with basic info
+        const buildPreview = (text) => {
+            const cleaned = (text || '').replace(/\s+/g, ' ').trim();
+            if (!cleaned) return 'No content';
+            return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
+        };
+        altGreetingsSection.style.display = 'block';
+        // Build HTML with empty bodies — content is rendered lazily on toggle to save memory
+        altGreetingsEl.innerHTML = greetings.map((greeting, idx) => {
+            const label = `#${idx + 1}`;
+            const preview = escapeHtml(buildPreview(greeting));
+            return `
+                <details class="chub-alt-greeting" data-greeting-idx="${idx}">
+                    <summary>
+                        <span class="chub-alt-greeting-index">${label}</span>
+                        <span class="chub-alt-greeting-preview">${preview}</span>
+                        <span class="chub-alt-greeting-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+                    </summary>
+                    <div class="chub-alt-greeting-body"></div>
+                </details>
+            `;
+        }).join('');
+        // Lazy-render greeting body on first open (avoids formatRichText for ALL greetings at once)
+        altGreetingsEl.querySelectorAll('details.chub-alt-greeting').forEach(details => {
+            details.addEventListener('toggle', function onToggle() {
+                if (!details.open) return;
+                const body = details.querySelector('.chub-alt-greeting-body');
+                if (body && !body.dataset.rendered) {
+                    const idx = parseInt(details.dataset.greetingIdx, 10);
+                    if (greetings[idx] != null) {
+                        body.innerHTML = formatRichText(greetings[idx], char.name, true);
+                    }
+                    body.dataset.rendered = '1';
+                }
+            }, { once: true });
+        });
+        if (altGreetingsCountEl) altGreetingsCountEl.textContent = `(${greetings.length})`;
+        window.currentChubAltGreetings = greetings;
+    };
+
+    // Render from basic data if already present
+    renderAltGreetings(char.alternate_greetings || []);
+
+    const applyDetailData = (node) => {
+        if (!node) return;
+        const def = node.definition || {};
+
+        // Update Creator's Notes if node has better/different description than search result
+        // node.description is the PUBLIC listing description (Creator's Notes)
+        if (node.description && node.description !== char.description) {
+            renderCreatorNotesSecure(node.description, char.name, creatorNotesEl);
+        }
+
+        // Character Definition (def.personality in ChubAI API = character description/definition for prompt)
+        // This is confusingly named in ChubAI's API - "personality" is actually the main character definition
+        if (def.personality) {
+            descSection.style.display = 'block';
+            descEl.innerHTML = formatRichText(def.personality, char.name, true);
+            descEl.dataset.fullContent = def.personality;
+        }
+
+        // Scenario
+        if (def.scenario) {
+            scenarioSection.style.display = 'block';
+            scenarioEl.innerHTML = formatRichText(def.scenario, char.name, true);
+            scenarioEl.dataset.fullContent = def.scenario;
+        }
+
+        // First message - ChubAI uses first_message, not first_mes
+        const firstMsg = def.first_message || def.first_mes;
+        if (firstMsg) {
+            firstMsgSection.style.display = 'block';
+            firstMsgEl.innerHTML = formatRichText(firstMsg, char.name, true);
+            firstMsgEl.dataset.fullContent = firstMsg;
+        }
+
+        // Update greetings count if we have better data
+        if (def.alternate_greetings?.length > 0) {
+            greetingsStat.style.display = 'flex';
+            greetingsCount.textContent = def.alternate_greetings.length + 1;
+        }
+
+        // Alternate greetings list
+        if (def.alternate_greetings) {
+            renderAltGreetings(def.alternate_greetings);
+        }
+    };
+
+    const cachedDetail = fullPath ? chubDetailCache.get(fullPath) : null;
+    if (cachedDetail) {
+        // LRU refresh: move to end of Map insertion order
+        chubDetailCache.delete(fullPath);
+        chubDetailCache.set(fullPath, cachedDetail);
+        applyDetailData(cachedDetail);
+    }
+
+    if (!cachedDetail && fullPath) {
+        // Try to fetch detailed character info
+        chubDetailFetchController = new AbortController();
+        const fetchSignal = chubDetailFetchController.signal;
+        try {
+            const detailUrl = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
+
+            const response = await fetch(detailUrl, { signal: fetchSignal });
+            if (response.ok) {
+                const detailData = await response.json();
+                // If modal was closed or a different character was opened while 
+                // we were fetching, discard the result to avoid stale rendering
+                if (fetchSignal.aborted || chubSelectedChar !== char) {
+                    debugLog('[ChubAI] Detail fetch completed but modal moved on — discarding');
+                } else {
+                    const node = detailData.node || detailData;
+                    // Strip heavy data we never display — character_book (lorebook) can be
+                    // 100KB-1MB by itself, mes_example and extensions add more.
+                    // Only keep fields actually used in applyDetailData.
+                    const stripped = {
+                        description: node.description,
+                        definition: node.definition ? {
+                            personality: node.definition.personality,
+                            scenario: node.definition.scenario,
+                            first_message: node.definition.first_message,
+                            first_mes: node.definition.first_mes,
+                            alternate_greetings: node.definition.alternate_greetings,
+                        } : undefined,
+                    };
+                    // Enforce LRU cap — evict oldest entries
+                    while (chubDetailCache.size >= CHUB_DETAIL_CACHE_MAX) {
+                        const oldestKey = chubDetailCache.keys().next().value;
+                        chubDetailCache.delete(oldestKey);
+                    }
+                    chubDetailCache.set(fullPath, stripped);
+                    applyDetailData(stripped);
+                }
+            }
+        } catch (e) {
+            if (e.name === 'AbortError') {
+                debugLog('[ChubAI] Detail fetch aborted (modal closed)');
+            } else {
+                debugLog('[ChubAI] Could not fetch detailed character info:', e.message);
+            }
+            // Modal still works with basic info
+        }
     }
 }
 
@@ -22023,8 +22635,46 @@ async function toggleChubCharFavorite() {
     }
 }
 
+/**
+ * Clean up memory held by the ChubAI character modal.
+ * Releases window globals, dataset.fullContent, alt greetings HTML, and iframe content.
+ * Critical for mobile where memory is limited.
+ */
+function cleanupChubCharModal() {
+    // Release window globals
+    window.currentChubAltGreetings = null;
+    
+    const modal = document.getElementById('chubCharModal');
+    if (modal) {
+        // Clear heavy dataset.fullContent stored on DOM elements
+        modal.querySelectorAll('[data-full-content]').forEach(el => {
+            delete el.dataset.fullContent;
+        });
+        
+        // Clear all rendered section content (can hold large formatRichText HTML)
+        const sectionIds = [
+            'chubCharAltGreetings',   // alt greetings list (was wrong ID before!)
+            'chubCharDescription',    // character description
+            'chubCharScenario',       // scenario
+            'chubCharFirstMsg',       // first message
+            'chubCharTagline',        // tagline
+        ];
+        for (const id of sectionIds) {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = '';
+        }
+        
+        // Clear creator notes iframe — disconnect ResizeObserver and release its document
+        const creatorNotesEl = document.getElementById('chubCreatorNotes');
+        cleanupCreatorNotesContainer(creatorNotesEl);
+    }
+}
+
 async function downloadChubCharacter() {
     if (!chubSelectedChar) return;
+    
+    // Abort any in-flight detail fetch — we're downloading now, no need for preview data
+    abortChubDetailFetch();
     
     const downloadBtn = document.getElementById('chubDownloadBtn');
     const originalHtml = downloadBtn.innerHTML;
@@ -22035,11 +22685,17 @@ async function downloadChubCharacter() {
     let inheritedGalleryId = null;
     
     try {
+        // Free heavy caches before download to maximize available memory (critical for mobile)
+        chubDetailCache.clear();
+        chubMetadataCache.clear();
+        // Yield to browser for GC of cleared caches before allocating download buffers
+        await new Promise(r => setTimeout(r, 100));
+        
         // Use the same method as the working importChubCharacter function
         const fullPath = chubSelectedChar.fullPath;
         
         // Fetch complete character data from the API
-        const metadata = await fetchChubMetadata(fullPath);
+        let metadata = await fetchChubMetadata(fullPath);
         
         if (!metadata || !metadata.definition) {
             throw new Error('Could not fetch character data from API');
@@ -22102,6 +22758,13 @@ async function downloadChubCharacter() {
         // Build the character card from API metadata (uses ST's exact field mapping)
         // This always has the LATEST version data, unlike chara_card_v2.png which may be stale
         const characterCard = buildCharacterCardFromChub(metadata);
+        // Capture fields we need after the card is built, then release the full metadata
+        const metadataHasGallery = metadata.hasGallery || false;
+        const metadataId = metadata.id || null;
+        const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
+        const metadataMaxResUrl = metadata.max_res_url || null;
+        const metadataAvatarUrl = metadata.avatar_url || null;
+        metadata = null;
         
         // Ensure extensions object exists
         if (!characterCard.data.extensions) {
@@ -22112,8 +22775,9 @@ async function downloadChubCharacter() {
         const existingChub = characterCard.data.extensions.chub || {};
         characterCard.data.extensions.chub = {
             ...existingChub,
-            id: metadata.id || existingChub.id || null,
+            id: metadataId || existingChub.id || null,
             full_path: fullPath,
+            tagline: metadataTagline || existingChub.tagline || '',
             linkedAt: new Date().toISOString()
         };
         
@@ -22133,8 +22797,8 @@ async function downloadChubCharacter() {
         const imageUrls = [];
         
         // ST uses metadata.node.max_res_url for highest quality avatar
-        if (metadata.max_res_url) {
-            imageUrls.push(metadata.max_res_url);
+        if (metadataMaxResUrl) {
+            imageUrls.push(metadataMaxResUrl);
         }
         
         // Add avatar URL from selected character if available
@@ -22143,8 +22807,8 @@ async function downloadChubCharacter() {
         }
         
         // Add avatar URL from metadata if available
-        if (metadata.avatar_url) {
-            imageUrls.push(metadata.avatar_url);
+        if (metadataAvatarUrl) {
+            imageUrls.push(metadataAvatarUrl);
         }
         
         // Add standard avatar URLs as fallback
@@ -22191,6 +22855,7 @@ async function downloadChubCharacter() {
         if (needsConversion) {
             debugLog('[ChubDownload] Converting WebP avatar to PNG...');
             pngBuffer = await convertImageToPng(imageBuffer);
+            imageBuffer = null; // Release original buffer — pngBuffer is now the source
         }
         
         debugLog('[ChubDownload] Character card built from API:', {
@@ -22202,16 +22867,19 @@ async function downloadChubCharacter() {
         });
         
         // Embed character card into avatar PNG
-        const embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
+        let embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
+        pngBuffer = null; // Release source buffer after embedding
         
         // Create file for ST import
-        const blob = new Blob([embeddedPng], { type: 'image/png' });
         const fileName = fullPath.split('/').pop() + '.png';
-        const file = new File([blob], fileName, { type: 'image/png' });
+        // Create File directly from Uint8Array (skip intermediate Blob to avoid double copy)
+        let file = new File([embeddedPng], fileName, { type: 'image/png' });
+        embeddedPng = null; // Release — data now lives in file
         
-        const formData = new FormData();
+        let formData = new FormData();
         formData.append('avatar', file);
         formData.append('file_type', 'png');
+        file = null; // FormData now holds the reference
         
         const csrfToken = getCSRFToken();
         
@@ -22220,6 +22888,7 @@ async function downloadChubCharacter() {
             headers: { 'X-CSRF-Token': csrfToken },
             body: formData
         });
+        formData = null; // Release — fetch has consumed the body
         
         const responseText = await importResponse.text();
         debugLog('[ChubDownload] Import response:', importResponse.status, responseText);
@@ -22239,8 +22908,11 @@ async function downloadChubCharacter() {
             throw new Error('Import failed: Server returned error');
         }
         
-        // Close the character modal
+        // Close the character modal and free download metadata
+        cleanupChubCharModal();
         document.getElementById('chubCharModal').classList.add('hidden');
+        // Remove the just-imported entry — it's no longer needed and frees memory
+        chubMetadataCache.delete(fullPath);
         
         showToast(`Downloaded "${characterName}" successfully!`, 'success');
         
@@ -22249,7 +22921,7 @@ async function downloadChubCharacter() {
         const assignedGalleryId = characterCard.data.extensions?.gallery_id || null;
         
         const mediaUrls = findCharacterMediaUrls(characterCard);
-        const hasGallery = metadata.hasGallery || false;
+        const hasGallery = metadataHasGallery;
         const hasMedia = mediaUrls.length > 0;
         
         if ((hasGallery || hasMedia) && getSetting('notifyAdditionalContent') !== false) {
@@ -22257,7 +22929,7 @@ async function downloadChubCharacter() {
                 galleryCharacters: hasGallery ? [{
                     name: characterName,
                     fullPath: fullPath,
-                    chubId: metadata.id || null,
+                    chubId: metadataId,
                     url: `https://chub.ai/characters/${fullPath}`,
                     avatar: localAvatarFileName,
                     galleryId: assignedGalleryId
@@ -22273,6 +22945,11 @@ async function downloadChubCharacter() {
         }
         
         // === REFRESH + SYNC ===
+        // Yield to browser for GC before heavy refresh (critical for mobile memory).
+        // 500ms gives mobile browsers enough time to collect the download pipeline garbage
+        // (embeddedPng, canvas backing stores, Blob internals, etc.) before allocating
+        // the full character list reload.
+        await new Promise(r => setTimeout(r, 500));
         await fetchCharacters(true);
         
         // Register gallery folder mappings using actual avatar filenames.
