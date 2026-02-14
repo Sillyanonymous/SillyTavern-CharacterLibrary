@@ -715,9 +715,12 @@
         gap: 4px;
         padding: 8px 10px;
     }
-    .vt-diff-label { font-size: 0.78rem; min-width: unset; }
+    .vt-diff-label { font-size: 0.78rem; min-width: unset; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
     .vt-diff-vals { width: 100%; font-size: 0.78rem; }
-    .vt-diff-header { padding: 8px 10px; min-height: 44px; }
+    .vt-diff-header { padding: 8px 10px; min-height: 44px; flex-wrap: wrap; gap: 6px; }
+    .vt-diff-stats { max-width: 100%; gap: 3px 4px; }
+    .vt-stat { font-size: 0.68rem; padding: 1px 4px; }
+    .vt-lb-counts { font-size: 0.8em; margin-left: 4px; gap: 3px; }
     .vt-diff-content { max-height: 220px; font-size: 0.78rem; }
     .vt-diff-line { padding: 2px 8px 2px 4px; }
 
@@ -1110,6 +1113,17 @@
         font-size: 0.75rem;
         font-weight: 600;
     }
+
+    /* Card update lorebook header — prevent overflow on mobile */
+    .card-update-diff-item.long-text .card-update-diff-header {
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 8px 10px;
+    }
+    .card-update-diff-item.long-text .card-update-diff-header label { flex-shrink: 1; min-width: 0; }
+    .card-update-diff-stats { font-size: 0.75em; white-space: nowrap; }
+    .lorebook-entry-counts { font-size: 0.78em; margin-left: 4px; gap: 3px; }
+    .lorebook-diff-summary { font-size: 0.78em; }
 
     .card-update-diff-item.short {
         flex-direction: column;

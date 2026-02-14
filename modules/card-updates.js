@@ -47,7 +47,9 @@ const COMPARABLE_FIELDS = {
     'character_book': 'Embedded Lorebook',
 };
 
-let batchFieldSelection = new Set(Object.keys(COMPARABLE_FIELDS));
+let batchFieldSelection = new Set(
+    Object.keys(COMPARABLE_FIELDS).filter(k => k !== 'character_book')
+);
 
 // Fields that should use text diff view
 const LONG_TEXT_FIELDS = new Set([
@@ -552,6 +554,13 @@ function compareCards(localData, remoteCard, allowedFields = null) {
         // Treat missing/null/empty lorebooks as equivalent
         if (field === 'character_book') {
             if (lorebooksEqual(localValue, remoteValue)) continue;
+            // Deeper semantic check: fuzzy-match entries to see if anything truly changed
+            const localEntries = localValue?.entries || [];
+            const remoteEntries = remoteValue?.entries || [];
+            const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
+            const modified = matched.filter(m => m.changedFields.length > 0);
+            const metaDiffs = compareLorebookMeta(localValue, remoteValue);
+            if (added.length === 0 && removed.length === 0 && modified.length === 0 && metaDiffs.length === 0) continue;
             diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
             continue;
         }
@@ -794,14 +803,28 @@ function renderLorebookDiff(diff, charKey, idx) {
     const modified = matched.filter(m => m.changedFields.length > 0);
     const metaDiffs = compareLorebookMeta(localBook, remoteBook);
 
+    // "removed" = entries in local but not remote. These are user-added entries, not creator deletions.
+    const userAdded = removed;
+
+    // Nothing actually changed after fuzzy matching — skip
+    if (added.length === 0 && userAdded.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
+
     const statParts = [];
-    if (added.length > 0) statParts.push(`${added.length} added`);
-    if (removed.length > 0) statParts.push(`${removed.length} removed`);
+    if (added.length > 0) statParts.push(`${added.length} new from creator`);
+    if (userAdded.length > 0) statParts.push(`${userAdded.length} user-added`);
     if (modified.length > 0) statParts.push(`${modified.length} modified`);
     if (metaDiffs.length > 0) statParts.push(`${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed`);
-    const stats = statParts.length > 0 ? statParts.join(', ') : 'identical';
+    const stats = statParts.join(', ');
 
     let entriesHtml = '';
+
+    // Summary of what will happen on apply
+    const summaryParts = [];
+    if (matched.length > 0) summaryParts.push(`${matched.length} matched with remote`);
+    if (added.length > 0) summaryParts.push(`${added.length} new entries from remote will be added`);
+    if (userAdded.length > 0) summaryParts.push(`${userAdded.length} local-only (not in remote)`);
+    if (modified.length > 0) summaryParts.push(`${modified.length} matched entries have changes`);
+    entriesHtml += `<div class="lorebook-diff-summary">${summaryParts.join('. ')}.</div>`;
 
     if (metaDiffs.length > 0) {
         entriesHtml += `<div class="lorebook-diff-meta-section">
@@ -825,13 +848,13 @@ function renderLorebookDiff(diff, charKey, idx) {
         </div>`;
     }
 
-    for (const entry of removed) {
+    for (const entry of userAdded) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
-        entriesHtml += `<div class="lorebook-diff-entry removed">
-            <span class="lorebook-diff-badge removed">&minus;</span>
+        entriesHtml += `<div class="lorebook-diff-entry user-added">
+            <span class="lorebook-diff-badge user-added">&#9733;</span>
             <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
-            ${keys ? `<span class="lorebook-diff-entry-keys">${CoreAPI.escapeHtml(keys)}</span>` : ''}
+            <span class="lorebook-diff-entry-keys">${keys ? CoreAPI.escapeHtml(keys) + ' · ' : ''}user-added, will be kept</span>
         </div>`;
     }
 
@@ -852,6 +875,8 @@ function renderLorebookDiff(diff, charKey, idx) {
         </div>`;
     }
 
+    const mergedCount = matched.length + added.length + userAdded.length;
+
     return `
         <div class="card-update-diff-item long-text lorebook">
             <div class="card-update-diff-header">
@@ -861,7 +886,7 @@ function renderLorebookDiff(diff, charKey, idx) {
                     <span class="lorebook-entry-counts">
                         <span class="local-count">${localEntries.length}</span>
                         <i class="fa-solid fa-arrow-right"></i>
-                        <span class="remote-count">${remoteEntries.length}</span>
+                        <span class="remote-count">${mergedCount}</span>
                     </span>
                 </label>
                 <span class="card-update-diff-stats">${stats}</span>
@@ -920,20 +945,44 @@ function matchLorebookEntries(localEntries, remoteEntries) {
 }
 
 function lorebookEntryMatchScore(a, b) {
-    const aKeys = new Set((a.keys || []).map(k => k.toLowerCase()));
-    const bKeys = new Set((b.keys || []).map(k => k.toLowerCase()));
+    // Expand keys: split comma-separated strings into individual keys
+    const expandKeys = (entry) => {
+        const raw = entry.keys || [];
+        const expanded = new Set();
+        for (const k of raw) {
+            for (const part of String(k).split(',')) {
+                const trimmed = part.toLowerCase().trim();
+                if (trimmed) expanded.add(trimmed);
+            }
+        }
+        return expanded;
+    };
+
+    const aKeys = expandKeys(a);
+    const bKeys = expandKeys(b);
 
     if (aKeys.size > 0 && bKeys.size > 0) {
         let intersection = 0;
         for (const k of aKeys) { if (bKeys.has(k)) intersection++; }
         const union = new Set([...aKeys, ...bKeys]).size;
-        if (union > 0) return intersection / union;
+        if (union > 0) {
+            const jaccard = intersection / union;
+            if (jaccard > 0) return jaccard;
+        }
     }
 
-    // Fallback: exact name/comment match
+    // Name/comment match (exact or substring)
     const aName = (a.comment || a.name || '').toLowerCase().trim();
     const bName = (b.comment || b.name || '').toLowerCase().trim();
-    if (aName && bName && aName === bName) return 1;
+    if (aName && bName) {
+        if (aName === bName) return 1;
+        if (aName.includes(bName) || bName.includes(aName)) return 0.8;
+    }
+
+    // Content similarity fallback — first 200 chars
+    const aCont = (a.content || '').slice(0, 200).toLowerCase().trim();
+    const bCont = (b.content || '').slice(0, 200).toLowerCase().trim();
+    if (aCont.length > 20 && bCont.length > 20 && aCont === bCont) return 0.7;
 
     return 0;
 }
@@ -992,6 +1041,52 @@ function lorebooksEqual(a, b) {
         if (JSON.stringify(na) !== JSON.stringify(nb)) return false;
     }
     return true;
+}
+
+function hasRemoteLorebookMeta(book) {
+    if (!book) return false;
+    return Object.keys(LOREBOOK_META_FIELDS).some(k => book[k] != null);
+}
+
+/**
+ * Merge remote lorebook into local.
+ * - Matched entries: replaced with remote version
+ * - Remote-only entries: added
+ * - Local-only entries: kept only if keepLocalOnly is true
+ * - Meta fields: taken from remote when available
+ */
+function mergeLorebookForApply(localBook, remoteBook, keepLocalOnly = true) {
+    const localEntries = localBook?.entries || [];
+    const remoteEntries = remoteBook?.entries || [];
+
+    if (remoteEntries.length === 0 && localEntries.length === 0) {
+        return remoteBook || localBook;
+    }
+
+    const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
+
+    // Use remote meta when available, fall back to local meta
+    const base = remoteBook ? { ...remoteBook } : { ...(localBook || {}) };
+    const merged = { ...base };
+
+    const mergedEntries = [];
+    // Matched entries: use remote version
+    for (const m of matched) {
+        mergedEntries.push(m.remote);
+    }
+    // Remote-only (new from creator): add them
+    for (const entry of added) {
+        mergedEntries.push(entry);
+    }
+    // Local-only: keep only if user chose to
+    if (keepLocalOnly) {
+        for (const entry of removed) {
+            mergedEntries.push(entry);
+        }
+    }
+
+    merged.entries = mergedEntries;
+    return merged;
 }
 
 function compareLorebookMeta(localBook, remoteBook) {
@@ -1088,10 +1183,14 @@ function showBatchCheckModal(characters) {
     if (fieldGridEl) {
         fieldGridEl.innerHTML = Object.entries(COMPARABLE_FIELDS).map(([field, label]) => {
             const isChecked = batchFieldSelection.has(field);
+            const isLorebook = field === 'character_book';
+            const tooltip = isLorebook
+                ? 'title="Lorebook matching may misidentify entries the creator removed vs. ones you added locally. Review lorebook changes per-character instead."'
+                : '';
             return `
-                <label class="card-update-field-option">
+                <label class="card-update-field-option" ${tooltip}>
                     <input type="checkbox" data-field="${field}" ${isChecked ? 'checked' : ''}>
-                    <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}</span>
+                    <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}${isLorebook ? ' <i class="fa-solid fa-circle-info" style="opacity:0.4;font-size:0.8em;"></i>' : ''}</span>
                 </label>
             `;
         }).join('');
@@ -1249,8 +1348,20 @@ async function applySingleUpdates() {
     const updatedFields = {};
     checkboxes.forEach(cb => {
         const field = cb.dataset.field;
-        const remoteValue = getNestedValue(remoteData, field);
-        updatedFields[field] = remoteValue;
+        if (field === 'character_book') {
+            // Check the keep-local toggle inside this lorebook diff
+            const lbItem = cb.closest('.card-update-diff-item');
+            const keepToggle = lbItem?.querySelector('.lb-keep-local-toggle');
+            const keepLocal = keepToggle ? keepToggle.checked : false;
+            updatedFields[field] = mergeLorebookForApply(
+                getNestedValue(char.data || char, field),
+                getNestedValue(remoteData, field),
+                keepLocal
+            );
+        } else {
+            const remoteValue = getNestedValue(remoteData, field);
+            updatedFields[field] = remoteValue;
+        }
     });
     
     // Apply via CoreAPI
@@ -1313,8 +1424,17 @@ async function applyAllBatchUpdates() {
         // Apply all diffs for this character
         const updatedFields = {};
         for (const diff of diffs) {
-            const remoteValue = getNestedValue(remoteData, diff.field);
-            updatedFields[diff.field] = remoteValue;
+            if (diff.field === 'character_book') {
+                // Batch apply: don't keep local-only entries (no UI toggle available)
+                updatedFields[diff.field] = mergeLorebookForApply(
+                    getNestedValue(char.data || char, diff.field),
+                    getNestedValue(remoteData, diff.field),
+                    false
+                );
+            } else {
+                const remoteValue = getNestedValue(remoteData, diff.field);
+                updatedFields[diff.field] = remoteValue;
+            }
         }
         
         try {
@@ -2232,6 +2352,20 @@ function injectStyles() {
         .lorebook-diff-badge.added { background: rgba(76, 175, 80, 0.25); color: #81c784; }
         .lorebook-diff-badge.removed { background: rgba(244, 67, 54, 0.25); color: #ef9a9a; }
         .lorebook-diff-badge.modified { background: rgba(255, 152, 0, 0.25); color: #ffcc80; }
+        .lorebook-diff-badge.local-only { background: rgba(158, 158, 158, 0.25); color: #bdbdbd; font-size: 11px; }
+        .lorebook-diff-entry.local-only { opacity: 0.7; }
+
+        .lorebook-diff-summary {
+            padding: 6px 10px;
+            font-size: 0.82em;
+            color: var(--cl-text-secondary, #999);
+            border-bottom: 1px dashed rgba(255,255,255,0.08);
+            line-height: 1.4;
+        }
+
+        .lorebook-diff-local-only-section { padding: 6px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
+        .lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82em; color: var(--cl-text-secondary, #999); }
+        .lorebook-diff-keep-toggle input { accent-color: var(--accent, #7b68ee); }
 
         .lorebook-diff-entry-name {
             font-weight: 500;

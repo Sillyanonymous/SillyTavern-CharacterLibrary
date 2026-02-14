@@ -1021,25 +1021,24 @@ function renderDiffPreview(previewEl, localData, compareData, rawChubData) {
         // Lorebook needs semantic comparison (ST adds internal fields like uid, display_index)
         if (f.key === 'character_book') {
             if (lorebooksEqual(lv, rv)) continue;
+            const lbHtml = renderLorebookDiff(f, lv, rv);
+            if (!lbHtml) continue;
             diffCount++;
-            html += renderLorebookDiff(f, lv, rv);
+            html += lbHtml;
             continue;
         }
 
         if (normVal(lv) === normVal(rv)) continue;
-        diffCount++;
 
-        if (f.key === 'tags') {
-            html += renderTagsDiff(f, lv, rv);
-        } else if (f.key === 'alternate_greetings') {
-            html += renderGreetingsDiff(f, lv, rv);
-        } else if (f.key === 'character_book') {
-            html += renderLorebookDiff(f, lv, rv);
-        } else if (f.long) {
-            html += renderLongDiff(f, lv, rv);
-        } else {
-            html += renderShortDiff(f, lv, rv);
-        }
+        const rendered = (() => {
+            if (f.key === 'tags') return renderTagsDiff(f, lv, rv);
+            if (f.key === 'alternate_greetings') return renderGreetingsDiff(f, lv, rv);
+            if (f.long) return renderLongDiff(f, lv, rv);
+            return renderShortDiff(f, lv, rv);
+        })();
+        if (!rendered) continue;
+        diffCount++;
+        html += rendered;
     }
 
     if (diffCount === 0 && !html) {
@@ -1136,6 +1135,8 @@ function renderTagsDiff(field, localTags, remoteTags) {
     const removed = local.filter(t => !remoteSet.has(t.toLowerCase()));
     const kept = local.filter(t => remoteSet.has(t.toLowerCase()));
 
+    if (!added.length && !removed.length) return '';
+
     const stats = [];
     if (added.length) stats.push(`<span class="vt-stat added">+${added.length}</span>`);
     if (removed.length) stats.push(`<span class="vt-stat removed">-${removed.length}</span>`);
@@ -1210,7 +1211,7 @@ function renderGreetingsDiff(field, localGreets, remoteGreets) {
             </div>`;
     }
 
-    if (!blocks) blocks = '<span class="vt-empty">(identical)</span>';
+    if (!blocks) return '';
 
     return `
         <div class="vt-diff-item long">
@@ -1269,7 +1270,16 @@ async function restoreVersion() {
 
         const updates = {};
         for (const f of CARD_FIELDS) {
-            if (cardData[f] !== undefined) updates[f] = cardData[f];
+            if (cardData[f] !== undefined) {
+                if (f === 'character_book' && activeTab === 'remote') {
+                    // Read the keep-local toggle from the versions preview
+                    const keepToggle = paneContainer?.querySelector('.vt-lb-keep-local-toggle');
+                    const keepLocal = keepToggle ? keepToggle.checked : false;
+                    updates[f] = mergeLorebookForRestore(curData.character_book, cardData[f], keepLocal);
+                } else {
+                    updates[f] = cardData[f];
+                }
+            }
         }
 
         const success = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, updates);
@@ -1487,12 +1497,17 @@ function renderLorebookDiff(field, localBook, remoteBook) {
     const modified = matched.filter(m => m.changedFields.length > 0);
     const metaDiffs = compareLbMeta(localBook, remoteBook);
 
+    const localOnly = removed;
+
+    // Nothing actually changed — don't render this diff item at all
+    if (added.length === 0 && localOnly.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
+
     const statParts = [];
-    if (added.length > 0) statParts.push(`<span class="vt-stat added">+${added.length}</span>`);
-    if (removed.length > 0) statParts.push(`<span class="vt-stat removed">-${removed.length}</span>`);
+    if (added.length > 0) statParts.push(`<span class="vt-stat added">+${added.length} new</span>`);
+    if (localOnly.length > 0) statParts.push(`<span class="vt-stat local-only">${localOnly.length} local only</span>`);
     if (modified.length > 0) statParts.push(`<span class="vt-stat changed">${modified.length} modified</span>`);
     if (metaDiffs.length > 0) statParts.push(`<span class="vt-stat changed">${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''}</span>`);
-    const stats = statParts.length > 0 ? statParts.join(' ') : 'identical';
+    const stats = statParts.join(' ');
 
     let entriesHtml = '';
 
@@ -1518,14 +1533,23 @@ function renderLorebookDiff(field, localBook, remoteBook) {
         </div>`;
     }
 
-    for (const entry of removed) {
-        const name = lbEntryName(entry);
-        const keys = (entry.keys || []).slice(0, 4).join(', ');
-        entriesHtml += `<div class="vt-lb-entry removed">
-            <span class="vt-lb-badge removed">&minus;</span>
-            <span class="vt-lb-name">${esc(name)}</span>
-            ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
+    if (localOnly.length > 0) {
+        entriesHtml += `<div class="vt-lb-local-only-section">
+            <label class="vt-lb-keep-toggle">
+                <input type="checkbox" class="vt-lb-keep-local-toggle" checked>
+                <span>Keep ${localOnly.length} local-only entr${localOnly.length === 1 ? 'y' : 'ies'}</span>
+            </label>
         </div>`;
+        for (const entry of localOnly) {
+            const name = lbEntryName(entry);
+            const keys = (entry.keys || []).slice(0, 4).join(', ');
+            entriesHtml += `<div class="vt-lb-entry local-only">
+                <span class="vt-lb-badge local-only">?</span>
+                <span class="vt-lb-name">${esc(name)}</span>
+                ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
+                <span class="vt-lb-keys">local only</span>
+            </div>`;
+        }
     }
 
     for (const m of modified) {
@@ -1545,14 +1569,16 @@ function renderLorebookDiff(field, localBook, remoteBook) {
         </div>`;
     }
 
+    const mergedCount = matched.length + added.length + localOnly.length;
+
     return `
-        <div class="vt-diff-item long expanded">
+        <div class="vt-diff-item long" data-local-only-count="${localOnly.length}">
             <div class="vt-diff-header">
                 <span class="vt-diff-label">${fieldIcon(field)}${esc(field.label)}
                     <span class="vt-lb-counts">
                         <span>${localEntries.length}</span>
                         <i class="fa-solid fa-arrow-right"></i>
-                        <span>${remoteEntries.length}</span>
+                        <span>${mergedCount}</span>
                     </span>
                 </span>
                 <div class="vt-diff-stats">${stats}</div>
@@ -1606,19 +1632,41 @@ function matchLbEntries(localEntries, remoteEntries) {
 }
 
 function lbMatchScore(a, b) {
-    const aKeys = new Set((a.keys || []).map(k => k.toLowerCase()));
-    const bKeys = new Set((b.keys || []).map(k => k.toLowerCase()));
+    const expandKeys = (entry) => {
+        const raw = entry.keys || [];
+        const expanded = new Set();
+        for (const k of raw) {
+            for (const part of String(k).split(',')) {
+                const trimmed = part.toLowerCase().trim();
+                if (trimmed) expanded.add(trimmed);
+            }
+        }
+        return expanded;
+    };
+
+    const aKeys = expandKeys(a);
+    const bKeys = expandKeys(b);
 
     if (aKeys.size > 0 && bKeys.size > 0) {
         let intersection = 0;
         for (const k of aKeys) { if (bKeys.has(k)) intersection++; }
         const union = new Set([...aKeys, ...bKeys]).size;
-        if (union > 0) return intersection / union;
+        if (union > 0) {
+            const jaccard = intersection / union;
+            if (jaccard > 0) return jaccard;
+        }
     }
 
     const aName = (a.comment || a.name || '').toLowerCase().trim();
     const bName = (b.comment || b.name || '').toLowerCase().trim();
-    if (aName && bName && aName === bName) return 1;
+    if (aName && bName) {
+        if (aName === bName) return 1;
+        if (aName.includes(bName) || bName.includes(aName)) return 0.8;
+    }
+
+    const aCont = (a.content || '').slice(0, 200).toLowerCase().trim();
+    const bCont = (b.content || '').slice(0, 200).toLowerCase().trim();
+    if (aCont.length > 20 && bCont.length > 20 && aCont === bCont) return 0.7;
 
     return 0;
 }
@@ -1655,6 +1703,41 @@ function normalizeLbEntry(entry) {
         if (entry[f] !== undefined) out[f] = entry[f];
     }
     return out;
+}
+
+function hasRemoteLbMeta(book) {
+    if (!book) return false;
+    return Object.keys(LB_META_FIELDS).some(k => book[k] != null);
+}
+
+/**
+ * Merge remote lorebook into local.
+ * - Matched entries: replaced with remote version
+ * - Remote-only entries: added
+ * - Local-only entries: kept only if keepLocalOnly is true
+ * - Meta fields: taken from remote when available
+ */
+function mergeLorebookForRestore(localBook, remoteBook, keepLocalOnly = true) {
+    const localEntries = localBook?.entries || [];
+    const remoteEntries = remoteBook?.entries || [];
+
+    if (remoteEntries.length === 0 && localEntries.length === 0) {
+        return remoteBook || localBook;
+    }
+
+    const { matched, added, removed } = matchLbEntries(localEntries, remoteEntries);
+
+    const base = remoteBook ? { ...remoteBook } : { ...(localBook || {}) };
+    const merged = { ...base };
+    const mergedEntries = [];
+    for (const m of matched) mergedEntries.push(m.remote);
+    for (const entry of added) mergedEntries.push(entry);
+    if (keepLocalOnly) {
+        for (const entry of removed) mergedEntries.push(entry);
+    }
+
+    merged.entries = mergedEntries;
+    return merged;
 }
 
 function lorebooksEqual(a, b) {
@@ -2024,8 +2107,8 @@ function injectStyles() {
 
 .vt-diff-header { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; user-select: none; transition: background 0.1s; }
 .vt-diff-header:hover { background: rgba(255,255,255,0.04); }
-.vt-diff-stats { display: flex; gap: 5px; margin-left: auto; }
-.vt-stat { font-size: 0.72rem; font-family: monospace; padding: 1px 5px; border-radius: 4px; }
+.vt-diff-stats { display: flex; flex-wrap: wrap; gap: 3px 5px; margin-left: auto; justify-content: flex-end; max-width: 60%; }
+.vt-stat { font-size: 0.72rem; font-family: monospace; padding: 1px 5px; border-radius: 4px; white-space: nowrap; }
 .vt-stat.added { color: #89d185; background: rgba(137,209,133,0.1); }
 .vt-stat.removed { color: #f48771; background: rgba(244,135,113,0.1); }
 
@@ -2113,6 +2196,13 @@ function injectStyles() {
 .vt-lb-badge.added { background: rgba(137,209,133,0.2); color: #89d185; }
 .vt-lb-badge.removed { background: rgba(244,135,113,0.2); color: #f48771; }
 .vt-lb-badge.modified { background: rgba(255,180,80,0.2); color: #ffb450; }
+.vt-lb-badge.local-only { background: rgba(158,158,158,0.2); color: #bdbdbd; font-size: 11px; }
+.vt-lb-entry.local-only { opacity: 0.7; }
+
+.vt-lb-local-only-section { padding: 4px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
+.vt-lb-keep-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82em; color: var(--cl-text-secondary, #999); }
+.vt-lb-keep-toggle input { accent-color: var(--accent, #7b68ee); }
+.vt-stat.local-only { color: #bdbdbd; background: rgba(158,158,158,0.1); }
 .vt-lb-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .vt-lb-keys {
     font-size: 0.85em; color: var(--cl-text-secondary, #999);
