@@ -14,6 +14,120 @@
     --modal-bg: rgba(20, 20, 20, 0.85);
 }
 
+/* ========================================================================
+ * COMPONENT CATALOG
+ * ========================================================================
+ *
+ * BUTTONS
+ *   .glass-btn              — Translucent glass button (topbar, filters)
+ *   .glass-btn.icon-only    — Icon-only variant (tighter padding)
+ *   .action-btn             — Solid action button (.primary / .secondary / .danger)
+ *   .cl-btn                 — Module dialog button (.primary / .danger / .small)
+ *   .settings-action-btn    — Settings panel action button (.primary / .danger)
+ *
+ * INPUTS
+ *   .glass-input            — Standard text/textarea input
+ *   .glass-input-small      — Compact input (inside dropdowns/panels)
+ *   .cl-input               — Module dialog input
+ *
+ * SELECTS / DROPDOWNS
+ *   .custom-select-*        — Styled <select> replacement via initCustomSelect()
+ *   .dropdown-menu          — Dropdown panel (menus, popovers)
+ *   .dropdown-item          — Clickable row inside .dropdown-menu
+ *   .dropdown-section-title — Section header inside .dropdown-menu
+ *
+ * MODALS
+ *   .modal-glass            — Full-screen detail/viewer panel
+ *   .cl-modal               — Lightweight dialog overlay (confirm, edit)
+ *   .cl-modal-content       — Dialog box inside .cl-modal
+ *
+ * TAGS
+ *   .cl-tag                 — Pill-style tag (.removable variant adds ×)
+ *
+ * UTILITIES
+ *   .cl-hidden              — display: none !important
+ *   .hidden                 — display: none (general hide class)
+ *
+ * CSS VARIABLES
+ *   --accent, --text-primary, --glass-border, etc. — see :root above
+ *   --cl-accent, --cl-glass-bg, --cl-border, etc. — module vars (bottom of file)
+ * ======================================================================== */
+
+/* @canonical select-dropdown */
+
+.custom-select-container {
+    position: relative;
+    display: inline-flex;
+    transition: opacity 0.15s ease, visibility 0.15s ease;
+}
+
+.custom-select-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.custom-select-trigger .trigger-text {
+    flex: 1;
+}
+
+.custom-select-trigger .trigger-arrow {
+    font-size: 0.55rem;
+    opacity: 0.5;
+    transition: transform 0.2s;
+}
+
+.custom-select-trigger[aria-expanded="true"] .trigger-arrow {
+    transform: rotate(180deg);
+}
+
+/* Small variant — matches glass-select-small sizing */
+.custom-select-trigger.small {
+    padding: 5px 8px;
+    font-size: 0.8rem;
+    border-radius: 4px;
+}
+
+/* Menu — position: fixed, appended to <body> to escape overflow clipping */
+.dropdown-menu.custom-select-menu {
+    position: fixed;
+    z-index: 10000;
+    overflow-y: auto;
+    padding: 4px;
+    gap: 2px;
+}
+
+.custom-select-item {
+    padding: 5px 8px;
+    gap: 8px;
+    font-size: 0.82rem;
+    border-radius: 4px;
+}
+
+.custom-select-item .item-icon {
+    width: 14px;
+    font-size: 0.75rem;
+    text-align: center;
+    flex-shrink: 0;
+    opacity: 0.6;
+}
+
+.custom-select-item.selected .item-icon {
+    opacity: 1;
+}
+
+.custom-select-menu .dropdown-section-title {
+    padding: 4px 8px 2px;
+    margin-top: 2px;
+}
+
+.custom-select-item.selected {
+    color: var(--accent);
+    background: rgba(74, 158, 255, 0.1);
+}
+
 * {
     box-sizing: border-box;
     margin: 0;
@@ -48,6 +162,8 @@ body {
     padding: 0 20px;
     gap: 15px;
     z-index: 100;
+    overflow-x: clip;
+    overflow-y: visible;
 }
 
 .logo-area {
@@ -127,8 +243,11 @@ body {
 .filter-area {
     display: flex;
     gap: 10px;
+    flex-shrink: 1;
+    min-width: 0;
 }
 
+/* @canonical button */
 .glass-btn, .glass-select {
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid var(--glass-border);
@@ -140,6 +259,7 @@ body {
     transition: all 0.2s;
 }
 
+/* @deprecated — use initCustomSelect() */
 .glass-select option {
     background: var(--bg-secondary);
 }
@@ -202,12 +322,17 @@ body {
     border: 1px solid var(--glass-border);
     border-radius: 12px;
     overflow: hidden;
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+               box-shadow 0.3s cubic-bezier(0.25, 0.8, 0.25, 1),
+               border-color 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
     cursor: pointer;
     position: relative;
     aspect-ratio: 2/3;
     display: flex;
     flex-direction: column;
+    /* Containment: tells the browser each card is self-contained so adding/removing
+       cards during virtual scroll doesn't force re-layout of all siblings */
+    contain: layout style paint;
 }
 
 .char-card:hover {
@@ -424,17 +549,20 @@ body {
 /* Tag Autocomplete Dropdown */
 .tag-autocomplete {
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 0;
     right: 0;
     max-height: 200px;
     overflow-y: auto;
-    background: var(--glass-bg, rgba(30, 30, 40, 0.95));
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-top: none;
-    border-radius: 0 0 6px 6px;
+    background: rgba(24, 24, 32, 0.97);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
     z-index: 1000;
     display: none;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
 }
 
 .tag-autocomplete.visible {
@@ -498,6 +626,7 @@ body {
     pointer-events: none;
 }
 
+/* @canonical modal-full */
 .modal-glass {
     width: 90%;
     max-width: 1000px;
@@ -545,6 +674,7 @@ body {
     color: white;
 }
 
+/* @canonical button-solid */
 .action-btn {
     padding: 10px 24px;
     border-radius: 8px;
@@ -571,6 +701,22 @@ body {
 
 .action-btn.primary:active {
     transform: translateY(0);
+}
+
+/* Cancel / Cancelled button states for import */
+.action-btn.cancellable {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%) !important;
+    box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3) !important;
+}
+
+.action-btn.cancellable:hover {
+    box-shadow: 0 4px 16px rgba(231, 76, 60, 0.4) !important;
+    transform: translateY(-1px);
+}
+
+.action-btn.cancelled {
+    background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%) !important;
+    box-shadow: 0 2px 8px rgba(243, 156, 18, 0.3) !important;
 }
 
 .action-btn.secondary {
@@ -602,16 +748,14 @@ body {
     cursor: not-allowed;
 }
 
-/* Danger hover - turns red on hover */
-.action-btn.danger-hover:hover {
-    background: rgba(231, 76, 60, 0.2);
-    border-color: #e74c3c;
-    color: #ff6b6b;
+/* Danger hover - subtle at rest, red on hover */
+.action-btn.danger-hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border: 1px solid var(--glass-border);
 }
 
-/* Delete button special styling */
-.action-btn.secondary:hover[title="Delete Character"],
-#deleteCharBtn:hover {
+.action-btn.danger-hover:hover {
     background: rgba(231, 76, 60, 0.2);
     border-color: #e74c3c;
     color: #ff6b6b;
@@ -620,6 +764,21 @@ body {
 .action-btn.small {
     padding: 6px 14px;
     font-size: 0.85rem;
+}
+
+/* Inline copy button (folder mapping, table rows) */
+.copy-folder-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    border-radius: 4px;
+    transition: color 0.15s ease;
+}
+
+.copy-folder-btn:hover {
+    color: var(--accent);
 }
 
 /* Legacy Folder Indicator - small circle badge */
@@ -666,6 +825,23 @@ body {
 
 .alt-greeting-item {
     animation: fadeIn 0.2s ease;
+}
+
+.remove-alt-greeting-btn {
+    background: rgba(255, 100, 100, 0.2);
+    border: 1px solid rgba(255, 100, 100, 0.3);
+    color: #f88;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.remove-alt-greeting-btn:hover {
+    background: rgba(255, 100, 100, 0.35);
+    border-color: rgba(255, 100, 100, 0.5);
 }
 
 /* Lorebook Editor Section */
@@ -1023,6 +1199,7 @@ body {
 
 .modal-content-tabs {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
 }
@@ -1068,6 +1245,20 @@ body {
 
 .tab-pane.active {
     display: block;
+}
+
+#pane-versions.active,
+#pane-related.active {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#pane-versions #versionsTabContent {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .meta-info {
@@ -2541,6 +2732,7 @@ h3 {
     opacity: 0.8;
 }
 
+/* @canonical input */
 .glass-input {
     width: 100%;
     background: rgba(0,0,0,0.3);
@@ -2811,6 +3003,7 @@ textarea.glass-input {
     position: relative;
 }
 
+/* @canonical dropdown */
 .dropdown-menu {
     position: absolute;
     top: 100%;
@@ -2988,7 +3181,7 @@ textarea.glass-input {
     position: fixed;
     bottom: 30px;
     right: 30px;
-    z-index: 10000;
+    z-index: 10010;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -3088,6 +3281,13 @@ textarea.glass-input {
     border: 1px solid rgba(255, 200, 50, 0.3);
     border-radius: 8px;
     margin-bottom: 20px;
+}
+
+.lock-header-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
 }
 
 .edit-lock-header.unlocked {
@@ -5260,15 +5460,6 @@ textarea.glass-input {
     color: #e74c3c;
 }
 
-.action-btn.danger {
-    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-    box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
-}
-
-.action-btn.danger:hover {
-    background: linear-gradient(135deg, #c0392b 0%, #a93226 100%);
-}
-
 /* Pre-Import Duplicate Modal */
 .pre-import-duplicate-content {
     max-width: 850px;
@@ -5319,7 +5510,32 @@ textarea.glass-input {
     overflow-y: auto;
 }
 
-/* Responsive */
+/* Responsive — desktop only (mobile has its own overrides in library-mobile.css) */
+@media (min-width: 769px) and (max-width: 1250px) {
+    .char-duplicates-modal-content {
+        min-width: unset;
+        width: 98vw;
+    }
+
+    .char-dup-comparison {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+
+    .char-dup-divider {
+        flex-direction: row;
+        padding: 10px 0;
+    }
+
+    .char-dup-divider i {
+        transform: rotate(90deg);
+    }
+
+    .char-dup-card {
+        min-width: unset;
+    }
+}
+
 @media (max-width: 768px) {
     .char-dup-comparison {
         grid-template-columns: 1fr;
@@ -5729,10 +5945,79 @@ textarea.glass-input {
     letter-spacing: 0.5px;
 }
 
-/* Small button variant */
-.action-btn.small {
-    padding: 6px 12px;
-    font-size: 0.8rem;
+/* @canonical settings-action-btn */
+.settings-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.03) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.settings-action-btn i {
+    color: var(--accent);
+    font-size: 0.82rem;
+    opacity: 0.85;
+    transition: opacity 0.2s ease;
+}
+
+.settings-action-btn:hover {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.14) 0%, rgba(var(--accent-rgb), 0.05) 100%);
+    border-color: rgba(var(--accent-rgb), 0.35);
+    box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.12);
+    transform: translateY(-1px);
+}
+
+.settings-action-btn:hover i {
+    opacity: 1;
+}
+
+.settings-action-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
+}
+
+.settings-action-btn.primary {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(var(--accent-rgb), 0.08) 100%);
+    border-color: rgba(var(--accent-rgb), 0.25);
+}
+
+.settings-action-btn.primary i {
+    opacity: 1;
+}
+
+.settings-action-btn.primary:hover {
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.3) 0%, rgba(var(--accent-rgb), 0.14) 100%);
+    border-color: rgba(var(--accent-rgb), 0.45);
+    box-shadow: 0 2px 16px rgba(var(--accent-rgb), 0.18);
+}
+
+.settings-action-btn.danger {
+    color: #ff6b6b;
+    border-color: rgba(231, 76, 60, 0.15);
+}
+
+.settings-action-btn.danger i {
+    color: #ff6b6b;
+    opacity: 0.85;
+}
+
+.settings-action-btn.danger:hover {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.15) 0%, rgba(231, 76, 60, 0.05) 100%);
+    border-color: rgba(231, 76, 60, 0.4);
+    box-shadow: 0 2px 12px rgba(231, 76, 60, 0.12);
+}
+
+.settings-action-btn.danger:hover i {
+    opacity: 1;
 }
 
 /* Responsive: collapse sidebar on small screens */
@@ -6178,6 +6463,238 @@ textarea.glass-input {
     border: none;
     border-top: 1px dashed rgba(255, 255, 255, 0.2);
     margin: 0;
+}
+
+/* Import Source Toggle */
+.import-source-toggle {
+    display: flex;
+    gap: 0;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+    background: rgba(0, 0, 0, 0.2);
+}
+
+.import-source-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    position: relative;
+}
+
+.import-source-btn:not(:last-child) {
+    border-right: 1px solid var(--glass-border);
+}
+
+.import-source-btn:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.import-source-btn.active {
+    background: rgba(74, 158, 255, 0.15);
+    color: var(--accent);
+    box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.import-source-btn i {
+    font-size: 0.85rem;
+}
+
+/* Import Source Panels */
+.import-source-panel {
+    transition: opacity 0.2s ease;
+}
+
+.import-source-panel.hidden {
+    display: none;
+}
+
+/* Import Drop Zone */
+.import-drop-zone {
+    width: 100%;
+    min-height: 200px;
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.15);
+    transition: all 0.25s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.import-drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(74, 158, 255, 0.08);
+    box-shadow: inset 0 0 20px rgba(74, 158, 255, 0.1);
+}
+
+.import-file-input {
+    position: absolute;
+    width: 0;
+    height: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.import-drop-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+    text-align: center;
+    min-height: 200px;
+}
+
+.import-drop-placeholder.hidden {
+    display: none;
+}
+
+.import-drop-placeholder i {
+    font-size: 2.5rem;
+    color: var(--accent);
+    opacity: 0.6;
+}
+
+.import-drop-placeholder span {
+    font-size: 0.95rem;
+    opacity: 0.8;
+}
+
+.import-browse-btn {
+    padding: 8px 20px;
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    margin-top: 4px;
+}
+
+.import-browse-btn:hover {
+    background: rgba(74, 158, 255, 0.25);
+    transform: translateY(-1px);
+}
+
+/* Import File List */
+.import-file-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px;
+    max-height: 252px;
+    overflow-y: auto;
+}
+
+.import-file-list.hidden {
+    display: none;
+}
+
+.import-file-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    transition: background 0.15s ease;
+}
+
+.import-file-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.import-file-item i.fa-file-image {
+    color: var(--accent);
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.import-file-item .import-file-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.import-file-item .import-file-size {
+    font-size: 0.75rem;
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.import-file-remove {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    opacity: 0.5;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.import-file-remove:hover {
+    opacity: 1;
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
+}
+
+/* Import File Count Bar */
+.import-file-count {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 6px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.import-file-count.hidden {
+    display: none;
+}
+
+.import-clear-files-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.import-clear-files-btn:hover {
+    color: #e74c3c;
+    background: rgba(231, 76, 60, 0.1);
 }
 
 /* ========================================
@@ -6833,7 +7350,8 @@ textarea.glass-input {
 }
 
 .bulk-summary-filter .glass-select,
-.bulk-summary-filter .glass-input {
+.bulk-summary-filter .glass-input,
+.bulk-summary-filter .custom-select-container {
     flex: 1;
     min-width: 120px;
 }
@@ -7556,6 +8074,13 @@ textarea.glass-input {
 .chat-message-text {
     white-space: pre-wrap;
     word-break: break-word;
+    overflow: hidden;
+}
+
+.chat-message-text img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
 }
 
 .chat-message-time {
@@ -7577,6 +8102,29 @@ textarea.glass-input {
     font-size: 0.8rem;
     font-style: italic;
     text-align: center;
+}
+
+/* Model badge */
+.chat-model-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: rgba(var(--accent-rgb), 0.15);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 10px;
+    font-size: 0.72rem;
+    color: var(--accent);
+    cursor: default;
+    white-space: nowrap;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chat-model-badge i {
+    font-size: 0.65rem;
+    flex-shrink: 0;
 }
 
 /* Empty chats state */
@@ -7761,9 +8309,8 @@ textarea.glass-input {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
 
-/* Ensure filters have transition when showing */
-#chubDiscoveryPreset,
-#chubTimelineSortHeader,
+[data-select-id="chubDiscoveryPreset"],
+[data-select-id="chubTimelineSortHeader"],
 .chub-more-filters {
     transition: opacity 0.15s ease, visibility 0.15s ease;
 }
@@ -7775,11 +8322,11 @@ textarea.glass-input {
 }
 
 /* Both sort dropdowns positioned in same spot */
-.chub-sort-container select {
+.chub-sort-container .custom-select-trigger {
     min-width: 175px;
 }
 
-#chubTimelineSortHeader {
+[data-select-id="chubTimelineSortHeader"] {
     position: absolute;
     top: 0;
     left: 0;
@@ -7926,7 +8473,7 @@ textarea.glass-input {
     gap: 8px;
 }
 
-#chubAuthorSortSelect {
+[data-select-id="chubAuthorSortSelect"] .custom-select-trigger {
     min-width: 150px;
     font-size: 0.85rem;
     padding: 6px 10px;
@@ -9357,7 +9904,8 @@ textarea.glass-input {
 }
 
 .related-results {
-    max-height: calc(100vh - 400px);
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
 }
@@ -9419,7 +9967,7 @@ textarea.glass-input {
     cursor: pointer;
     transition: all 0.2s ease;
     min-width: 0;
-    max-width: 100%;
+    overflow: hidden;
 }
 
 .related-card:hover {
@@ -9619,10 +10167,11 @@ textarea.glass-input {
     color: var(--accent);
 }
 
+/* Desktop: hide icon, show text only (mobile overrides to icon-only) */
 #infoTabBtn i {
-    margin-right: 4px;
-    font-size: 0.85em;
+    display: none;
 }
+
 
 #infoTabBtn.active {
     background: rgba(74, 158, 255, 0.15);
@@ -10210,7 +10759,7 @@ textarea.glass-input {
     flex-wrap: wrap;
 }
 
-.gallery-sync-buttons .action-btn {
+.gallery-sync-buttons .settings-action-btn {
     flex: 0 0 auto;
 }
 
@@ -10470,5 +11019,407 @@ textarea.glass-input {
     color: var(--text-muted);
     font-style: italic;
     text-align: center;
+}
+
+/* ==============================================
+   RESPONSIVE TOPBAR — progressive collapse
+   ============================================== */
+
+/* Stage 1: Compact view toggle (icons only) + hide tag label */
+@media (max-width: 1400px) {
+    .view-toggle-btn {
+        min-width: unset;
+        padding: 8px 12px;
+        gap: 0;
+        font-size: 0; /* hides bare text nodes (Characters, Chats, ChubAI) */
+    }
+    .view-toggle-btn i {
+        font-size: 0.85rem; /* restore icon size */
+    }
+
+    #tagFilterLabel {
+        display: none;
+    }
+
+    .search-area {
+        min-width: 160px;
+    }
+}
+
+/* Overflow items in ⋮ menu — hidden at wide widths, shown when topbar buttons are hidden */
+.topbar-overflow-item {
+    display: none;
+}
+.topbar-overflow-item-narrow {
+    display: none;
+}
+
+/* Stage 2: Hide refresh, gallery sync, multi-select toggle (moved to ⋮ menu) */
+@media (max-width: 1100px) {
+    .gallery-sync-container {
+        display: none;
+    }
+    #refreshBtn {
+        display: none;
+    }
+    #multiSelectToggleBtn {
+        display: none;
+    }
+
+    /* Show the overflow items in the ⋮ menu */
+    .topbar-overflow-item {
+        display: flex;
+    }
+
+    .topbar {
+        gap: 10px;
+        padding: 0 12px;
+    }
+
+    .search-area {
+        min-width: 140px;
+    }
+
+    .logo-area h1 {
+        font-size: 1rem;
+    }
+}
+
+/* ========================================
+ * Shared Module Styles
+ * Formerly in shared-styles.js, now statically loaded.
+ * These provide CSS variables and components used by
+ * modules (context-menu, batch-tagging, card-updates,
+ * character-versions, etc.)
+ * ======================================== */
+
+/* ---- Module CSS Variables ---- */
+:root {
+    --cl-accent-rgb: 74, 158, 255;
+    --cl-accent: rgb(var(--cl-accent-rgb));
+    --cl-accent-hover: color-mix(in srgb, var(--cl-accent), white 20%);
+    --cl-glass-bg: rgba(30, 30, 30, 0.95);
+    --cl-border: rgba(58, 58, 58, 0.6);
+    --cl-text-primary: var(--SmartThemeBodyColor, #e0e0e0);
+    --cl-text-secondary: var(--SmartThemeQuoteColor, #a0a0a0);
+    --cl-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+    --cl-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.2);
+    --cl-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+    --cl-shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.4);
+    --cl-success: #4caf50;
+    --cl-error: #f44336;
+    --cl-warning: #ff9800;
+}
+
+/* ---- Context Menu ---- */
+.cl-context-menu {
+    display: none;
+    position: fixed;
+    background: var(--cl-glass-bg);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(var(--cl-accent-rgb), 0.2);
+    border-radius: 12px;
+    box-shadow:
+        var(--cl-shadow-xl),
+        0 0 40px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    z-index: 10000;
+    min-width: 200px;
+    padding: 6px;
+    opacity: 0;
+    transform: scale(0.97);
+    transition: opacity 0.08s ease-out, transform 0.08s ease-out;
+}
+
+.cl-context-menu.visible {
+    display: block;
+    animation: clContextMenuSlide 0.15s ease forwards;
+}
+
+@keyframes clContextMenuSlide {
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.cl-context-menu-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.03s;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--cl-text-primary);
+    font-size: 14px;
+    user-select: none;
+}
+
+.cl-context-menu-item i {
+    width: 18px;
+    text-align: center;
+    opacity: 0.8;
+    font-size: 14px;
+}
+
+.cl-context-menu-item:hover {
+    background: rgba(var(--cl-accent-rgb), 0.2);
+}
+
+.cl-context-menu-item:hover i {
+    opacity: 1;
+}
+
+.cl-context-menu-item.danger {
+    color: #ff6b7a;
+}
+
+.cl-context-menu-item.danger:hover {
+    background: rgba(244, 67, 54, 0.25);
+}
+
+.cl-context-menu-item.secondary {
+    color: var(--cl-text-secondary);
+}
+
+.cl-context-menu-item.secondary:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.cl-context-menu-item.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.cl-context-menu-separator {
+    height: 1px;
+    background: var(--cl-border);
+    margin: 6px 0;
+}
+
+.cl-context-menu-header {
+    padding: 8px 14px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--cl-text-secondary);
+    font-weight: 600;
+}
+
+/* @canonical modal-dialog */
+.cl-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s, visibility 0.2s;
+}
+
+.cl-modal.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.cl-modal-content {
+    background: var(--cl-glass-bg);
+    border-radius: 12px;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--cl-shadow-xl);
+    border: 1px solid var(--cl-border);
+    transform: scale(0.95);
+    transition: transform 0.2s;
+}
+
+.cl-modal.visible .cl-modal-content {
+    transform: scale(1);
+}
+
+.cl-modal-header {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--cl-border);
+    gap: 12px;
+}
+
+.cl-modal-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: var(--cl-text-primary);
+    flex: 1;
+}
+
+.cl-modal-close {
+    background: none;
+    border: none;
+    color: var(--cl-text-primary);
+    cursor: pointer;
+    padding: 4px 8px;
+    font-size: 1.2em;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+}
+
+.cl-modal-close:hover {
+    opacity: 1;
+}
+
+.cl-modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.cl-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 16px 20px;
+    border-top: 1px solid var(--cl-border);
+}
+
+/* @canonical button-module */
+.cl-btn {
+    padding: 10px 20px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.95em;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s;
+}
+
+.cl-btn-primary {
+    background: var(--cl-accent);
+    color: white;
+}
+
+.cl-btn-primary:hover:not(:disabled) {
+    background: var(--cl-accent-hover);
+}
+
+.cl-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.cl-btn-secondary {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--cl-text-primary);
+}
+
+.cl-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.cl-btn-danger {
+    background: rgba(244, 67, 54, 0.2);
+    color: #ff6b7a;
+}
+
+.cl-btn-danger:hover {
+    background: rgba(244, 67, 54, 0.35);
+}
+
+/* @canonical input-module */
+.cl-input {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--cl-border);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--cl-text-primary);
+    font-size: 0.95em;
+}
+
+.cl-input:focus {
+    outline: none;
+    border-color: var(--cl-accent);
+}
+
+.cl-input::placeholder {
+    color: var(--cl-text-secondary);
+}
+
+/* @canonical tag-pill */
+.cl-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.cl-tag-success {
+    background: rgba(76, 175, 80, 0.2);
+    color: #81c784;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.cl-tag-warning {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffd54f;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.cl-tag-info {
+    background: rgba(33, 150, 243, 0.2);
+    color: #64b5f6;
+    border: 1px solid rgba(33, 150, 243, 0.3);
+}
+
+.cl-tag-danger {
+    background: rgba(244, 67, 54, 0.2);
+    color: #e57373;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+/* ---- Utility Classes ---- */
+.cl-hidden {
+    display: none !important;
+}
+
+/* Stage 3: Hide sort, favorites, tags — only search + view toggle + ⋮ remain */
+@media (max-width: 900px) {
+    [data-select-id="sortSelect"] {
+        display: none;
+    }
+    .favorites-filter-btn {
+        display: none;
+    }
+    .filter-group {
+        display: none;
+    }
+
+    .topbar-overflow-item-narrow {
+        display: flex;
+    }
+
+    .logo-area h1 {
+        display: none;
+    }
+
+    .topbar {
+        gap: 8px;
+        padding: 0 10px;
+    }
 }
 

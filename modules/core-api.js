@@ -1,35 +1,36 @@
-/**
- * Core API - The single interface between modules and the gallery monolith
- * 
- * ╔═══════════════════════════════════════════════════════════════════════════╗
- * ║                           MODULE ARCHITECTURE RULE                        ║
- * ╠═══════════════════════════════════════════════════════════════════════════╣
- * ║                                                                           ║
- * ║  🚫 MODULES CANNOT:                                                       ║
- * ║     - Import from gallery.js directly                                     ║
- * ║     - Use window.allCharacters, window.openModal, window.showToast, etc.  ║
- * ║     - Access monolith internal state or functions directly                ║
- * ║     - Use the `dependencies` object passed to init() for core features    ║
- * ║                                                                           ║
- * ║  ✅ MODULES CAN ONLY:                                                     ║
- * ║     - Import from core-api.js (this file)                                 ║
- * ║     - Import from shared-styles.js                                        ║
- * ║     - Import other modules via CoreAPI.getModule()                        ║
- * ║     - Use standard browser APIs (window.open, document.*, fetch, etc.)    ║
- * ║                                                                           ║
- * ║  WHY: This abstraction layer allows the monolith to be refactored         ║
- * ║  without breaking modules. CoreAPI is the contract - if internals         ║
- * ║  change, update CoreAPI once, not every module.                           ║
- * ║                                                                           ║
- * ╚═══════════════════════════════════════════════════════════════════════════╝
- * 
- * @module CoreAPI
- * @version 1.0.0
- */
+// Core API — proxy layer between modules and the library monolith
 
 // ========================================
 // STATE ACCESS
 // ========================================
+
+// ---- View Management (proxies to library.js implementation) ----
+
+/**
+ * Switch between top-level views (characters, chats, chub).
+ * @param {string} view - 'characters' | 'chats' | 'chub'
+ */
+export function switchView(view) {
+    window.switchView?.(view);
+}
+
+/**
+ * Get current active view
+ * @returns {string} 'characters' | 'chats' | 'chub'
+ */
+export function getCurrentView() {
+    return window.getCurrentView?.() || 'characters';
+}
+
+/**
+ * Register a callback to run each time a specific view becomes active.
+ * Modules use this for lazy-loading (e.g. chats loads on first visit).
+ * @param {string} view - View name ('characters', 'chats', 'chub')
+ * @param {function} callback - Function to call when view is entered
+ */
+export function onViewEnter(view, callback) {
+    window.onViewEnter?.(view, callback);
+}
 
 /**
  * Get all loaded characters
@@ -384,6 +385,130 @@ export function findAllCardElements() {
     return document.querySelectorAll('.char-card');
 }
 
+/**
+ * Show an element by removing 'hidden' class
+ * @param {string} id - Element ID
+ */
+export function showElement(id) {
+    document.getElementById(id)?.classList.remove('hidden');
+}
+
+/**
+ * Hide an element by adding 'hidden' class
+ * @param {string} id - Element ID
+ */
+export function hideElement(id) {
+    document.getElementById(id)?.classList.add('hidden');
+}
+
+/**
+ * Hide a modal (adds 'hidden' class, cleans up overlay)
+ * @param {string} modalId - Modal element ID
+ */
+export function hideModal(modalId) {
+    if (window.hideModal) {
+        return window.hideModal(modalId);
+    }
+    document.getElementById(modalId)?.classList.add('hidden');
+}
+
+/**
+ * Bind an event listener to an element by ID
+ * @param {string} id - Element ID
+ * @param {string} event - Event name
+ * @param {Function} handler - Event handler
+ * @returns {boolean} Whether the element was found
+ */
+export function onElement(id, event, handler) {
+    const el = document.getElementById(id);
+    if (el) {
+        el.addEventListener(event, handler);
+        return true;
+    }
+    return false;
+}
+
+// ========================================
+// RENDERING HELPERS
+// ========================================
+
+/**
+ * Render a loading spinner inside a container
+ * @param {HTMLElement} container - Container element
+ * @param {string} message - Loading message
+ * @param {string} className - CSS class name
+ */
+export function renderLoadingState(container, message, className = 'loading-spinner') {
+    if (window.renderLoadingState) {
+        return window.renderLoadingState(container, message, className);
+    }
+    if (container) {
+        container.innerHTML = `<div class="${className}"><i class="fa-solid fa-spinner fa-spin"></i><p>${message}</p></div>`;
+    }
+}
+
+/**
+ * Get avatar URL for a character
+ * @param {string} avatar - Avatar filename
+ * @returns {string} Avatar URL
+ */
+export function getCharacterAvatarUrl(avatar) {
+    if (window.getCharacterAvatarUrl) {
+        return window.getCharacterAvatarUrl(avatar);
+    }
+    return avatar ? `/characters/${avatar}` : '/img/ai4.png';
+}
+
+/**
+ * Format rich text (markdown-like formatting for chat messages)
+ * @param {string} text - Raw text
+ * @param {string} charName - Character name for substitution
+ * @param {boolean} preserveHtml - Whether to preserve existing HTML
+ * @returns {string} Formatted HTML
+ */
+export function formatRichText(text, charName = '', preserveHtml = false) {
+    if (window.formatRichText) {
+        return window.formatRichText(text, charName, preserveHtml);
+    }
+    // Minimal fallback
+    return escapeHtml(text);
+}
+
+// ========================================
+// CHARACTER ACTIONS
+// ========================================
+
+/**
+ * Load a character in the main SillyTavern window
+ * @param {Object|string} charOrAvatar - Character object or avatar filename
+ * @param {boolean} newChat - Whether to start a new chat
+ * @returns {Promise<boolean>} Success status
+ */
+export function loadCharInMain(charOrAvatar, newChat = false) {
+    return window.loadCharInMain?.(charOrAvatar, newChat) || Promise.resolve(false);
+}
+
+/**
+ * Register a gallery folder override for media localization
+ * @param {Object} char - Character object
+ * @param {boolean} immediate - Save immediately
+ */
+export function registerGalleryFolderOverride(char, immediate = false) {
+    window.registerGalleryFolderOverride?.(char, immediate);
+}
+
+// ========================================
+// LOGGING
+// ========================================
+
+/**
+ * Debug log (only outputs when debug mode is enabled)
+ * @param {...*} args - Arguments to log
+ */
+export function debugLog(...args) {
+    window.debugLog?.(...args);
+}
+
 // ========================================
 // EVENT SYSTEM (Future expansion)
 // ========================================
@@ -502,6 +627,14 @@ export function applyCardFieldUpdates(avatar, fieldUpdates) {
     return window.applyCardFieldUpdates?.(avatar, fieldUpdates) || Promise.resolve(false);
 }
 
+/**
+ * Get Chub API headers (with optional auth token)
+ * @returns {Object} Headers object
+ */
+export function getChubHeaders() {
+    return window.getChubHeaders?.() || { 'Accept': 'application/json' };
+}
+
 // ========================================
 // DEFAULT EXPORT - Convenience object
 // ========================================
@@ -513,6 +646,11 @@ export default {
     getCharacterByAvatar,
     getSetting,
     setSetting,
+    
+    // View management
+    switchView,
+    getCurrentView,
+    onViewEnter,
     
     // UI
     openCharacterModal,
@@ -556,6 +694,24 @@ export default {
     findCardElement,
     findAllCardElements,
     
+    // DOM helpers
+    showElement,
+    hideElement,
+    hideModal,
+    onElement,
+    
+    // Rendering
+    renderLoadingState,
+    getCharacterAvatarUrl,
+    formatRichText,
+    
+    // Character actions
+    loadCharInMain,
+    registerGalleryFolderOverride,
+    
+    // Logging
+    debugLog,
+    
     // Events
     on,
     emit,
@@ -565,5 +721,6 @@ export default {
     getChubLinkedCharacters,
     fetchChubMetadata,
     extractCharacterDataFromPng,
-    applyCardFieldUpdates
+    applyCardFieldUpdates,
+    getChubHeaders
 };

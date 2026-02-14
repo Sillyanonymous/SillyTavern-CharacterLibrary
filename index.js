@@ -478,7 +478,6 @@ async function buildChatMediaLocalizationMap(character) {
     const urlMap = {};
     
     try {
-        // Get CSRF token properly
         const csrfToken = await getCsrfToken();
         
         // Get list of files in character's gallery

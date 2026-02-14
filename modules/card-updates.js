@@ -6,7 +6,6 @@
  * @version 1.0.0
  */
 
-import * as SharedStyles from './shared-styles.js';
 import * as CoreAPI from './core-api.js';
 
 // Module state
@@ -14,6 +13,9 @@ let isInitialized = false;
 let currentUpdateChecks = new Map(); // fullPath -> { local, remote, diffs }
 let abortController = null;
 let pendingBatchCharacters = [];
+let batchCheckPaused = false;
+let batchCheckRunning = false;
+let batchCheckedCount = 0;
 
 // Fields to compare (key -> display label)
 const COMPARABLE_FIELDS = {
@@ -42,6 +44,7 @@ const COMPARABLE_FIELDS = {
     'depth_prompt.prompt': 'Depth Prompt Text', // Not mapped from Chub API yet
     'depth_prompt.depth': 'Depth Prompt Depth', // Not mapped from Chub API yet
     'depth_prompt.role': 'Depth Prompt Role', // Not mapped from Chub API yet
+    'character_book': 'Embedded Lorebook',
 };
 
 let batchFieldSelection = new Set(Object.keys(COMPARABLE_FIELDS));
@@ -64,7 +67,6 @@ export function init(deps) {
         return;
     }
     
-    SharedStyles.inject();
     injectStyles();
     injectModals();
     setupEventListeners();
@@ -546,6 +548,13 @@ function compareCards(localData, remoteCard, allowedFields = null) {
         }
         const localValue = getNestedValue(localData, field);
         const remoteValue = getNestedValue(remoteData, field);
+
+        // Treat missing/null/empty lorebooks as equivalent
+        if (field === 'character_book') {
+            if (lorebooksEqual(localValue, remoteValue)) continue;
+            diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
+            continue;
+        }
         
         // Normalize for comparison
         const normalizedLocal = normalizeValue(localValue);
@@ -684,6 +693,10 @@ function renderDiffItem(diff, charKey, idx) {
     const localDisplay = formatValueForDisplay(diff.local);
     const remoteDisplay = formatValueForDisplay(diff.remote);
 
+    if (diff.field === 'character_book') {
+        return renderLorebookDiff(diff, charKey, idx);
+    }
+
     if (!diff.isLongText && (Array.isArray(diff.local) || Array.isArray(diff.remote))) {
         const localValues = Array.isArray(diff.local) ? diff.local : [];
         const remoteValues = Array.isArray(diff.remote) ? diff.remote : [];
@@ -764,6 +777,238 @@ function renderDiffItem(diff, charKey, idx) {
             </div>
         </div>
     `;
+}
+
+// ========================================
+// LOREBOOK DIFF
+// ========================================
+
+function renderLorebookDiff(diff, charKey, idx) {
+    const checkboxId = `diff-${charKey}-${idx}`;
+    const localBook = diff.local;
+    const remoteBook = diff.remote;
+    const localEntries = localBook?.entries || [];
+    const remoteEntries = remoteBook?.entries || [];
+
+    const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
+    const modified = matched.filter(m => m.changedFields.length > 0);
+    const metaDiffs = compareLorebookMeta(localBook, remoteBook);
+
+    const statParts = [];
+    if (added.length > 0) statParts.push(`${added.length} added`);
+    if (removed.length > 0) statParts.push(`${removed.length} removed`);
+    if (modified.length > 0) statParts.push(`${modified.length} modified`);
+    if (metaDiffs.length > 0) statParts.push(`${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed`);
+    const stats = statParts.length > 0 ? statParts.join(', ') : 'identical';
+
+    let entriesHtml = '';
+
+    if (metaDiffs.length > 0) {
+        entriesHtml += `<div class="lorebook-diff-meta-section">
+            <div class="lorebook-diff-meta-title">Lorebook Settings</div>
+            ${metaDiffs.map(m => `<div class="lorebook-diff-meta-row">
+                <span class="lorebook-diff-meta-key">${CoreAPI.escapeHtml(m.label)}</span>
+                <span class="lorebook-diff-meta-old">${CoreAPI.escapeHtml(m.localStr)}</span>
+                <i class="fa-solid fa-arrow-right"></i>
+                <span class="lorebook-diff-meta-new">${CoreAPI.escapeHtml(m.remoteStr)}</span>
+            </div>`).join('')}
+        </div>`;
+    }
+
+    for (const entry of added) {
+        const name = lorebookEntryName(entry);
+        const keys = (entry.keys || []).slice(0, 4).join(', ');
+        entriesHtml += `<div class="lorebook-diff-entry added">
+            <span class="lorebook-diff-badge added">+</span>
+            <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
+            ${keys ? `<span class="lorebook-diff-entry-keys">${CoreAPI.escapeHtml(keys)}</span>` : ''}
+        </div>`;
+    }
+
+    for (const entry of removed) {
+        const name = lorebookEntryName(entry);
+        const keys = (entry.keys || []).slice(0, 4).join(', ');
+        entriesHtml += `<div class="lorebook-diff-entry removed">
+            <span class="lorebook-diff-badge removed">&minus;</span>
+            <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
+            ${keys ? `<span class="lorebook-diff-entry-keys">${CoreAPI.escapeHtml(keys)}</span>` : ''}
+        </div>`;
+    }
+
+    for (const m of modified) {
+        const name = lorebookEntryName(m.remote);
+        const changes = m.changedFields.join(', ');
+        entriesHtml += `<div class="lorebook-diff-entry modified">
+            <span class="lorebook-diff-badge modified">~</span>
+            <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
+            <span class="lorebook-diff-entry-changes">${CoreAPI.escapeHtml(changes)}</span>
+        </div>`;
+    }
+
+    const unchangedCount = matched.length - modified.length;
+    if (unchangedCount > 0) {
+        entriesHtml += `<div class="lorebook-diff-entry unchanged">
+            <span class="lorebook-diff-unchanged-count">${unchangedCount} unchanged entr${unchangedCount === 1 ? 'y' : 'ies'}</span>
+        </div>`;
+    }
+
+    return `
+        <div class="card-update-diff-item long-text lorebook">
+            <div class="card-update-diff-header">
+                <label>
+                    <input type="checkbox" id="${checkboxId}" data-field="${diff.field}" checked>
+                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}</span>
+                    <span class="lorebook-entry-counts">
+                        <span class="local-count">${localEntries.length}</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                        <span class="remote-count">${remoteEntries.length}</span>
+                    </span>
+                </label>
+                <span class="card-update-diff-stats">${stats}</span>
+                <button class="card-update-diff-expand" onclick="window.cardUpdatesToggleExpand(this)">
+                    <i class="fa-solid fa-chevron-down"></i>
+                </button>
+            </div>
+            <div class="card-update-diff-content collapsed">
+                <div class="lorebook-diff-entries">
+                    ${entriesHtml}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function lorebookEntryName(entry) {
+    if (entry.comment?.trim()) return entry.comment.trim();
+    if (entry.name?.trim()) return entry.name.trim();
+    const keys = entry.keys || [];
+    if (keys.length > 0) return keys.slice(0, 3).join(', ');
+    return `Entry #${entry.id ?? '?'}`;
+}
+
+function matchLorebookEntries(localEntries, remoteEntries) {
+    const matched = [];
+    const unmatchedRemote = [...remoteEntries];
+    const unmatchedLocal = [...localEntries];
+
+    // Match entries by key overlap (Jaccard similarity)
+    for (let i = unmatchedLocal.length - 1; i >= 0; i--) {
+        let bestIdx = -1;
+        let bestScore = 0;
+
+        for (let j = 0; j < unmatchedRemote.length; j++) {
+            const score = lorebookEntryMatchScore(unmatchedLocal[i], unmatchedRemote[j]);
+            if (score > bestScore) {
+                bestScore = score;
+                bestIdx = j;
+            }
+        }
+
+        if (bestIdx >= 0 && bestScore > 0.3) {
+            const changedFields = compareLorebookEntryFields(unmatchedLocal[i], unmatchedRemote[bestIdx]);
+            matched.push({
+                local: unmatchedLocal[i],
+                remote: unmatchedRemote[bestIdx],
+                changedFields
+            });
+            unmatchedLocal.splice(i, 1);
+            unmatchedRemote.splice(bestIdx, 1);
+        }
+    }
+
+    return { matched, added: unmatchedRemote, removed: unmatchedLocal };
+}
+
+function lorebookEntryMatchScore(a, b) {
+    const aKeys = new Set((a.keys || []).map(k => k.toLowerCase()));
+    const bKeys = new Set((b.keys || []).map(k => k.toLowerCase()));
+
+    if (aKeys.size > 0 && bKeys.size > 0) {
+        let intersection = 0;
+        for (const k of aKeys) { if (bKeys.has(k)) intersection++; }
+        const union = new Set([...aKeys, ...bKeys]).size;
+        if (union > 0) return intersection / union;
+    }
+
+    // Fallback: exact name/comment match
+    const aName = (a.comment || a.name || '').toLowerCase().trim();
+    const bName = (b.comment || b.name || '').toLowerCase().trim();
+    if (aName && bName && aName === bName) return 1;
+
+    return 0;
+}
+
+function compareLorebookEntryFields(local, remote) {
+    const changed = [];
+    for (const f of LOREBOOK_ENTRY_FIELDS) {
+        if (f === 'id' || f === 'name' || f === 'comment') continue;
+        if (JSON.stringify(local[f] ?? null) !== JSON.stringify(remote[f] ?? null)) {
+            changed.push(f);
+        }
+    }
+    return changed;
+}
+
+const LOREBOOK_META_FIELDS = {
+    name: 'Name',
+    description: 'Description',
+    scan_depth: 'Scan Depth',
+    token_budget: 'Token Budget',
+    recursive_scanning: 'Recursive Scanning',
+};
+
+// V2-spec entry fields — everything else (uid, display_index, vectorized, etc.) is ST-internal
+const LOREBOOK_ENTRY_FIELDS = [
+    'keys', 'secondary_keys', 'content', 'enabled', 'selective',
+    'constant', 'position', 'insertion_order', 'priority', 'case_sensitive',
+    'name', 'comment', 'id'
+];
+
+function normalizeLorebookEntry(entry) {
+    const out = {};
+    for (const f of LOREBOOK_ENTRY_FIELDS) {
+        if (entry[f] !== undefined) out[f] = entry[f];
+    }
+    return out;
+}
+
+function lorebooksEqual(a, b) {
+    const aEntries = a?.entries || [];
+    const bEntries = b?.entries || [];
+    const aEmpty = aEntries.length === 0;
+    const bEmpty = bEntries.length === 0;
+    if (aEmpty && bEmpty) return true;
+
+    // Compare meta
+    for (const key of Object.keys(LOREBOOK_META_FIELDS)) {
+        if (JSON.stringify(a?.[key] ?? null) !== JSON.stringify(b?.[key] ?? null)) return false;
+    }
+
+    // Compare entries (order-sensitive by spec)
+    if (aEntries.length !== bEntries.length) return false;
+    for (let i = 0; i < aEntries.length; i++) {
+        const na = normalizeLorebookEntry(aEntries[i]);
+        const nb = normalizeLorebookEntry(bEntries[i]);
+        if (JSON.stringify(na) !== JSON.stringify(nb)) return false;
+    }
+    return true;
+}
+
+function compareLorebookMeta(localBook, remoteBook) {
+    const diffs = [];
+    for (const [key, label] of Object.entries(LOREBOOK_META_FIELDS)) {
+        const lv = localBook?.[key];
+        const rv = remoteBook?.[key];
+        if (JSON.stringify(lv ?? null) !== JSON.stringify(rv ?? null)) {
+            diffs.push({
+                key,
+                label,
+                localStr: lv == null ? '(not set)' : typeof lv === 'object' ? JSON.stringify(lv) : String(lv),
+                remoteStr: rv == null ? '(not set)' : typeof rv === 'object' ? JSON.stringify(rv) : String(rv)
+            });
+        }
+    }
+    return diffs;
 }
 
 function renderArrayList(values, field, otherSide = null) {
@@ -859,10 +1104,12 @@ function showBatchCheckModal(characters) {
     if (fieldSelectEl) fieldSelectEl.classList.remove('hidden');
     listEl.classList.add('hidden');
     progressEl.classList.add('hidden');
-    if (startBtn) {
-        startBtn.disabled = false;
-        startBtn.style.display = '';
-    }
+    
+    // Reset state
+    batchCheckPaused = false;
+    batchCheckRunning = false;
+    batchCheckedCount = 0;
+    updateBatchFooter('idle');
     
     modal.classList.add('visible');
 }
@@ -871,20 +1118,30 @@ function showBatchCheckModal(characters) {
  * Perform batch update check
  * @param {Array} characters - Characters to check
  */
-async function performBatchCheck(characters, allowedFields) {
+async function performBatchCheck(characters, allowedFields, startFrom = 0) {
     const progressEl = document.getElementById('cardUpdateBatchProgress');
-    const actionsEl = document.getElementById('cardUpdateBatchActions');
     
     abortController = new AbortController();
-    let checked = 0;
-    let withUpdates = 0;
+    batchCheckRunning = true;
+    batchCheckPaused = false;
+    updateBatchFooter('checking');
+    
+    let withUpdates = currentUpdateChecks.size;
     let errors = 0;
     
-    for (const char of characters) {
-        if (abortController.signal.aborted) break;
+    for (let i = startFrom; i < characters.length; i++) {
+        if (abortController.signal.aborted || batchCheckPaused) break;
         
+        const char = characters[i];
         const itemEl = document.querySelector(`.card-update-batch-item[data-avatar="${char.avatar}"]`);
         const statusEl = itemEl?.querySelector('.card-update-batch-item-status');
+        
+        // Skip already-checked items
+        const curStatus = statusEl?.textContent?.trim() || '';
+        if (curStatus.includes('Up to date') || curStatus.includes('update') || 
+            curStatus.includes('Updated') || curStatus.includes('Failed') || curStatus.includes('Error')) {
+            continue;
+        }
         
         if (statusEl) {
             statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
@@ -922,16 +1179,19 @@ async function performBatchCheck(characters, allowedFields) {
             errors++;
         }
         
-        checked++;
-        progressEl.innerHTML = `Checked ${checked}/${characters.length}`;
+        batchCheckedCount++;
+        progressEl.innerHTML = `Checked ${batchCheckedCount}/${characters.length}`;
+        updateBatchFooter('checking');
     }
     
-    progressEl.innerHTML = `
-        Done! ${withUpdates} with updates, ${errors} errors
-    `;
+    batchCheckRunning = false;
     
-    if (withUpdates > 0) {
-        actionsEl.style.display = 'flex';
+    if (batchCheckPaused) {
+        progressEl.innerHTML = `Paused — Checked ${batchCheckedCount}/${characters.length}`;
+        updateBatchFooter('paused');
+    } else {
+        progressEl.innerHTML = `Done! ${withUpdates} with updates, ${errors} error${errors !== 1 ? 's' : ''}`;
+        updateBatchFooter('done');
     }
 }
 
@@ -995,6 +1255,10 @@ async function applySingleUpdates() {
     
     // Apply via CoreAPI
     try {
+        // Auto-snapshot before update
+        if (window.autoSnapshotBeforeChange) {
+            try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
+        }
         const success = await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields);
         
         if (success) {
@@ -1054,6 +1318,10 @@ async function applyAllBatchUpdates() {
         }
         
         try {
+            // Auto-snapshot before batch update
+            if (window.autoSnapshotBeforeChange) {
+                try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
+            }
             const success = await CoreAPI.applyCardFieldUpdates(avatar, updatedFields);
             
             if (success) {
@@ -1092,6 +1360,13 @@ async function applyAllBatchUpdates() {
     
     if (progressWrap) progressWrap.style.display = 'none';
     if (progressFill) progressFill.style.width = '0%';
+    
+    // Update footer: if we were paused and unchecked characters remain, show resume; otherwise done
+    if (batchCheckPaused && batchCheckedCount < pendingBatchCharacters.length) {
+        updateBatchFooter('paused');
+    } else {
+        updateBatchFooter('done');
+    }
 }
 
 // ========================================
@@ -1104,11 +1379,84 @@ function closeSingleModal() {
 
 function closeBatchModal() {
     abortController?.abort();
+    batchCheckPaused = false;
+    batchCheckRunning = false;
+    batchCheckedCount = 0;
     document.getElementById('cardUpdateBatchModal')?.classList.remove('visible');
     currentUpdateChecks.clear();
     pendingBatchCharacters = [];
+}
+
+/**
+ * Pause the currently running batch check
+ */
+function pauseBatchCheck() {
+    if (!batchCheckRunning) return;
+    batchCheckPaused = true;
+    abortController?.abort();
+}
+
+/**
+ * Resume a paused batch check
+ */
+function resumeBatchCheck() {
+    if (!batchCheckPaused || batchCheckRunning) return;
+    performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection), 0);
+}
+
+/**
+ * Update the batch modal footer buttons based on state
+ * @param {'idle'|'checking'|'paused'|'done'} state
+ */
+function updateBatchFooter(state) {
     const startBtn = document.getElementById('cardUpdateBatchStartBtn');
-    if (startBtn) startBtn.style.display = '';
+    const pauseBtn = document.getElementById('cardUpdateBatchPauseBtn');
+    const applyBtn = document.getElementById('cardUpdateBatchApplyAllBtn');
+    const closeBtn = document.getElementById('cardUpdateBatchCloseFooterBtn');
+    const actionsWrap = document.getElementById('cardUpdateBatchActions');
+    
+    // Update apply button count
+    const updateCount = currentUpdateChecks.size;
+    if (applyBtn) {
+        applyBtn.innerHTML = `<i class="fa-solid fa-check-double"></i> Apply All ${updateCount} Update${updateCount !== 1 ? 's' : ''}`;
+    }
+    
+    switch (state) {
+        case 'idle':
+            if (startBtn) { startBtn.style.display = ''; startBtn.disabled = false; }
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (actionsWrap) actionsWrap.style.display = 'none';
+            if (closeBtn) closeBtn.style.display = '';
+            break;
+        case 'checking':
+            if (startBtn) startBtn.style.display = 'none';
+            if (pauseBtn) {
+                pauseBtn.style.display = '';
+                pauseBtn.innerHTML = '<i class="fa-solid fa-pause"></i> Pause';
+                pauseBtn.classList.remove('resume');
+                pauseBtn.classList.add('pause');
+            }
+            if (actionsWrap) actionsWrap.style.display = 'none';
+            if (closeBtn) closeBtn.style.display = '';
+            break;
+        case 'paused':
+            if (startBtn) startBtn.style.display = 'none';
+            if (pauseBtn) {
+                pauseBtn.style.display = '';
+                pauseBtn.innerHTML = '<i class="fa-solid fa-play"></i> Resume';
+                pauseBtn.classList.remove('pause');
+                pauseBtn.classList.add('resume');
+            }
+            if (actionsWrap) actionsWrap.style.display = updateCount > 0 ? 'flex' : 'none';
+            if (closeBtn) closeBtn.style.display = '';
+            break;
+        case 'done':
+            if (startBtn) startBtn.style.display = 'none';
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (actionsWrap) actionsWrap.style.display = updateCount > 0 ? 'flex' : 'none';
+            if (closeBtn) closeBtn.style.display = '';
+            break;
+    }
 }
 
 function updateBatchFieldCount() {
@@ -1152,8 +1500,10 @@ function startBatchCheck() {
     const listEl = document.getElementById('cardUpdateBatchList');
     const progressEl = document.getElementById('cardUpdateBatchProgress');
     const fieldSelectEl = document.getElementById('cardUpdateBatchFieldSelect');
-    const actionsEl = document.getElementById('cardUpdateBatchActions');
-    const startBtn = document.getElementById('cardUpdateBatchStartBtn');
+
+    // Reset counters
+    batchCheckedCount = 0;
+    currentUpdateChecks.clear();
 
     // Build initial list
     listEl.innerHTML = pendingBatchCharacters.map(char => {
@@ -1175,10 +1525,8 @@ function startBatchCheck() {
     if (fieldSelectEl) fieldSelectEl.classList.add('hidden');
     listEl.classList.remove('hidden');
     progressEl.classList.remove('hidden');
-    actionsEl.style.display = 'none';
-    if (startBtn) startBtn.style.display = 'none';
 
-    performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection));
+    performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection), 0);
 }
 
 // ========================================
@@ -1221,11 +1569,21 @@ function setupEventListeners() {
     // Close buttons
     document.getElementById('cardUpdateSingleCloseBtn')?.addEventListener('click', closeSingleModal);
     document.getElementById('cardUpdateBatchCloseBtn')?.addEventListener('click', closeBatchModal);
+    document.getElementById('cardUpdateBatchCloseFooterBtn')?.addEventListener('click', closeBatchModal);
     
     // Apply buttons
     document.getElementById('cardUpdateSingleApplyBtn')?.addEventListener('click', applySingleUpdates);
     document.getElementById('cardUpdateBatchApplyAllBtn')?.addEventListener('click', applyAllBatchUpdates);
     document.getElementById('cardUpdateBatchStartBtn')?.addEventListener('click', startBatchCheck);
+    
+    // Pause/Resume button
+    document.getElementById('cardUpdateBatchPauseBtn')?.addEventListener('click', () => {
+        if (batchCheckRunning && !batchCheckPaused) {
+            pauseBatchCheck();
+        } else if (batchCheckPaused && !batchCheckRunning) {
+            resumeBatchCheck();
+        }
+    });
     
     // Close on backdrop click
     document.getElementById('cardUpdateSingleModal')?.addEventListener('click', (e) => {
@@ -1697,6 +2055,27 @@ function injectStyles() {
             margin-top: 12px;
         }
 
+        /* Pause / Resume button */
+        .card-update-pause-btn {
+            transition: background-color 0.2s ease, border-color 0.2s ease;
+        }
+        .card-update-pause-btn.pause {
+            background: rgba(255, 152, 0, 0.2);
+            border: 1px solid rgba(255, 152, 0, 0.45);
+            color: #ffcc80;
+        }
+        .card-update-pause-btn.pause:hover {
+            background: rgba(255, 152, 0, 0.35);
+        }
+        .card-update-pause-btn.resume {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.45);
+            color: #a5d6a7;
+        }
+        .card-update-pause-btn.resume:hover {
+            background: rgba(76, 175, 80, 0.35);
+        }
+
         .card-update-apply-progress {
             display: flex;
             flex-direction: column;
@@ -1815,6 +2194,145 @@ function injectStyles() {
             font-size: 0.9rem;
         }
 
+        /* Lorebook diff */
+        .lorebook-diff-entries {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 10px 12px;
+        }
+
+        .lorebook-diff-entry {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.88em;
+        }
+
+        .lorebook-diff-entry.added { background: rgba(76, 175, 80, 0.1); }
+        .lorebook-diff-entry.removed { background: rgba(244, 67, 54, 0.1); }
+        .lorebook-diff-entry.modified { background: rgba(255, 152, 0, 0.1); }
+        .lorebook-diff-entry.unchanged { padding: 4px 10px; }
+
+        .lorebook-diff-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            font-weight: bold;
+            font-size: 13px;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+
+        .lorebook-diff-badge.added { background: rgba(76, 175, 80, 0.25); color: #81c784; }
+        .lorebook-diff-badge.removed { background: rgba(244, 67, 54, 0.25); color: #ef9a9a; }
+        .lorebook-diff-badge.modified { background: rgba(255, 152, 0, 0.25); color: #ffcc80; }
+
+        .lorebook-diff-entry-name {
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+        }
+
+        .lorebook-diff-entry-keys {
+            font-size: 0.85em;
+            color: var(--cl-text-secondary, #999);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex-shrink: 1;
+            min-width: 0;
+        }
+
+        .lorebook-diff-entry-keys::before {
+            content: '\\2014\\00a0';
+            opacity: 0.4;
+        }
+
+        .lorebook-diff-entry-changes {
+            font-size: 0.8em;
+            color: var(--cl-text-secondary, #999);
+            margin-left: auto;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .lorebook-diff-unchanged-count {
+            opacity: 0.5;
+            font-style: italic;
+            font-size: 0.85em;
+        }
+
+        .lorebook-entry-counts {
+            font-size: 0.85em;
+            opacity: 0.65;
+            margin-left: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .lorebook-entry-counts i {
+            font-size: 8px;
+            opacity: 0.6;
+        }
+
+        .lorebook-diff-meta-section {
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .lorebook-diff-meta-title {
+            font-size: 0.75em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--cl-text-secondary, #999);
+            margin-bottom: 6px;
+            font-weight: 600;
+        }
+
+        .lorebook-diff-meta-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 3px 0;
+            font-size: 0.85em;
+        }
+
+        .lorebook-diff-meta-key {
+            font-weight: 500;
+            min-width: 100px;
+            flex-shrink: 0;
+        }
+
+        .lorebook-diff-meta-old {
+            color: #ff8a80;
+            background: rgba(244, 67, 54, 0.15);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+
+        .lorebook-diff-meta-new {
+            color: #b9f6ca;
+            background: rgba(76, 175, 80, 0.15);
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+
+        .lorebook-diff-meta-row i {
+            color: var(--cl-text-secondary, #aaa);
+            font-size: 0.7em;
+            opacity: 0.6;
+            flex-shrink: 0;
+        }
+
     `;
     
     document.head.appendChild(style);
@@ -1899,7 +2417,10 @@ function injectModals() {
                     <button class="cl-btn cl-btn-primary" id="cardUpdateBatchStartBtn">
                         <i class="fa-solid fa-magnifying-glass"></i> Start Check
                     </button>
-                    <button class="cl-btn cl-btn-secondary" onclick="document.getElementById('cardUpdateBatchModal').classList.remove('visible')">Close</button>
+                    <button class="cl-btn cl-btn-warning card-update-pause-btn" id="cardUpdateBatchPauseBtn" style="display: none;">
+                        <i class="fa-solid fa-pause"></i> Pause
+                    </button>
+                    <button class="cl-btn cl-btn-secondary" id="cardUpdateBatchCloseFooterBtn">Close</button>
                 </div>
             </div>
         </div>

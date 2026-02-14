@@ -55,12 +55,12 @@
 
             <div class="filter-area" id="filterArea">
                 <select id="sortSelect" class="glass-select">
-                    <option value="name_asc">Name (A-Z)</option>
-                    <option value="name_desc">Name (Z-A)</option>
-                    <option value="date_new">Last Modified (Newest)</option>
-                    <option value="date_old">Last Modified (Oldest)</option>
-                    <option value="created_new">Date Created (Newest)</option>
-                    <option value="created_old">Date Created (Oldest)</option>
+                    <option value="name_asc" data-icon="fa-solid fa-arrow-down-a-z">Name (A-Z)</option>
+                    <option value="name_desc" data-icon="fa-solid fa-arrow-up-z-a">Name (Z-A)</option>
+                    <option value="date_new" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Newest)</option>
+                    <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
+                    <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
+                    <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
                 </select>
                 <button id="favoritesFilterBtn" class="glass-btn favorites-filter-btn" title="Show favorites only">
                     <i class="fa-solid fa-star"></i>
@@ -112,6 +112,25 @@
                             <i class="fa-solid fa-link"></i> Link ChubAI Characters
                         </button>
                         <div class="dropdown-divider"></div>
+                        <button id="menuRefreshBtn" class="dropdown-item topbar-overflow-item">
+                            <i class="fa-solid fa-sync"></i> Refresh
+                        </button>
+                        <button id="menuGallerySyncBtn" class="dropdown-item topbar-overflow-item">
+                            <i class="fa-solid fa-circle-info"></i> Gallery Sync Status
+                        </button>
+                        <button id="menuMultiSelectBtn" class="dropdown-item topbar-overflow-item">
+                            <i class="fa-solid fa-object-group"></i> Select Mode
+                        </button>
+                        <button id="menuSortBtn" class="dropdown-item topbar-overflow-item-narrow">
+                            <i class="fa-solid fa-arrow-down-wide-short"></i> Sort
+                        </button>
+                        <button id="menuFavoritesBtn" class="dropdown-item topbar-overflow-item-narrow">
+                            <i class="fa-solid fa-star"></i> Favorites Filter
+                        </button>
+                        <button id="menuTagsBtn" class="dropdown-item topbar-overflow-item-narrow">
+                            <i class="fa-solid fa-tags"></i> Tag Filter
+                        </button>
+                        <div class="dropdown-divider topbar-overflow-item"></div>
                         <button id="galleryInfoBtn" class="dropdown-item">
                             <i class="fa-solid fa-circle-info"></i> Help & Tips
                         </button>
@@ -127,15 +146,15 @@
                 <!-- Chats-specific filters (hidden by default via CSS) -->
                 <div class="filter-area chats-filters" id="chatsFilterArea">
                     <select id="chatsSortSelect" class="glass-select">
-                        <option value="recent">Most Recent</option>
-                        <option value="oldest">Oldest First</option>
-                        <option value="char_asc">Character (A-Z)</option>
-                        <option value="char_desc">Character (Z-A)</option>
-                        <option value="most_messages">Most Messages</option>
-                        <option value="least_messages">Least Messages</option>
-                        <option value="longest_chat">Longest Chat</option>
-                        <option value="shortest_chat">Shortest Chat</option>
-                        <option value="most_chats">Most Chats (Character)</option>
+                        <option value="recent" data-icon="fa-solid fa-clock">Most Recent</option>
+                        <option value="oldest" data-icon="fa-solid fa-hourglass">Oldest First</option>
+                        <option value="char_asc" data-icon="fa-solid fa-arrow-down-a-z">Character (A-Z)</option>
+                        <option value="char_desc" data-icon="fa-solid fa-arrow-up-z-a">Character (Z-A)</option>
+                        <option value="most_messages" data-icon="fa-solid fa-comments">Most Messages</option>
+                        <option value="least_messages" data-icon="fa-solid fa-comment">Least Messages</option>
+                        <option value="longest_chat" data-icon="fa-solid fa-ruler">Longest Chat</option>
+                        <option value="shortest_chat" data-icon="fa-solid fa-ruler">Shortest Chat</option>
+                        <option value="most_chats" data-icon="fa-solid fa-layer-group">Most Chats (Character)</option>
                     </select>
                     <div class="grouping-toggle">
                         <button class="glass-btn grouping-btn active" data-group="flat" title="Flat list">
@@ -224,8 +243,8 @@
                             <div class="chub-advanced-option">
                                 <label><i class="fa-solid fa-arrow-down-wide-short"></i> Sort Direction</label>
                                 <select id="chubSortDirection" class="glass-select-small">
-                                    <option value="desc" selected>Descending</option>
-                                    <option value="asc">Ascending</option>
+                                    <option value="desc" selected data-icon="fa-solid fa-arrow-down-wide-short">Descending</option>
+                                    <option value="asc" data-icon="fa-solid fa-arrow-up-short-wide">Ascending</option>
                                 </select>
                             </div>
                             
@@ -400,7 +419,7 @@
                 </div>
                 <div class="modal-controls">
                     <button id="chatPreviewOpenBtn" class="action-btn primary"><i class="fa-solid fa-arrow-up-right-from-square"></i> Open in SillyTavern</button>
-                    <button id="chatPreviewDeleteBtn" class="action-btn secondary" style="color: #e74c3c;"><i class="fa-solid fa-trash"></i></button>
+                    <button id="chatPreviewDeleteBtn" class="action-btn danger-hover"><i class="fa-solid fa-trash"></i></button>
                     <button class="close-btn" id="chatPreviewClose">&times;</button>
                 </div>
             </div>
@@ -593,7 +612,7 @@
                     <button id="favoriteCharBtn" class="action-btn favorite-btn" title="Toggle Favorite">
                         <i class="fa-regular fa-star"></i>
                     </button>
-                    <button id="deleteCharBtn" class="action-btn secondary" style="color: #e74c3c; border-color: rgba(231, 76, 60, 0.3);" title="Delete Character">
+                    <button id="deleteCharBtn" class="action-btn danger-hover" title="Delete Character">
                         <i class="fa-solid fa-trash"></i>
                     </button>
                     <button id="modalChatBtn" class="action-btn primary"><i class="fa-solid fa-comments"></i> Chat</button>
@@ -619,12 +638,14 @@
                     </div>
                     -->
                     <div class="sidebar-section">
-                        <div class="sidebar-label"><i class="fa-solid fa-tags"></i> Tags</div>
+                        <div class="sidebar-label">
+                            <i class="fa-solid fa-tags"></i> Tags
+                        </div>
                         <div class="tags-container" id="modalTags">
                             <!-- Tags injected here -->
                         </div>
                         <div class="tag-input-wrapper hidden" id="tagInputWrapper">
-                            <input type="text" id="tagInput" class="glass-input tag-input" placeholder="Add tag...">
+                            <input type="text" id="tagInput" class="glass-input tag-input" placeholder="Add tag..." autocomplete="off">
                             <div id="tagAutocomplete" class="tag-autocomplete hidden"></div>
                         </div>
                     </div>
@@ -637,6 +658,7 @@
                         <button class="tab-btn" data-tab="chats">Chats</button>
                         <button class="tab-btn" data-tab="gallery">Gallery</button>
                         <button class="tab-btn" data-tab="related">Related</button>
+                        <button class="tab-btn hidden" data-tab="versions" id="versionsTabBtn"></button>
                         <button class="tab-btn hidden" data-tab="info" id="infoTabBtn"><i class="fa-solid fa-microscope"></i> Info</button>
                     </div>
                     
@@ -703,25 +725,30 @@
                                 <i class="fa-solid fa-lock"></i>
                                 <span>Fields are locked. Click unlock to edit.</span>
                             </div>
-                            <button type="button" id="toggleEditLockBtn" class="action-btn secondary small">
-                                <i class="fa-solid fa-lock-open"></i> Unlock Editing
-                            </button>
+                            <div class="lock-header-actions">
+                                <button type="button" id="toggleEditLockBtn" class="action-btn secondary small">
+                                    <i class="fa-solid fa-lock-open"></i> <span class="btn-label">Unlock Editing</span>
+                                </button>
+                                <button type="button" id="editPaneVersionsBtn" class="action-btn secondary small" title="Version History">
+                                    <i class="fa-solid fa-clock-rotate-left"></i> <span class="btn-label">Versions</span>
+                                </button>
+                            </div>
                         </div>
 
                         <div class="edit-section">
                             <h4 class="section-header"><i class="fa-solid fa-user"></i> Basic Information</h4>
                             <div class="form-group">
                                 <label>Character Name</label>
-                                <input type="text" id="editName" class="glass-input">
+                                <input type="text" id="editName" class="glass-input" autocomplete="off">
                             </div>
                             <div class="form-row">
                                 <div class="form-group half">
                                     <label>Creator / Author</label>
-                                    <input type="text" id="editCreator" class="glass-input" placeholder="Who made this character">
+                                    <input type="text" id="editCreator" class="glass-input" placeholder="Who made this character" autocomplete="off">
                                 </div>
                                 <div class="form-group half">
                                     <label>Character Version</label>
-                                    <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0">
+                                    <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0" autocomplete="off">
                                 </div>
                             </div>
                         </div>
@@ -871,7 +898,7 @@
                                     <strong>No Gallery ID assigned</strong>
                                     <span>This character doesn't have a unique gallery ID. Without one, characters with the same name will share a gallery folder.</span>
                                 </div>
-                                <button id="assignGalleryIdBtn" class="action-btn small" title="Assign a unique gallery ID to this character">
+                                <button id="assignGalleryIdBtn" class="action-btn secondary small" title="Assign a unique gallery ID to this character">
                                     <i class="fa-solid fa-fingerprint"></i> Assign ID
                                 </button>
                             </div>
@@ -912,6 +939,13 @@
                         </div>
                     </div>
 
+                    <!-- Versions Tab -->
+                    <div class="tab-pane" id="pane-versions">
+                        <div id="versionsTabContent">
+                            <!-- Populated by character-versions.js module -->
+                        </div>
+                    </div>
+
                     <!-- Info Tab (Developer) -->
                     <div class="tab-pane" id="pane-info">
                         <div class="info-tab-header">
@@ -926,8 +960,6 @@
             </div>
         </div>
     </div>
-
-    <div id="toastContainer" class="toast-container"></div>
 
     <!-- ChubAI Link Modal -->
     <div id="chubLinkModal" class="confirm-modal hidden">
@@ -971,6 +1003,9 @@
                             <button id="chubLinkGalleryBtn" class="chub-link-btn secondary">
                                 <i class="fa-solid fa-images"></i> Download Gallery
                             </button>
+                            <button id="chubLinkVersionsBtn" class="chub-link-btn secondary">
+                                <i class="fa-solid fa-clock-rotate-left"></i> Version History
+                            </button>
                             <button id="chubLinkUnlinkBtn" class="chub-link-btn text-danger">
                                 <i class="fa-solid fa-unlink"></i> Unlink
                             </button>
@@ -981,9 +1016,9 @@
                     <div id="chubLinkUnlinkedState" class="chub-link-state">
                         <div class="chub-link-search-section">
                             <div class="chub-link-search-row">
-                                <input type="text" id="chubLinkSearchName" class="glass-input" placeholder="Character name">
+                                <input type="text" id="chubLinkSearchName" class="glass-input" placeholder="Character name" autocomplete="off">
                                 <span class="chub-link-search-by">by</span>
-                                <input type="text" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator">
+                                <input type="text" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator" autocomplete="off">
                                 <button id="chubLinkSearchBtn" class="chub-link-search-btn" title="Search">
                                     <i class="fa-solid fa-search"></i>
                                 </button>
@@ -994,7 +1029,7 @@
                         <div class="chub-link-divider"><span>or paste URL</span></div>
                         
                         <div class="chub-link-url-row">
-                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="https://chub.ai/characters/...">
+                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="https://chub.ai/characters/..." autocomplete="off">
                             <button id="chubLinkUrlBtn" class="chub-link-btn primary compact">
                                 <i class="fa-solid fa-link"></i>
                             </button>
@@ -1061,16 +1096,50 @@
                 <button class="close-confirm-btn" id="closeImportModal">&times;</button>
             </div>
             <div class="confirm-modal-body">
-                <p>Paste Chub AI character URLs below (one per line):</p>
-                <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
+                <!-- Import source toggle -->
+                <div class="import-source-toggle">
+                    <button class="import-source-btn active" data-source="chub">
+                        <i class="fa-solid fa-link"></i> Chub URLs
+                    </button>
+                    <button class="import-source-btn" data-source="local">
+                        <i class="fa-solid fa-file-image"></i> Local PNG
+                    </button>
+                </div>
+
+                <!-- Chub URL input (default) -->
+                <div id="importSourceChub" class="import-source-panel">
+                    <p>Paste Chub AI character URLs below (one per line):</p>
+                    <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
 https://chub.ai/characters/author/another-character
 ..."></textarea>
+                </div>
+
+                <!-- Local PNG input -->
+                <div id="importSourceLocal" class="import-source-panel hidden">
+                    <p>Select or drag &amp; drop character card PNG files:</p>
+                    <div id="importDropZone" class="import-drop-zone">
+                        <input type="file" id="importFileInput" multiple accept=".png" class="import-file-input">
+                        <div class="import-drop-placeholder" id="importDropPlaceholder">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                            <span>Drag &amp; drop PNG files here</span>
+                            <button type="button" class="import-browse-btn">Browse Files</button>
+                        </div>
+                        <div class="import-file-list hidden" id="importFileList"></div>
+                    </div>
+                    <div class="import-file-count hidden" id="importFileCount">
+                        <span id="importFileCountText">0 files selected</span>
+                        <button type="button" class="import-clear-files-btn" id="importClearFiles" title="Clear all files">
+                            <i class="fa-solid fa-trash-can"></i> Clear
+                        </button>
+                    </div>
+                </div>
+
                 <div class="import-options">
                     <label class="import-option-toggle">
                         <input type="checkbox" id="importSkipDuplicates" checked>
                         <span>Skip duplicates <span class="import-option-hint">(already in library)</span></span>
                     </label>
-                    <label class="import-option-toggle">
+                    <label class="import-option-toggle" id="importGalleryOption">
                         <input type="checkbox" id="importAutoDownloadGallery">
                         <span>Auto-download gallery</span>
                     </label>
@@ -1079,7 +1148,7 @@ https://chub.ai/characters/author/another-character
                         <span>Auto-download embedded media</span>
                     </label>
                 </div>
-                <div class="import-info">
+                <div class="import-info" id="importInfoHint">
                     <i class="fa-solid fa-info-circle"></i>
                     <span>Supports chub.ai and characterhub.org links. Characters will be imported as PNG files.</span>
                 </div>
@@ -1196,12 +1265,13 @@ https://chub.ai/characters/author/another-character
                 <div id="bulkSummaryFilter" class="bulk-summary-filter">
                     <label>Show:</label>
                     <select id="bulkSummaryFilterSelect" class="glass-select">
-                        <option value="all">All Characters</option>
-                        <option value="downloaded">With Downloads</option>
-                        <option value="skipped">With Skipped</option>
-                        <option value="errors">With Errors</option>
-                        <option value="incomplete">Incomplete (Errors/Stopped)</option>
-                        <option value="none">No Remote Media</option>
+                        <option value="all" data-icon="fa-solid fa-list">All Characters</option>
+                        <option value="localized" data-icon="fa-solid fa-circle-check">Fully Localized</option>
+                        <option value="downloaded" data-icon="fa-solid fa-download">With Downloads</option>
+                        <option value="skipped" data-icon="fa-solid fa-forward">With Skipped</option>
+                        <option value="errors" data-icon="fa-solid fa-triangle-exclamation">With Errors</option>
+                        <option value="incomplete" data-icon="fa-solid fa-circle-half-stroke">Incomplete (Errors/Stopped)</option>
+                        <option value="none" data-icon="fa-solid fa-circle-xmark">No Remote Media</option>
                     </select>
                     <input type="text" id="bulkSummarySearch" class="glass-input" placeholder="Search character...">
                 </div>
@@ -1209,9 +1279,9 @@ https://chub.ai/characters/author/another-character
                     <!-- Per-character results go here -->
                 </div>
                 <div id="bulkSummaryPagination" class="bulk-summary-pagination">
-                    <button id="bulkSummaryPrevBtn" class="glass-btn"><i class="fa-solid fa-chevron-left"></i></button>
+                    <button id="bulkSummaryPrevBtn" class="glass-btn icon-only"><i class="fa-solid fa-chevron-left"></i></button>
                     <span id="bulkSummaryPageInfo">Page 1 of 1</span>
-                    <button id="bulkSummaryNextBtn" class="glass-btn"><i class="fa-solid fa-chevron-right"></i></button>
+                    <button id="bulkSummaryNextBtn" class="glass-btn icon-only"><i class="fa-solid fa-chevron-right"></i></button>
                 </div>
             </div>
             <div class="confirm-modal-footer">
@@ -1293,7 +1363,7 @@ https://chub.ai/characters/author/another-character
                 
                 <div class="info-section">
                     <h4><i class="fa-solid fa-magnifying-glass"></i> Search Filters</h4>
-                    <p>(These will be integrated in the UI later) For now: Use special search prefixes to filter your character library:</p>
+                    <p>Use special search prefixes to filter your character library:</p>
                     <div class="info-code-list">
                         <div class="info-code-item">
                             <code>creator:name</code>
@@ -1311,25 +1381,40 @@ https://chub.ai/characters/author/another-character
                 </div>
 
                 <div class="info-section">
+                    <h4><i class="fa-solid fa-clock-rotate-left"></i> Version History</h4>
+                    <p>Track changes to your character cards with snapshots and diffs:</p>
+                    <ul>
+                        <li><strong>Auto-backup:</strong> A snapshot is saved automatically before every edit, restore, or card update — you can always undo</li>
+                        <li><strong>Manual snapshots:</strong> Save the current state of any character at any time</li>
+                        <li><strong>Diff preview:</strong> Side-by-side comparison for every card field with added/removed highlighting</li>
+                        <li><strong>Remote versions:</strong> For ChubAI-linked characters, browse the full published version history and restore any version</li>
+                    </ul>
+                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure max auto-backup count in Settings → Version History.</p>
+                </div>
+
+                <div class="info-section">
                     <h4><i class="fa-solid fa-link"></i> ChubAI Linking</h4>
                     <p>Link your local characters to their ChubAI source for extra features:</p>
                     <ul>
+                        <li><strong>Card Updates:</strong> Check for and apply field-level updates from ChubAI with diff preview</li>
                         <li><strong>Gallery Downloads:</strong> Download character gallery images from ChubAI</li>
+                        <li><strong>Version History:</strong> Browse the full published version history from ChubAI</li>
                         <li><strong>Quick Navigation:</strong> Jump to the ChubAI page from character details</li>
-                        <li><strong>Bulk Linking:</strong> Use "Link ChubAI Characters" to auto-match by name, creator, and content similarity. User review still required.</li>
+                        <li><strong>Bulk Linking:</strong> Use "Link ChubAI Characters" to auto-match by name, creator, and content similarity</li>
                     </ul>
                 </div>
 
                 <div class="info-section">
                     <h4><i class="fa-solid fa-images"></i> Media Localization</h4>
-                    <p>Download embedded remote images, reference them dynamically:</p>
+                    <p>Download embedded remote images and reference them dynamically:</p>
                     <ul>
-                        <li>Preserves images if the original URL goes offline</li>
-                        <li>Downloads gallery images from linked ChubAI characters (if character is linked)</li>
+                        <li>Preserves images if the original host goes offline</li>
+                        <li>Downloads gallery images from linked ChubAI characters</li>
                         <li>Deduplication by image hash</li>
                         <li>URL replacement uses the original filename to match local files</li>
+                        <li>Some hosts require SillyTavern's <strong>CORS Proxy</strong> to be enabled (User Settings → Network)</li>
                     </ul>
-                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Enable "Replace remote media URLs" in Settings to auto-swap URLs when viewing.</p>
+                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Enable "Replace remote media URLs" in Settings to auto-swap URLs when viewing. Use Bulk Localization in Settings to process your entire library at once.</p>
                 </div>
 
                 <div class="info-section">
@@ -1341,24 +1426,43 @@ https://chub.ai/characters/author/another-character
                         <li>Higher scores indicate closer matches</li>
                         <li>Review and manage duplicates to keep your library organized</li>
                     </ul>
-                    
                     <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Adjust the minimum score threshold in Settings to see more or fewer matches.</p>
+                </div>
+
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-list-check"></i> Multi-Select & Batch Operations</h4>
+                    <p>Select multiple characters for bulk actions:</p>
+                    <ul>
+                        <li>Press <code>Space</code> or click the multi-select button to enter selection mode</li>
+                        <li>Click characters to select/deselect them</li>
+                        <li><strong>Batch Tagging:</strong> Add or remove tags across all selected characters</li>
+                        <li><strong>Batch Delete:</strong> Remove multiple characters at once</li>
+                        <li>Press <code>Escape</code> to exit multi-select mode</li>
+                    </ul>
                 </div>
 
                 <div class="info-section">
                     <h4><i class="fa-solid fa-keyboard"></i> Keyboard Shortcuts</h4>
                     <div class="info-code-list">
                         <div class="info-code-item">
-                            <code>Escape</code>
-                            <span>Close modals</span>
+                            <code>Space</code>
+                            <span>Toggle multi-select mode (character grid)</span>
                         </div>
                         <div class="info-code-item">
-                            <code>page up / page down</code>
+                            <code>Escape</code>
+                            <span>Close modals, exit multi-select mode</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>Page Up / Page Down</code>
                             <span>Scroll through character list</span>
                         </div>
                         <div class="info-code-item">
                             <code>Home / End</code>
                             <span>Scroll to top / bottom of character list</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>← / →</code>
+                            <span>Navigate images in gallery viewer</span>
                         </div>
                     </div>
                 </div>
@@ -1373,10 +1477,15 @@ https://chub.ai/characters/author/another-character
                     </ul>
                 </div>
 
-                <div class="info-section info-section-dev">
-                    <h4><i class="fa-solid fa-code"></i> Developer Notes</h4>
-                    <p class="info-muted">Feature freeze time, I have been postponing a proper refactor for a while.</p>
-                    <ul class="info-dev-notes">
+                <div class="info-section">
+                    <h4><i class="fa-solid fa-hand-pointer"></i> Quick Actions</h4>
+                    <ul>
+                        <li><strong>Right-click</strong> any character card for a context menu with quick actions</li>
+                        <li><strong>Import local PNGs</strong> via the import dialog (not just ChubAI URLs)</li>
+                        <li><strong>Chats view</strong> lets you browse all chat histories across characters with AI model badges</li>
+                        <li>On mobile: <strong>tap the avatar</strong> in the modal header for a full-size quick-view</li>
+                        <li>On mobile: <strong>swipe left/right</strong> on character details to switch between tabs</li>
+                        <li>On mobile: <strong>swipe left/right</strong> to cycle alternate greetings</li>
                     </ul>
                 </div>
 
@@ -1508,12 +1617,12 @@ https://chub.ai/characters/author/another-character
                             <div class="settings-group-title"><i class="fa-solid fa-sort"></i> Default Sort</div>
                             <div class="settings-row">
                                 <select id="settingsDefaultSort" class="glass-select">
-                                    <option value="name_asc">Name (A-Z)</option>
-                                    <option value="name_desc">Name (Z-A)</option>
-                                    <option value="date_new">Last Modified (Newest)</option>
-                                    <option value="date_old">Last Modified (Oldest)</option>
-                                    <option value="created_new">Date Created (Newest)</option>
-                                    <option value="created_old">Date Created (Oldest)</option>
+                                    <option value="name_asc" data-icon="fa-solid fa-arrow-down-a-z">Name (A-Z)</option>
+                                    <option value="name_desc" data-icon="fa-solid fa-arrow-up-z-a">Name (Z-A)</option>
+                                    <option value="date_new" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Newest)</option>
+                                    <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
+                                    <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
+                                    <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
                                 </select>
                             </div>
                         </div>
@@ -1576,6 +1685,23 @@ https://chub.ai/characters/author/another-character
                         </div>
 
                         <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-clock-rotate-left"></i> Version History</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsAutoSnapshotOnEdit"> Auto-snapshot before edits and updates
+                                </label>
+                                <span class="settings-hint">Automatically save a snapshot of the character's current state before applying edits, card updates, or restores</span>
+                            </div>
+                            <div class="settings-row">
+                                <label for="settingsMaxAutoBackups">Max auto-backup snapshots per character:</label>
+                                <div class="settings-input-group" style="align-items: center; gap: 8px;">
+                                    <input type="number" id="settingsMaxAutoBackups" min="0" max="100" value="10" style="width: 70px;">
+                                    <span class="settings-hint" style="margin: 0;">0 = unlimited</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental</div>
                         </div>
                     </div>
@@ -1610,7 +1736,7 @@ https://chub.ai/characters/author/another-character
                             <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Card Updates</div>
                             <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
                                 <span class="settings-hint" style="margin-bottom: 4px;">Check all Chub-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
-                                <button id="batchCheckUpdatesBtn" class="glass-btn" style="white-space: nowrap;">
+                                <button id="batchCheckUpdatesBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-arrows-rotate"></i> Check All for Updates
                                 </button>
                             </div>
@@ -1640,13 +1766,13 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-download"></i> Bulk Operations</div>
                             <div class="settings-row">
-                                <button id="bulkLocalizeBtn" class="action-btn secondary">
+                                <button id="bulkLocalizeBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-download"></i> Bulk Localize All Characters
                                 </button>
                                 <span class="settings-hint">Scan and download remote media for ALL characters. Previously processed are skipped.</span>
                             </div>
                             <div class="settings-row">
-                                <button id="clearBulkLocalizeHistoryBtn" class="action-btn secondary">
+                                <button id="clearBulkLocalizeHistoryBtn" class="settings-action-btn danger">
                                     <i class="fa-solid fa-eraser"></i> Clear Processed History
                                 </button>
                                 <span class="settings-hint">Reset the processed list so bulk localize scans everyone again.</span>
@@ -1696,7 +1822,7 @@ https://chub.ai/characters/author/another-character
                             <div class="settings-group-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Step 1: Assign IDs</div>
                             <span class="settings-hint">Generate unique IDs for all characters and register folder mappings.</span>
                             <div class="settings-row" style="margin-top: 8px;">
-                                <button id="migrateGalleryFoldersBtn" class="action-btn secondary">
+                                <button id="migrateGalleryFoldersBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-wand-magic-sparkles"></i> Assign Gallery IDs
                                 </button>
                             </div>
@@ -1716,7 +1842,7 @@ https://chub.ai/characters/author/another-character
                                 <div class="settings-sub-title"><i class="fa-solid fa-user"></i> Unique Names</div>
                                 <span class="settings-hint">Simply moves all images from {{charname}} folder into {charname}_{uuid} folder.</span>
                                 <div class="settings-row" style="margin-top: 6px;">
-                                    <button id="migrateAllImagesBtn" class="action-btn secondary small">
+                                    <button id="migrateAllImagesBtn" class="settings-action-btn">
                                         <i class="fa-solid fa-truck-moving"></i> Migrate All
                                     </button>
                                 </div>
@@ -1729,7 +1855,7 @@ https://chub.ai/characters/author/another-character
                                 <div class="settings-sub-title"><i class="fa-solid fa-users"></i> Shared Names</div>
                                 <span class="settings-hint">Uses fingerprinting to sort images to correct owners.</span>
                                 <div class="settings-row" style="margin-top: 6px;">
-                                    <button id="relocateSharedImagesBtn" class="action-btn secondary small">
+                                    <button id="relocateSharedImagesBtn" class="settings-action-btn">
                                         <i class="fa-solid fa-fingerprint"></i> Smart Relocate
                                     </button>
                                 </div>
@@ -1746,13 +1872,13 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-map"></i> Reference</div>
                             <div class="settings-row">
-                                <button id="viewFolderMappingBtn" class="action-btn secondary small">
+                                <button id="viewFolderMappingBtn" class="settings-action-btn">
                                     <i class="fa-solid fa-map"></i> View Folder Mapping
                                 </button>
                                 <span class="settings-hint">See which unique folder belongs to which character.</span>
                             </div>
                             <div class="settings-row" style="margin-top: 8px;">
-                                <button id="browseOrphanedFoldersBtn" class="action-btn secondary small">
+                                <button id="browseOrphanedFoldersBtn" class="settings-action-btn">
                                     <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
                                 </button>
                                 <span class="settings-hint">Find and redistribute images from old legacy folders.</span>
@@ -1771,13 +1897,13 @@ https://chub.ai/characters/author/another-character
                             </div>
                             
                             <div class="settings-row gallery-sync-buttons" style="margin-top: 10px;">
-                                <button id="gallerySyncAuditBtn" class="action-btn secondary small">
+                                <button id="gallerySyncAuditBtn" class="settings-action-btn">
                                     <i class="fa-solid fa-magnifying-glass"></i> Run Audit
                                 </button>
-                                <button id="gallerySyncFullBtn" class="action-btn primary small">
+                                <button id="gallerySyncFullBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-rotate"></i> Full Sync
                                 </button>
-                                <button id="gallerySyncCleanupBtn" class="action-btn secondary small">
+                                <button id="gallerySyncCleanupBtn" class="settings-action-btn">
                                     <i class="fa-solid fa-broom"></i> Cleanup Orphans
                                 </button>
                             </div>
@@ -1819,7 +1945,7 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v3.3.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.0.0</span>
                             </div>
                         </div>
                     </div>
@@ -1831,6 +1957,9 @@ https://chub.ai/characters/author/another-character
             </div>
         </div>
     </div>
+
+    <!-- Toast container — placed last to guarantee it renders above all modals -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
     <script src="library.js?v=74"></script>

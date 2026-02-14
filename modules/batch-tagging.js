@@ -6,7 +6,6 @@
  * @version 1.1.0
  */
 
-import * as SharedStyles from './shared-styles.js';
 import * as CoreAPI from './core-api.js';
 
 const debugLog = (...args) => {
@@ -28,9 +27,6 @@ export function init(deps) {
         console.warn('[BatchTagging] Already initialized');
         return;
     }
-    
-    // Ensure shared styles are loaded first
-    SharedStyles.inject();
     
     // Inject module-specific styles (only what's unique to batch tagging)
     injectStyles();
@@ -702,7 +698,6 @@ function injectModal() {
 
 /**
  * Inject module-specific styles (only what's unique to batch tagging)
- * Common modal/button/input styles come from shared-styles.js
  */
 function injectStyles() {
     if (document.getElementById('batch-tagging-styles')) return;

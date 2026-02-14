@@ -346,6 +346,32 @@
         flex-shrink: 0;
     }
 
+    /* Mobile avatar quick-view overlay */
+    .mobile-avatar-viewer {
+        position: fixed;
+        inset: 0;
+        z-index: 10100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.9);
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .mobile-avatar-viewer img {
+        max-width: 90%;
+        max-height: 85vh;
+        object-fit: contain;
+        border-radius: 8px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+    }
+    .mobile-header-avatar {
+        cursor: pointer;
+    }
+    .chub-char-avatar {
+        cursor: pointer;
+    }
+
     /* Close button – always visible, always tappable */
     .close-btn {
         display: flex !important;
@@ -454,9 +480,15 @@
         font-size: 1rem;
     }
     /* Settings panel buttons */
-    .settings-content .action-btn {
-        padding: 8px 12px;
+    .settings-action-btn {
+        padding: 8px 14px;
         font-size: 0.8rem;
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    .settings-action-btn:hover {
+        transform: none;
+        box-shadow: none;
     }
 
     /* ---------------------------------------------------
@@ -500,6 +532,7 @@
         padding-right: 12px;
     }
     #infoTabBtn i {
+        display: inline-block;
         font-size: 0.78rem;
     }
 
@@ -510,6 +543,17 @@
         padding: 14px;
         padding-bottom: 60px;
     }
+
+    @keyframes tab-slide-from-right {
+        from { transform: translateX(25%); opacity: 0; }
+        to   { transform: translateX(0);   opacity: 1; }
+    }
+    @keyframes tab-slide-from-left {
+        from { transform: translateX(-25%); opacity: 0; }
+        to   { transform: translateX(0);    opacity: 1; }
+    }
+    .tab-pane.slide-from-right { animation: tab-slide-from-right 0.2s ease-out; }
+    .tab-pane.slide-from-left  { animation: tab-slide-from-left  0.2s ease-out; }
     .meta-info {
         font-size: 0.8rem;
         padding: 10px 12px;
@@ -571,8 +615,143 @@
     }
     .glass-input { font-size: 16px; padding: 10px 12px; } /* 16px prevents iOS zoom */
     textarea.glass-input { min-height: 60px; }
-    .edit-lock-header { flex-wrap: wrap; gap: 8px; }
-    .edit-lock-header .action-btn { font-size: 0.8rem; padding: 7px 12px; }
+    .edit-lock-header { flex-wrap: wrap; gap: 8px; padding: 10px 12px; }
+    .edit-lock-header .lock-status { width: 100%; font-size: 0.82rem; }
+    .lock-header-actions { width: 100%; display: flex; gap: 6px; }
+    .lock-header-actions .action-btn {
+        flex: 1;
+        justify-content: center;
+        font-size: 0.8rem;
+        padding: 8px 12px;
+    }
+    #editPaneVersionsBtn {
+        background: rgba(var(--accent-rgb), 0.12);
+        border-color: rgba(var(--accent-rgb), 0.3);
+        color: var(--accent);
+    }
+
+    /* ---------------------------------------------------
+       VERSIONS TAB (character-versions.js module)
+       Drill-down: list view → tap item → detail view
+       --------------------------------------------------- */
+
+    .vt-container { gap: 8px; }
+
+    /* Back button — only visible in detail view */
+    .vt-back-btn { display: none !important; }
+    .vt-container.vt-detail-open .vt-back-btn {
+        display: flex !important;
+        min-height: 36px;
+        color: var(--cl-accent, #4a9eff);
+        border-color: rgba(var(--cl-accent-rgb, 74,158,255), 0.3);
+        background: rgba(var(--cl-accent-rgb, 74,158,255), 0.08);
+        touch-action: manipulation;
+    }
+
+    /* Toolbar — sub-tabs fill first row, buttons fill second */
+    .vt-toolbar { flex-wrap: wrap; gap: 6px; }
+    .vt-sub-tabs { flex: 1 1 100%; order: -1; }
+    .vt-sub-tab {
+        flex: 1;
+        justify-content: center;
+        padding: 8px 10px;
+        font-size: 0.8rem;
+        min-height: 36px;
+    }
+    .vt-toolbar-right { flex: 1 1 100%; justify-content: stretch; }
+    .vt-toolbar-right .vt-btn {
+        flex: 1;
+        justify-content: center;
+        min-height: 36px;
+    }
+
+    .vt-status { font-size: 0.8rem; padding: 6px 10px; }
+
+    /* Body — vertical stack */
+    .vt-body { flex-direction: column; overflow: visible; }
+
+    /* List — full-width vertical, standard mobile list */
+    .vt-list {
+        min-width: unset;
+        max-width: 100%;
+        max-height: none;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 4px;
+        gap: 6px;
+    }
+
+    /* Items — full-width rows, touch-friendly */
+    .vt-item { padding: 10px 12px; min-height: 44px; }
+    .vt-item-header { gap: 4px; }
+    .vt-item-id { font-size: 0.78rem; }
+    .vt-item-label { font-size: 0.82rem; }
+    .vt-item-title { font-size: 0.75rem; }
+    .vt-item-date { font-size: 0.7rem; }
+
+    /* --- Drill-down: hide list in detail view --- */
+    .vt-container.vt-detail-open .vt-toolbar { display: none; }
+    .vt-container.vt-detail-open .vt-status { display: none; }
+    .vt-container.vt-detail-open .vt-list { display: none; }
+
+    /* Hide preview & actions until detail is open */
+    .vt-container:not(.vt-detail-open) .vt-preview { display: none !important; }
+    .vt-container:not(.vt-detail-open) .vt-actions { display: none !important; }
+
+    /* Preview — scrollable content in detail view */
+    .vt-preview {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .vt-preview-header { font-size: 0.82rem; padding: 6px 8px; margin-bottom: 8px; }
+
+    /* Diff items */
+    .vt-diff-list { gap: 6px; }
+    .vt-diff-item.short {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 8px 10px;
+    }
+    .vt-diff-label { font-size: 0.78rem; min-width: unset; }
+    .vt-diff-vals { width: 100%; font-size: 0.78rem; }
+    .vt-diff-header { padding: 8px 10px; min-height: 44px; }
+    .vt-diff-content { max-height: 220px; font-size: 0.78rem; }
+    .vt-diff-line { padding: 2px 8px 2px 4px; }
+
+    /* Tags diff */
+    .vt-tag-content { padding: 8px; }
+    .vt-tag-pills { gap: 5px; }
+    .vt-tag-pill { font-size: 0.75rem; padding: 3px 8px; }
+
+    /* Greetings diff */
+    .vt-greeting-header { padding: 8px 10px; min-height: 40px; font-size: 0.78rem; }
+    .vt-greeting-body { max-height: 180px; font-size: 0.78rem; }
+
+    /* Avatar preview */
+    .vt-avatar-preview { padding: 8px; gap: 10px; }
+    .vt-avatar-thumb { width: 48px; height: 48px; }
+    .vt-apply-avatar { width: 36px; height: 36px; }
+
+    /* Actions bar — pinned at bottom of detail view */
+    .vt-actions { flex-wrap: wrap; gap: 6px; padding-top: 8px; flex-shrink: 0; }
+    .vt-actions-left, .vt-actions-right { gap: 6px; }
+    .vt-actions .vt-btn { min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }
+
+    /* Buttons — touch sizing */
+    .vt-btn { min-height: 36px; font-size: 0.8rem; touch-action: manipulation; }
+
+    /* Dialogs */
+    .vt-dialog { width: 95vw; max-width: 95vw; padding: 18px; border-radius: 12px; }
+    .vt-dialog-title { font-size: 1rem; }
+    .vt-dialog-msg { font-size: 0.85rem; }
+    .vt-dialog-btns { gap: 8px; }
+    .vt-dialog-btn { min-height: 40px; padding: 8px 14px; font-size: 0.85rem; }
+    .vt-input { font-size: 16px; padding: 10px 12px; }
+
+    .vt-loading, .vt-error { padding: 20px 12px; font-size: 0.82rem; }
 
     /* Chats tab (inside character modal) */
     .chats-header { display: none !important; } /* hide title + buttons */
@@ -608,7 +787,6 @@
     .related-filters { flex-wrap: wrap; gap: 6px; padding: 8px; margin-bottom: 12px; }
     .related-filter-toggle { font-size: 0.78rem; padding: 5px 10px; }
     .related-filter-toggle span { font-size: 0.78rem; }
-    .related-results { max-height: none; }
     .related-section-header { font-size: 0.8rem; padding: 6px 0; margin-bottom: 8px; }
     .related-card { gap: 10px; padding: 8px 10px; }
     .related-card-avatar { width: 40px; height: 40px; border-radius: 6px; }
@@ -782,6 +960,7 @@
         height: 100% !important;
         max-height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
     }
     .card-update-modal .cl-modal-header {
         padding: 10px 12px;
@@ -796,11 +975,6 @@
         max-height: calc(100vh - 120px);
         padding: 12px;
         -webkit-overflow-scrolling: touch;
-    }
-    .card-update-modal .cl-modal-footer {
-        padding: 10px 12px;
-        gap: 8px;
-        flex-wrap: wrap;
     }
 
     .card-update-field-select {
@@ -839,49 +1013,102 @@
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
 
+    /* =============================================
+       Batch list — compact iOS-style cells
+       Each row: [name + clamped path] ... [status badge] [>]
+       Fits ~8+ items on screen before scrolling
+       ============================================= */
     .card-update-batch-list {
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 1px;
         overflow-x: hidden;
         max-height: none;
         overflow-y: visible;
-    }
-    .card-update-batch-item {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 8px;
-        padding: 12px;
-        border-radius: 14px;
         background: rgba(255, 255, 255, 0.04);
+        border-radius: 12px;
         border: 1px solid rgba(255, 255, 255, 0.08);
-        width: 100%;
     }
+
+    .card-update-batch-item {
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        border-radius: 0;
+        background: rgba(255, 255, 255, 0.02);
+        border: none;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        width: auto;
+        min-height: 44px;
+        box-sizing: border-box;
+    }
+    .card-update-batch-item:last-child {
+        border-bottom: none;
+    }
+    .card-update-batch-item:first-child {
+        border-radius: 12px 12px 0 0;
+    }
+    .card-update-batch-item:last-child {
+        border-radius: 0 0 12px 12px;
+    }
+    .card-update-batch-item:only-child {
+        border-radius: 12px;
+    }
+
+    /* Info column — name + path, single lines, truncated */
     .card-update-batch-item-info {
-        width: 100%;
+        width: auto;
+        flex: 1;
         min-width: 0;
+        gap: 1px;
     }
-    .card-update-batch-item-name { font-size: 0.95rem; }
-    .card-update-batch-item-path { font-size: 0.75rem; }
+    .card-update-batch-item-name {
+        font-size: 0.88rem;
+        font-weight: 600;
+        line-height: 1.25;
+    }
+    .card-update-batch-item-path {
+        font-size: 0.72rem;
+        opacity: 0.5;
+        line-height: 1.2;
+    }
     .card-update-batch-item-name,
     .card-update-batch-item-path {
-        white-space: normal;
-        overflow: visible;
-        text-overflow: clip;
-        word-break: break-word;
-        overflow-wrap: anywhere;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        word-break: normal;
+        overflow-wrap: normal;
     }
+
+    /* Status area — compact inline badges */
     .card-update-batch-item-status {
-        width: 100%;
-        justify-content: flex-start;
-        gap: 10px;
-        flex-wrap: wrap;
+        width: auto;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-wrap: nowrap;
+        flex-shrink: 0;
+        font-size: 0.78rem;
+        white-space: nowrap;
     }
+
+    /* Status badge — "3 updates" pill */
+    .card-update-batch-item-status .has-updates {
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+    }
+
+    /* View button → compact pill instead of full-width block */
     .card-update-batch-view-btn {
-        width: 100%;
-        justify-content: center;
-        padding: 8px 12px;
-        border-radius: 8px;
+        width: auto;
+        padding: 3px 10px;
+        border-radius: 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
     }
 
     .card-update-diff-item.short {
@@ -927,13 +1154,93 @@
         max-height: none;
         overflow: visible;
     }
-    .card-update-batch-actions {
-        flex-direction: column;
+    /* =============================================
+       Batch modal footer — mobile
+       States:  idle     → [Start Check] [Close]
+                checking → [Pause]       [Close]
+                paused   → [Apply All ···········]    (full row, primary CTA)
+                           [Resume]      [Close]
+                done     → [Apply All ···········]    (full row, primary CTA)
+                                         [Close]
+       ============================================= */
+    .card-update-modal .cl-modal-footer {
+        padding: 12px;
         gap: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
+        position: sticky;
+        bottom: 0;
+        z-index: 1;
     }
-    .card-update-batch-actions .cl-btn,
-    #cardUpdateBatchStartBtn {
+
+    /* Uniform button sizing — every button in the footer */
+    .card-update-modal .cl-modal-footer .cl-btn,
+    .card-update-modal .cl-modal-footer .card-update-pause-btn {
+        height: 44px;
+        padding: 0 16px;
+        border-radius: 12px;
+        font-size: 0.92rem;
+        font-weight: 500;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    /* Apply progress bar — full width row */
+    .card-update-modal .cl-modal-footer .card-update-apply-progress {
+        flex: 0 0 100%;
+        order: -2;
+    }
+
+    /* Apply All wrapper — full width, primary CTA row */
+    .card-update-batch-actions {
+        flex: 0 0 100% !important;
+        order: -1;
+        padding-top: 0;
+        border-top: none;
+        margin-top: 0;
+        gap: 0;
+    }
+    .card-update-batch-actions .cl-btn {
         width: 100%;
+        height: 48px;          /* slightly taller — primary action */
+        font-size: 0.95rem;
+        font-weight: 600;
+        border-radius: 12px;
+        letter-spacing: 0.01em;
+    }
+
+    /* Pause / Resume — colour variants */
+    .card-update-pause-btn {
+        font-weight: 600 !important;
+    }
+    .card-update-pause-btn.pause {
+        background: rgba(255, 152, 0, 0.18) !important;
+        border: 1px solid rgba(255, 152, 0, 0.4) !important;
+        color: #ffd54f !important;
+    }
+    .card-update-pause-btn.resume {
+        background: rgba(76, 175, 80, 0.18) !important;
+        border: 1px solid rgba(76, 175, 80, 0.4) !important;
+        color: #81c784 !important;
+    }
+
+    /* Batch progress text - mobile */
+    .card-update-batch-progress {
+        padding: 12px 14px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: rgba(255, 255, 255, 0.75);
+        background: rgba(255, 255, 255, 0.03);
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: 8px;
     }
 
     /* ---------------------------------------------------
@@ -1203,11 +1510,155 @@
         height: 100% !important;
         border-radius: 0 !important;
     }
-    .chub-link-modal-body { flex-direction: column; }
-    .chub-link-sidebar { flex-direction: row; gap: 12px; align-items: center; }
-    .chub-link-avatar { width: 50px; height: 50px; }
-    .chub-link-search-row { flex-wrap: wrap; }
-    .chub-link-search-row input { font-size: 16px; }
+    .chub-link-modal-body {
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    /* Sidebar → horizontal strip with avatar + name + status */
+    .chub-link-sidebar {
+        flex-direction: row;
+        gap: 12px;
+        align-items: center;
+        padding-bottom: 10px;
+        border-bottom: 1px solid var(--glass-border);
+    }
+    .chub-link-avatar-wrapper { flex-shrink: 0; }
+    .chub-link-avatar {
+        width: 48px;
+        height: 48px;
+        border-radius: 10px;
+    }
+    .chub-link-status-icon {
+        width: 20px;
+        height: 20px;
+        font-size: 0.55rem;
+        bottom: -4px;
+        right: -4px;
+    }
+    .chub-link-char-name {
+        max-width: none;
+        font-size: 0.9rem;
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
+    }
+
+    /* Linked state */
+    .chub-link-current-path {
+        padding: 10px 12px;
+        font-size: 0.85rem;
+        gap: 8px;
+    }
+    .chub-link-current-path:hover {
+        transform: none;
+    }
+    .chub-link-stats {
+        gap: 12px;
+        font-size: 0.8rem;
+        flex-wrap: wrap;
+    }
+    .chub-link-actions {
+        gap: 8px;
+    }
+    .chub-link-btn {
+        min-height: 44px;
+        font-size: 0.85rem;
+        padding: 10px 16px;
+        border-radius: 10px;
+    }
+    .chub-link-btn.primary:hover,
+    .chub-link-btn.secondary:hover,
+    .chub-link-btn.text-danger:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
+    .chub-link-btn.text-danger {
+        min-height: 40px;
+        padding: 8px 16px;
+    }
+    .chub-link-btn.compact {
+        min-height: 44px;
+        padding: 10px 14px;
+    }
+
+    /* Search section */
+    .chub-link-search-row {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    .chub-link-search-row input {
+        font-size: 16px;
+        min-height: 44px;
+    }
+    .chub-link-search-row input:first-child {
+        flex: 1 1 100%;
+    }
+    .chub-link-search-row input:nth-child(3) {
+        flex: 1;
+    }
+    .chub-link-search-by {
+        font-size: 0.75rem;
+    }
+    .chub-link-search-btn {
+        min-height: 44px;
+        min-width: 44px;
+        padding: 10px 14px;
+    }
+
+    /* Search results */
+    .chub-link-search-results {
+        max-height: 50vh;
+    }
+    .chub-link-search-result {
+        padding: 10px;
+        gap: 10px;
+        min-height: 44px;
+    }
+    .chub-link-search-result:hover {
+        transform: none;
+    }
+    .chub-link-search-result-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+    }
+    .chub-link-search-result-name {
+        font-size: 0.85rem;
+    }
+    .chub-link-search-result-creator {
+        font-size: 0.75rem;
+    }
+    .chub-link-search-result-stats {
+        font-size: 0.7rem;
+        gap: 8px;
+    }
+    .chub-link-search-result-btn {
+        min-height: 36px;
+        padding: 6px 12px;
+        font-size: 0.78rem;
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .chub-link-search-empty {
+        padding: 16px 12px;
+        font-size: 0.82rem;
+    }
+
+    /* Divider + URL row */
+    .chub-link-divider {
+        margin: 10px 0;
+    }
+    .chub-link-url-row {
+        gap: 8px;
+    }
+    .chub-link-url-row input {
+        font-size: 16px;
+        min-height: 44px;
+    }
 
     /* ---------------------------------------------------
        SETTINGS MODAL (gallery settings)
@@ -1302,10 +1753,47 @@
     }
     .import-urls-textarea {
         font-size: 16px; /* prevent iOS zoom */
-        flex: 1 1 auto;
-        height: auto;
-        min-height: 80px;
+        height: 200px;
+        min-height: 200px;
+        resize: vertical;
     }
+
+    /* Import source toggle */
+    .import-source-toggle {
+        margin-bottom: 10px;
+    }
+    .import-source-btn {
+        padding: 10px 12px;
+        font-size: 0.85rem;
+    }
+
+    /* Import drop zone */
+    .import-drop-zone {
+        min-height: 150px;
+        flex: 1 1 auto;
+    }
+    .import-drop-placeholder {
+        padding: 25px 15px;
+        min-height: 150px;
+    }
+    .import-drop-placeholder i {
+        font-size: 2rem;
+    }
+    .import-drop-placeholder span {
+        font-size: 0.85rem;
+    }
+    .import-file-list {
+        max-height: 200px;
+    }
+    .import-file-item {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+    }
+    .import-file-count {
+        font-size: 0.8rem;
+        padding: 6px 10px;
+    }
+
     .import-options { gap: 8px; }
     .import-option-toggle {
         padding: 8px 0;
@@ -1351,6 +1839,137 @@
     .bulk-localize-char-info img { width: 32px; height: 32px; border-radius: 6px; }
     .bulk-localize-stats { flex-wrap: wrap; gap: 6px; }
     .bulk-localize-stats .stat-item { font-size: 0.75rem; }
+
+    /* --- Bulk localization summary modal --- */
+    .bulk-summary-header-row {
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+    }
+    .bulk-summary-stat {
+        padding: 8px 12px;
+        min-width: 70px;
+        flex: 1;
+    }
+    .bulk-summary-stat:hover {
+        transform: none;
+    }
+    .bulk-summary-stat .stat-value {
+        font-size: 1.2rem;
+    }
+    .bulk-summary-stat .stat-label {
+        font-size: 0.65rem;
+    }
+    .bulk-summary-media-sources {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    .bulk-summary-source {
+        padding: 10px;
+        border-radius: 10px;
+    }
+    .bulk-summary-source .source-header {
+        font-size: 0.82rem;
+        margin-bottom: 8px;
+        padding-bottom: 6px;
+        gap: 6px;
+    }
+    .bulk-summary-source .source-stats {
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+    .bulk-summary-source .source-stat {
+        padding: 6px 8px;
+        font-size: 0.75rem;
+        gap: 4px;
+    }
+    .bulk-summary-source .source-stat .value {
+        font-size: 0.95rem;
+    }
+    .bulk-summary-source .source-stat .label {
+        font-size: 0.65rem;
+    }
+    .bulk-summary-source .source-empty {
+        font-size: 0.75rem;
+        padding: 8px;
+    }
+    .bulk-summary-source .source-footer {
+        font-size: 0.65rem;
+        margin-top: 8px;
+        padding-top: 6px;
+    }
+    .bulk-summary-totals {
+        gap: 12px;
+        padding: 10px 12px;
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+    .bulk-summary-totals .total-item {
+        gap: 6px;
+    }
+    .bulk-summary-totals .total-value {
+        font-size: 1rem;
+    }
+    .bulk-summary-totals .total-label {
+        font-size: 0.68rem;
+    }
+    .bulk-summary-filter {
+        flex-direction: column;
+        gap: 8px;
+    }
+    .bulk-summary-filter label {
+        font-size: 0.8rem;
+        display: none;
+    }
+    .bulk-summary-filter .glass-input,
+    .bulk-summary-filter .glass-select,
+    .bulk-summary-filter .custom-select-container {
+        font-size: 16px;
+        min-height: 40px;
+        width: 100%;
+        min-width: 0;
+        flex: none;
+    }
+    .bulk-summary-filter .custom-select-trigger {
+        width: 100%;
+        min-width: 0 !important;
+    }
+    .bulk-summary-list {
+        max-height: none;
+    }
+    .bulk-summary-item {
+        padding: 10px 12px;
+        gap: 10px;
+    }
+    .bulk-summary-item img {
+        width: 30px;
+        height: 30px;
+    }
+    .bulk-summary-item .char-name,
+    .bulk-summary-item .char-name-link {
+        font-size: 0.82rem;
+    }
+    .bulk-summary-item .char-stats {
+        gap: 6px;
+        font-size: 0.7rem;
+        flex-wrap: wrap;
+    }
+    .bulk-summary-item .media-source-group {
+        padding: 3px 6px;
+        font-size: 0.68rem;
+    }
+    .bulk-summary-pagination {
+        gap: 10px;
+        margin-top: 10px;
+        padding-top: 10px;
+    }
+    .bulk-summary-pagination span {
+        font-size: 0.8rem;
+    }
+    .bulk-summary-pagination .glass-btn {
+        min-height: 36px;
+        min-width: 36px;
+    }
 
     /* --- Bulk ChubAI Link --- */
     .bulk-chub-link-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -1694,34 +2313,139 @@
         grid-template-columns: 1fr;
         gap: 8px;
     }
-    .chat-card { border-radius: 10px; }
-    .chat-card:hover { transform: none; } /* disable hover lift on touch */
-    .chat-card-header { padding: 10px; gap: 10px; }
-    .chat-card-avatar,
-    .chat-card-avatar-fallback { width: 38px; height: 38px; }
-    .chat-card-char-name { font-size: 0.85rem; }
-    .chat-card-chat-name { font-size: 0.75rem; }
-    .chat-card-body { padding: 10px; gap: 6px; }
-    .chat-card-preview { font-size: 0.8rem; padding: 8px; min-height: 40px; -webkit-line-clamp: 2; line-clamp: 2; }
-    .chat-card-footer { padding: 8px 10px; font-size: 0.7rem; }
-    .chat-card-meta { gap: 8px; }
-    .chat-card-stat { font-size: 0.7rem; }
-    .chat-card-actions { opacity: 1; gap: 4px; } /* always visible on touch */
-    .chat-card-action { padding: 8px 12px; font-size: 0.75rem; min-height: 36px; display: flex; align-items: center; border-radius: 6px; }
-    .chat-card.active::before { font-size: 0.6rem; top: 6px; right: 6px; padding: 2px 5px; }
 
-    /* Grouped chats view */
-    .chats-grouped-view { gap: 10px; }
-    .chat-group { border-radius: 10px; }
-    .chat-group-header { padding: 10px 12px; gap: 10px; }
-    .chat-group-avatar { width: 36px; height: 36px; }
-    .chat-group-header h3 { font-size: 0.9rem; }
-    .chat-group-header .chat-count { font-size: 0.75rem; }
-    .chat-group-item { padding: 10px 12px 10px 50px; gap: 10px; }
-    .chat-group-item-name { font-size: 0.85rem; }
-    .chat-group-item-preview { font-size: 0.75rem; max-width: 100%; }
-    .chat-group-item-meta { font-size: 0.75rem; gap: 8px; }
-    .chat-group-item-actions { opacity: 1; } /* always visible on touch */
+    /* Flat chat cards — compact list rows */
+    .chat-card {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .chat-card:hover {
+        transform: none;
+        box-shadow: none;
+    }
+    .chat-card-header {
+        padding: 8px 10px;
+        gap: 8px;
+    }
+    .chat-card-avatar,
+    .chat-card-avatar-fallback {
+        width: 36px;
+        height: 36px;
+    }
+    .chat-card-char-name {
+        font-size: 0.85rem;
+    }
+    .chat-card-chat-name {
+        font-size: 0.72rem;
+    }
+    .chat-card-body {
+        padding: 0 10px 8px;
+        gap: 4px;
+    }
+    .chat-card-preview {
+        font-size: 0.78rem !important;
+        line-height: 1.4 !important;
+        padding: 6px 8px !important;
+        min-height: 0 !important;
+        max-height: 3.2em !important;
+        display: block !important;
+        -webkit-line-clamp: unset !important;
+        line-clamp: unset !important;
+        -webkit-box-orient: unset !important;
+        overflow: hidden !important;
+        border-radius: 6px;
+        word-break: break-word;
+    }
+    .chat-card-footer {
+        padding: 6px 10px;
+        font-size: 0.7rem;
+    }
+    .chat-card-meta {
+        gap: 8px;
+    }
+    .chat-card-actions {
+        opacity: 1;
+        gap: 4px;
+    }
+    .chat-card-action {
+        padding: 6px 10px;
+        font-size: 0.72rem;
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        border-radius: 6px;
+    }
+    .chat-card.active::before {
+        font-size: 0.55rem;
+        top: 4px;
+        right: 4px;
+        padding: 2px 5px;
+    }
+    .chat-model-badge {
+        max-width: 100px;
+        font-size: 0.62rem;
+        padding: 1px 5px;
+    }
+
+    /* Grouped chats view — iOS-style sections */
+    .chats-grouped-view { gap: 8px; }
+    .chat-group {
+        border-radius: 10px;
+        overflow: hidden;
+    }
+    .chat-group-header {
+        padding: 10px 12px;
+        gap: 10px;
+        min-height: 44px;
+    }
+    .chat-group-header:hover { background: rgba(0, 0, 0, 0.25); }
+    .chat-group-avatar,
+    .chat-group-avatar-fallback { width: 36px; height: 36px; }
+    .chat-group-name { font-size: 0.88rem; }
+    .chat-group-count { font-size: 0.75rem; }
+    .chat-group-toggle { font-size: 0.8rem; }
+    .chat-group-item {
+        padding: 10px 12px 10px 16px;
+        gap: 10px;
+        min-height: 44px;
+    }
+    .chat-group-item:hover { background: none; }
+    .chat-group-item-icon { font-size: 0.9rem; }
+    .chat-group-item-name { font-size: 0.78rem; }
+    .chat-group-item-preview {
+        display: none;
+    }
+    .chat-group-item-meta {
+        font-size: 0.72rem;
+        gap: 8px;
+        display: flex;
+        align-items: center;
+        flex-wrap: nowrap;
+    }
+    .chat-group-item-meta > span {
+        display: inline-flex;
+        align-items: center;
+        flex-shrink: 0;
+        gap: 3px;
+    }
+    .chat-group-item-actions {
+        opacity: 1;
+        gap: 4px;
+    }
+    .chat-group-item-actions .chat-card-action {
+        min-height: 32px;
+        padding: 6px 10px;
+    }
+    .chat-group-item .chat-model-badge {
+        display: inline-block;
+        max-width: 80px;
+        height: 1.1rem;
+        line-height: 1.1rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
 
     /* Chat preview modal */
     .chat-preview-modal {
@@ -1738,6 +2462,12 @@
         position: relative;
     }
     .chat-preview-header-info { gap: 10px; min-width: 0; width: 100%; }
+    .chat-preview-header-info > div { min-width: 0; }
+    .chat-preview-header-info h2 {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
     .chat-preview-avatar { width: 36px; height: 36px; }
     .chat-preview-meta { font-size: 0.75rem; }
     /* Chat preview modal buttons — icon-only on mobile */
@@ -1786,6 +2516,7 @@
     .chat-message-name { font-size: 0.75rem; }
     .chat-message-actions { opacity: 1; }
     .chat-msg-action-btn { width: 28px; height: 28px; }
+    .chat-model-badge { max-width: 120px; font-size: 0.68rem; padding: 1px 6px; }
 
     /* Chats empty/loading states */
     .chats-empty { padding: 40px 16px; }
@@ -1899,7 +2630,7 @@
     .chub-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
     .chub-author-banner-content { font-size: 0.85rem; }
     .chub-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
-    #chubAuthorSortSelect { min-width: 0; flex: 1; font-size: 0.8rem; }
+    #chubAuthorSortSelect, [data-select-id="chubAuthorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
     #chubFollowAuthorBtn { font-size: 0.8rem; padding: 6px 10px; }
 
     /* Card grid */

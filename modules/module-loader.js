@@ -14,11 +14,6 @@ const ModuleLoader = {
     modules: {},
     initialized: false,
     
-    /**
-     * Register a module
-     * @param {string} name - Module name
-     * @param {Object} module - Module object with init function
-     */
     register(name, module) {
         this.modules[name] = module;
         console.log(`[ModuleLoader] Registered module: ${name}`);
@@ -92,6 +87,7 @@ async function initModuleSystem() {
         // Expose gallery viewer functions for library.js to use
         window.openGalleryViewer = galleryViewerModule.openViewer;
         window.openGalleryViewerWithImages = galleryViewerModule.openViewerWithImages;
+        window.closeGalleryViewer = galleryViewerModule.closeViewer;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load gallery-viewer module:', err);
     }
@@ -121,7 +117,44 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load gallery-sync module:', err);
     }
     
-    // Initialize all modules
+    try {
+        const charVersionsModule = await import('./character-versions.js');
+        ModuleLoader.register('character-versions', charVersionsModule.default);
+        
+        // Expose version functions for library.js to use
+        window.openCharVersionHistory = charVersionsModule.openVersionHistory;
+        window.renderVersionsPane = charVersionsModule.renderVersionsPane;
+        window.cleanupVersionsPane = charVersionsModule.cleanupVersionsPane;
+        window.autoSnapshotBeforeChange = charVersionsModule.autoSnapshotBeforeChange;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load character-versions module:', err);
+    }
+    
+    try {
+        const chatsModule = await import('./chats.js');
+        ModuleLoader.register('chats', chatsModule.default);
+        
+        // Expose chats functions for library.js to use
+        window.chatsModule = {
+            fetchCharacterChats: chatsModule.default.fetchCharacterChats,
+            openChat: chatsModule.default.openChat,
+            deleteChat: chatsModule.default.deleteChat,
+            createNewChat: chatsModule.default.createNewChat,
+            loadAllChats: chatsModule.default.loadAllChats,
+            renderChats: chatsModule.default.renderChats,
+            clearChatCache: chatsModule.default.clearChatCache,
+            openChatPreview: chatsModule.default.openChatPreview,
+        };
+        
+        // Expose key functions directly on window for simpler access
+        window.fetchCharacterChats = chatsModule.default.fetchCharacterChats;
+        window.createNewChat = chatsModule.default.createNewChat;
+        window.openChat = chatsModule.default.openChat;
+        window.deleteChat = chatsModule.default.deleteChat;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load chats module:', err);
+    }
+    
     await ModuleLoader.initAll(dependencies);
     
     console.log('[ModuleLoader] Module system ready');
@@ -129,7 +162,6 @@ async function initModuleSystem() {
 
 window.ModuleLoader = ModuleLoader;
 
-// Initialize when DOM is ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initModuleSystem);
 } else {

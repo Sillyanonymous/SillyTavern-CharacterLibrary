@@ -264,6 +264,8 @@
         createMenuButton(topbar);
         setupModalAvatar();
         setupGallerySwipe();
+        setupGreetingsSwipe();
+        setupTabSwipe();
         setupContextMenu();
         setupViewportFix();
         relocateTagPopup();
@@ -276,6 +278,183 @@
         fixRefreshLoadingStuck();
         preventAutoFocusOnOpen();
         setupMobileTagEditor();
+        setupBackButton();
+    }
+
+    /* ========================================
+       ANDROID BACK BUTTON
+       ======================================== */
+    function setupBackButton() {
+        const STATIC_OVERLAYS = new Set([
+            'charModal', 'chubCharModal', 'chatPreviewModal', 'chubLoginModal'
+        ]);
+
+        const stack = [
+            // Tier 0 — avatar quick-view (highest z-index)
+            ['.mobile-avatar-viewer', () => closeAvatarViewer()],
+
+            // Tier 1 — top z-index overlays
+            ['#galleryViewerModal.visible',    () => window.closeGalleryViewer?.()],
+            ['.mobile-ctx-sheet.visible',      () => { document.querySelector('.mobile-ctx-sheet')?.classList.remove('visible'); document.querySelector('.mobile-ctx-scrim')?.classList.remove('visible'); }],
+            ['#clContextMenu.visible',         el => el.classList.remove('visible')],
+            ['.custom-select-menu:not(.hidden)', el => el.classList.add('hidden')],
+            ['#batchTagModal.visible',         el => el.classList.remove('visible')],
+            ['#cardUpdateSingleModal.visible', el => el.classList.remove('visible')],
+            ['#cardUpdateBatchModal.visible',  el => el.classList.remove('visible')],
+
+            // Tier 1.5 — catch-all for dynamic modal-overlays
+            () => {
+                for (const el of document.querySelectorAll('.modal-overlay:not(.hidden)')) {
+                    if (!STATIC_OVERLAYS.has(el.id)) {
+                        el.remove();
+                        return true;
+                    }
+                }
+                return false;
+            },
+
+            // Tier 2 — confirm/dialog modals (z-2000+)
+            ['#disableGalleryFoldersModal',          el => el.remove()],
+            ['#confirmSaveModal:not(.hidden)',        el => el.classList.add('hidden')],
+            ['#preImportDuplicateModal:not(.hidden)', el => el.classList.add('hidden')],
+            ['#chubLinkModal:not(.hidden)',           el => el.classList.add('hidden')],
+            ['#bulkChubLinkModal:not(.hidden)',       el => el.classList.add('hidden')],
+            ['#galleryInfoModal:not(.hidden)',        el => el.classList.add('hidden')],
+            ['#gallerySettingsModal:not(.hidden)',    el => el.classList.add('hidden')],
+            ['#localizeModal:not(.hidden)',           el => el.classList.add('hidden')],
+            ['#bulkLocalizeModal:not(.hidden)',       el => el.classList.add('hidden')],
+            ['#bulkLocalizeSummaryModal:not(.hidden)', el => el.classList.add('hidden')],
+            ['#charDuplicatesModal:not(.hidden)',     el => el.classList.add('hidden')],
+            ['#importSummaryModal:not(.hidden)',      el => el.classList.add('hidden')],
+            ['#importModal:not(.hidden)',             el => el.classList.add('hidden')],
+            ['#deleteConfirmModal',                   el => el.remove()],
+            ['#deleteDuplicateModal',                 el => el.remove()],
+            ['#legacyFolderModal',                    el => el.remove()],
+            ['#folderMappingModal',                   el => el.remove()],
+            ['#orphanedFoldersModal',                 el => el.remove()],
+
+            // Tier 2.5 — mobile sheets & overlays
+            ['.mobile-search-overlay:not(.hidden)', () => {
+                const overlay = document.querySelector('.mobile-search-overlay');
+                if (overlay) overlay.classList.add('hidden');
+                const searchBox = document.querySelector('.search-box');
+                const searchArea = document.querySelector('.search-area');
+                if (searchBox && searchArea) searchArea.insertBefore(searchBox, searchArea.firstChild);
+            }],
+            ['.mobile-sheet-overlay:not(.hidden)', el => {
+                el.querySelector('.mobile-sheet')?.classList.remove('open');
+                setTimeout(() => el.classList.add('hidden'), 300);
+            }],
+            ['#tagFilterPopup:not(.hidden)', el => el.classList.add('hidden')],
+
+            // Tier 3 — tag editor sheet
+            ['.tag-editor-sheet:not(.hidden)', el => { el.classList.add('hidden'); document.getElementById('tagEditorSheetAutocomplete')?.classList.add('hidden'); }],
+
+            // Tier 3 — full-screen modals
+            ['#chatPreviewModal:not(.hidden)',  el => el.classList.add('hidden')],
+            ['#chubLoginModal:not(.hidden)',    el => el.classList.add('hidden')],
+            ['#chubCharModal:not(.hidden)',     () => { window.cleanupChubCharModal?.(); document.getElementById('chubCharModal')?.classList.add('hidden'); }],
+
+            // Tier 4 — in-modal sub-views
+            ['.vt-container.vt-detail-open', el => el.classList.remove('vt-detail-open')],
+
+            // Tier 5 — main modals (lowest priority full-screen)
+            ['#charModal:not(.hidden)', () => window.closeModal?.()],
+
+            // Tier 5.5 — multi-select mode
+            () => {
+                if (window.MultiSelect?.enabled) {
+                    window.MultiSelect.disable();
+                    return true;
+                }
+                return false;
+            },
+
+            // Tier 6 — dropdowns
+            ['#moreOptionsMenu:not(.hidden)',     el => el.classList.add('hidden')],
+            ['#settingsMenu:not(.hidden)',        el => el.classList.add('hidden')],
+            ['#chubFiltersDropdown:not(.hidden)', el => el.classList.add('hidden')],
+            ['#chubTagsDropdown:not(.hidden)',    el => el.classList.add('hidden')],
+        ];
+
+        // Baseline guard so back works before any modal is opened
+        history.pushState({ clBackGuard: true }, '', location.href);
+
+        // Push a guard entry whenever an overlay/modal opens.
+        // Each back press consumes one guard — this keeps them balanced
+        // without needing a re-push inside the popstate handler.
+        function pushGuard() {
+            history.pushState({ clBackGuard: true }, '', location.href);
+        }
+
+        const classObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                const el = m.target;
+                // modal-overlay / confirm-modal: hidden removed → opening
+                if ((el.classList.contains('modal-overlay') || el.classList.contains('confirm-modal')) &&
+                    !el.classList.contains('hidden')) {
+                    pushGuard();
+                    return;
+                }
+                // gv-modal / cl-modal: visible added → opening
+                if ((el.classList.contains('gv-modal') || el.classList.contains('cl-modal')) &&
+                    el.classList.contains('visible')) {
+                    pushGuard();
+                    return;
+                }
+                // multi-select-mode added to body → entering multi-select
+                if (el === document.body && el.classList.contains('multi-select-mode')) {
+                    pushGuard();
+                    return;
+                }
+            }
+        });
+
+        // Observe class changes on existing static modals
+        document.querySelectorAll('.modal-overlay, .cl-modal, .confirm-modal').forEach(el => {
+            classObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+        });
+
+        // Observe body for multi-select-mode class
+        classObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+
+        // Watch body's direct children for dynamically added modals
+        const childObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType !== 1) continue;
+                    if (node.classList.contains('modal-overlay') || node.classList.contains('confirm-modal')) {
+                        pushGuard();
+                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'] });
+                    }
+                    if (node.classList.contains('gv-modal') || node.classList.contains('cl-modal')) {
+                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'] });
+                    }
+                }
+            }
+        });
+        childObserver.observe(document.body, { childList: true });
+
+        window.addEventListener('popstate', () => {
+            try {
+                for (const entry of stack) {
+                    if (typeof entry === 'function') {
+                        if (entry()) return;
+                        continue;
+                    }
+                    const [selector, closeFn] = entry;
+                    const el = document.querySelector(selector);
+                    if (el) {
+                        closeFn(el);
+                        return;
+                    }
+                }
+            } catch (e) {
+                // Swallow errors — fall through to re-push below
+            }
+            // Nothing was open — re-push baseline guard
+            history.pushState({ clBackGuard: true }, '', location.href);
+        });
     }
 
     /* ========================================
@@ -735,6 +914,11 @@
         if (moreOptionsMenu) {
             const items = moreOptionsMenu.querySelectorAll('.dropdown-item');
             items.forEach(item => {
+                // Skip desktop-only responsive overflow items — they belong to the
+                // progressive topbar collapse and have their own mobile equivalents
+                if (item.classList.contains('topbar-overflow-item') ||
+                    item.classList.contains('topbar-overflow-item-narrow')) return;
+
                 const mobileItem = document.createElement('button');
                 mobileItem.className = 'mobile-sheet-item';
 
@@ -846,11 +1030,193 @@
             avatar.className = 'mobile-header-avatar';
             avatar.src = modalImg.src;
             avatar.alt = 'Avatar';
+            avatar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openAvatarViewer(avatar.src);
+            });
             // Insert before the title h2
             header.insertBefore(avatar, header.firstChild);
         });
 
         observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
+
+        // ChubAI character preview modal avatar — load full-size on tap
+        const chubAvatar = document.getElementById('chubCharAvatar');
+        if (chubAvatar) {
+            chubAvatar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (!chubAvatar.src) return;
+                const fullSrc = chubAvatar.src.replace(/\/avatar\.webp$/, '/chara_card_v2.png');
+                openAvatarViewer(fullSrc, chubAvatar.src);
+            });
+        }
+    }
+
+    /* ========================================
+       AVATAR QUICK-VIEW OVERLAY
+       ======================================== */
+    function openAvatarViewer(src, fallbackSrc) {
+        if (!src) return;
+        const existing = document.querySelector('.mobile-avatar-viewer');
+        if (existing) existing.remove();
+
+        const overlay = document.createElement('div');
+        overlay.className = 'mobile-avatar-viewer';
+
+        const img = document.createElement('img');
+        img.alt = 'Avatar';
+        if (fallbackSrc) {
+            img.onerror = () => { img.onerror = null; img.src = fallbackSrc; };
+        }
+        img.src = src;
+
+        overlay.appendChild(img);
+        overlay.addEventListener('click', () => closeAvatarViewer());
+        document.body.appendChild(overlay);
+
+        // Push history guard for back button
+        history.pushState({ clBackGuard: true }, '', location.href);
+    }
+
+    function closeAvatarViewer() {
+        const viewer = document.querySelector('.mobile-avatar-viewer');
+        if (viewer) viewer.remove();
+    }
+
+    /* ========================================
+       CHARACTER DETAILS TAB SWIPE
+       ======================================== */
+    function setupTabSwipe() {
+        const modal = document.getElementById('charModal');
+        if (!modal) return;
+
+        const tabContainer = modal.querySelector('.modal-content-tabs');
+        if (!tabContainer) return;
+
+        let startX = 0, startY = 0, tracking = false, swiping = false;
+        const SWIPE_THRESHOLD = 50, LOCK_THRESHOLD = 10;
+
+        function getVisibleTabs() {
+            return [...modal.querySelectorAll('.tab-btn')].filter(b => !b.classList.contains('hidden'));
+        }
+
+        function isInteractiveTarget(el) {
+            const tag = el.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+                // Allow swipe over locked/readonly fields
+                if (el.readOnly || el.disabled || el.classList.contains('locked')) return false;
+                return true;
+            }
+            return false;
+        }
+
+        tabContainer.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            if (isInteractiveTarget(e.target)) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            tracking = true;
+            swiping = false;
+        }, { passive: true });
+
+        tabContainer.addEventListener('touchmove', (e) => {
+            if (!tracking || e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            if (!swiping && Math.abs(dx) > LOCK_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+                swiping = true;
+            }
+            if (swiping) e.preventDefault();
+        }, { passive: false });
+
+        tabContainer.addEventListener('touchend', (e) => {
+            if (!tracking) return;
+            tracking = false;
+            if (!swiping) return;
+            const dx = (e.changedTouches[0]?.clientX || 0) - startX;
+            if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+
+            const tabs = getVisibleTabs();
+            const activeIdx = tabs.findIndex(b => b.classList.contains('active'));
+            if (activeIdx === -1) return;
+
+            const nextIdx = dx < 0 ? activeIdx + 1 : activeIdx - 1;
+            if (nextIdx >= 0 && nextIdx < tabs.length) {
+                tabs[nextIdx].click();
+
+                // Slide-in animation on the newly active pane
+                const paneId = 'pane-' + tabs[nextIdx].dataset.tab;
+                const pane = document.getElementById(paneId);
+                if (pane) {
+                    const cls = dx < 0 ? 'slide-from-right' : 'slide-from-left';
+                    pane.classList.remove('slide-from-right', 'slide-from-left');
+                    void pane.offsetWidth;
+                    pane.classList.add(cls);
+                    pane.addEventListener('animationend', () => pane.classList.remove(cls), { once: true });
+                }
+            }
+        }, { passive: true });
+    }
+
+    /* ========================================
+       ALT GREETINGS SWIPE NAVIGATION
+       ======================================== */
+    function setupGreetingsSwipe() {
+        const observer = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                for (const node of m.addedNodes) {
+                    if (node.nodeType !== 1) continue;
+                    if (node.id === 'altGreetingsFullscreenModal') {
+                        attachGreetingsSwipe(node);
+                        return;
+                    }
+                }
+            }
+        });
+        observer.observe(document.body, { childList: true });
+    }
+
+    function attachGreetingsSwipe(modal) {
+        const body = modal.querySelector('.content-fullscreen-body');
+        if (!body) return;
+
+        let startX = 0, startY = 0, tracking = false, swiping = false;
+        const SWIPE_THRESHOLD = 50, LOCK_THRESHOLD = 10;
+
+        body.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            tracking = true;
+            swiping = false;
+        }, { passive: true });
+
+        body.addEventListener('touchmove', (e) => {
+            if (!tracking || e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            if (!swiping && Math.abs(dx) > LOCK_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+                swiping = true;
+            }
+            if (swiping) e.preventDefault();
+        }, { passive: false });
+
+        body.addEventListener('touchend', (e) => {
+            if (!tracking) return;
+            tracking = false;
+            if (!swiping) return;
+            const dx = (e.changedTouches[0]?.clientX || 0) - startX;
+            if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+
+            const nav = modal.querySelector('#greetingNav');
+            if (!nav) return;
+            const btns = [...nav.querySelectorAll('.greeting-nav-btn')];
+            const activeIdx = btns.findIndex(b => b.classList.contains('active'));
+            const nextIdx = dx < 0 ? activeIdx + 1 : activeIdx - 1;
+            if (nextIdx >= 0 && nextIdx < btns.length) {
+                btns[nextIdx].click();
+            }
+        }, { passive: true });
     }
 
     /* ========================================
@@ -872,11 +1238,6 @@
         let startX = 0, startY = 0, currentX = 0;
         let tracking = false, swiping = false;
         const SWIPE_THRESHOLD = 40, LOCK_THRESHOLD = 8;
-
-        // Pinch zoom state
-        let lastPinchDist = 0;
-        let isPinching = false;
-        let pinchMidX = 0, pinchMidY = 0;
 
         // Double-tap state
         let lastTapTime = 0;
@@ -944,29 +1305,11 @@
             }
         }
 
-        function pinchDist(t) {
-            const dx = t[0].clientX - t[1].clientX;
-            const dy = t[0].clientY - t[1].clientY;
-            return Math.sqrt(dx * dx + dy * dy);
-        }
-
         container.addEventListener('touchstart', (e) => {
             recentTouch = true;
             const img = getImageEl();
             if (!img) return;
             img.style.transition = '';
-
-            if (e.touches.length === 2) {
-                // Pinch start
-                isPinching = true;
-                tracking = false;
-                swiping = false;
-                gestureOccurred = true;
-                lastPinchDist = pinchDist(e.touches);
-                pinchMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
-                pinchMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-                return;
-            }
 
             if (e.touches.length !== 1) return;
 
@@ -1016,23 +1359,6 @@
             const img = getImageEl();
             if (!img) return;
 
-            // Pinch zoom — incremental per-frame
-            if (isPinching && e.touches.length === 2) {
-                e.preventDefault();
-                const dist = pinchDist(e.touches);
-                if (lastPinchDist > 0 && dist > 0) {
-                    const frameRatio = dist / lastPinchDist;
-                    // Dampen: only apply 30% of the per-frame delta
-                    const dampened = 1 + (frameRatio - 1) * 0.3;
-                    const curScale = getZoom();
-                    const newScale = Math.max(1, Math.min(3, curScale * dampened));
-                    setTransform(img, newScale, panX, panY);
-                    showZoom(newScale);
-                }
-                lastPinchDist = dist;
-                return;
-            }
-
             // Pan when zoomed
             if (isPanning) {
                 const moveThreshold = 5;
@@ -1043,7 +1369,7 @@
                 }
                 e.preventDefault();
                 const curZoom = getZoom();
-                setTransform(img, curZoom, imgPanStartX + dx / curZoom, imgPanStartY + dy / curZoom);
+                setTransform(img, curZoom, imgPanStartX + dx / Math.sqrt(curZoom), imgPanStartY + dy / Math.sqrt(curZoom));
                 return;
             }
 
@@ -1070,17 +1396,6 @@
 
         container.addEventListener('touchend', (e) => {
             const img = getImageEl();
-
-            // Pinch end
-            if (isPinching) {
-                isPinching = false;
-                lastPinchDist = 0;
-                if (img) {
-                    const z = getZoom();
-                    if (z < 1.05) resetTransform(img);
-                }
-                return;
-            }
 
             // Pan end — single tap while zoomed resets to 1x
             if (isPanning) {

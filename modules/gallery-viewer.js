@@ -1,15 +1,4 @@
-/**
- * Gallery Viewer Module for SillyTavern Character Library
- * Full-screen image viewer for character gallery images
- * 
- * @module GalleryViewer
- * @version 1.0.0
- * 
- * IMPORTANT: This module follows the CoreAPI architecture.
- * - Only import from core-api.js and shared-styles.js
- * - Never access window.* directly (except through CoreAPI)
- * - Never import from gallery.js
- */
+
 
 import * as CoreAPI from './core-api.js';
 
@@ -25,13 +14,19 @@ let currentImages = [];
 let currentIndex = 0;
 let currentCharacter = null;
 let currentZoom = 1;
+let panX = 0;
+let panY = 0;
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let dragStartPanX = 0;
+let dragStartPanY = 0;
+let didDrag = false;
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 5;
 const ZOOM_STEP = 0.25;
+const DRAG_DEAD_ZONE = 5;
 
-/**
- * Initialize the gallery viewer module
- */
 export function init() {
     if (isInitialized) return;
     
@@ -43,11 +38,6 @@ export function init() {
     debugLog('[GalleryViewer] Module initialized');
 }
 
-/**
- * Open the gallery viewer for a character
- * @param {Object} char - Character object
- * @param {number} startIndex - Optional starting image index
- */
 export async function openViewer(char, startIndex = 0) {
     if (!char) {
         CoreAPI.showToast('No character provided', 'error');
@@ -100,13 +90,6 @@ export async function openViewer(char, startIndex = 0) {
     }
 }
 
-/**
- * Open the gallery viewer with pre-loaded images
- * Used when images are already loaded (e.g., from character details gallery tab)
- * @param {Array} images - Array of {name, url} objects
- * @param {number} startIndex - Index of image to show first
- * @param {string} title - Optional title to display (e.g., character name)
- */
 export function openViewerWithImages(images, startIndex = 0, title = 'Gallery') {
     if (!images || images.length === 0) {
         CoreAPI.showToast('No images to display', 'error');
@@ -141,9 +124,6 @@ export function openViewerWithImages(images, startIndex = 0, title = 'Gallery') 
     showImage(validIndex);
 }
 
-/**
- * Close the gallery viewer
- */
 export function closeViewer() {
     const modal = document.getElementById('galleryViewerModal');
     const videoEl = document.getElementById('galleryViewerVideo');
@@ -163,13 +143,13 @@ export function closeViewer() {
     currentImages = [];
     currentIndex = 0;
     currentCharacter = null;
+    currentZoom = 1;
+    panX = 0;
+    panY = 0;
+    isDragging = false;
+    didDrag = false;
 }
 
-/**
- * Fetch gallery images for a character
- * @param {Object} char - Character object
- * @returns {Promise<Array>} Array of image URLs
- */
 async function fetchGalleryImages(char) {
     const folderName = CoreAPI.getGalleryFolderName(char);
     
@@ -204,10 +184,6 @@ async function fetchGalleryImages(char) {
     });
 }
 
-/**
- * Update character info display
- * @param {Object} char - Character object
- */
 function updateCharacterInfo(char) {
     const nameEl = document.getElementById('galleryViewerCharName');
     if (nameEl) {
@@ -215,9 +191,6 @@ function updateCharacterInfo(char) {
     }
 }
 
-/**
- * Update the image counter display
- */
 function updateCounter() {
     const counterEl = document.getElementById('galleryViewerCounter');
     if (counterEl) {
@@ -225,20 +198,11 @@ function updateCounter() {
     }
 }
 
-/**
- * Check if a file is a video based on extension or type property
- * @param {Object} media - Media object with name and optional type
- * @returns {boolean}
- */
 function isVideo(media) {
     if (media.type === 'video') return true;
     return media.name?.match(/\.(mp4|webm|mov|avi|mkv|m4v)$/i);
 }
 
-/**
- * Show media (image or video) at specified index
- * @param {number} index - Media index
- */
 function showImage(index) {
     if (index < 0 || index >= currentImages.length) return;
     
@@ -289,14 +253,14 @@ function showImage(index) {
     updateThumbnailSelection();
 }
 
-/**
- * Reset zoom to default
- */
 function resetZoom() {
     currentZoom = 1;
+    panX = 0;
+    panY = 0;
     const imgEl = document.getElementById('galleryViewerImage');
     if (imgEl) {
-        imgEl.style.transform = `scale(${currentZoom})`;
+        imgEl.style.transform = `scale(1)`;
+        imgEl.style.cursor = '';
     }
     updateZoomIndicator();
 }
@@ -304,25 +268,45 @@ function resetZoom() {
 // Zoom indicator timeout
 let zoomIndicatorTimeout = null;
 
-/**
- * Apply zoom to image
- * @param {number} delta - Zoom delta (positive = zoom in, negative = zoom out)
- */
 function applyZoom(delta) {
     const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + delta));
     if (newZoom !== currentZoom) {
         currentZoom = newZoom;
-        const imgEl = document.getElementById('galleryViewerImage');
-        if (imgEl) {
-            imgEl.style.transform = `scale(${currentZoom})`;
+        // Reset pan when zooming back to 1x
+        if (currentZoom <= 1) {
+            panX = 0;
+            panY = 0;
+        } else {
+            // Clamp pan to new zoom bounds
+            clampPan();
         }
+        applyTransform();
         showZoomIndicator();
     }
 }
 
-/**
- * Show zoom indicator briefly
- */
+function applyTransform() {
+    const imgEl = document.getElementById('galleryViewerImage');
+    if (!imgEl) return;
+    if (panX === 0 && panY === 0) {
+        imgEl.style.transform = `scale(${currentZoom})`;
+    } else {
+        imgEl.style.transform = `scale(${currentZoom}) translate(${panX}px, ${panY}px)`;
+    }
+    imgEl.style.cursor = currentZoom > 1 ? 'grab' : '';
+}
+
+function clampPan() {
+    const container = document.querySelector('.gv-image-container');
+    const imgEl = document.getElementById('galleryViewerImage');
+    if (!container || !imgEl) return;
+    const cRect = container.getBoundingClientRect();
+    const maxPanX = Math.max(0, (cRect.width * 0.5) / currentZoom);
+    const maxPanY = Math.max(0, (cRect.height * 0.5) / currentZoom);
+    panX = Math.max(-maxPanX, Math.min(maxPanX, panX));
+    panY = Math.max(-maxPanY, Math.min(maxPanY, panY));
+}
+
 function showZoomIndicator() {
     const indicator = document.getElementById('galleryViewerZoomIndicator');
     if (!indicator) return;
@@ -341,9 +325,6 @@ function showZoomIndicator() {
     }, 1000);
 }
 
-/**
- * Update zoom indicator (without auto-hide)
- */
 function updateZoomIndicator() {
     const indicator = document.getElementById('galleryViewerZoomIndicator');
     if (indicator) {
@@ -351,9 +332,6 @@ function updateZoomIndicator() {
     }
 }
 
-/**
- * Update navigation button states
- */
 function updateNavButtons() {
     // Navigation buttons are always enabled with round robin
     const prevBtn = document.getElementById('galleryViewerPrev');
@@ -367,9 +345,6 @@ function updateNavButtons() {
     }
 }
 
-/**
- * Render thumbnail strip
- */
 function renderThumbnails() {
     const strip = document.getElementById('galleryViewerThumbnails');
     if (!strip) return;
@@ -393,19 +368,8 @@ function renderThumbnails() {
             `;
         }
     }).join('');
-    
-    // Add click handlers
-    strip.querySelectorAll('.gv-thumb').forEach(thumb => {
-        thumb.addEventListener('click', () => {
-            const idx = parseInt(thumb.dataset.index, 10);
-            showImage(idx);
-        });
-    });
 }
 
-/**
- * Update thumbnail selection highlight
- */
 function updateThumbnailSelection() {
     const strip = document.getElementById('galleryViewerThumbnails');
     if (!strip) return;
@@ -421,36 +385,24 @@ function updateThumbnailSelection() {
     }
 }
 
-/**
- * Navigate to previous image (round robin)
- */
 function prevImage() {
     if (currentImages.length === 0) return;
     const newIndex = currentIndex > 0 ? currentIndex - 1 : currentImages.length - 1;
     showImage(newIndex);
 }
 
-/**
- * Navigate to next image (round robin)
- */
 function nextImage() {
     if (currentImages.length === 0) return;
     const newIndex = currentIndex < currentImages.length - 1 ? currentIndex + 1 : 0;
     showImage(newIndex);
 }
 
-/**
- * Open current image in new tab
- */
 function openInNewTab() {
     if (currentImages[currentIndex]) {
         window.open(currentImages[currentIndex].url, '_blank');
     }
 }
 
-/**
- * Setup event listeners
- */
 function setupEventListeners() {
     // Close button
     document.getElementById('galleryViewerClose')?.addEventListener('click', closeViewer);
@@ -458,6 +410,14 @@ function setupEventListeners() {
     // Navigation buttons
     document.getElementById('galleryViewerPrev')?.addEventListener('click', prevImage);
     document.getElementById('galleryViewerNext')?.addEventListener('click', nextImage);
+    
+    // Thumbnail strip - single delegated handler
+    document.getElementById('galleryViewerThumbnails')?.addEventListener('click', (e) => {
+        const thumb = e.target.closest('.gv-thumb');
+        if (!thumb) return;
+        const idx = parseInt(thumb.dataset.index, 10);
+        if (!isNaN(idx)) showImage(idx);
+    });
     
     // Open in new tab
     document.getElementById('galleryViewerOpenBtn')?.addEventListener('click', openInNewTab);
@@ -471,6 +431,8 @@ function setupEventListeners() {
     
     // Close when clicking the image container area (but not the image itself)
     document.getElementById('galleryViewerContent')?.addEventListener('click', (e) => {
+        // Don't close if we just finished a drag
+        if (didDrag) return;
         // Close if clicking on the content area but not on the image, nav buttons, or their children
         const clickedOnImage = e.target.id === 'galleryViewerImage';
         const clickedOnNav = e.target.closest('.gv-nav');
@@ -479,8 +441,21 @@ function setupEventListeners() {
         }
     });
     
-    // Click on image left/right halves to navigate
+    // Click on image: if zoomed, reset zoom; otherwise navigate prev/next halves
     document.getElementById('galleryViewerImage')?.addEventListener('click', (e) => {
+        // If we just finished a drag, suppress this click
+        if (didDrag) {
+            didDrag = false;
+            e.stopPropagation();
+            return;
+        }
+        // If zoomed in, click anywhere on image resets zoom
+        if (currentZoom > 1) {
+            resetZoom();
+            showZoomIndicator();
+            e.stopPropagation();
+            return;
+        }
         const img = e.target;
         const rect = img.getBoundingClientRect();
         const clickX = e.clientX - rect.left;
@@ -493,6 +468,49 @@ function setupEventListeners() {
         }
     });
     
+    // Desktop drag-to-pan when zoomed
+    const imageContainer = document.querySelector('.gv-image-container');
+    if (imageContainer) {
+        imageContainer.addEventListener('mousedown', (e) => {
+            if (currentZoom <= 1 || e.button !== 0) return;
+            isDragging = true;
+            didDrag = false;
+            dragStartX = e.clientX;
+            dragStartY = e.clientY;
+            dragStartPanX = panX;
+            dragStartPanY = panY;
+            const imgEl = document.getElementById('galleryViewerImage');
+            if (imgEl) {
+                imgEl.style.cursor = 'grabbing';
+                imgEl.style.transition = 'none';
+            }
+            e.preventDefault();
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - dragStartX;
+            const dy = e.clientY - dragStartY;
+            if (!didDrag && (Math.abs(dx) > DRAG_DEAD_ZONE || Math.abs(dy) > DRAG_DEAD_ZONE)) {
+                didDrag = true;
+            }
+            panX = dragStartPanX + dx / currentZoom;
+            panY = dragStartPanY + dy / currentZoom;
+            clampPan();
+            applyTransform();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (!isDragging) return;
+            isDragging = false;
+            const imgEl = document.getElementById('galleryViewerImage');
+            if (imgEl) {
+                imgEl.style.cursor = currentZoom > 1 ? 'grab' : '';
+                imgEl.style.transition = '';
+            }
+        });
+    }
+
     // Scroll wheel zoom on image container
     document.getElementById('galleryViewerContent')?.addEventListener('wheel', (e) => {
         e.preventDefault();
@@ -536,9 +554,6 @@ function setupEventListeners() {
     });
 }
 
-/**
- * Inject the modal HTML
- */
 function injectModal() {
     if (document.getElementById('galleryViewerModal')) return;
     
@@ -608,9 +623,6 @@ function injectModal() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
-/**
- * Inject module styles
- */
 function injectStyles() {
     if (document.getElementById('gallery-viewer-styles')) return;
     
@@ -788,7 +800,7 @@ function injectStyles() {
             background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
         }
         
-        /* Image content - make sure cursor shows zoom hint */
+        /* Zoom hint cursor */
         .gv-content {
             cursor: zoom-in;
         }

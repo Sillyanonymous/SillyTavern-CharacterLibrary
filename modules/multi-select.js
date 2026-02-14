@@ -1,10 +1,4 @@
-/**
- * Multi-Select Module for SillyTavern Character Library
- * Handles multi-select mode, toolbar UI, and keyboard shortcuts
- *
- * @module MultiSelect
- * @version 1.0.0
- */
+
 
 import * as CoreAPI from './core-api.js';
 
@@ -14,9 +8,6 @@ const MultiSelect = {
     enabled: false,
     selectedCharacters: new Map(), // avatar -> character object
 
-    /**
-     * Enable multi-select mode
-     */
     enable() {
         this.enabled = true;
         document.body.classList.add('multi-select-mode');
@@ -28,9 +19,6 @@ const MultiSelect = {
         console.log('[MultiSelect] Mode enabled');
     },
 
-    /**
-     * Disable multi-select mode and clear selection
-     */
     disable() {
         this.enabled = false;
         this.selectedCharacters.clear();
@@ -48,11 +36,6 @@ const MultiSelect = {
         console.log('[MultiSelect] Mode disabled');
     },
 
-    /**
-     * Toggle selection of a character
-     * @param {Object} char - Character object
-     * @param {HTMLElement} cardElement - The card DOM element
-     */
     toggle(char, cardElement) {
         if (!this.enabled) return;
 
@@ -69,9 +52,6 @@ const MultiSelect = {
         this.updateToolbar();
     },
 
-    /**
-     * Select all currently filtered characters
-     */
     selectAll() {
         if (!this.enabled) return;
 
@@ -97,9 +77,6 @@ const MultiSelect = {
         this.updateToolbar();
     },
 
-    /**
-     * Clear all selections
-     */
     clearSelection() {
         this.selectedCharacters.clear();
         document.querySelectorAll('.char-card.selected').forEach(card => {
@@ -108,25 +85,14 @@ const MultiSelect = {
         this.updateToolbar();
     },
 
-    /**
-     * Get array of selected characters
-     * @returns {Array} Selected character objects
-     */
     getSelected() {
         return Array.from(this.selectedCharacters.values());
     },
 
-    /**
-     * Get count of selected characters
-     * @returns {number} Selection count
-     */
     getCount() {
         return this.selectedCharacters.size;
     },
 
-    /**
-     * Update the multi-select toolbar UI
-     */
     updateToolbar() {
         const toolbar = document.getElementById('multiSelectToolbar');
         const countEl = document.getElementById('multiSelectCount');
@@ -145,20 +111,11 @@ const MultiSelect = {
         }
     },
 
-    /**
-     * Check if a character is selected
-     * @param {string} avatar - Character avatar
-     * @returns {boolean} Whether selected
-     */
     isSelected(avatar) {
         return this.selectedCharacters.has(avatar);
     }
 };
 
-/**
- * Check if all selected characters are favorited
- * @returns {boolean} True if all selected are favorites
- */
 function areAllSelectedFavorited() {
     const selected = MultiSelect.getSelected();
     if (selected.length === 0) return false;
@@ -169,9 +126,6 @@ function areAllSelectedFavorited() {
     });
 }
 
-/**
- * Update the favorite toggle button appearance based on selection state
- */
 function updateFavoriteToggleState() {
     const btn = document.getElementById('multiSelectFavToggleBtn');
     if (!btn) return;

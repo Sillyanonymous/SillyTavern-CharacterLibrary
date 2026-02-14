@@ -6,7 +6,6 @@
  * @version 1.0.0
  */
 
-import * as SharedStyles from './shared-styles.js';
 import * as CoreAPI from './core-api.js';
 
 // Module state
@@ -24,9 +23,6 @@ export function init(deps) {
         console.warn('[ContextMenu] Already initialized');
         return;
     }
-    
-    // Ensure shared styles are loaded
-    SharedStyles.inject();
     
     // Create menu element
     createMenu();
@@ -308,6 +304,18 @@ function buildSingleMenuItems(char, cardElement) {
             action: () => CoreAPI.openChubLinkModal(char)
         });
     }
+    
+    // Version history (available for ALL characters — local snapshots + remote if Chub-linked)
+    items.push({
+        icon: 'fa-solid fa-clock-rotate-left',
+        label: 'Version History',
+        action: () => {
+            const charVersions = CoreAPI.getModule('character-versions');
+            if (charVersions?.openVersionHistory) {
+                charVersions.openVersionHistory(char);
+            }
+        }
+    });
     
     // Gallery viewer
     items.push({
@@ -669,7 +677,7 @@ async function bulkDelete() {
                 <button class="action-btn secondary" id="cancelBulkDeleteBtn">
                     <i class="fa-solid fa-xmark"></i> Cancel
                 </button>
-                <button class="action-btn primary" id="confirmBulkDeleteBtn" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);">
+                <button class="action-btn danger" id="confirmBulkDeleteBtn">
                     <i class="fa-solid fa-trash"></i> Delete All
                 </button>
             </div>

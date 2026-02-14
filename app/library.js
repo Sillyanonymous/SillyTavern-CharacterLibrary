@@ -12,6 +12,7 @@ let isEditLocked = true;
 let originalValues = {};  // Form values for diff comparison
 let originalRawData = {}; // Raw character data for cancel/restore
 let pendingPayload = null;
+let _editPanePopulated = false; // Deferred — set true after Edit tab first opened
 
 // Favorites filter state
 let showFavoritesOnly = false;
@@ -57,7 +58,7 @@ function throttle(func, wait) {
 
 // Simple cache for expensive computations
 const computationCache = new Map();
-const CACHE_MAX_SIZE = 500;
+const CACHE_MAX_SIZE = 2000;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 function getCached(key) {
@@ -82,6 +83,256 @@ function clearCache() {
     computationCache.clear();
 }
 
+// ========================================================================
+// CUSTOM SELECT
+// ========================================================================
+
+// Native <select> is hidden but remains the data model — .value and 'change'
+// events work transparently so existing code needs no changes.
+function initCustomSelect(select) {
+    if (!select || select._customSelect) return null;
+
+    // Capture native value accessor before we override it
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+    const nativeValueSetter = descriptor.set;
+    const nativeValueGetter = descriptor.get;
+
+    const isSmall = select.classList.contains('glass-select-small');
+
+    // --- Build container ---
+    const container = document.createElement('div');
+    container.className = 'custom-select-container';
+    if (select.id) container.dataset.selectId = select.id;
+
+    // Transfer non-glass classes from the select (e.g. chub-filter-hidden)
+    for (const cls of select.classList) {
+        if (cls !== 'glass-select' && cls !== 'glass-select-small') {
+            container.classList.add(cls);
+        }
+    }
+
+    // --- Trigger button ---
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = `glass-btn custom-select-trigger${isSmall ? ' small' : ''}`;
+    if (select.title) trigger.title = select.title;
+    trigger.setAttribute('aria-expanded', 'false');
+    trigger.innerHTML = `
+        <span class="trigger-text"></span>
+        <i class="fa-solid fa-chevron-down trigger-arrow"></i>
+    `;
+
+    // --- Dropdown menu (appended to body for fixed positioning) ---
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu custom-select-menu hidden';
+
+    // Build / rebuild menu items from the <select>'s <option> / <optgroup> children
+    function buildMenu() {
+        menu.innerHTML = '';
+        for (const child of select.children) {
+            if (child.tagName === 'OPTGROUP') {
+                const title = document.createElement('div');
+                title.className = 'dropdown-section-title';
+                title.textContent = child.label;
+                menu.appendChild(title);
+                for (const opt of child.children) {
+                    menu.appendChild(createItem(opt));
+                }
+            } else if (child.tagName === 'OPTION') {
+                menu.appendChild(createItem(child));
+            }
+        }
+    }
+
+    function createItem(option) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'dropdown-item custom-select-item';
+        item.dataset.value = option.value;
+
+        const isSelected = option.value === nativeValueGetter.call(select);
+        if (isSelected) item.classList.add('selected');
+
+        const iconClass = option.dataset.icon;
+        const iconHtml = iconClass ? `<i class="${iconClass} item-icon"></i>` : '';
+
+        item.innerHTML = `${iconHtml}<span>${option.textContent}</span>`;
+
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            nativeValueSetter.call(select, option.value);
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            syncVisuals();
+            close();
+        });
+        return item;
+    }
+
+    function syncVisuals() {
+        const selectedOpt = select.options[select.selectedIndex];
+        const triggerText = trigger.querySelector('.trigger-text');
+        if (triggerText && selectedOpt) {
+            triggerText.textContent = selectedOpt.textContent;
+        }
+        menu.querySelectorAll('.custom-select-item').forEach(item => {
+            const isSelected = item.dataset.value === nativeValueGetter.call(select);
+            item.classList.toggle('selected', isSelected);
+        });
+    }
+
+    function positionMenu() {
+        const rect = trigger.getBoundingClientRect();
+        const menuHeight = menu.scrollHeight || 200;
+        const spaceBelow = window.innerHeight - rect.bottom - 10;
+        const spaceAbove = rect.top - 10;
+
+        menu.style.left = rect.left + 'px';
+        menu.style.width = Math.max(rect.width, 180) + 'px';
+
+        if (spaceBelow >= menuHeight || spaceBelow >= spaceAbove) {
+            menu.style.top = rect.bottom + 4 + 'px';
+            menu.style.bottom = '';
+            menu.style.maxHeight = Math.min(350, spaceBelow) + 'px';
+        } else {
+            menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+            menu.style.top = '';
+            menu.style.maxHeight = Math.min(350, spaceAbove) + 'px';
+        }
+    }
+
+    let openedAt = 0;
+
+    function open() {
+        // Close any other open custom selects
+        document.querySelectorAll('.custom-select-menu:not(.hidden)').forEach(m => {
+            if (m !== menu) m.classList.add('hidden');
+        });
+        menu.classList.remove('hidden');
+        trigger.setAttribute('aria-expanded', 'true');
+        openedAt = Date.now();
+        positionMenu();
+        syncVisuals();
+        const selectedItem = menu.querySelector('.custom-select-item.selected');
+        if (selectedItem) selectedItem.scrollIntoView({ block: 'nearest' });
+    }
+
+    function close() {
+        menu.classList.add('hidden');
+        trigger.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggle() {
+        if (menu.classList.contains('hidden')) {
+            open();
+        } else {
+            close();
+        }
+    }
+
+    buildMenu();
+    syncVisuals();
+
+    // --- Event listeners ---
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggle();
+    });
+
+    window.addEventListener('click', (e) => {
+        if (!menu.classList.contains('hidden') && !container.contains(e.target) && !menu.contains(e.target)) {
+            close();
+        }
+    });
+
+    // Close on scroll in any ancestor (but not the menu itself)
+    // Grace period prevents instant close from touch-triggered scroll bubbling
+    window.addEventListener('scroll', (e) => {
+        if (!menu.classList.contains('hidden') && e.target !== menu && Date.now() - openedAt > 150) close();
+    }, true);
+
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !menu.classList.contains('hidden')) {
+            close();
+        }
+    });
+
+    // --- DOM assembly ---
+    container.appendChild(trigger);
+    document.body.appendChild(menu);
+
+    select.parentNode.insertBefore(container, select);
+    select.style.display = 'none';
+
+    // Lock trigger width to the widest option so it doesn't resize on selection change.
+    // Uses IntersectionObserver because selects in hidden views (chats, chub) have zero
+    // scrollWidth until their container becomes visible.
+    const triggerText = trigger.querySelector('.trigger-text');
+    function lockTriggerWidth() {
+        if (trigger.style.minWidth) return;
+        let maxW = 0;
+        const original = triggerText.textContent;
+        for (const opt of select.options) {
+            triggerText.textContent = opt.textContent;
+            maxW = Math.max(maxW, trigger.scrollWidth);
+        }
+        triggerText.textContent = original;
+        if (maxW > 0) trigger.style.minWidth = maxW + 'px';
+    }
+    const widthObserver = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting) {
+            lockTriggerWidth();
+            widthObserver.disconnect();
+        }
+    });
+    widthObserver.observe(trigger);
+
+    // Intercept .value to keep visuals in sync
+    Object.defineProperty(select, 'value', {
+        get() { return nativeValueGetter.call(this); },
+        set(val) {
+            nativeValueSetter.call(this, val);
+            syncVisuals();
+        },
+        configurable: true
+    });
+
+    // --- Public API stored on the select element ---
+    select._customSelect = { container, trigger, menu, open, close, toggle, refresh() { buildMenu(); syncVisuals(); }, update: syncVisuals };
+
+    return container;
+}
+
+function initAllCustomSelects() {
+    document.querySelectorAll('.glass-select, .glass-select-small').forEach(select => {
+        initCustomSelect(select);
+    });
+}
+
+/**
+ * Pre-compute frequently-accessed sort/search keys on each character object.
+ * Called once when character data loads (processAndRender), so that performSearch()
+ * and sort comparators can use cheap property lookups instead of:
+ *   - .toLowerCase() on every filter pass (10k calls per keystroke)
+ *   - parseDateValue() inside sort comparator (130k+ calls per sort at 10k chars)
+ *   - getTags() + join() + toLowerCase() per character per search
+ */
+function prepareCharacterKeys(chars) {
+    for (let i = 0; i < chars.length; i++) {
+        const c = chars[i];
+        if (!c) continue;
+        // Normalize name to root level (some chars store it only in data.name)
+        if (!c.name) c.name = c.data?.name || c.definition?.name || 'Unknown';
+        // Pre-compute lowercase fields for text search
+        c._lowerName = c.name.toLowerCase();
+        c._lowerCreator = (c.creator || c.data?.creator || '').toLowerCase();
+        const tags = getTags(c);
+        c._tagsLower = tags.length > 0 ? tags.join(' ').toLowerCase() : '';
+        // Pre-compute numeric timestamps for date sorting
+        c._dateAdded = getCharacterDateAdded(c);
+        c._createDate = getCharacterCreateDate(c);
+    }
+}
+
 // ========================================
 // SETTINGS PERSISTENCE SYSTEM
 // Uses SillyTavern's extensionSettings via main window for server-side storage
@@ -92,7 +343,6 @@ const SETTINGS_KEY = 'SillyTavernCharacterGallery';
 const DEFAULT_SETTINGS = {
     chubToken: null,
     chubRememberToken: false,
-    // Add more settings here as needed
     defaultSort: 'name_asc',
     // Include ChubAI gallery images in character galleries
     includeChubGallery: true,
@@ -143,7 +393,6 @@ function debugWarn(...args) {
 }
 
 function debugError(...args) {
-    // Always log errors, but add prefix when in debug mode
     if (getSetting('debugMode')) {
         console.error('[Debug]', ...args);
     } else {
@@ -154,10 +403,6 @@ function debugError(...args) {
 // In-memory settings cache
 let gallerySettings = { ...DEFAULT_SETTINGS };
 
-/**
- * Get the SillyTavern context from the main window
- * @returns {object|null} The ST context or null if unavailable
- */
 function getSTContext() {
     try {
         if (window.opener && !window.opener.closed && window.opener.SillyTavern?.getContext) {
@@ -169,15 +414,7 @@ function getSTContext() {
     return null;
 }
 
-/**
- * Directly set a value in ST's extensionSettings via the opener window
- * Uses explicit property assignment to ensure cross-window write works
- * @param {string} path - Dot-separated path like 'gallery.folders'
- * @param {string} key - The key to set
- * @param {*} value - The value to set
- * @param {boolean} [immediate=false] - If true, use saveSettings() instead of saveSettingsDebounced() for critical operations
- * @returns {boolean} True if successful
- */
+// Uses explicit property assignment for cross-window write reliability
 function setSTExtensionSetting(path, key, value, immediate = false) {
     try {
         if (!window.opener || window.opener.closed) {
@@ -219,15 +456,10 @@ function setSTExtensionSetting(path, key, value, immediate = false) {
     }
 }
 
-/**
- * Verify that our context access matches what ST's gallery would use
- * This helps diagnose cross-window context issues
- */
 function verifyContextAccess() {
     const ourContext = getSTContext();
     if (!ourContext?.extensionSettings) return false;
     
-    // Ensure gallery.folders exists
     if (!ourContext.extensionSettings.gallery) {
         ourContext.extensionSettings.gallery = { folders: {} };
     }
@@ -438,6 +670,10 @@ function setupSettingsModal() {
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     
+    // Version History
+    const autoSnapshotOnEditCheckbox = document.getElementById('settingsAutoSnapshotOnEdit');
+    const maxAutoBackupsInput = document.getElementById('settingsMaxAutoBackups');
+
     // Unique Gallery Folders
     const uniqueGalleryFoldersCheckbox = document.getElementById('settingsUniqueGalleryFolders');
     const migrateGalleryFoldersBtn = document.getElementById('migrateGalleryFoldersBtn');
@@ -509,6 +745,14 @@ function setupSettingsModal() {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
         }
         
+        // Version History
+        if (autoSnapshotOnEditCheckbox) {
+            autoSnapshotOnEditCheckbox.checked = getSetting('autoSnapshotOnEdit') || false;
+        }
+        if (maxAutoBackupsInput) {
+            maxAutoBackupsInput.value = getSetting('maxAutoBackups') ?? 10;
+        }
+
         // Unique Gallery Folders
         if (uniqueGalleryFoldersCheckbox) {
             uniqueGalleryFoldersCheckbox.checked = getSetting('uniqueGalleryFolders') || false;
@@ -568,7 +812,6 @@ function setupSettingsModal() {
         };
     }
     
-    // Helper function to actually save settings
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
         
@@ -593,6 +836,8 @@ function setupSettingsModal() {
             showChubTagline: showChubTaglineCheckbox ? showChubTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
+            autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
+            maxAutoBackups: maxAutoBackupsInput ? parseInt(maxAutoBackupsInput.value) || 10 : 10,
         });
         
         // If unique gallery folders was just enabled, register overrides for all characters with gallery_ids
@@ -883,7 +1128,6 @@ function setupSettingsModal() {
             const totalToProcess = needsId;
             let processed = 0;
             
-            // Step 1: Assign gallery IDs to characters that need them
             for (const char of allCharacters) {
                 const hasId = getCharacterGalleryId(char);
                 
@@ -904,7 +1148,7 @@ function setupSettingsModal() {
                 }
             }
             
-            // Step 2: Sync ALL folder overrides to ST at once (more reliable than individual registration)
+            // Sync folder overrides to ST at once (more reliable than individual registration)
             if (galleryMigrationStatusText) {
                 galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing folder overrides to ST...`;
             }
@@ -1406,7 +1650,6 @@ function getCSRFToken() {
 
 // ========================================
 // CORE HELPER FUNCTIONS
-// Reusable utilities to reduce code duplication
 // ========================================
 
 /**
@@ -1464,6 +1707,115 @@ function show(id) {
  */
 function hide(id) {
     document.getElementById(id)?.classList.add('hidden');
+}
+
+// ========================================
+// VIEW MANAGEMENT
+// Top-level view switching (characters, chats, chub)
+// Exposed on window.* so CoreAPI proxies and modules can access it.
+// ========================================
+
+let currentView = 'characters';
+const viewEnterCallbacks = {}; // view → callback[]
+
+/**
+ * Switch between top-level views (characters, chats, chub).
+ * Handles UI toggles for filter areas, buttons, scroll reset, etc.
+ * Modules register lazy-load hooks via onViewEnter().
+ * @param {string} view - 'characters' | 'chats' | 'chub'
+ */
+function switchView(view) {
+    debugLog('[View] Switching to:', view);
+    currentView = view;
+
+    // Update toggle buttons
+    document.querySelectorAll('.view-toggle-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.view === view);
+    });
+
+    // Update search placeholder
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        if (view === 'characters') {
+            searchInput.placeholder = 'Search characters...';
+        } else if (view === 'chats') {
+            searchInput.placeholder = 'Search chats...';
+        } else {
+            searchInput.placeholder = 'Search library...';
+        }
+    }
+
+    // Get elements
+    const charFilters = document.getElementById('filterArea');
+    const chatFilters = document.getElementById('chatsFilterArea');
+    const chubFilters = document.getElementById('chubFilterArea');
+    const importBtn = document.getElementById('importBtn');
+    const searchSettings = document.querySelector('.search-settings-container');
+    const mainSearch = document.querySelector('.search-area');
+
+    // Hide all views first
+    hide('characterGrid');
+    hide('chatsView');
+    hide('chubView');
+
+    // Reset scroll position when switching views
+    const scrollContainer = document.querySelector('.gallery-content');
+    if (scrollContainer) {
+        scrollContainer.scrollTop = 0;
+    }
+
+    // Hide all filter areas using display:none for cleaner switching
+    if (charFilters) charFilters.style.display = 'none';
+    if (chatFilters) chatFilters.style.display = 'none';
+    if (chubFilters) chubFilters.style.display = 'none';
+
+    if (view === 'characters') {
+        if (charFilters) charFilters.style.display = 'flex';
+        if (importBtn) importBtn.style.display = '';
+        if (searchSettings) searchSettings.style.display = '';
+        if (mainSearch) {
+            mainSearch.style.visibility = 'visible';
+            mainSearch.style.pointerEvents = '';
+        }
+        show('characterGrid');
+
+        // Re-apply current filters and sort when returning to characters view.
+        // Defer so the grid has reflowed after removing 'hidden' class.
+        requestAnimationFrame(() => performSearch());
+    } else if (view === 'chats') {
+        if (chatFilters) chatFilters.style.display = 'flex';
+        if (importBtn) importBtn.style.display = 'none';
+        if (searchSettings) searchSettings.style.display = 'none';
+        if (mainSearch) {
+            mainSearch.style.visibility = 'visible';
+            mainSearch.style.pointerEvents = '';
+        }
+        show('chatsView');
+    } else if (view === 'chub') {
+        if (chubFilters) chubFilters.style.display = 'flex';
+        if (importBtn) importBtn.style.display = 'none';
+        if (searchSettings) searchSettings.style.display = 'none';
+        if (mainSearch) {
+            mainSearch.style.visibility = 'hidden';
+            mainSearch.style.pointerEvents = 'none';
+        }
+        show('chubView');
+    }
+
+    // Fire registered callbacks for this view
+    const callbacks = viewEnterCallbacks[view];
+    if (callbacks) {
+        for (const cb of callbacks) cb();
+    }
+}
+
+function getCurrentView() {
+    return currentView;
+}
+
+function onViewEnter(view, callback) {
+    if (!viewEnterCallbacks[view]) viewEnterCallbacks[view] = [];
+    viewEnterCallbacks[view].push(callback);
 }
 
 /**
@@ -2102,7 +2454,7 @@ function showFolderMappingModal() {
                                             <span style="color: var(--text-primary);">${escapeHtml(char.name)}${chubLabel}</span>
                                             <i class="fa-solid fa-arrow-right" style="color: var(--text-muted);"></i>
                                             <code style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 2px 6px; border-radius: 3px; font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
-                                            <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy folder name" style="background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 4px;">
+                                            <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy folder name">
                                                 <i class="fa-solid fa-copy"></i>
                                             </button>
                                         </div>
@@ -2149,7 +2501,7 @@ function showFolderMappingModal() {
                                             <td style="padding: 6px; color: var(--text-primary);">${escapeHtml(char.name)}</td>
                                             <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${uniqueFolder}</code></td>
                                             <td style="padding: 6px;">
-                                                <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy" style="background: none; border: none; cursor: pointer; color: var(--text-muted); padding: 2px;">
+                                                <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy">
                                                     <i class="fa-solid fa-copy"></i>
                                                 </button>
                                             </td>
@@ -2431,7 +2783,7 @@ async function showOrphanedFoldersModal() {
                         <span class="orphaned-file-count" id="orphanedFileCount">${orphanedFolders[0].files.length} files</span>
                     </div>
                     <div class="orphaned-content-actions">
-                        <button class="action-btn small" id="orphanedClearDuplicatesBtn" title="Remove files that already exist in a unique folder">
+                        <button class="action-btn secondary small" id="orphanedClearDuplicatesBtn" title="Remove files that already exist in a unique folder">
                             <i class="fa-solid fa-broom"></i> Clear Duplicates
                         </button>
                         <label class="orphaned-select-all">
@@ -2683,7 +3035,8 @@ async function showOrphanedFoldersModal() {
                     if (uniqueFolderFilenames.has(fileName)) {
                         console.log(`[ClearDuplicates] File "${fileName}" - DUPLICATE (filename match)`);
                         const deletePath = `/user/images/${safeFolderName}/${fileName}`;
-                        await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                        const delResp = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                        await delResp.text().catch(() => {});
                         folderDeleted++;
                         totalDeleted++;
                         continue;
@@ -2704,7 +3057,8 @@ async function showOrphanedFoldersModal() {
                             if (isDuplicate) {
                                 // Duplicate found - delete from orphaned folder
                                 const deletePath = `/user/images/${safeFolderName}/${fileName}`;
-                                await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                                const delResp = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+                                await delResp.text().catch(() => {});
                                 folderDeleted++;
                                 totalDeleted++;
                             } else {
@@ -3273,12 +3627,14 @@ async function moveImageToFolder(sourceFolder, targetFolder, fileName, deleteSou
             return { success: false, error: `Upload failed: ${errorText}` };
         }
         
+        await uploadResponse.text().catch(() => {});
         debugLog(`[MoveFile] Upload successful for ${fileName}`);
         
         // Delete from source folder if requested
         if (deleteSource) {
             const deletePath = `/user/images/${safeSourceFolder}/${fileName}`;
-            await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            const delResp = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            await delResp.text().catch(() => {});
             debugLog(`[MoveFile] Deleted source file ${fileName}`);
         }
         
@@ -3437,7 +3793,8 @@ async function relocateSharedFolderImages(characters, options = {}) {
             // File already exists in destination - just delete from source
             debugLog(`[Migration] File ${fileName} already exists in ${uniqueFolder}, deleting from source`);
             const deletePath = `/user/images/${sanitizeFolderName(sharedFolderName)}/${fileName}`;
-            await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            const delResp = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', { path: deletePath });
+            await delResp.text().catch(() => {});
             results.moved++; // Count as successful (file is where it should be)
             continue;
         }
@@ -3655,8 +4012,6 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
             }
         }
         
-        // Update the folder mapping with the new folder name
-        // char.name should already be updated by now, but we ensure it matches newName
         const tempChar = { ...char, name: newName };
         registerGalleryFolderOverride(tempChar);
         
@@ -3682,6 +4037,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Apply saved highlight color
     applyHighlightColor(getSetting('highlightColor'));
+    
+    // Convert all native <select> elements into styled custom dropdowns
+    initAllCustomSelects();
     
     // Reset filters and search on page load
     resetFiltersAndSearch();
@@ -3992,6 +4350,9 @@ function processAndRender(data) {
     // Filter valid
     allCharacters = allCharacters.filter(c => c && c.avatar);
     
+    // Pre-compute sort/search keys once (avoids repeated toLowerCase, date parsing, etc.)
+    prepareCharacterKeys(allCharacters);
+    
     // Re-link activeChar to the new object in allCharacters if modal is open
     if (activeCharAvatar) {
         const updatedChar = allCharacters.find(c => c.avatar === activeCharAvatar);
@@ -4021,7 +4382,7 @@ function processAndRender(data) {
     // the grid is hidden and rendering now would use stale dimensions. In that case just
     // sort/update currentCharacters without rendering — switchView('characters') will call
     // performSearch() again with correct dimensions when the user navigates back.
-    if (currentView === 'characters') {
+    if ((getCurrentView() || 'characters') === 'characters') {
         performSearch();
     } else {
         // Still sort currentCharacters so the data is ready when the user switches views,
@@ -4031,10 +4392,10 @@ function processAndRender(data) {
         currentCharacters.sort((a, b) => {
             if (sortType === 'name_asc') return a.name.localeCompare(b.name);
             if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-            if (sortType === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a);
-            if (sortType === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
-            if (sortType === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
-            if (sortType === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
+            if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
+            if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
+            if (sortType === 'created_new') return b._createDate - a._createDate;
+            if (sortType === 'created_old') return a._createDate - b._createDate;
             return 0;
         });
     }
@@ -4242,6 +4603,8 @@ let isScrolling = false;
 let scrollTimeout = null;
 let cachedCardHeight = 0;
 let cachedCardWidth = 0;
+let cachedGridWidth = 0;       // cached grid.clientWidth — invalidated on resize
+let cachedClientHeight = 0;    // cached scrollContainer.clientHeight — invalidated on resize
 let characterGridDelegatesInitialized = false;
 let currentCharByAvatar = new Map();
 
@@ -4260,16 +4623,19 @@ function renderGrid(chars) {
     // Store chars reference
     currentCharsList = chars;
     currentCharByAvatar = new Map();
-    chars.forEach(char => {
+    for (let i = 0; i < chars.length; i++) {
+        const char = chars[i];
         if (char?.avatar) currentCharByAvatar.set(char.avatar, char);
-    });
+    }
     
     // Clear existing content and state
-    grid.innerHTML = '';
+    grid.replaceChildren();
     activeCards.clear();
     lastRenderedStartIndex = -1;
     lastRenderedEndIndex = -1;
     cachedCardHeight = 0;
+    cachedGridWidth = 0;
+    cachedClientHeight = 0;
     
     // Remove any existing sentinel (not needed with virtual scroll)
     const existingSentinel = document.getElementById('lazyLoadSentinel');
@@ -4336,13 +4702,18 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     if (currentCharsList.length === 0) return;
     
     const scrollTop = scrollContainer.scrollTop;
-    const clientHeight = scrollContainer.clientHeight;
-    const gridWidth = grid.clientWidth || 800;
+    // Use cached dimensions to avoid forced reflow on every scroll frame.
+    // These are invalidated on resize and on force (scroll-end) updates.
+    if (force || cachedClientHeight === 0) {
+        cachedClientHeight = scrollContainer.clientHeight;
+        cachedGridWidth = grid.clientWidth || 800;
+    }
+    const clientHeight = cachedClientHeight;
+    const gridWidth = cachedGridWidth;
     
     const { cols, cardHeight } = getGridMetrics(gridWidth);
     
-    // Render buffer: 2 screens above and below
-    const RENDER_BUFFER_PX = clientHeight * 2;
+    const RENDER_BUFFER_PX = clientHeight * 2.5;
     
     // Preload buffer: 4 screens ahead for images
     const PRELOAD_BUFFER_PX = clientHeight * 4;
@@ -4362,55 +4733,79 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     lastRenderedStartIndex = startIndex;
     lastRenderedEndIndex = endIndex;
     
-    // Calculate padding to position cards correctly
     const paddingTop = startRow * (cardHeight + GRID_GAP);
     grid.style.paddingTop = `${paddingTop}px`;
     
-    // Determine which indices we need
-    const neededIndices = new Set();
-    for (let i = startIndex; i < endIndex; i++) {
-        neededIndices.add(i);
-    }
-    
-    // Remove cards that are no longer visible
+    // Remove cards outside the visible range
+    let cardsChanged = false;
     for (const [index, card] of activeCards) {
-        if (!neededIndices.has(index)) {
+        if (index < startIndex || index >= endIndex) {
             card.remove();
             activeCards.delete(index);
+            cardsChanged = true;
         }
     }
     
-    // Add missing cards in order
-    // We need to maintain DOM order for proper grid layout
-    const sortedIndices = Array.from(neededIndices).sort((a, b) => a - b);
-    
-    // Create any missing cards
-    for (const index of sortedIndices) {
-        if (!activeCards.has(index)) {
-            const char = currentCharsList[index];
+    // Create missing cards and track which indices are new (already ascending order)
+    const newCardIndices = [];
+    for (let i = startIndex; i < endIndex; i++) {
+        if (!activeCards.has(i)) {
+            const char = currentCharsList[i];
             if (char) {
                 const card = createCharacterCard(char);
-                card.dataset.virtualIndex = index;
-                activeCards.set(index, card);
+                card.dataset.virtualIndex = i;
+                activeCards.set(i, card);
+                newCardIndices.push(i);
+                cardsChanged = true;
             }
         }
     }
     
-    // Check if we need to rebuild the grid (cards added/removed, not just scrolling)
-    const currentChildren = Array.from(grid.children);
-    const currentIndices = currentChildren.map(c => parseInt(c.dataset.virtualIndex)).filter(i => !isNaN(i));
-    const needsRebuild = currentIndices.length !== sortedIndices.length || 
-                         !sortedIndices.every((idx, i) => currentIndices[i] === idx);
-    
-    if (needsRebuild) {
-        // Only rebuild if card set has changed - preserves hover states during pure scroll
-        const orderedCards = sortedIndices
-            .map(i => activeCards.get(i))
-            .filter(card => card);
-        
-        grid.innerHTML = '';
-        grid.style.paddingTop = `${paddingTop}px`;
-        orderedCards.forEach(card => grid.appendChild(card));
+    // Surgical DOM update: only touch changed cards instead of clearing + rebuilding.
+    // Normal scrolling removes cards from one edge and adds at the other, so a simple
+    // append (down) or prepend (up) handles ~99% of updates with minimal DOM work.
+    // Full ordered rebuild via DocumentFragment is the rare fallback for jump/resize.
+    if (cardsChanged && newCardIndices.length > 0) {
+        if (grid.children.length === 0) {
+            // Grid is empty (first render or complete range change) — batch append all
+            const fragment = document.createDocumentFragment();
+            for (let i = startIndex; i < endIndex; i++) {
+                const card = activeCards.get(i);
+                if (card) fragment.appendChild(card);
+            }
+            grid.appendChild(fragment);
+        } else {
+            // Determine optimal insertion point based on where new cards fall
+            // relative to what's already in the DOM
+            const firstDomIndex = parseInt(grid.firstElementChild.dataset.virtualIndex);
+            const lastDomIndex = parseInt(grid.lastElementChild.dataset.virtualIndex);
+            const allAfter = newCardIndices[0] > lastDomIndex;
+            const allBefore = newCardIndices[newCardIndices.length - 1] < firstDomIndex;
+            
+            if (allAfter) {
+                // Scrolling down — append new cards at end
+                const fragment = document.createDocumentFragment();
+                for (const idx of newCardIndices) {
+                    fragment.appendChild(activeCards.get(idx));
+                }
+                grid.appendChild(fragment);
+            } else if (allBefore) {
+                // Scrolling up — prepend new cards at start
+                const fragment = document.createDocumentFragment();
+                for (const idx of newCardIndices) {
+                    fragment.appendChild(activeCards.get(idx));
+                }
+                grid.insertBefore(fragment, grid.firstChild);
+            } else {
+                // Jump/resize: new cards span both sides — full ordered rebuild
+                const fragment = document.createDocumentFragment();
+                for (let i = startIndex; i < endIndex; i++) {
+                    const card = activeCards.get(i);
+                    if (card) fragment.appendChild(card);
+                }
+                grid.replaceChildren(fragment);
+            }
+        }
     }
     
     // Preload images only on scroll-end (force=true), not during active scrolling.
@@ -4529,6 +4924,15 @@ function setupCharacterGridDelegates() {
         openModal(char);
     });
 
+    // Delegated image error handler for card avatars — single listener instead of
+    // per-card inline onerror attributes (avoids per-card handler allocation)
+    grid.addEventListener('error', (e) => {
+        if (e.target.classList.contains('card-image') && !e.target.dataset.fallback) {
+            e.target.dataset.fallback = '1'; // prevent infinite loop if placeholder also fails
+            e.target.src = '/img/No-Image-Placeholder.svg';
+        }
+    }, true); // useCapture: error events don't bubble, so we catch in capture phase
+
     characterGridDelegatesInitialized = true;
 }
 
@@ -4540,6 +4944,8 @@ window.addEventListener('resize', () => {
         resizeRAF = null;
         cachedCardHeight = 0;
         cachedCardWidth = 0;
+        cachedGridWidth = 0;
+        cachedClientHeight = 0;
         const grid = document.getElementById('characterGrid');
         if (grid && currentCharsList.length > 0) {
             updateGridHeight(grid);
@@ -4563,11 +4969,9 @@ function createCharacterCard(char) {
     }
     
     const name = getCharacterName(char);
-    char.name = name; 
+    char.name = name;
     const imgPath = getCharacterAvatarUrl(char.avatar);
     const tags = getTags(char);
-    
-    const tagHtml = tags.slice(0, 3).map(t => `<span class="card-tag">${escapeHtml(t)}</span>`).join('');
     
     // Use creator_notes as hover tooltip - extract plain text only
     // For ChubAI imports, this contains the public character description (often with HTML/CSS)
@@ -4582,17 +4986,45 @@ function createCharacterCard(char) {
         card.title = tooltipText;
     }
     
-    // Build favorite indicator HTML
-    const favoriteHtml = isFavorite ? '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>' : '';
-
-    card.innerHTML = `
-        ${favoriteHtml}
-        <img src="${imgPath}" class="card-image" loading="lazy" onerror="this.src='/img/No-Image-Placeholder.svg'">
-        <div class="card-overlay">
-            <div class="card-name">${escapeHtml(name)}</div>
-            <div class="card-tags">${tagHtml}</div>
-        </div>
-    `;
+    // Build card DOM directly instead of innerHTML — avoids HTML parser overhead
+    // and escapeHtml regex chains. textContent auto-escapes safely.
+    
+    // Favorite indicator
+    if (isFavorite) {
+        const favDiv = document.createElement('div');
+        favDiv.className = 'favorite-indicator';
+        const favIcon = document.createElement('i');
+        favIcon.className = 'fa-solid fa-star';
+        favDiv.appendChild(favIcon);
+        card.appendChild(favDiv);
+    }
+    
+    // Avatar image
+    const img = document.createElement('img');
+    img.src = imgPath;
+    img.className = 'card-image';
+    card.appendChild(img);
+    
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'card-overlay';
+    
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'card-name';
+    nameDiv.textContent = name; // textContent auto-escapes
+    overlay.appendChild(nameDiv);
+    
+    const tagsDiv = document.createElement('div');
+    tagsDiv.className = 'card-tags';
+    const tagSlice = tags.length > 3 ? tags.slice(0, 3) : tags;
+    for (let i = 0; i < tagSlice.length; i++) {
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'card-tag';
+        tagSpan.textContent = tagSlice[i]; // auto-escaped
+        tagsDiv.appendChild(tagSpan);
+    }
+    overlay.appendChild(tagsDiv);
+    card.appendChild(overlay);
     
     // Store avatar for multi-select lookup
     card.dataset.avatar = char.avatar;
@@ -4631,7 +5063,6 @@ function deactivateAllTabs() {
     getTabPanes().forEach(p => p.classList.remove('active'));
 }
 
-/** Reset scroll positions on all tab panes (and sidebar) */
 function resetTabScrollPositions() {
     getTabPanes().forEach(p => p.scrollTop = 0);
     const sidebar = document.querySelector('.modal-sidebar');
@@ -5333,73 +5764,8 @@ function openModal(char) {
         }
     }
     
-    // Edit Form - Basic
-    document.getElementById('editName').value = char.name;
-    document.getElementById('editDescription').value = desc;
-    document.getElementById('editFirstMes').value = firstMes;
-    
-    // Edit Form - Extended Fields
-    const personality = char.personality || (char.data ? char.data.personality : "") || "";
-    const scenario = char.scenario || (char.data ? char.data.scenario : "") || "";
-    const mesExample = char.mes_example || (char.data ? char.data.mes_example : "") || "";
-    const systemPrompt = char.system_prompt || (char.data ? char.data.system_prompt : "") || "";
-    const postHistoryInstructions = char.post_history_instructions || (char.data ? char.data.post_history_instructions : "") || "";
-    const creatorNotesEdit = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
-    const charVersion = char.character_version || (char.data ? char.data.character_version : "") || "";
-    
-    // Tags: always store as array, never as comma-delimited string
-    const rawTags = char.tags || (char.data ? char.data.tags : []) || [];
-    if (Array.isArray(rawTags)) {
-        _editTagsArray = [...rawTags];
-    } else if (typeof rawTags === "string") {
-        _editTagsArray = rawTags.split(',').map(t => t.trim()).filter(t => t);
-    } else {
-        _editTagsArray = [];
-    }
-    
-    document.getElementById('editCreator').value = author;
-    document.getElementById('editVersion').value = charVersion;
-    document.getElementById('editPersonality').value = personality;
-    document.getElementById('editScenario').value = scenario;
-    document.getElementById('editMesExample').value = mesExample;
-    document.getElementById('editSystemPrompt').value = systemPrompt;
-    document.getElementById('editPostHistoryInstructions').value = postHistoryInstructions;
-    document.getElementById('editCreatorNotes').value = creatorNotesEdit;
-    
-    // Populate alternate greetings editor
-    populateAltGreetingsEditor(altGreetings);
-    
-    // Populate lorebook editor
-    populateLorebookEditor(characterBook);
-    
-    // Store raw data for cancel/restore
-    originalRawData = {
-        altGreetings: altGreetings ? [...altGreetings] : [],
-        characterBook: characterBook ? JSON.parse(JSON.stringify(characterBook)) : null
-    };
-    
-    // Store original values for diff comparison
-    // IMPORTANT: Read values back from the form elements to capture any browser normalization
-    // (e.g., line ending changes from \r\n to \n)
-    originalValues = {
-        name: document.getElementById('editName').value,
-        description: document.getElementById('editDescription').value,
-        first_mes: document.getElementById('editFirstMes').value,
-        creator: document.getElementById('editCreator').value,
-        character_version: document.getElementById('editVersion').value,
-        tagsArray: [..._editTagsArray], // tags stored as array only, no string intermediary
-        personality: document.getElementById('editPersonality').value,
-        scenario: document.getElementById('editScenario').value,
-        mes_example: document.getElementById('editMesExample').value,
-        system_prompt: document.getElementById('editSystemPrompt').value,
-        post_history_instructions: document.getElementById('editPostHistoryInstructions').value,
-        creator_notes: document.getElementById('editCreatorNotes').value,
-        alternate_greetings: getAltGreetingsFromEditor(),
-        character_book: getCharacterBookFromEditor()
-    };
-    
-    // Lock edit fields by default
-    setEditLock(true);
+    // Edit pane is populated lazily on first Edit tab click (see populateEditPane)
+    _editPanePopulated = false;
     
     // Render tags in sidebar (will be made editable when edit is unlocked)
     renderSidebarTags(getTags(char));
@@ -5414,8 +5780,18 @@ function openModal(char) {
     // Reset scroll positions to top
     resetTabScrollPositions();
 
-    // Trigger Image Fetch for 'Gallery' tab logic
-    // We defer this slightly or just prepare it
+    // Edit tab logic (deferred population)
+    const editTabBtn = document.querySelector('.tab-btn[data-tab="edit"]');
+    if (editTabBtn) {
+        editTabBtn.onclick = () => {
+            deactivateAllTabs();
+            editTabBtn.classList.add('active');
+            document.getElementById('pane-edit').classList.add('active');
+            populateEditPane();
+        };
+    }
+
+    // Gallery tab logic
     const galleryTabBtn = document.querySelector('.tab-btn[data-tab="gallery"]');
     if (galleryTabBtn) {
         galleryTabBtn.onclick = () => {
@@ -5441,7 +5817,7 @@ function openModal(char) {
         legacyFolderBtn.onclick = () => showLegacyFolderModal(char);
     }
     
-    // Chats tab logic
+    // Chats tab logic (delegated to chats module)
     const chatsTabBtn = document.querySelector('.tab-btn[data-tab="chats"]');
     if (chatsTabBtn) {
         chatsTabBtn.onclick = () => {
@@ -5450,8 +5826,8 @@ function openModal(char) {
             chatsTabBtn.classList.add('active');
             document.getElementById('pane-chats').classList.add('active');
             
-            // Fetch chats
-            fetchCharacterChats(char);
+            // Fetch chats via module
+            window.fetchCharacterChats?.(char);
         };
     }
 
@@ -5468,6 +5844,20 @@ function openModal(char) {
             findRelatedCharacters(char);
         };
     }
+
+    // Versions tab
+    const versionsTabBtn = document.getElementById('versionsTabBtn');
+    const openVersionsTab = () => {
+        deactivateAllTabs();
+        if (versionsTabBtn) versionsTabBtn.classList.add('active');
+        document.getElementById('pane-versions').classList.add('active');
+        if (window.renderVersionsPane) {
+            window.renderVersionsPane(document.getElementById('versionsTabContent'), char);
+        }
+    };
+    if (versionsTabBtn) versionsTabBtn.onclick = openVersionsTab;
+    const editPaneVersionsBtn = document.getElementById('editPaneVersionsBtn');
+    if (editPaneVersionsBtn) editPaneVersionsBtn.onclick = openVersionsTab;
 
     // Info tab logic (developer/debugging feature)
     const infoTabBtn = document.getElementById('infoTabBtn');
@@ -5498,6 +5888,87 @@ function openModal(char) {
     setTimeout(() => resetTabScrollPositions(), 0);
 }
 
+/** Populate the Edit tab form fields, editors, and original-value baselines. Called once per modal open. */
+function populateEditPane() {
+    if (_editPanePopulated) return;
+    _editPanePopulated = true;
+
+    const char = activeChar;
+    if (!char) return;
+
+    const desc = char.description || (char.data ? char.data.description : "") || "";
+    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+    const author = char.creator || (char.data ? char.data.creator : "") || "";
+
+    document.getElementById('editName').value = char.name;
+    document.getElementById('editDescription').value = desc;
+    document.getElementById('editFirstMes').value = firstMes;
+
+    const personality = char.personality || (char.data ? char.data.personality : "") || "";
+    const scenario = char.scenario || (char.data ? char.data.scenario : "") || "";
+    const mesExample = char.mes_example || (char.data ? char.data.mes_example : "") || "";
+    const systemPrompt = char.system_prompt || (char.data ? char.data.system_prompt : "") || "";
+    const postHistoryInstructions = char.post_history_instructions || (char.data ? char.data.post_history_instructions : "") || "";
+    const creatorNotesEdit = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
+    const charVersion = char.character_version || (char.data ? char.data.character_version : "") || "";
+
+    // Tags: always store as array, never as comma-delimited string
+    const rawTags = char.tags || (char.data ? char.data.tags : []) || [];
+    if (Array.isArray(rawTags)) {
+        _editTagsArray = [...rawTags];
+    } else if (typeof rawTags === "string") {
+        _editTagsArray = rawTags.split(',').map(t => t.trim()).filter(t => t);
+    } else {
+        _editTagsArray = [];
+    }
+
+    document.getElementById('editCreator').value = author;
+    document.getElementById('editVersion').value = charVersion;
+    document.getElementById('editPersonality').value = personality;
+    document.getElementById('editScenario').value = scenario;
+    document.getElementById('editMesExample').value = mesExample;
+    document.getElementById('editSystemPrompt').value = systemPrompt;
+    document.getElementById('editPostHistoryInstructions').value = postHistoryInstructions;
+    document.getElementById('editCreatorNotes').value = creatorNotesEdit;
+
+    // Populate alternate greetings editor
+    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
+    populateAltGreetingsEditor(altGreetings);
+
+    // Populate lorebook editor
+    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
+    populateLorebookEditor(characterBook);
+
+    // Store raw data for cancel/restore
+    originalRawData = {
+        altGreetings: altGreetings ? [...altGreetings] : [],
+        characterBook: characterBook ? JSON.parse(JSON.stringify(characterBook)) : null
+    };
+
+    // Store original values for diff comparison
+    // IMPORTANT: Read values back from the form elements to capture any browser normalization
+    // (e.g., line ending changes from \r\n to \n)
+    originalValues = {
+        name: document.getElementById('editName').value,
+        description: document.getElementById('editDescription').value,
+        first_mes: document.getElementById('editFirstMes').value,
+        creator: document.getElementById('editCreator').value,
+        character_version: document.getElementById('editVersion').value,
+        tagsArray: [..._editTagsArray],
+        personality: document.getElementById('editPersonality').value,
+        scenario: document.getElementById('editScenario').value,
+        mes_example: document.getElementById('editMesExample').value,
+        system_prompt: document.getElementById('editSystemPrompt').value,
+        post_history_instructions: document.getElementById('editPostHistoryInstructions').value,
+        creator_notes: document.getElementById('editCreatorNotes').value,
+        alternate_greetings: getAltGreetingsFromEditor(),
+        character_book: getCharacterBookFromEditor()
+    };
+
+    // Lock edit fields by default (must come after editor population so dynamic elements are locked)
+    setEditLock(true);
+}
+
 function closeModal() {
     modal.classList.add('hidden');
     activeChar = null;
@@ -5505,6 +5976,7 @@ function closeModal() {
     isEditLocked = true;
     originalValues = {};
     originalRawData = {};
+    _editTagsArray = [];
     
     // Release window globals holding rich text content (can be large)
     window.currentCreatorNotesContent = null;
@@ -5523,6 +5995,11 @@ function closeModal() {
     // Clear tagline content
     const taglineEl = document.getElementById('modalChubTagline');
     if (taglineEl) taglineEl.textContent = '';
+
+    // Cleanup versions tab
+    if (window.cleanupVersionsPane) window.cleanupVersionsPane();
+    const vtContent = document.getElementById('versionsTabContent');
+    if (vtContent) vtContent.innerHTML = '';
     
     // Check if we need to restore duplicates modal
     if (duplicateModalState.wasOpen) {
@@ -5959,8 +6436,14 @@ function calculateTagWeight(tag, frequencies, totalChars) {
 /**
  * Calculate relatedness score between two characters
  * Returns object with total score and breakdown by category
+ *
+ * @param {Object} sourceChar
+ * @param {Object} targetChar
+ * @param {Object} options  - useTags / useCreator / useContent booleans
+ * @param {Object} [sourceCache] - Pre-computed source-side data to avoid
+ *   recomputing per comparison (tags Set, creator string, keywords Set)
  */
-function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
+function calculateRelatednessScore(sourceChar, targetChar, options = {}, sourceCache = null) {
     const { useTags = true, useCreator = true, useContent = true } = options;
     
     let score = 0;
@@ -5969,7 +6452,7 @@ function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
     
     // 1. Tag overlap (highest weight - tags are explicit categorization)
     if (useTags) {
-        const sourceTags = new Set(getTags(sourceChar).map(t => t.toLowerCase().trim()));
+        const sourceTags = sourceCache?.tags ?? new Set(getTags(sourceChar).map(t => t.toLowerCase().trim()));
         const targetTags = new Set(getTags(targetChar).map(t => t.toLowerCase().trim()));
         
         const sharedTags = [...sourceTags].filter(t => t && targetTags.has(t));
@@ -6018,7 +6501,7 @@ function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
     
     // 2. Same creator (moderate weight)
     if (useCreator) {
-        const sourceCreator = (getCharField(sourceChar, 'creator') || '').toLowerCase().trim();
+        const sourceCreator = sourceCache?.creator ?? (getCharField(sourceChar, 'creator') || '').toLowerCase().trim();
         const targetCreator = (getCharField(targetChar, 'creator') || '').toLowerCase().trim();
         
         if (sourceCreator && targetCreator && sourceCreator === targetCreator) {
@@ -6030,14 +6513,13 @@ function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
     
     // 3. Content/keyword similarity (looks for universe indicators)
     if (useContent) {
-        // Extract keywords from source
-        const sourceText = [
+        const sourceKeywords = sourceCache?.keywords ?? extractContentKeywords([
             getCharField(sourceChar, 'name'),
             getCharField(sourceChar, 'description'),
             getCharField(sourceChar, 'personality'),
             getCharField(sourceChar, 'scenario'),
             getCharField(sourceChar, 'first_mes')
-        ].filter(Boolean).join(' ');
+        ].filter(Boolean).join(' '));
         
         const targetText = [
             getCharField(targetChar, 'name'),
@@ -6047,7 +6529,6 @@ function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
             getCharField(targetChar, 'first_mes')
         ].filter(Boolean).join(' ');
         
-        const sourceKeywords = extractContentKeywords(sourceText);
         const targetKeywords = extractContentKeywords(targetText);
         
         // Find shared keywords
@@ -6072,12 +6553,19 @@ function calculateRelatednessScore(sourceChar, targetChar, options = {}) {
     };
 }
 
+let _relatedSearchId = 0;
+const RELATED_CHUNK_SIZE = 200;
+
 /**
- * Find characters related to the given character
+ * Find characters related to the given character.
+ * Processes in async chunks so the UI stays responsive for large libraries.
  */
 function findRelatedCharacters(sourceChar) {
     const resultsEl = document.getElementById('relatedResults');
     if (!resultsEl) return;
+    
+    // Cancel any in-flight search
+    const searchId = ++_relatedSearchId;
     
     resultsEl.innerHTML = '<div class="related-loading"><i class="fa-solid fa-spinner fa-spin"></i> Finding related characters...</div>';
     
@@ -6085,20 +6573,39 @@ function findRelatedCharacters(sourceChar) {
     const useTags = document.getElementById('relatedFilterTags')?.checked ?? true;
     const useCreator = document.getElementById('relatedFilterCreator')?.checked ?? true;
     const useContent = document.getElementById('relatedFilterContent')?.checked ?? true;
+    const options = { useTags, useCreator, useContent };
     
-    // Use setTimeout to allow UI to update
-    setTimeout(() => {
-        const sourceAvatar = sourceChar.avatar;
-        const related = [];
+    // Pre-compute source-side data once (avoids recomputing per comparison)
+    const sourceCache = {};
+    if (useTags) {
+        sourceCache.tags = new Set(getTags(sourceChar).map(t => t.toLowerCase().trim()));
+    }
+    if (useCreator) {
+        sourceCache.creator = (getCharField(sourceChar, 'creator') || '').toLowerCase().trim();
+    }
+    if (useContent) {
+        sourceCache.keywords = extractContentKeywords([
+            getCharField(sourceChar, 'name'),
+            getCharField(sourceChar, 'description'),
+            getCharField(sourceChar, 'personality'),
+            getCharField(sourceChar, 'scenario'),
+            getCharField(sourceChar, 'first_mes')
+        ].filter(Boolean).join(' '));
+    }
+    
+    const sourceAvatar = sourceChar.avatar;
+    const related = [];
+    let idx = 0;
+    
+    function processChunk() {
+        if (searchId !== _relatedSearchId) return; // cancelled
         
-        // Compare against all other characters
-        for (const targetChar of allCharacters) {
-            // Skip self
+        const end = Math.min(idx + RELATED_CHUNK_SIZE, allCharacters.length);
+        for (; idx < end; idx++) {
+            const targetChar = allCharacters[idx];
             if (targetChar.avatar === sourceAvatar) continue;
             
-            const result = calculateRelatednessScore(sourceChar, targetChar, { useTags, useCreator, useContent });
-            
-            // Only include if there's some relationship
+            const result = calculateRelatednessScore(sourceChar, targetChar, options, sourceCache);
             if (result.score > 0) {
                 related.push({
                     char: targetChar,
@@ -6109,15 +6616,16 @@ function findRelatedCharacters(sourceChar) {
             }
         }
         
-        // Sort by score descending
-        related.sort((a, b) => b.score - a.score);
-        
-        // Take top results
-        const topRelated = related.slice(0, 20);
-        
-        // Render results
-        renderRelatedResults(topRelated, sourceChar);
-    }, 10);
+        if (idx < allCharacters.length) {
+            setTimeout(processChunk, 0);
+        } else {
+            related.sort((a, b) => b.score - a.score);
+            renderRelatedResults(related.slice(0, 20), sourceChar);
+        }
+    }
+    
+    // Yield one frame so the loading spinner paints first
+    setTimeout(processChunk, 0);
 }
 
 /**
@@ -6245,20 +6753,10 @@ window.openRelatedCharacter = openRelatedCharacter;
 async function showDeleteConfirmation(char) {
     const charName = getCharacterName(char);
     const avatar = char.avatar || '';
-    
-    // Get gallery info for this character
-    const galleryInfo = await getCharacterGalleryInfo(char);
-    const hasImages = galleryInfo.count > 0;
-    
-    // Only offer gallery deletion when:
-    // 1. Unique gallery folders feature is ENABLED
-    // 2. Character has a gallery_id (unique gallery)
-    // 3. Gallery has images
     const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders') || false;
     const hasUniqueGallery = !!getCharacterGalleryId(char);
-    const canDeleteGallery = uniqueFoldersEnabled && hasImages && hasUniqueGallery;
     
-    // Create delete confirmation modal
+    // Show modal immediately with a loading placeholder for gallery info
     const deleteModal = document.createElement('div');
     deleteModal.className = 'confirm-modal';
     deleteModal.id = 'deleteConfirmModal';
@@ -6279,38 +6777,11 @@ async function showDeleteConfirmation(char) {
                          onerror="this.src='/img/ai4.png'">
                     <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
                 </div>
-                
-                ${canDeleteGallery ? `
-                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
-                            <i class="fa-solid fa-images"></i>
-                            <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
-                        </div>
-                        <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
-                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                                <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
-                                <span><strong>Keep gallery files</strong> - Leave in folder</span>
-                            </label>
-                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                                <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
-                                <span><strong>Delete gallery files</strong> - Remove all images</span>
-                            </label>
-                        </div>
+                <div id="deleteGallerySection">
+                    <div style="color: var(--text-secondary); font-size: 0.85rem; padding: 8px 0;">
+                        <i class="fa-solid fa-spinner fa-spin"></i> Checking gallery...
                     </div>
-                ` : (hasImages ? `
-                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
-                            <i class="fa-solid fa-images"></i>
-                            <strong>Gallery Contains ${galleryInfo.count} File${galleryInfo.count !== 1 ? 's' : ''}</strong>
-                        </div>
-                        <p style="margin: 8px 0 0 0; color: var(--text-secondary); font-size: 13px;">
-                            ${!uniqueFoldersEnabled 
-                                ? 'Unique gallery folders feature is disabled. Gallery files will not be deleted.'
-                                : 'Gallery folder will remain after deletion.'}
-                        </p>
-                    </div>
-                ` : '')}
-                
+                </div>
                 <p style="color: var(--text-secondary); margin-bottom: 15px;">
                     Are you sure you want to delete this character? This action cannot be undone.
                 </p>
@@ -6325,7 +6796,7 @@ async function showDeleteConfirmation(char) {
                 <button class="action-btn secondary" id="cancelDeleteBtn">
                     <i class="fa-solid fa-xmark"></i> Cancel
                 </button>
-                <button class="action-btn primary" id="confirmDeleteBtn" style="background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);">
+                <button class="action-btn danger" id="confirmDeleteBtn">
                     <i class="fa-solid fa-trash"></i> Delete
                 </button>
             </div>
@@ -6349,6 +6820,56 @@ async function showDeleteConfirmation(char) {
         if (e.target === deleteModal) closeDeleteModal();
     });
     
+    // Fetch gallery info in background and inject when ready
+    let galleryInfo = { folder: '', files: [], count: 0 };
+    let canDeleteGallery = false;
+    
+    getCharacterGalleryInfo(char).then(info => {
+        galleryInfo = info;
+        const hasImages = info.count > 0;
+        canDeleteGallery = uniqueFoldersEnabled && hasImages && hasUniqueGallery;
+        
+        const section = deleteModal.querySelector('#deleteGallerySection');
+        if (!section) return; // Modal was closed before fetch finished
+        
+        if (canDeleteGallery) {
+            section.innerHTML = `
+                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                        <i class="fa-solid fa-images"></i>
+                        <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                            <span><strong>Keep gallery files</strong> - Leave in folder</span>
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                            <span><strong>Delete gallery files</strong> - Remove all images</span>
+                        </label>
+                    </div>
+                </div>
+            `;
+        } else if (hasImages) {
+            section.innerHTML = `
+                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
+                        <i class="fa-solid fa-images"></i>
+                        <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
+                    </div>
+                    <p style="margin: 8px 0 0 0; color: var(--text-secondary); font-size: 13px;">
+                        ${!uniqueFoldersEnabled 
+                            ? 'Unique gallery folders feature is disabled. Gallery files will not be deleted.'
+                            : 'Gallery folder will remain after deletion.'}
+                    </p>
+                </div>
+            `;
+        } else {
+            section.innerHTML = '';
+        }
+    });
+    
     confirmBtn.addEventListener('click', async () => {
         const deleteChats = deleteModal.querySelector('#deleteChatsCheckbox').checked;
         const galleryAction = deleteModal.querySelector('input[name="galleryAction"]:checked')?.value || 'keep';
@@ -6369,6 +6890,7 @@ async function showDeleteConfirmation(char) {
                     const response = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
                         path: deletePath
                     });
+                    await response.text().catch(() => {});
                     if (response.ok) {
                         deleted++;
                     } else {
@@ -6859,6 +7381,11 @@ function showSaveConfirmation() {
 async function performSave() {
     if (!activeChar || !pendingPayload) return;
     
+    // Auto-snapshot before edit (non-blocking — don't let snapshot failure block the save)
+    if (window.autoSnapshotBeforeChange) {
+        try { await window.autoSnapshotBeforeChange(activeChar, 'edit'); } catch (_) {}
+    }
+    
     // Capture old name BEFORE updating for gallery folder rename
     const oldName = originalValues.name;
     const newName = pendingPayload.name;
@@ -6958,8 +7485,8 @@ async function performSave() {
             setEditLock(true);
             pendingPayload = null;
             
-            // Also fetch from server to ensure full sync (in background)
-            // Use forceRefresh to avoid stale opener data overwriting recent changes.
+            // Fetch from server for full sync (in background)
+            // forceRefresh avoids stale opener data overwriting recent changes
             fetchCharacters(true);
         } else {
             const err = await response.text();
@@ -7122,7 +7649,7 @@ function setEditLock(locked) {
             lockStatus.innerHTML = '<i class="fa-solid fa-lock"></i><span>Fields are locked. Click unlock to edit.</span>';
         }
         if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> Unlock Editing';
+            toggleBtn.innerHTML = '<i class="fa-solid fa-lock-open"></i> <span class="btn-label">Unlock Editing</span>';
         }
         
         editInputs.forEach(input => {
@@ -7133,8 +7660,8 @@ function setEditLock(locked) {
         
         if (saveBtn) saveBtn.disabled = true;
         if (cancelBtn) cancelBtn.style.display = 'none';
-        if (addAltGreetingBtn) addAltGreetingBtn.disabled = true;
-        removeGreetingBtns.forEach(btn => btn.disabled = true);
+        if (addAltGreetingBtn) addAltGreetingBtn.classList.add('hidden');
+        removeGreetingBtns.forEach(btn => btn.classList.add('hidden'));
         
         // Hide expand buttons when locked
         expandFieldBtns.forEach(btn => btn.classList.add('hidden'));
@@ -7163,7 +7690,7 @@ function setEditLock(locked) {
             lockStatus.innerHTML = '<i class="fa-solid fa-unlock"></i><span>Editing enabled. Remember to save your changes!</span>';
         }
         if (toggleBtn) {
-            toggleBtn.innerHTML = '<i class="fa-solid fa-lock"></i> Lock Editing';
+            toggleBtn.innerHTML = '<i class="fa-solid fa-lock"></i> <span class="btn-label">Lock Editing</span>';
         }
         
         editInputs.forEach(input => {
@@ -7174,8 +7701,8 @@ function setEditLock(locked) {
         
         if (saveBtn) saveBtn.disabled = false;
         if (cancelBtn) cancelBtn.style.display = '';
-        if (addAltGreetingBtn) addAltGreetingBtn.disabled = false;
-        removeGreetingBtns.forEach(btn => btn.disabled = false);
+        if (addAltGreetingBtn) addAltGreetingBtn.classList.remove('hidden');
+        removeGreetingBtns.forEach(btn => btn.classList.remove('hidden'));
         
         // Show expand buttons when unlocked
         expandFieldBtns.forEach(btn => btn.classList.remove('hidden'));
@@ -8735,205 +9262,6 @@ function initChubExpandButtons() {
     });
 }
 
-// Chats Functions
-async function fetchCharacterChats(char) {
-    const chatsList = document.getElementById('chatsList');
-    if (!chatsList) return;
-    
-    renderLoadingState(chatsList, 'Loading chats...', 'chats-loading');
-    
-    try {
-        const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { 
-            avatar_url: char.avatar, 
-            metadata: true 
-        });
-        
-        if (!response.ok) {
-            chatsList.innerHTML = '<div class="no-chats"><i class="fa-solid fa-exclamation-circle"></i><p>Failed to load chats</p></div>';
-            return;
-        }
-        
-        const chats = await response.json();
-        
-        if (chats.error || !chats.length) {
-            chatsList.innerHTML = `
-                <div class="no-chats">
-                    <i class="fa-solid fa-comments"></i>
-                    <p>No chats found for this character</p>
-                </div>
-            `;
-            return;
-        }
-        
-        // Sort by date (most recent first)
-        chats.sort((a, b) => {
-            const dateA = a.last_mes ? new Date(a.last_mes) : new Date(0);
-            const dateB = b.last_mes ? new Date(b.last_mes) : new Date(0);
-            return dateB - dateA;
-        });
-        
-        const currentChat = char.chat;
-        
-        chatsList.innerHTML = chats.map(chat => {
-            const isActive = chat.file_name === currentChat + '.jsonl';
-            const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
-            const messageCount = chat.chat_items || chat.mes_count || chat.message_count || '?';
-            const chatName = chat.file_name.replace('.jsonl', '');
-            
-            return `
-                <div class="chat-item ${isActive ? 'active' : ''}" data-chat="${escapeHtml(chat.file_name)}">
-                    <div class="chat-item-icon">
-                        <i class="fa-solid fa-message"></i>
-                    </div>
-                    <div class="chat-item-info">
-                        <div class="chat-item-name">${escapeHtml(chatName)}</div>
-                        <div class="chat-item-meta">
-                            <span><i class="fa-solid fa-calendar"></i> ${lastDate}</span>
-                            <span><i class="fa-solid fa-comment"></i> ${messageCount} messages</span>
-                            ${isActive ? '<span style="color: var(--accent);"><i class="fa-solid fa-check-circle"></i> Current</span>' : ''}
-                        </div>
-                    </div>
-                    <div class="chat-item-actions">
-                        <button class="chat-action-btn" title="Open chat" data-action="open"><i class="fa-solid fa-arrow-right"></i></button>
-                        <button class="chat-action-btn danger" title="Delete chat" data-action="delete"><i class="fa-solid fa-trash"></i></button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-        
-        // Add chat item click handlers
-        chatsList.querySelectorAll('.chat-item').forEach(item => {
-            const chatFile = item.dataset.chat;
-            
-            // Main click to open
-            item.addEventListener('click', (e) => {
-                if (e.target.closest('.chat-action-btn')) return;
-                openChat(char, chatFile);
-            });
-            
-            // Action buttons
-            item.querySelectorAll('.chat-action-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const action = btn.dataset.action;
-                    if (action === 'open') {
-                        openChat(char, chatFile);
-                    } else if (action === 'delete') {
-                        deleteChat(char, chatFile);
-                    }
-                });
-            });
-        });
-        
-    } catch (e) {
-        chatsList.innerHTML = `<div class="no-chats"><i class="fa-solid fa-exclamation-triangle"></i><p>Error: ${escapeHtml(e.message)}</p></div>`;
-    }
-}
-
-async function openChat(char, chatFile) {
-    // Load the character with specific chat
-    try {
-        const chatName = chatFile.replace('.jsonl', '');
-        
-        // Show toast immediately
-        showToast("Opening chat...", "success");
-        
-        // Close any open modals
-        hide('chatPreviewModal');
-        document.querySelector('.modal-overlay')?.classList.add('hidden');
-        
-        // IMPORTANT: Register the gallery folder override BEFORE opening the chat
-        // This ensures index.js can find the correct folder for media localization
-        // Use immediate save since we're about to switch context to main window
-        if (getSetting('uniqueGalleryFolders') && getCharacterGalleryId(char)) {
-            registerGalleryFolderOverride(char, true);
-        }
-        
-        if (window.opener && !window.opener.closed) {
-            let context = null;
-            let mainCharacters = [];
-            
-            if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                context = window.opener.SillyTavern.getContext();
-                mainCharacters = context.characters || [];
-            } else if (window.opener.characters) {
-                mainCharacters = window.opener.characters;
-            }
-            
-            // Find character index
-            const characterIndex = mainCharacters.findIndex(c => c.avatar === char.avatar);
-            
-            if (characterIndex !== -1 && context) {
-                // First select the character
-                await context.selectCharacterById(characterIndex);
-                
-                // Wait a short moment for character to load
-                await new Promise(r => setTimeout(r, 200));
-                
-                // Try to open the specific chat using the chat manager
-                if (context.openChat) {
-                    await context.openChat(chatName);
-                } else if (window.opener.jQuery) {
-                    // Alternative: trigger chat selection via UI
-                    const $ = window.opener.jQuery;
-                    // Look for chat in the chat list and click it
-                    const chatItems = $('#past_chats_popup .select_chat_block_wrapper');
-                    chatItems.each(function() {
-                        if ($(this).attr('file_name') === chatName) {
-                            $(this).trigger('click');
-                        }
-                    });
-                }
-                
-                return;
-            }
-        }
-        
-        // Fallback: open in new tab with URL params
-        showToast("Opening in main window...", "info");
-        if (window.opener && !window.opener.closed) {
-            window.opener.location.href = `/?character=${encodeURIComponent(char.avatar)}`;
-            window.opener.focus();
-        }
-    } catch (e) {
-        console.error('openChat error:', e);
-        showToast("Could not open chat: " + e.message, "error");
-    }
-}
-
-async function deleteChat(char, chatFile) {
-    if (!confirm(`Are you sure you want to delete this chat?\n\n${chatFile}\n\nThis cannot be undone!`)) {
-        return;
-    }
-    
-    try {
-        const response = await apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
-            chatfile: chatFile,
-            avatar_url: char.avatar
-        });
-        
-        if (response.ok) {
-            showToast("Chat deleted", "success");
-            fetchCharacterChats(char); // Refresh list
-        } else {
-            showToast("Failed to delete chat", "error");
-        }
-    } catch (e) {
-        showToast("Error deleting chat: " + e.message, "error");
-    }
-}
-
-async function createNewChat(char) {
-    try {
-        // Load character which creates new chat
-        if (await loadCharInMain(char, true)) {
-            showToast("Creating new chat...", "success");
-        }
-    } catch (e) {
-        showToast("Could not create new chat: " + e.message, "error");
-    }
-}
-
 // Search and Filter Functionality (Global so it can be called from view switching)
 function performSearch() {
     const rawQuery = document.getElementById('searchInput').value;
@@ -8975,8 +9303,8 @@ function performSearch() {
         
         // Special creator: filter - exact creator match only
         if (creatorFilter) {
-            const author = (c.creator || (c.data ? c.data.creator : "") || "").toLowerCase();
-            return author === creatorFilter || author.includes(creatorFilter);
+            // Use pre-computed _lowerCreator instead of toLowerCase() per iteration
+            return c._lowerCreator === creatorFilter || c._lowerCreator.includes(creatorFilter);
         }
         
         // Special version: filter - match character_version field
@@ -9010,27 +9338,20 @@ function performSearch() {
             if (!isCharacterFavorite(c)) return false;
         }
 
-        // 1. Text Search Logic
+        // 1. Text Search Logic — uses pre-computed lowercase fields
         if (!query) {
             matchesSearch = true; // No text query? Everything matches text criteria
         } else {
-            // Name
-            if (useName && c.name.toLowerCase().includes(query)) matchesSearch = true;
+            // Name — c._lowerName pre-computed in prepareCharacterKeys
+            if (useName && c._lowerName.includes(query)) matchesSearch = true;
             
-            // Tags (String Match)
-            if (!matchesSearch && useTags) {
-                 const tags = (c.tags && Array.isArray(c.tags)) ? c.tags.join(' ') : 
-                              (c.data && c.data.tags) ? String(c.data.tags) : "";
-                 if (tags.toLowerCase().includes(query)) matchesSearch = true;
-            }
+            // Tags — c._tagsLower pre-computed in prepareCharacterKeys
+            if (!matchesSearch && useTags && c._tagsLower.includes(query)) matchesSearch = true;
             
-            // Author
-            if (!matchesSearch && useAuthor) {
-                const author = c.creator || (c.data ? c.data.creator : "") || "";
-                if (author.toLowerCase().includes(query)) matchesSearch = true;
-            }
+            // Author — c._lowerCreator pre-computed in prepareCharacterKeys
+            if (!matchesSearch && useAuthor && c._lowerCreator.includes(query)) matchesSearch = true;
 
-            // Creator Notes
+            // Creator Notes (not pre-computed — large strings, rarely searched)
             if (!matchesSearch && useNotes) {
                  const notes = c.creator_notes || (c.data ? c.data.creator_notes : "") || "";
                  if (notes.toLowerCase().includes(query)) matchesSearch = true;
@@ -9063,16 +9384,17 @@ function performSearch() {
         return matchesSearch;
     });
     
-    // Also apply current sort
+    // Also apply current sort — pre-computed _dateAdded / _createDate avoid
+    // parseDateValue() (regex + Date constructor) inside the comparator
     const sortSelect = document.getElementById('sortSelect');
     const sortType = sortSelect ? sortSelect.value : 'name_asc';
     const sorted = [...filtered].sort((a, b) => {
         if (sortType === 'name_asc') return a.name.localeCompare(b.name);
         if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-        if (sortType === 'date_new') return getCharacterDateAdded(b) - getCharacterDateAdded(a); 
-        if (sortType === 'date_old') return getCharacterDateAdded(a) - getCharacterDateAdded(b);
-        if (sortType === 'created_new') return getCharacterCreateDate(b) - getCharacterCreateDate(a);
-        if (sortType === 'created_old') return getCharacterCreateDate(a) - getCharacterCreateDate(b);
+        if (sortType === 'date_new') return b._dateAdded - a._dateAdded; 
+        if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
+        if (sortType === 'created_new') return b._createDate - a._createDate;
+        if (sortType === 'created_old') return a._createDate - b._createDate;
         return 0;
     });
     
@@ -9106,7 +9428,7 @@ function filterLocalByCreator(creatorName) {
     debugLog('[Gallery] Filtering local by creator:', creatorName);
     
     // Switch to characters view if not already there
-    if (currentView !== 'characters') {
+    if ((getCurrentView() || 'characters') !== 'characters') {
         switchView('characters');
     }
     
@@ -9119,7 +9441,6 @@ function filterLocalByCreator(creatorName) {
         if (clearSearchBtn) clearSearchBtn.classList.remove('hidden');
     }
     
-    // Ensure Author checkbox is checked
     const authorCheckbox = document.getElementById('searchAuthor');
     if (authorCheckbox) {
         authorCheckbox.checked = true;
@@ -9220,6 +9541,53 @@ function setupEventListeners() {
                 moreOptionsMenu.classList.add('hidden');
             });
         });
+
+        // Overflow proxy items — relay clicks to the real topbar buttons
+        const menuRefreshBtn = document.getElementById('menuRefreshBtn');
+        if (menuRefreshBtn) {
+            menuRefreshBtn.addEventListener('click', () => {
+                document.getElementById('refreshBtn')?.click();
+            });
+        }
+        const menuGallerySyncBtn = document.getElementById('menuGallerySyncBtn');
+        if (menuGallerySyncBtn) {
+            menuGallerySyncBtn.addEventListener('click', () => {
+                // Navigate to gallery sync settings instead of toggling the
+                // dropdown (which is inside a hidden container at narrow widths)
+                document.getElementById('gallerySettingsBtn')?.click();
+                setTimeout(() => {
+                    const navItem = document.querySelector('.settings-nav-item[data-section="gallery-folders"]');
+                    if (navItem) navItem.click();
+                }, 100);
+            });
+        }
+        const menuMultiSelectBtn = document.getElementById('menuMultiSelectBtn');
+        if (menuMultiSelectBtn) {
+            menuMultiSelectBtn.addEventListener('click', () => {
+                document.getElementById('multiSelectToggleBtn')?.click();
+            });
+        }
+        const menuSortBtn = document.getElementById('menuSortBtn');
+        if (menuSortBtn) {
+            menuSortBtn.addEventListener('click', () => {
+                const sortSelect = document.getElementById('sortSelect');
+                if (sortSelect?._customSelect) {
+                    sortSelect._customSelect.toggle();
+                }
+            });
+        }
+        const menuFavoritesBtn = document.getElementById('menuFavoritesBtn');
+        if (menuFavoritesBtn) {
+            menuFavoritesBtn.addEventListener('click', () => {
+                document.getElementById('favoritesFilterBtn')?.click();
+            });
+        }
+        const menuTagsBtn = document.getElementById('menuTagsBtn');
+        if (menuTagsBtn) {
+            menuTagsBtn.addEventListener('click', () => {
+                document.getElementById('tagFilterBtn')?.click();
+            });
+        }
     }
     
     // Clear Search Button
@@ -9361,18 +9729,18 @@ function setupEventListeners() {
         closeConfirmModal.onclick = () => confirmModal?.classList.add('hidden');
     }
     
-    // Chats Tab Buttons
+    // Chats Tab Buttons (delegated to chats module)
     const newChatBtn = document.getElementById('newChatBtn');
     const refreshChatsBtn = document.getElementById('refreshChatsBtn');
     
     if (newChatBtn) {
         newChatBtn.onclick = () => {
-            if (activeChar) createNewChat(activeChar);
+            if (activeChar) window.createNewChat?.(activeChar);
         };
     }
     if (refreshChatsBtn) {
         refreshChatsBtn.onclick = () => {
-            if (activeChar) fetchCharacterChats(activeChar);
+            if (activeChar) window.fetchCharacterChats?.(activeChar);
         };
     }
     
@@ -9466,7 +9834,7 @@ function addAltGreetingField(container, value = '', index = null) {
         <div style="display: flex; align-items: flex-start; gap: 8px;">
             <span style="color: var(--accent); font-weight: bold; padding-top: 8px;">#${idx + 1}</span>
             <textarea class="glass-input alt-greeting-input" rows="3" placeholder="Alternate greeting message..." style="flex: 1;"></textarea>
-            <button type="button" class="remove-alt-greeting-btn" style="background: rgba(255,100,100,0.2); border: 1px solid rgba(255,100,100,0.3); color: #f88; padding: 8px 10px; border-radius: 6px; cursor: pointer;" title="Remove this greeting">
+            <button type="button" class="remove-alt-greeting-btn" title="Remove this greeting">
                 <i class="fa-solid fa-trash"></i>
             </button>
         </div>
@@ -9747,22 +10115,11 @@ function getCharacterBookFromEditor() {
 // Utility Functions
 // ==============================================
 
-/**
- * Get character name with fallbacks
- * @param {Object} char - Character object
- * @param {string} fallback - Default value if no name found
- * @returns {string} Character name
- */
 function getCharacterName(char, fallback = 'Unknown') {
     if (!char) return fallback;
     return char.name || char.data?.name || char.definition?.name || fallback;
 }
 
-/**
- * Get character avatar URL
- * @param {string} avatar - Avatar filename
- * @returns {string} Full avatar URL path
- */
 function getCharacterAvatarUrl(avatar) {
     if (!avatar) return '';
     return `/characters/${encodeURIComponent(avatar)}`;
@@ -10038,7 +10395,6 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     
     // 1b. Preserve existing HTML audio tags
     processedText = processedText.replace(/<audio[^>]*>[\s\S]*?<\/audio>/gi, (match) => {
-        // Ensure it has our styling class
         if (!match.includes('audio-player')) {
             match = match.replace(/<audio/, '<audio class="audio-player embedded-audio"');
         }
@@ -10233,6 +10589,7 @@ async function uploadImages(files) {
             });
             
             if (res.ok) {
+                await res.text().catch(() => {});
                 uploadedCount++;
             } else {
                 const errorText = await res.text();
@@ -10269,7 +10626,39 @@ const importLog = document.getElementById('importLog');
 const importAutoDownloadGallery = document.getElementById('importAutoDownloadGallery');
 const importAutoDownloadMedia = document.getElementById('importAutoDownloadMedia');
 
+// Local import elements
+const importSourceChub = document.getElementById('importSourceChub');
+const importSourceLocal = document.getElementById('importSourceLocal');
+const importDropZone = document.getElementById('importDropZone');
+const importFileInput = document.getElementById('importFileInput');
+const importDropPlaceholder = document.getElementById('importDropPlaceholder');
+const importFileList = document.getElementById('importFileList');
+const importFileCount = document.getElementById('importFileCount');
+const importFileCountText = document.getElementById('importFileCountText');
+const importClearFiles = document.getElementById('importClearFiles');
+const importGalleryOption = document.getElementById('importGalleryOption');
+const importInfoHint = document.getElementById('importInfoHint');
+
 let isImporting = false;
+let importSourceMode = 'chub'; // 'chub' or 'local'
+let importLocalFiles = []; // Array of File objects for local import
+
+// Track active import for cancellation
+let importAbortState = {
+    abort: false,
+    controller: null  // AbortController for in-flight network requests
+};
+
+function resetImportAbortState() {
+    importAbortState.abort = false;
+    importAbortState.controller?.abort();
+    importAbortState.controller = null;
+}
+
+function cancelActiveImport() {
+    importAbortState.abort = true;
+    importAbortState.controller?.abort();
+}
 
 // Open/close import modal
 importBtn?.addEventListener('click', () => {
@@ -10279,12 +10668,18 @@ importBtn?.addEventListener('click', () => {
     importLog.innerHTML = '';
     startImportBtn.disabled = false;
     startImportBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
-    startImportBtn.classList.remove('success');
+    startImportBtn.classList.remove('success', 'cancelled', 'cancellable');
     syncImportAutoDownloadGallery();
     syncImportAutoDownloadMedia();
     // Hide stats when opening fresh
     const importStats = document.getElementById('importStats');
     if (importStats) importStats.classList.add('hidden');
+    // Reset to Chub mode
+    switchImportSource('chub');
+    // Reset local file state
+    clearImportLocalFiles();
+    // Reset abort state
+    resetImportAbortState();
 });
 
 function syncImportAutoDownloadGallery() {
@@ -10300,15 +10695,22 @@ function syncImportAutoDownloadMedia() {
 }
 
 closeImportModal?.addEventListener('click', () => {
-    if (!isImporting) {
-        importModal.classList.add('hidden');
+    if (isImporting) {
+        const confirmClose = confirm('Import is still running. Cancel and close?');
+        if (!confirmClose) return;
+        cancelActiveImport();
     }
+    importModal.classList.add('hidden');
 });
 
 importModal?.addEventListener('click', (e) => {
-    if (e.target === importModal && !isImporting) {
-        importModal.classList.add('hidden');
+    if (e.target !== importModal) return;
+    if (isImporting) {
+        const confirmClose = confirm('Import is still running. Cancel and close?');
+        if (!confirmClose) return;
+        cancelActiveImport();
     }
+    importModal.classList.add('hidden');
 });
 
 // Parse Chub AI URL to get fullPath
@@ -10327,6 +10729,269 @@ function parseChubUrl(url) {
         return null;
     } catch {
         return null;
+    }
+}
+
+// ==================== IMPORT SOURCE TOGGLE ====================
+
+/**
+ * Switch import modal between Chub URL and Local PNG modes
+ * @param {string} source - 'chub' or 'local'
+ */
+function switchImportSource(source) {
+    importSourceMode = source;
+    
+    // Update toggle buttons
+    document.querySelectorAll('.import-source-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.source === source);
+    });
+    
+    // Show/hide panels
+    if (importSourceChub) importSourceChub.classList.toggle('hidden', source !== 'chub');
+    if (importSourceLocal) importSourceLocal.classList.toggle('hidden', source !== 'local');
+    
+    // Update info hint
+    if (importInfoHint) {
+        if (source === 'chub') {
+            importInfoHint.innerHTML = '<i class="fa-solid fa-info-circle"></i><span>Supports chub.ai and characterhub.org links. Characters will be imported as PNG files.</span>';
+        } else {
+            importInfoHint.innerHTML = '<i class="fa-solid fa-info-circle"></i><span>Import V2 character card PNG files directly. Card metadata will be preserved.</span>';
+        }
+    }
+}
+
+// Toggle button click handlers
+document.querySelectorAll('.import-source-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        if (isImporting) return;
+        switchImportSource(btn.dataset.source);
+    });
+});
+
+// ==================== LOCAL FILE HANDLING ====================
+
+/**
+ * Format file size for display
+ * @param {number} bytes
+ * @returns {string}
+ */
+function formatImportFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+/**
+ * Add files to the local import list (deduplicates by name+size)
+ * @param {FileList|File[]} files
+ */
+function addImportLocalFiles(files) {
+    for (const file of files) {
+        // Only accept PNG files
+        if (!file.name.toLowerCase().endsWith('.png')) {
+            showToast(`Skipped "${file.name}" — only PNG files are supported`, 'warning');
+            continue;
+        }
+        // Deduplicate by name + size
+        const isDupe = importLocalFiles.some(f => f.name === file.name && f.size === file.size);
+        if (!isDupe) {
+            importLocalFiles.push(file);
+        }
+    }
+    renderImportFileList();
+}
+
+/**
+ * Remove a file from the local import list by index
+ * @param {number} index
+ */
+function removeImportLocalFile(index) {
+    importLocalFiles.splice(index, 1);
+    renderImportFileList();
+}
+
+/**
+ * Clear all local import files
+ */
+function clearImportLocalFiles() {
+    importLocalFiles = [];
+    if (importFileInput) importFileInput.value = '';
+    renderImportFileList();
+}
+
+/**
+ * Render the file list UI for local imports
+ */
+function renderImportFileList() {
+    if (!importFileList || !importDropPlaceholder || !importFileCount) return;
+    
+    if (importLocalFiles.length === 0) {
+        importFileList.classList.add('hidden');
+        importFileList.innerHTML = '';
+        importDropPlaceholder.classList.remove('hidden');
+        importFileCount.classList.add('hidden');
+        return;
+    }
+    
+    importDropPlaceholder.classList.add('hidden');
+    importFileList.classList.remove('hidden');
+    importFileCount.classList.remove('hidden');
+    
+    importFileList.innerHTML = importLocalFiles.map((file, idx) => `
+        <div class="import-file-item" data-index="${idx}">
+            <i class="fa-solid fa-file-image"></i>
+            <span class="import-file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+            <span class="import-file-size">${formatImportFileSize(file.size)}</span>
+            <button class="import-file-remove" data-index="${idx}" title="Remove file">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </div>
+    `).join('');
+    
+    if (importFileCountText) {
+        importFileCountText.textContent = `${importLocalFiles.length} file${importLocalFiles.length !== 1 ? 's' : ''} selected`;
+    }
+    
+    // Attach remove handlers
+    importFileList.querySelectorAll('.import-file-remove').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            removeImportLocalFile(parseInt(btn.dataset.index));
+        });
+    });
+}
+
+// File input change handler
+importFileInput?.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        addImportLocalFiles(e.target.files);
+    }
+});
+
+// Browse button click (delegated)
+importDropZone?.addEventListener('click', (e) => {
+    if (e.target.closest('.import-browse-btn')) {
+        importFileInput?.click();
+    }
+});
+
+// Drag & drop handlers
+importDropZone?.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    importDropZone.classList.add('drag-over');
+});
+
+importDropZone?.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only remove highlight if leaving the drop zone entirely
+    if (!importDropZone.contains(e.relatedTarget)) {
+        importDropZone.classList.remove('drag-over');
+    }
+});
+
+importDropZone?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    importDropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+        addImportLocalFiles(e.dataTransfer.files);
+    }
+});
+
+// Clear files button
+importClearFiles?.addEventListener('click', () => {
+    clearImportLocalFiles();
+});
+
+// ==================== LOCAL PNG IMPORT ====================
+
+/**
+ * Import a single local PNG character card into SillyTavern
+ * Reads the PNG, extracts card metadata, and sends to ST's import endpoint
+ * @param {File} file - The PNG file
+ * @returns {Promise<Object>} Same shape as importChubCharacter result
+ */
+async function importLocalCharacter(file) {
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        
+        // Extract character data to validate it's a proper card and get metadata
+        const cardData = extractCharacterDataFromPng(arrayBuffer);
+        if (!cardData) {
+            throw new Error('No character card data found in PNG — is this a V2 character card?');
+        }
+        
+        const characterName = cardData.data?.name || file.name.replace(/\.png$/i, '');
+        
+        // Assign unique gallery_id if enabled and not already present
+        let pngToUpload = arrayBuffer;
+        if (getSetting('uniqueGalleryFolders') && !cardData.data?.extensions?.gallery_id) {
+            if (!cardData.data.extensions) cardData.data.extensions = {};
+            cardData.data.extensions.gallery_id = generateGalleryId();
+            debugLog('[Local Import] Assigned gallery_id:', cardData.data.extensions.gallery_id);
+            // Re-embed updated card data into PNG
+            pngToUpload = embedCharacterDataInPng(arrayBuffer, cardData);
+        }
+        
+        const galleryId = cardData.data?.extensions?.gallery_id || null;
+        
+        // Extract Chub metadata if present (card may have been originally imported from Chub)
+        const chubExt = cardData.data?.extensions?.chub || {};
+        const chubId = chubExt.id || null;
+        const chubFullPath = chubExt.full_path || null;
+        
+        // Check for embedded media URLs
+        const mediaUrls = findCharacterMediaUrls(cardData);
+        
+        // Send to ST's import endpoint (same as Chub import)
+        const uploadFile = new File([pngToUpload], file.name, { type: 'image/png' });
+        const formData = new FormData();
+        formData.append('avatar', uploadFile);
+        formData.append('file_type', 'png');
+        
+        const csrfToken = getCSRFToken();
+        
+        const importResponse = await fetch('/api/characters/import', {
+            method: 'POST',
+            headers: { 'X-CSRF-Token': csrfToken },
+            body: formData
+        });
+        
+        const responseText = await importResponse.text();
+        debugLog('[Local Import] Response:', importResponse.status, responseText);
+        
+        if (!importResponse.ok) {
+            throw new Error(`Import error: ${responseText}`);
+        }
+        
+        let result;
+        try {
+            result = JSON.parse(responseText);
+        } catch (e) {
+            throw new Error(`Invalid JSON response: ${responseText}`);
+        }
+        
+        if (result.error) {
+            throw new Error('Import failed: Server returned error');
+        }
+        
+        return {
+            success: true,
+            fileName: result.file_name || file.name,
+            characterName: characterName,
+            embeddedMediaUrls: mediaUrls,
+            galleryId: galleryId,
+            hasGallery: !!chubId,  // assume gallery available if card has a Chub ID
+            chubId: chubId,
+            fullPath: chubFullPath,
+            avatarUrl: chubFullPath ? `https://avatars.charhub.io/avatars/${chubFullPath}/avatar.webp` : null
+        };
+        
+    } catch (error) {
+        console.error(`Failed to import local file ${file.name}:`, error);
+        return { success: false, error: error.message };
     }
 }
 
@@ -11363,12 +12028,10 @@ async function importChubCharacter(fullPath) {
         const metadataAvatarUrl = metadata.avatar_url || null;
         metadata = null;
         
-        // Ensure extensions object exists
         if (!characterCard.data.extensions) {
             characterCard.data.extensions = {};
         }
         
-        // Add ChubAI link metadata
         const existingChub = characterCard.data.extensions.chub || {};
         characterCard.data.extensions.chub = {
             ...existingChub,
@@ -11377,7 +12040,6 @@ async function importChubCharacter(fullPath) {
             tagline: metadataTagline || existingChub.tagline || '',
             linkedAt: new Date().toISOString()
         };
-        
         // Add unique gallery_id if enabled
         if (getSetting('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
             characterCard.data.extensions.gallery_id = generateGalleryId();
@@ -11575,32 +12237,53 @@ function updateLogEntry(entry, message, status) {
 
 // Start import process
 startImportBtn?.addEventListener('click', async () => {
-    // If in "Done" state, just close the modal
-    if (startImportBtn.classList.contains('success')) {
+    // If in "Done" / "Cancelled" state, just close the modal
+    if (startImportBtn.classList.contains('success') || startImportBtn.classList.contains('cancelled')) {
         importModal.classList.add('hidden');
         return;
     }
     
-    const text = importUrlsInput.value.trim();
-    if (!text) {
-        showToast('Please enter at least one URL', 'warning');
+    // If currently importing, this click means "Cancel"
+    if (isImporting) {
+        cancelActiveImport();
         return;
     }
     
-    // Parse URLs
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-    const validUrls = [];
+    // ==================== VALIDATE INPUT ====================
+    let importItems = []; // Array of { displayName, fullPath?, file? }
     
-    for (const line of lines) {
-        const fullPath = parseChubUrl(line);
-        if (fullPath) {
-            validUrls.push({ url: line, fullPath });
+    if (importSourceMode === 'chub') {
+        const text = importUrlsInput.value.trim();
+        if (!text) {
+            showToast('Please enter at least one URL', 'warning');
+            return;
         }
-    }
-    
-    if (validUrls.length === 0) {
-        showToast('No valid Chub AI URLs found', 'error');
-        return;
+        
+        // Parse URLs
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+        
+        for (const line of lines) {
+            const fullPath = parseChubUrl(line);
+            if (fullPath) {
+                importItems.push({ displayName: fullPath.split('/').pop(), fullPath, url: line });
+            }
+        }
+        
+        if (importItems.length === 0) {
+            showToast('No valid Chub AI URLs found', 'error');
+            return;
+        }
+    } else {
+        // Local PNG mode
+        if (importLocalFiles.length === 0) {
+            showToast('Please select at least one PNG file', 'warning');
+            return;
+        }
+        
+        importItems = importLocalFiles.map(file => ({
+            displayName: file.name.replace(/\.png$/i, ''),
+            file: file
+        }));
     }
     
     // Get import options
@@ -11608,21 +12291,31 @@ startImportBtn?.addEventListener('click', async () => {
     const autoDownloadGallery = document.getElementById('importAutoDownloadGallery')?.checked ?? false;
     const autoDownloadMedia = document.getElementById('importAutoDownloadMedia')?.checked ?? false;
     
-    // Start importing
+    // ==================== START IMPORTING ====================
     isImporting = true;
-    startImportBtn.disabled = true;
-    startImportBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
-    importUrlsInput.disabled = true;
+    resetImportAbortState();
+    importAbortState.controller = new AbortController();
+    
+    // Show Cancel button (not disabled — clickable to cancel)
+    startImportBtn.disabled = false;
+    startImportBtn.innerHTML = '<i class="fa-solid fa-stop"></i> Cancel';
+    startImportBtn.classList.add('cancellable');
+    if (importSourceMode === 'chub') {
+        importUrlsInput.disabled = true;
+    }
+    // Disable source toggle during import
+    document.querySelectorAll('.import-source-btn').forEach(btn => btn.disabled = true);
     
     importProgress.classList.remove('hidden');
     importLog.innerHTML = '';
     importProgressFill.style.width = '0%';
-    importProgressCount.textContent = `0/${validUrls.length}`;
+    importProgressCount.textContent = `0/${importItems.length}`;
     
     let successCount = 0;
     let errorCount = 0;
     let skippedCount = 0;
     let mediaDownloadCount = 0;
+    let wasCancelled = false;
     
     // Get stat elements
     const importStats = document.getElementById('importStats');
@@ -11651,42 +12344,91 @@ startImportBtn?.addEventListener('click', async () => {
         if (importStatErrors) importStatErrors.textContent = errorCount;
     };
     
-    for (let i = 0; i < validUrls.length; i++) {
-        const { url, fullPath } = validUrls[i];
-        const displayName = fullPath.split('/').pop();
+    // Helper to check if we should stop
+    const shouldStop = () => importAbortState.abort;
+    
+    for (let i = 0; i < importItems.length; i++) {
+        // === ABORT CHECK: top of each iteration ===
+        if (shouldStop()) {
+            wasCancelled = true;
+            break;
+        }
+        
+        const item = importItems[i];
+        const displayName = item.displayName;
         
         const logEntry = addImportLogEntry(`Checking ${displayName}`, 'pending');
         
         // === PRE-IMPORT DUPLICATE CHECK ===
         if (skipDuplicates) {
             try {
-                // Fetch metadata to check for duplicates
-                const metadata = await fetchChubMetadata(fullPath);
+                if (shouldStop()) { wasCancelled = true; break; }
                 
-                if (metadata && metadata.definition) {
-                    const characterName = metadata.definition?.name || metadata.name || displayName;
-                    const characterCreator = metadata.definition?.creator || metadata.creator || fullPath.split('/')[0] || '';
+                if (importSourceMode === 'chub') {
+                    // Chub mode: fetch metadata for duplicate check
+                    const metadata = await fetchChubMetadata(item.fullPath);
                     
-                    // Check for duplicates
-                    const duplicateMatches = checkCharacterForDuplicates({
-                        name: characterName,
-                        creator: characterCreator,
-                        fullPath: fullPath,
-                        definition: metadata.definition
-                    });
+                    if (shouldStop()) { wasCancelled = true; break; }
                     
-                    if (duplicateMatches.length > 0) {
-                        const bestMatch = duplicateMatches[0];
-                        const existingName = getCharField(bestMatch.char, 'name');
-                        skippedCount++;
-                        updateStats();
-                        updateLogEntry(logEntry, `${displayName} skipped - already exists as "${existingName}" (${bestMatch.matchReason})`, 'info');
+                    if (metadata && metadata.definition) {
+                        const characterName = metadata.definition?.name || metadata.name || displayName;
+                        const characterCreator = metadata.definition?.creator || metadata.creator || item.fullPath.split('/')[0] || '';
                         
-                        // Update progress
-                        const progress = ((i + 1) / validUrls.length) * 100;
-                        importProgressFill.style.width = `${progress}%`;
-                        importProgressCount.textContent = `${i + 1}/${validUrls.length}`;
-                        continue;
+                        const duplicateMatches = checkCharacterForDuplicates({
+                            name: characterName,
+                            creator: characterCreator,
+                            fullPath: item.fullPath,
+                            definition: metadata.definition
+                        });
+                        
+                        if (duplicateMatches.length > 0) {
+                            const bestMatch = duplicateMatches[0];
+                            const existingName = getCharField(bestMatch.char, 'name');
+                            skippedCount++;
+                            updateStats();
+                            updateLogEntry(logEntry, `${displayName} skipped - already exists as "${existingName}" (${bestMatch.matchReason})`, 'info');
+                            
+                            const progress = ((i + 1) / importItems.length) * 100;
+                            importProgressFill.style.width = `${progress}%`;
+                            importProgressCount.textContent = `${i + 1}/${importItems.length}`;
+                            continue;
+                        }
+                    }
+                } else {
+                    // Local mode: read PNG to extract card data for duplicate check
+                    const tempBuffer = await item.file.arrayBuffer();
+                    const cardData = extractCharacterDataFromPng(tempBuffer);
+                    
+                    if (shouldStop()) { wasCancelled = true; break; }
+                    
+                    if (cardData && cardData.data) {
+                        const characterName = cardData.data.name || displayName;
+                        const characterCreator = cardData.data.creator || '';
+                        const chubPath = cardData.data.extensions?.chub?.full_path || null;
+                        
+                        const duplicateMatches = checkCharacterForDuplicates({
+                            name: characterName,
+                            creator: characterCreator,
+                            fullPath: chubPath,
+                            definition: {
+                                personality: cardData.data.description || '',
+                                first_message: cardData.data.first_mes || '',
+                                scenario: cardData.data.scenario || ''
+                            }
+                        });
+                        
+                        if (duplicateMatches.length > 0) {
+                            const bestMatch = duplicateMatches[0];
+                            const existingName = getCharField(bestMatch.char, 'name');
+                            skippedCount++;
+                            updateStats();
+                            updateLogEntry(logEntry, `${displayName} skipped - already exists as "${existingName}" (${bestMatch.matchReason})`, 'info');
+                            
+                            const progress = ((i + 1) / importItems.length) * 100;
+                            importProgressFill.style.width = `${progress}%`;
+                            importProgressCount.textContent = `${i + 1}/${importItems.length}`;
+                            continue;
+                        }
                     }
                 }
             } catch (e) {
@@ -11696,9 +12438,26 @@ startImportBtn?.addEventListener('click', async () => {
         }
         // === END DUPLICATE CHECK ===
         
+        if (shouldStop()) { wasCancelled = true; break; }
+        
         updateLogEntry(logEntry, `Importing ${displayName}`, 'pending');
         
-        const result = await importChubCharacter(fullPath);
+        // Execute the import based on mode
+        const result = importSourceMode === 'chub'
+            ? await importChubCharacter(item.fullPath)
+            : await importLocalCharacter(item.file);
+        
+        // Check abort AFTER import completes (import itself is atomic — card was already uploaded)
+        if (shouldStop()) {
+            // If the import succeeded, still count it since the card is already in ST
+            if (result.success) {
+                successCount++;
+                updateStats();
+                updateLogEntry(logEntry, `${displayName} imported successfully`, 'success');
+            }
+            wasCancelled = true;
+            break;
+        }
         
         // Yield to browser for GC + UI updates between imports (critical for mobile)
         await new Promise(r => setTimeout(r, 50));
@@ -11709,27 +12468,20 @@ startImportBtn?.addEventListener('click', async () => {
             updateLogEntry(logEntry, `${displayName} imported successfully`, 'success');
             
             // Determine folder name for media downloads
-            // Use gallery_id if available (for unique folders), otherwise fall back to character name
             let folderName;
             if (result.galleryId) {
-                // Build the unique folder name: CharacterName_uuid
                 const safeName = result.characterName.replace(/[<>:"/\\|?*]/g, '_').trim();
                 folderName = `${safeName}_${result.galleryId}`;
                 debugLog('[Import] Using unique gallery folder:', folderName);
-                // NOTE: We do NOT register a gallery folder override here with a tempChar.
-                // The result.fileName from the server may not exactly match the final avatar
-                // filename in allCharacters, which would create an orphaned mapping.
-                // Instead, syncAllGalleryFolderOverrides() is called after fetchCharacters(true)
-                // at the end of the batch import, using authoritative avatar keys.
             } else {
-                // Fall back to character name-based folder
                 folderName = resolveGalleryFolderName(result.fileName || result.characterName);
                 debugLog('[Import] Using name-based folder:', folderName);
             }
             
-            // Auto-download embedded media FIRST if enabled (takes precedence for media localization)
+            // Auto-download embedded media if enabled
             if (autoDownloadMedia && result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
-                // Show media progress
+                if (shouldStop()) { wasCancelled = true; break; }
+                
                 if (importMediaProgress) {
                     importMediaProgress.classList.remove('hidden');
                     importMediaProgressFill.style.width = '0%';
@@ -11743,11 +12495,18 @@ startImportBtn?.addEventListener('click', async () => {
                             importMediaProgressFill.style.width = `${(current / total) * 100}%`;
                             importMediaProgressCount.textContent = `${current}/${total}`;
                         }
-                    }
+                    },
+                    shouldAbort: shouldStop,
+                    abortSignal: importAbortState.controller.signal
                 });
                 mediaDownloadCount += mediaResult.success || 0;
                 updateStats();
-                if (mediaResult.success > 0) {
+                
+                if (mediaResult.aborted) {
+                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: cancelled (${mediaResult.success || 0} downloaded before stop)`, 'warning');
+                    wasCancelled = true;
+                    break;
+                } else if (mediaResult.success > 0) {
                     updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.success} downloaded, ${mediaResult.skipped || 0} skipped, ${mediaResult.errors || 0} failed`, 'success');
                 } else if (mediaResult.skipped > 0) {
                     updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.skipped} already exist`, 'info');
@@ -11756,9 +12515,10 @@ startImportBtn?.addEventListener('click', async () => {
                 }
             }
             
-            // Auto-download gallery SECOND if enabled (will skip duplicates already downloaded as embedded media)
+            // Auto-download Chub gallery if enabled
             if (autoDownloadGallery && result.hasGallery && result.chubId) {
-                // Show media progress
+                if (shouldStop()) { wasCancelled = true; break; }
+                
                 if (importMediaProgress) {
                     importMediaProgress.classList.remove('hidden');
                     importMediaProgressFill.style.width = '0%';
@@ -11772,11 +12532,18 @@ startImportBtn?.addEventListener('click', async () => {
                             importMediaProgressFill.style.width = `${(current / total) * 100}%`;
                             importMediaProgressCount.textContent = `${current}/${total}`;
                         }
-                    }
+                    },
+                    shouldAbort: shouldStop,
+                    abortSignal: importAbortState.controller.signal
                 });
                 mediaDownloadCount += galleryResult.success || 0;
                 updateStats();
-                if (galleryResult.success > 0) {
+                
+                if (galleryResult.aborted) {
+                    updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: cancelled (${galleryResult.success || 0} downloaded before stop)`, 'warning');
+                    wasCancelled = true;
+                    break;
+                } else if (galleryResult.success > 0) {
                     updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: ${galleryResult.success} downloaded, ${galleryResult.skipped || 0} skipped, ${galleryResult.errors || 0} failed`, 'success');
                 } else if (galleryResult.skipped > 0) {
                     updateLogEntry(galleryLogEntry, `  ↳ ChubAI Gallery: ${galleryResult.skipped} already exist`, 'info');
@@ -11791,17 +12558,36 @@ startImportBtn?.addEventListener('click', async () => {
         }
         
         // Update progress
-        const progress = ((i + 1) / validUrls.length) * 100;
+        const progress = ((i + 1) / importItems.length) * 100;
         importProgressFill.style.width = `${progress}%`;
-        importProgressCount.textContent = `${i + 1}/${validUrls.length}`;
+        importProgressCount.textContent = `${i + 1}/${importItems.length}`;
     }
     
-    // Done
+    // ==================== FINALIZE ====================
+    
+    // Log cancellation
+    if (wasCancelled) {
+        addImportLogEntry('Import cancelled by user', 'warning');
+    }
+    
+    // Clean up state
     isImporting = false;
-    startImportBtn.disabled = false;
-    startImportBtn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
-    startImportBtn.classList.add('success');
+    importAbortState.controller = null;
     importUrlsInput.disabled = false;
+    startImportBtn.classList.remove('cancellable');
+    // Re-enable source toggle
+    document.querySelectorAll('.import-source-btn').forEach(btn => btn.disabled = false);
+    
+    // Set button to final state
+    if (wasCancelled) {
+        startImportBtn.disabled = false;
+        startImportBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Cancelled';
+        startImportBtn.classList.add('cancelled');
+    } else {
+        startImportBtn.disabled = false;
+        startImportBtn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
+        startImportBtn.classList.add('success');
+    }
     
     // Hide media progress
     if (importMediaProgress) {
@@ -11815,6 +12601,7 @@ startImportBtn?.addEventListener('click', async () => {
         if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
         if (mediaDownloadCount > 0) parts.push(`${mediaDownloadCount} media`);
         if (errorCount > 0) parts.push(`${errorCount} failed`);
+        if (wasCancelled) parts.push('cancelled');
         showToast(parts.join(', '), successCount > 0 ? 'success' : 'info');
         
         // Only refresh if we actually imported something
@@ -11840,12 +12627,11 @@ startImportBtn?.addEventListener('click', async () => {
             } catch (e) {
                 console.warn('Could not refresh main window characters:', e);
             }
-            
-            // NOTE: Import summary modal is NOT shown here - it's only for ChubAI browser downloads
-            // This modal already shows progress with stats, no need for additional popup
         }
-    } else {
+    } else if (!wasCancelled) {
         showToast(`Import failed: ${errorCount} error${errorCount > 1 ? 's' : ''}`, 'error');
+    } else {
+        showToast('Import cancelled', 'info');
     }
 });
 
@@ -12131,6 +12917,9 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
 // ChubAI Link Feature
 // ==============================================
 
+// Cached raw API node from chubLink modal fetch — reused by "View on ChubAI"
+let chubLinkCachedNode = null;
+
 /**
  * Get ChubAI link info from character
  * @param {Object} char - Character object
@@ -12161,7 +12950,6 @@ function getChubLinkInfo(char) {
 function setChubLinkInfo(char, chubInfo) {
     if (!char) return;
     
-    // Ensure data and extensions exist
     if (!char.data) char.data = {};
     if (!char.data.extensions) char.data.extensions = {};
     
@@ -12301,17 +13089,35 @@ function openChubLinkModal() {
  */
 async function fetchChubLinkStats(fullPath) {
     try {
-        const metadata = await fetchChubMetadata(fullPath);
-        if (!metadata) return;
-        
+        // Fetch directly instead of using fetchChubMetadata, since the cached
+        // metadata is stripped of stat fields (starCount, n_favorites, nTokens)
+        // to save memory. This only runs on chubLink modal open.
+        const url = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
+        let response;
+        try {
+            response = await fetch(url, { headers: getChubHeaders(true) });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        } catch {
+            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+            response = await fetch(proxyUrl, { headers: getChubHeaders(true) });
+            if (!response.ok) return;
+        }
+
+        const data = await response.json();
+        const node = data.node;
+        if (!node) return;
+
+        // Cache raw node for reuse by "View on ChubAI" button
+        chubLinkCachedNode = node;
+
         const starsEl = document.getElementById('chubLinkStars');
         const favoritesEl = document.getElementById('chubLinkFavorites');
         const tokensEl = document.getElementById('chubLinkTokens');
         
         // ChubAI's weird naming: starCount is actually downloads, n_favorites is favorites
-        const downloadCount = metadata.starCount || 0;
-        const favoritesCount = metadata.n_favorites || metadata.nFavorites || 0;
-        const tokenCount = metadata.nTokens || metadata.n_tokens || 0;
+        const downloadCount = node.starCount || 0;
+        const favoritesCount = node.n_favorites || node.nFavorites || 0;
+        const tokenCount = node.nTokens || node.n_tokens || 0;
         
         if (starsEl) starsEl.textContent = formatNumber(downloadCount);
         if (favoritesEl) favoritesEl.textContent = formatNumber(favoritesCount);
@@ -12373,7 +13179,6 @@ async function searchChubForLink(name, creator) {
                     const authorNodes = extractNodes(authorData);
                     
                     // Filter to characters whose name contains or is contained by search name
-                    // This handles "Ghost" matching "Ghost exorcism simulator"
                     for (const node of authorNodes) {
                         const nodeName = (node.name || '').toLowerCase().trim();
                         const nodeNameWords = nodeName.split(/\s+/).filter(w => w.length > 2);
@@ -12713,11 +13518,10 @@ async function viewInChubGallery() {
     // Show loading toast
     showToast('Loading character from ChubAI...', 'info');
     
-    // Fetch the character from ChubAI and open preview
+    // Reuse the raw node cached by fetchChubLinkStats (already fetched on modal open)
     setTimeout(async () => {
         try {
-            // Fetch character metadata
-            const metadata = await fetchChubMetadata(chubInfo.fullPath);
+            const metadata = chubLinkCachedNode;
             
             if (!metadata) {
                 showToast('Character not found on ChubAI', 'error');
@@ -12725,7 +13529,7 @@ async function viewInChubGallery() {
             }
             
             // Build a char object compatible with openChubCharPreview
-            // Include all fields from the metadata response
+            // Uses the raw cached node which has all stat fields intact
             const chubChar = {
                 id: metadata.id,
                 fullPath: chubInfo.fullPath,
@@ -12734,7 +13538,9 @@ async function viewInChubGallery() {
                 tagline: metadata.tagline,
                 avatar_url: `https://avatars.charhub.io/avatars/${chubInfo.fullPath}/avatar.webp`,
                 rating: metadata.rating,
+                ratingCount: metadata.ratingCount || metadata.rating_count,
                 starCount: metadata.starCount || metadata.star_count,
+                n_favorites: metadata.n_favorites || metadata.nFavorites,
                 nDownloads: metadata.nDownloads || metadata.n_downloads || metadata.downloadCount,
                 nTokens: metadata.nTokens || metadata.n_tokens,
                 n_greetings: metadata.n_greetings || metadata.nGreetings,
@@ -12746,6 +13552,9 @@ async function viewInChubGallery() {
                 definition: metadata.definition,
                 alternate_greetings: metadata.definition?.alternate_greetings || []
             };
+            
+            // Clear cached node now that it's been consumed
+            chubLinkCachedNode = null;
             
             // Open the character preview modal
             openChubCharPreview(chubChar);
@@ -12804,7 +13613,10 @@ async function downloadLinkedGallery() {
 
 // ChubAI Link Modal Event Handlers
 on('chubLinkIndicator', 'click', openChubLinkModal);
-on('closeChubLinkModal', 'click', () => hideModal('chubLinkModal'));
+on('closeChubLinkModal', 'click', () => {
+    chubLinkCachedNode = null;
+    hideModal('chubLinkModal');
+});
 
 on('chubLinkSearchBtn', 'click', () => {
     const name = document.getElementById('chubLinkSearchName')?.value || '';
@@ -12846,6 +13658,17 @@ document.getElementById('chubLinkUrlInput')?.addEventListener('keydown', (e) => 
 on('chubLinkViewInGalleryBtn', 'click', viewInChubGallery);
 on('chubLinkGalleryBtn', 'click', downloadLinkedGallery);
 on('chubLinkUnlinkBtn', 'click', unlinkFromChub);
+
+// Version History button in ChubAI Link modal
+on('chubLinkVersionsBtn', 'click', () => {
+    if (activeChar) {
+        // Close the ChubAI Link modal, then switch to the Versions tab
+        const linkModal = document.getElementById('chubLinkModal');
+        if (linkModal) linkModal.classList.add('hidden');
+        const editVBtn = document.getElementById('editPaneVersionsBtn');
+        if (editVBtn) editVBtn.click();
+    }
+});
 
 // ==============================================
 // Bulk ChubAI Link Feature
@@ -13117,7 +13940,6 @@ async function searchChubForBulkLink(name, creator) {
                     const authorNodes = extractNodes(authorData);
                     
                     // Filter to characters whose name contains or is contained by our search name
-                    // This handles "Ghost" matching "Ghost exorcism simulator"
                     for (const node of authorNodes) {
                         const nodeName = (node.name || '').toLowerCase().trim();
                         const nodeNameWords = nodeName.split(/\s+/).filter(w => w.length > 2);
@@ -14059,6 +14881,7 @@ async function renameToLocalizedFormat(existingFile, originalUrl, folderName, in
         const deleteResponse = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
             path: deletePath
         });
+        await deleteResponse.text().catch(() => {});
         
         if (!deleteResponse.ok) {
             console.warn(`[EmbeddedMedia] Could not delete old file ${existingFile.fileName} (path: ${deletePath}), but new file was saved`);
@@ -14917,6 +15740,7 @@ const bulkSummaryPageInfo = document.getElementById('bulkSummaryPageInfo');
 
 // Bulk localization state
 let bulkLocalizeAborted = false;
+let bulkLocalizeAbortController = null;
 let bulkLocalizeResults = [];
 let bulkSummaryCurrentPage = 1;
 let bulkSummaryShowRenamed = false;
@@ -14925,11 +15749,13 @@ const BULK_SUMMARY_PAGE_SIZE = 50;
 // Close bulk localize modal
 closeBulkLocalizeModal?.addEventListener('click', () => {
     bulkLocalizeAborted = true;
+    bulkLocalizeAbortController?.abort();
     bulkLocalizeModal.classList.add('hidden');
 });
 
 cancelBulkLocalizeBtn?.addEventListener('click', () => {
     bulkLocalizeAborted = true;
+    bulkLocalizeAbortController?.abort();
     cancelBulkLocalizeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Stopping...';
     cancelBulkLocalizeBtn.disabled = true;
 });
@@ -14981,6 +15807,7 @@ function getFilteredBulkResults() {
         const hasAnyMedia = r.totalUrls > 0 || r.chubDownloaded > 0 || r.chubSkipped > 0 || r.chubErrors > 0;
         
         // Apply filter (includes both embedded and Chub gallery)
+        if (filter === 'localized' && (!hasAnyMedia || totalErrors > 0 || r.incomplete)) return false;
         if (filter === 'downloaded' && totalDownloaded === 0) return false;
         if (filter === 'skipped' && totalSkipped === 0) return false;
         if (filter === 'errors' && totalErrors === 0) return false;
@@ -15255,6 +16082,9 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     // Always show renamed column since we always rename non-localized duplicates
     bulkSummaryShowRenamed = true;
     
+    // Refresh the custom select menu to pick up any option changes
+    bulkSummaryFilterSelect._customSelect?.refresh();
+    
     // Render list
     renderBulkSummaryList();
     
@@ -15294,6 +16124,7 @@ function clearCompletedMediaLocalizations() {
  */
 async function runBulkLocalization() {
     bulkLocalizeAborted = false;
+    bulkLocalizeAbortController = new AbortController();
     bulkLocalizeResults = [];
     
     // Include Chub gallery downloads for linked characters
@@ -15379,7 +16210,8 @@ async function runBulkLocalization() {
                         bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
                     }
                 },
-                shouldAbort: () => bulkLocalizeAborted
+                shouldAbort: () => bulkLocalizeAborted,
+                abortSignal: bulkLocalizeAbortController.signal
             });
             
             result.downloaded = downloadResult.success;
@@ -15433,7 +16265,8 @@ async function runBulkLocalization() {
                                 bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
                             }
                         },
-                        shouldAbort: () => bulkLocalizeAborted
+                        shouldAbort: () => bulkLocalizeAborted,
+                        abortSignal: bulkLocalizeAbortController.signal
                     });
                     
                     // Add Chub gallery stats to result
@@ -15788,7 +16621,6 @@ function replaceMediaUrlsInText(text, urlMap) {
     });
     
     // Replace raw media URLs (not already in markdown or HTML tags)
-    // This handles URLs that appear as plain text
     result = result.replace(/(^|[^"'(])((https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)))(?=[)\s<"']|$)/gi, (match, prefix, url) => {
         const localPath = lookupLocalizedMedia(urlMap, url);
         if (localPath) {
@@ -16939,7 +17771,7 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
                 <button class="action-btn secondary small" onclick="viewCharFromDuplicates('${escapeHtml(char.avatar)}')">
                     <i class="fa-solid fa-eye"></i> View
                 </button>
-                <button class="action-btn secondary small" style="color: #e74c3c;" onclick="deleteDuplicateChar('${escapeHtml(char.avatar)}', ${groupIdx})">
+                <button class="action-btn danger-hover small" onclick="deleteDuplicateChar('${escapeHtml(char.avatar)}', ${groupIdx})">
                     <i class="fa-solid fa-trash"></i> Delete
                 </button>
             </div>
@@ -17621,6 +18453,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                     const response = await apiRequest(ENDPOINTS.IMAGES_DELETE, 'POST', {
                         path: deletePath
                     });
+                    await response.text().catch(() => {});
                     if (response.ok) {
                         deleted++;
                     } else {
@@ -17796,1154 +18629,9 @@ on('preImportAnyway', 'click', () => resolvePreImportChoice('import'));
 on('preImportReplaceBtn', 'click', () => resolvePreImportChoice('replace'));
 
 // ========================================
-// CHATS VIEW - Global Chats Browser
-// ========================================
-
-let currentView = 'characters'; // 'characters' or 'chats'
-let allChats = [];
-let currentGrouping = 'flat'; // 'flat' or 'grouped'
-let currentChatSort = 'recent';
-let currentPreviewChat = null;
-let currentPreviewChar = null;
-
-// Initialize Chats View handlers after DOM is ready
-function initChatsView() {
-    // View Toggle Handlers
-    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const view = btn.dataset.view;
-            debugLog('View toggle clicked:', view);
-            switchView(view);
-        });
-    });
-    
-    // Chats Sort Select
-    on('chatsSortSelect', 'change', (e) => {
-        currentChatSort = e.target.value;
-        renderChats();
-    });
-    
-    // Grouping Toggle
-    // Grouping Toggle - just re-render, don't reload
-    document.querySelectorAll('.grouping-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            document.querySelectorAll('.grouping-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            currentGrouping = btn.dataset.group;
-            renderChats(); // Just re-render from cached data
-        });
-    });
-    
-    // Refresh Chats Button - force full refresh
-    on('refreshChatsViewBtn', 'click', () => {
-        clearChatCache();
-        allChats = [];
-        loadAllChats(true); // Force refresh
-    });
-    
-    // Chat Preview Modal handlers
-    on('chatPreviewClose', 'click', () => hideModal('chatPreviewModal'));
-    
-    on('chatPreviewOpenBtn', 'click', () => {
-        if (currentPreviewChat) {
-            openChatInST(currentPreviewChat);
-        }
-    });
-    
-    on('chatPreviewDeleteBtn', 'click', () => {
-        if (currentPreviewChat) {
-            deleteChatFromView(currentPreviewChat);
-        }
-    });
-    
-    // Close modal on overlay click
-    on('chatPreviewModal', 'click', (e) => {
-        if (e.target.id === 'chatPreviewModal') {
-            hideModal('chatPreviewModal');
-        }
-    });
-    
-    debugLog('Chats view initialized');
-}
-
-// Call init when DOM is ready
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initChatsView);
-} else {
-    initChatsView();
-}
-
-function switchView(view) {
-    debugLog('[View] Switching to:', view);
-    currentView = view;
-    
-    // Update toggle buttons
-    document.querySelectorAll('.view-toggle-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.view === view);
-    });
-    
-    // Update search placeholder
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        if (view === 'characters') {
-            searchInput.placeholder = 'Search characters...';
-        } else if (view === 'chats') {
-            searchInput.placeholder = 'Search chats...';
-        } else {
-            searchInput.placeholder = 'Search library...';
-        }
-    }
-    
-    // Get elements
-    const charFilters = document.getElementById('filterArea');
-    const chatFilters = document.getElementById('chatsFilterArea');
-    const chubFilters = document.getElementById('chubFilterArea');
-    const importBtn = document.getElementById('importBtn');
-    const searchSettings = document.querySelector('.search-settings-container');
-    const mainSearch = document.querySelector('.search-area');
-    
-    // Hide all views first
-    hide('characterGrid');
-    hide('chatsView');
-    hide('chubView');
-    
-    // Reset scroll position when switching views
-    const scrollContainer = document.querySelector('.gallery-content');
-    if (scrollContainer) {
-        scrollContainer.scrollTop = 0;
-    }
-    
-    // Hide all filter areas using display:none for cleaner switching
-    if (charFilters) charFilters.style.display = 'none';
-    if (chatFilters) chatFilters.style.display = 'none';
-    if (chubFilters) chubFilters.style.display = 'none';
-    
-    if (view === 'characters') {
-        if (charFilters) charFilters.style.display = 'flex';
-        if (importBtn) importBtn.style.display = '';
-        if (searchSettings) searchSettings.style.display = '';
-        // Use visibility to maintain space for search area
-        if (mainSearch) {
-            mainSearch.style.visibility = 'visible';
-            mainSearch.style.pointerEvents = '';
-        }
-        show('characterGrid');
-        
-        // Re-apply current filters and sort when returning to characters view.
-        // Defer to next animation frame so the grid has fully reflowed after
-        // removing the 'hidden' class — otherwise clientWidth/clientHeight can
-        // still report 0 and the virtual scroll renders nothing.
-        requestAnimationFrame(() => performSearch());
-    } else if (view === 'chats') {
-        if (chatFilters) chatFilters.style.display = 'flex';
-        if (importBtn) importBtn.style.display = 'none';
-        if (searchSettings) searchSettings.style.display = 'none';
-        // Use visibility to maintain space for search area
-        if (mainSearch) {
-            mainSearch.style.visibility = 'visible';
-            mainSearch.style.pointerEvents = '';
-        }
-        show('chatsView');
-        
-        // Load chats if not loaded
-        if (allChats.length === 0) {
-            loadAllChats();
-        }
-    } else if (view === 'chub') {
-        if (chubFilters) chubFilters.style.display = 'flex';
-        if (importBtn) importBtn.style.display = 'none';
-        if (searchSettings) searchSettings.style.display = 'none';
-        // Hide search visually but maintain its space to prevent layout shift
-        if (mainSearch) {
-            mainSearch.style.visibility = 'hidden';
-            mainSearch.style.pointerEvents = 'none';
-        }
-        show('chubView');
-        
-        // Load ChubAI characters if not loaded
-        if (chubCharacters.length === 0) {
-            loadChubCharacters();
-        }
-    }
-}
-
-// ========================================
-// CHATS CACHING
-// ========================================
-const CHATS_CACHE_KEY = 'st_gallery_chats_cache';
-const CHATS_CACHE_MAX_AGE = 5 * 60 * 1000; // 5 minutes before background refresh
-
-function getCachedChats() {
-    try {
-        const cached = localStorage.getItem(CHATS_CACHE_KEY);
-        if (!cached) return null;
-        
-        const data = JSON.parse(cached);
-        return data;
-    } catch (e) {
-        console.warn('[ChatsCache] Failed to read cache:', e);
-        return null;
-    }
-}
-
-function saveChatCache(chats) {
-    try {
-        const cacheData = {
-            timestamp: Date.now(),
-            chats: chats.map(c => ({
-                file_name: c.file_name,
-                last_mes: c.last_mes,
-                chat_items: c.chat_items || c.mes_count || 0,
-                charName: c.charName,
-                charAvatar: c.charAvatar,
-                preview: c.preview
-            }))
-        };
-        localStorage.setItem(CHATS_CACHE_KEY, JSON.stringify(cacheData));
-        debugLog(`[ChatsCache] Saved ${chats.length} chats to cache`);
-    } catch (e) {
-        console.warn('[ChatsCache] Failed to save cache:', e);
-    }
-}
-
-function clearChatCache() {
-    localStorage.removeItem(CHATS_CACHE_KEY);
-}
-
-// Fetch all chats from all characters
-async function loadAllChats(forceRefresh = false) {
-    const chatsView = document.getElementById('chatsView');
-    const chatsGrid = document.getElementById('chatsGrid');
-    
-    // Try to show cached data first for instant UI
-    const cached = getCachedChats();
-    const cacheAge = cached ? Date.now() - cached.timestamp : Infinity;
-    const isCacheValid = cached && cached.chats && cached.chats.length > 0;
-    
-    if (isCacheValid && !forceRefresh) {
-        debugLog(`[ChatsCache] Using cached data (${Math.round(cacheAge/1000)}s old, ${cached.chats.length} chats)`);
-        
-        // Reconstruct allChats from cache with character references
-        allChats = cached.chats.map(cachedChat => {
-            const char = allCharacters.find(c => c.avatar === cachedChat.charAvatar);
-            if (!char) return null;
-            return {
-                ...cachedChat,
-                character: char,
-                mes_count: cachedChat.chat_items
-            };
-        }).filter(Boolean);
-        
-        // Render immediately from cache
-        renderChats();
-        
-        // If cache is old, do background refresh
-        if (cacheAge > CHATS_CACHE_MAX_AGE) {
-            debugLog('[ChatsCache] Cache is stale, refreshing in background...');
-            showRefreshIndicator(true);
-            await fetchFreshChats(true); // background mode
-            showRefreshIndicator(false);
-        }
-        
-        return;
-    }
-    
-    // No cache or force refresh - do full load
-    renderLoadingState(chatsGrid, 'Loading all chats...', 'chats-loading');
-    await fetchFreshChats(false);
-}
-
-function showRefreshIndicator(show) {
-    let indicator = document.getElementById('chatsRefreshIndicator');
-    if (show) {
-        if (!indicator) {
-            indicator = document.createElement('div');
-            indicator.id = 'chatsRefreshIndicator';
-            indicator.className = 'chats-refresh-indicator';
-            indicator.innerHTML = '<i class="fa-solid fa-sync fa-spin"></i> Checking for updates...';
-            document.getElementById('chatsView')?.prepend(indicator);
-        }
-    } else {
-        indicator?.remove();
-    }
-}
-
-async function fetchFreshChats(isBackground = false) {
-    const chatsGrid = document.getElementById('chatsGrid');
-    
-    try {
-        const newChats = [];
-        
-        // Get chats for each character that has chats
-        for (const char of allCharacters) {
-            try {
-                const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { 
-                    avatar_url: char.avatar, 
-                    metadata: true 
-                });
-                
-                if (response.ok) {
-                    const chats = await response.json();
-                    if (chats && chats.length && !chats.error) {
-                        chats.forEach(chat => {
-                            // Check if we have a cached preview for this chat
-                            const cachedChat = allChats.find(c => 
-                                c.file_name === chat.file_name && c.charAvatar === char.avatar
-                            );
-                            
-                            // Reuse preview if message count hasn't changed
-                            const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
-                            const newMsgCount = chat.chat_items || chat.mes_count || 0;
-                            const canReusePreview = cachedChat?.preview && cachedMsgCount === newMsgCount;
-                            
-                            newChats.push({
-                                ...chat,
-                                character: char,
-                                charName: char.name,
-                                charAvatar: char.avatar,
-                                preview: canReusePreview ? cachedChat.preview : null
-                            });
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn(`Failed to load chats for ${char.name}:`, e);
-            }
-        }
-        
-        if (newChats.length === 0 && !isBackground) {
-            chatsGrid.innerHTML = `
-                <div class="chats-empty">
-                    <i class="fa-solid fa-comments"></i>
-                    <h3>No Chats Found</h3>
-                    <p>Start a conversation with a character to see it here.</p>
-                </div>
-            `;
-            return;
-        }
-        
-        // Update allChats
-        allChats = newChats;
-        
-        // Render chats
-        renderChats();
-        
-        // Find chats that need preview loading
-        const chatsNeedingPreviews = allChats.filter(c => c.preview === null);
-        debugLog(`[ChatsCache] ${chatsNeedingPreviews.length} of ${allChats.length} chats need preview loading`);
-        
-        if (chatsNeedingPreviews.length > 0) {
-            await loadChatPreviews(chatsNeedingPreviews);
-        }
-        
-        // Save to cache
-        saveChatCache(allChats);
-        
-    } catch (e) {
-        console.error('Failed to load chats:', e);
-        if (!isBackground) {
-            chatsGrid.innerHTML = `
-                <div class="chats-empty">
-                    <i class="fa-solid fa-exclamation-triangle"></i>
-                    <h3>Error Loading Chats</h3>
-                    <p>${escapeHtml(e.message)}</p>
-                </div>
-            `;
-        }
-    }
-}
-
-// Fetch chat previews in parallel batches
-async function loadChatPreviews(chatsToLoad = null) {
-    const BATCH_SIZE = 5; // Fetch 5 at a time to avoid overwhelming the server
-    const targetChats = chatsToLoad || allChats;
-    debugLog(`[ChatPreviews] Starting to load previews for ${targetChats.length} chats`);
-    
-    for (let i = 0; i < targetChats.length; i += BATCH_SIZE) {
-        const batch = targetChats.slice(i, i + BATCH_SIZE);
-        debugLog(`[ChatPreviews] Processing batch ${i/BATCH_SIZE + 1}, chats ${i} to ${i + batch.length}`);
-        
-        await Promise.all(batch.map(async (chat) => {
-            try {
-                // Try the file_name without .jsonl extension
-                const chatFileName = chat.file_name.replace('.jsonl', '');
-                
-                const response = await apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
-                    ch_name: chat.character.name,
-                    file_name: chatFileName,
-                    avatar_url: chat.character.avatar
-                });
-                
-                debugLog(`[ChatPreviews] ${chat.file_name}: response status ${response.status}`);
-                
-                if (response.ok) {
-                    const messages = await response.json();
-                    debugLog(`[ChatPreviews] ${chat.file_name}: got ${messages?.length || 0} messages`);
-                    
-                    if (messages && messages.length > 0) {
-                        // Get last non-system message as preview
-                        const lastMsg = [...messages].reverse().find(m => !m.is_system && m.mes);
-                        if (lastMsg) {
-                            const previewText = lastMsg.mes.substring(0, 150);
-                            chat.preview = (lastMsg.is_user ? 'You: ' : '') + previewText + (lastMsg.mes.length > 150 ? '...' : '');
-                            
-                            // Update the card in DOM if it exists
-                            updateChatCardPreview(chat);
-                        } else {
-                            chat.preview = '';
-                            updateChatCardPreview(chat);
-                        }
-                    } else {
-                        chat.preview = '';
-                        updateChatCardPreview(chat);
-                    }
-                } else {
-                    console.warn(`[ChatPreviews] ${chat.file_name}: HTTP error ${response.status}`);
-                    chat.preview = '';
-                    updateChatCardPreview(chat);
-                }
-            } catch (e) {
-                console.warn(`[ChatPreviews] ${chat.file_name}: Exception:`, e);
-                chat.preview = '';
-                updateChatCardPreview(chat);
-            }
-        }));
-    }
-    
-    debugLog(`[ChatPreviews] Finished loading all previews`);
-}
-
-// Update a chat card's preview text in the DOM
-function updateChatCardPreview(chat) {
-    const card = document.querySelector(`.chat-card[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
-    if (card) {
-        const previewEl = card.querySelector('.chat-card-preview');
-        if (previewEl && chat.preview) {
-            previewEl.textContent = chat.preview;
-        }
-    }
-    
-    // Also update in grouped view
-    const groupItem = document.querySelector(`.chat-group-item[data-chat-file="${CSS.escape(chat.file_name)}"]`);
-    if (groupItem) {
-        // Could add preview to grouped items too if desired
-    }
-}
-
-function renderChats() {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase().trim();
-    let filteredChats = allChats;
-    
-    // Apply search filter
-    if (searchTerm) {
-        filteredChats = allChats.filter(chat => {
-            const chatName = (chat.file_name || '').toLowerCase();
-            const charName = (chat.charName || '').toLowerCase();
-            return chatName.includes(searchTerm) || charName.includes(searchTerm);
-        });
-    }
-    
-    // Apply sorting
-    filteredChats = sortChats(filteredChats);
-    
-    if (currentGrouping === 'flat') {
-        renderFlatChats(filteredChats);
-    } else {
-        renderGroupedChats(filteredChats);
-    }
-}
-
-function sortChats(chats) {
-    const sorted = [...chats];
-    
-    switch (currentChatSort) {
-        case 'recent':
-            sorted.sort((a, b) => {
-                const dateA = a.last_mes ? new Date(a.last_mes) : new Date(0);
-                const dateB = b.last_mes ? new Date(b.last_mes) : new Date(0);
-                return dateB - dateA;
-            });
-            break;
-        case 'oldest':
-            sorted.sort((a, b) => {
-                const dateA = a.last_mes ? new Date(a.last_mes) : new Date(0);
-                const dateB = b.last_mes ? new Date(b.last_mes) : new Date(0);
-                return dateA - dateB;
-            });
-            break;
-        case 'char_asc':
-            sorted.sort((a, b) => (a.charName || '').localeCompare(b.charName || ''));
-            break;
-        case 'char_desc':
-            sorted.sort((a, b) => (b.charName || '').localeCompare(a.charName || ''));
-            break;
-        case 'most_messages':
-            sorted.sort((a, b) => (b.chat_items || b.mes_count || 0) - (a.chat_items || a.mes_count || 0));
-            break;
-        case 'least_messages':
-            sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
-            break;
-        case 'longest_chat':
-            // Longest by estimated content (messages * avg length)
-            sorted.sort((a, b) => (b.chat_items || b.mes_count || 0) - (a.chat_items || a.mes_count || 0));
-            break;
-        case 'shortest_chat':
-            sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
-            break;
-        case 'most_chats':
-            // Group by character and sort by chat count
-            const charChatCounts = {};
-            sorted.forEach(c => {
-                charChatCounts[c.charAvatar] = (charChatCounts[c.charAvatar] || 0) + 1;
-            });
-            sorted.sort((a, b) => (charChatCounts[b.charAvatar] || 0) - (charChatCounts[a.charAvatar] || 0));
-            break;
-    }
-    
-    return sorted;
-}
-
-function renderFlatChats(chats) {
-    const chatsGrid = document.getElementById('chatsGrid');
-    const groupedView = document.getElementById('chatsGroupedView');
-    
-    chatsGrid.classList.remove('hidden');
-    groupedView.classList.add('hidden');
-    
-    if (chats.length === 0) {
-        chatsGrid.innerHTML = `
-            <div class="chats-empty">
-                <i class="fa-solid fa-search"></i>
-                <h3>No Matching Chats</h3>
-                <p>Try a different search term.</p>
-            </div>
-        `;
-        return;
-    }
-    
-    chatsGrid.innerHTML = chats.map(chat => createChatCard(chat)).join('');
-    
-    // Add event listeners
-    chatsGrid.querySelectorAll('.chat-card').forEach(card => {
-        const chatFile = card.dataset.chatFile;
-        const charAvatar = card.dataset.charAvatar;
-        const chat = chats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar);
-        
-        card.addEventListener('click', (e) => {
-            if (e.target.closest('.chat-card-action')) return;
-            openChatPreview(chat);
-        });
-        
-        card.querySelector('.chat-card-action[data-action="open"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openChatInST(chat);
-        });
-        
-        card.querySelector('.chat-card-action[data-action="delete"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deleteChatFromView(chat);
-        });
-        
-        // Character name click to open details modal
-        card.querySelector('.clickable-char-name')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openCharacterDetailsFromChats(chat.character);
-        });
-    });
-}
-
-function renderGroupedChats(chats) {
-    const chatsGrid = document.getElementById('chatsGrid');
-    const groupedView = document.getElementById('chatsGroupedView');
-    
-    chatsGrid.classList.add('hidden');
-    groupedView.classList.remove('hidden');
-    
-    // Group by character
-    const groups = {};
-    chats.forEach(chat => {
-        const key = chat.charAvatar;
-        if (!groups[key]) {
-            groups[key] = {
-                character: chat.character,
-                chats: []
-            };
-        }
-        groups[key].chats.push(chat);
-    });
-    
-    // Sort groups by most chats if that sort is selected
-    let groupKeys = Object.keys(groups);
-    if (currentChatSort === 'most_chats') {
-        groupKeys.sort((a, b) => groups[b].chats.length - groups[a].chats.length);
-    } else if (currentChatSort === 'char_asc') {
-        groupKeys.sort((a, b) => (groups[a].character.name || '').localeCompare(groups[b].character.name || ''));
-    } else if (currentChatSort === 'char_desc') {
-        groupKeys.sort((a, b) => (groups[b].character.name || '').localeCompare(groups[a].character.name || ''));
-    }
-    
-    if (groupKeys.length === 0) {
-        groupedView.innerHTML = `
-            <div class="chats-empty">
-                <i class="fa-solid fa-search"></i>
-                <h3>No Matching Chats</h3>
-                <p>Try a different search term.</p>
-            </div>
-        `;
-        return;
-    }
-    
-    groupedView.innerHTML = groupKeys.map(key => {
-        const group = groups[key];
-        const char = group.character;
-        const avatarUrl = getCharacterAvatarUrl(char.avatar);
-        
-        // Avatar with fallback
-        const avatarHtml = avatarUrl 
-            ? `<img src="${avatarUrl}" alt="${escapeHtml(char.name)}" class="chat-group-avatar" onerror="this.src='/img/ai4.png'">`
-            : `<div class="chat-group-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
-        
-        return `
-            <div class="chat-group" data-char-avatar="${escapeHtml(char.avatar)}">
-                <div class="chat-group-header">
-                    ${avatarHtml}
-                    <div class="chat-group-info">
-                        <div class="chat-group-name clickable-char-name" data-char-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</div>
-                        <div class="chat-group-count">${group.chats.length} chat${group.chats.length !== 1 ? 's' : ''}</div>
-                    </div>
-                    <i class="fa-solid fa-chevron-down chat-group-toggle"></i>
-                </div>
-                <div class="chat-group-content">
-                    ${group.chats.map(chat => createGroupedChatItem(chat)).join('')}
-                </div>
-            </div>
-        `;
-    }).join('');
-    
-    // Add event listeners for groups
-    groupedView.querySelectorAll('.chat-group-header').forEach(header => {
-        header.addEventListener('click', (e) => {
-            // Don't toggle if clicking on character name
-            if (e.target.closest('.clickable-char-name')) return;
-            header.closest('.chat-group').classList.toggle('collapsed');
-        });
-        
-        // Character name click to open details modal
-        header.querySelector('.clickable-char-name')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const charAvatar = header.closest('.chat-group').dataset.charAvatar;
-            const char = allCharacters.find(c => c.avatar === charAvatar);
-            if (char) openCharacterDetailsFromChats(char);
-        });
-    });
-    
-    groupedView.querySelectorAll('.chat-group-item').forEach(item => {
-        const chatFile = item.dataset.chatFile;
-        const charAvatar = item.closest('.chat-group').dataset.charAvatar;
-        const chat = chats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar);
-        
-        item.addEventListener('click', (e) => {
-            if (e.target.closest('.chat-card-action')) return;
-            openChatPreview(chat);
-        });
-        
-        item.querySelector('.chat-card-action[data-action="open"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openChatInST(chat);
-        });
-        
-        item.querySelector('.chat-card-action[data-action="delete"]')?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            deleteChatFromView(chat);
-        });
-    });
-}
-
-function createChatCard(chat) {
-    const char = chat.character;
-    const avatarUrl = getCharacterAvatarUrl(char.avatar);
-    const chatName = (chat.file_name || '').replace('.jsonl', '');
-    const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
-    const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
-    const isActive = char.chat === chatName;
-    
-    // Preview: show loading if null, actual preview if available
-    let previewHtml;
-    if (chat.preview === null) {
-        previewHtml = '<i class="fa-solid fa-spinner fa-spin" style="opacity: 0.5;"></i> <span style="opacity: 0.5;">Loading preview...</span>';
-    } else if (chat.preview) {
-        previewHtml = escapeHtml(chat.preview);
-    } else {
-        previewHtml = '<span style="opacity: 0.5;">No messages</span>';
-    }
-    
-    // Avatar with fallback
-    const avatarHtml = avatarUrl 
-        ? `<img src="${avatarUrl}" alt="${escapeHtml(char.name)}" class="chat-card-avatar" onerror="this.src='/img/ai4.png'">`
-        : `<div class="chat-card-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
-    
-    return `
-        <div class="chat-card ${isActive ? 'active' : ''}" data-chat-file="${escapeHtml(chat.file_name)}" data-char-avatar="${escapeHtml(char.avatar)}">
-            <div class="chat-card-header">
-                ${avatarHtml}
-                <div class="chat-card-char-info">
-                    <div class="chat-card-char-name clickable-char-name" data-char-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</div>
-                    <div class="chat-card-chat-name">${escapeHtml(chatName)}</div>
-                </div>
-            </div>
-            <div class="chat-card-body">
-                <div class="chat-card-preview">${previewHtml}</div>
-            </div>
-            <div class="chat-card-footer">
-                <div class="chat-card-meta">
-                    <span><i class="fa-solid fa-calendar"></i> ${lastDate}</span>
-                    <span><i class="fa-solid fa-comment"></i> ${messageCount}</span>
-                </div>
-                <div class="chat-card-actions">
-                    <button class="chat-card-action" data-action="open" title="Open in SillyTavern">
-                        <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                    </button>
-                    <button class="chat-card-action danger" data-action="delete" title="Delete chat">
-                        <i class="fa-solid fa-trash"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-}
-
-function createGroupedChatItem(chat) {
-    const chatName = (chat.file_name || '').replace('.jsonl', '');
-    const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
-    const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
-    
-    // Preview text
-    let previewText;
-    if (chat.preview === null) {
-        previewText = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
-    } else if (chat.preview) {
-        previewText = escapeHtml(chat.preview);
-    } else {
-        previewText = '<span class="no-preview">No messages</span>';
-    }
-    
-    return `
-        <div class="chat-group-item" data-chat-file="${escapeHtml(chat.file_name)}">
-            <div class="chat-group-item-icon"><i class="fa-solid fa-message"></i></div>
-            <div class="chat-group-item-info">
-                <div class="chat-group-item-name">${escapeHtml(chatName)}</div>
-                <div class="chat-group-item-preview">${previewText}</div>
-                <div class="chat-group-item-meta">
-                    <span><i class="fa-solid fa-calendar"></i> ${lastDate}</span>
-                    <span><i class="fa-solid fa-comment"></i> ${messageCount}</span>
-                </div>
-            </div>
-            <div class="chat-group-item-actions">
-                <button class="chat-card-action" data-action="open" title="Open in SillyTavern">
-                    <i class="fa-solid fa-arrow-up-right-from-square"></i>
-                </button>
-                <button class="chat-card-action danger" data-action="delete" title="Delete chat">
-                    <i class="fa-solid fa-trash"></i>
-                </button>
-            </div>
-        </div>
-    `;
-}
-
-// Chat Preview Modal
-async function openChatPreview(chat) {
-    currentPreviewChat = chat;
-    currentPreviewChar = chat.character;
-    
-    const modal = document.getElementById('chatPreviewModal');
-    const avatarImg = document.getElementById('chatPreviewAvatar');
-    const title = document.getElementById('chatPreviewTitle');
-    const charName = document.getElementById('chatPreviewCharName');
-    const messageCount = document.getElementById('chatPreviewMessageCount');
-    const date = document.getElementById('chatPreviewDate');
-    const messagesContainer = document.getElementById('chatPreviewMessages');
-    
-    const chatName = (chat.file_name || '').replace('.jsonl', '');
-    const avatarUrl = getCharacterAvatarUrl(chat.character.avatar) || '/img/ai4.png';
-    
-    avatarImg.src = avatarUrl;
-    title.textContent = chatName;
-    charName.textContent = chat.character.name;
-    charName.className = 'clickable-char-name';
-    charName.title = 'View character details';
-    charName.style.cursor = 'pointer';
-    charName.onclick = (e) => {
-        e.preventDefault();
-        openCharacterDetailsFromChats(chat.character);
-    };
-    messageCount.textContent = chat.chat_items || chat.mes_count || '?';
-    date.textContent = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
-    
-    renderLoadingState(messagesContainer, 'Loading messages...', 'chats-loading');
-    
-    modal.classList.remove('hidden');
-    
-    // Load chat content
-    try {
-        const chatFileName = (chat.file_name || '').replace('.jsonl', '');
-        
-        debugLog(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
-        
-        const response = await apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
-            ch_name: chat.character.name,
-            file_name: chatFileName,
-            avatar_url: chat.character.avatar
-        });
-        
-        debugLog(`[ChatPreview] Response status: ${response.status}`);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`[ChatPreview] Error response:`, errorText);
-            throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const messages = await response.json();
-        debugLog(`[ChatPreview] Got ${messages?.length || 0} messages`);
-        renderChatMessages(messages, chat.character);
-        
-    } catch (e) {
-        console.error('Failed to load chat:', e);
-        messagesContainer.innerHTML = `
-            <div class="chats-empty">
-                <i class="fa-solid fa-exclamation-triangle"></i>
-                <h3>Could Not Load Chat</h3>
-                <p>${escapeHtml(e.message)}</p>
-            </div>
-        `;
-    }
-}
-
-// Store current messages for editing
-let currentChatMessages = [];
-
-function renderChatMessages(messages, character) {
-    const container = document.getElementById('chatPreviewMessages');
-    
-    if (!messages || messages.length === 0) {
-        container.innerHTML = `
-            <div class="chats-empty">
-                <i class="fa-solid fa-inbox"></i>
-                <h3>Empty Chat</h3>
-                <p>This chat has no messages.</p>
-            </div>
-        `;
-        currentChatMessages = [];
-        return;
-    }
-    
-    // Store messages for editing
-    currentChatMessages = messages;
-    
-    const avatarUrl = getCharacterAvatarUrl(character.avatar) || '/img/ai4.png';
-    
-    container.innerHTML = messages.map((msg, index) => {
-        const isUser = msg.is_user;
-        const isSystem = msg.is_system;
-        const name = msg.name || (isUser ? 'User' : character.name);
-        const text = msg.mes || '';
-        const time = msg.send_date ? new Date(msg.send_date).toLocaleString() : '';
-        
-        // Format message text with rich text (italics, bold, HTML tags, etc.)
-        const formattedText = formatRichText(text, character.name, true);
-        
-        // Skip rendering metadata-only messages (chat header)
-        if (index === 0 && msg.chat_metadata && !msg.mes) {
-            return ''; // Don't render the metadata header as a message
-        }
-        
-        // Action buttons for edit/delete (hide for metadata entries)
-        const isMetadata = msg.chat_metadata !== undefined;
-        const actionButtons = isMetadata ? '' : `
-            <div class="chat-message-actions">
-                <button class="chat-msg-action-btn" data-action="edit" data-index="${index}" title="Edit message">
-                    <i class="fa-solid fa-pen"></i>
-                </button>
-                <button class="chat-msg-action-btn danger" data-action="delete" data-index="${index}" title="Delete message">
-                    <i class="fa-solid fa-trash"></i>
-                </button>
-            </div>
-        `;
-        
-        if (isSystem) {
-            return `
-                <div class="chat-message system" data-msg-index="${index}">
-                    <div class="chat-message-content">
-                        <div class="chat-message-text">${formattedText}</div>
-                    </div>
-                    ${actionButtons}
-                </div>
-            `;
-        }
-        
-        return `
-            <div class="chat-message ${isUser ? 'user' : 'assistant'}" data-msg-index="${index}">
-                ${!isUser ? `<img src="${avatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
-                <div class="chat-message-content">
-                    <div class="chat-message-name">${escapeHtml(name)}</div>
-                    <div class="chat-message-text">${formattedText}</div>
-                    ${time ? `<div class="chat-message-time">${time}</div>` : ''}
-                </div>
-                ${actionButtons}
-            </div>
-        `;
-    }).join('');
-    
-    // Add event listeners for message actions
-    container.querySelectorAll('.chat-msg-action-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const action = btn.dataset.action;
-            const index = parseInt(btn.dataset.index, 10);
-            
-            if (action === 'edit') {
-                editChatMessage(index);
-            } else if (action === 'delete') {
-                deleteChatMessage(index);
-            }
-        });
-    });
-    
-    // Scroll to bottom
-    container.scrollTop = container.scrollHeight;
-}
-
-async function openChatInST(chat) {
-    openChat(chat.character, chat.file_name);
-}
-
-async function deleteChatFromView(chat) {
-    if (!confirm(`Delete this chat?\n\n${chat.file_name}\n\nThis cannot be undone!`)) {
-        return;
-    }
-    
-    try {
-        const response = await apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
-            chatfile: chat.file_name,
-            avatar_url: chat.character.avatar
-        });
-        
-        if (response.ok) {
-            showToast('Chat deleted', 'success');
-            
-            // Remove from allChats
-            const idx = allChats.findIndex(c => c.file_name === chat.file_name && c.charAvatar === chat.charAvatar);
-            if (idx !== -1) {
-                allChats.splice(idx, 1);
-            }
-            
-            // Close preview modal if open
-            if (currentPreviewChat === chat) {
-                document.getElementById('chatPreviewModal').classList.add('hidden');
-            }
-            
-            // Re-render
-            renderChats();
-        } else {
-            showToast('Failed to delete chat', 'error');
-        }
-    } catch (e) {
-        showToast('Error: ' + e.message, 'error');
-    }
-}
-
-/**
- * Open character details modal from the Chats view
- * This opens the modal without switching away from chats view
- */
-function openCharacterDetailsFromChats(char) {
-    if (!char) return;
-    openModal(char);
-}
-
-/**
- * Edit a specific message in the current chat
- */
-async function editChatMessage(messageIndex) {
-    if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
-        showToast('Message not found', 'error');
-        return;
-    }
-    
-    const msg = currentChatMessages[messageIndex];
-    const currentText = msg.mes || '';
-    
-    // Create edit modal
-    const editModalHtml = `
-        <div id="editMessageModal" class="modal-overlay">
-            <div class="modal-glass" style="max-width: 600px; width: 90%;">
-                <div class="modal-header">
-                    <h2><i class="fa-solid fa-pen"></i> Edit Message</h2>
-                    <button class="close-btn" id="editMessageClose">&times;</button>
-                </div>
-                <div style="padding: 20px;">
-                    <div class="edit-message-info" style="margin-bottom: 15px; font-size: 0.85rem; color: var(--text-secondary);">
-                        <span><strong>${escapeHtml(msg.name || (msg.is_user ? 'User' : currentPreviewChar?.name || 'Character'))}</strong></span>
-                        ${msg.send_date ? `<span> \u2022 ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
-                    </div>
-                    <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;">${escapeHtml(currentText)}</textarea>
-                    <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;">
-                        <button id="editMessageCancel" class="action-btn secondary">Cancel</button>
-                        <button id="editMessageSave" class="action-btn primary"><i class="fa-solid fa-save"></i> Save</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Add modal to DOM
-    const existingModal = document.getElementById('editMessageModal');
-    if (existingModal) existingModal.remove();
-    document.body.insertAdjacentHTML('beforeend', editModalHtml);
-    
-    const editModal = document.getElementById('editMessageModal');
-    const textarea = document.getElementById('editMessageText');
-    
-    // Focus textarea
-    setTimeout(() => textarea.focus(), 50);
-    
-    // Close handlers
-    const closeEditModal = () => editModal.remove();
-    
-    document.getElementById('editMessageClose').onclick = closeEditModal;
-    document.getElementById('editMessageCancel').onclick = closeEditModal;
-    editModal.onclick = (e) => { if (e.target === editModal) closeEditModal(); };
-    
-    // Save handler
-    document.getElementById('editMessageSave').onclick = async () => {
-        const newText = textarea.value;
-        if (newText === currentText) {
-            closeEditModal();
-            return;
-        }
-        
-        try {
-            // Update the message in local array
-            currentChatMessages[messageIndex].mes = newText;
-            
-            // Save the entire chat
-            const success = await saveChatToServer(currentPreviewChat, currentChatMessages);
-            
-            if (success) {
-                showToast('Message updated', 'success');
-                closeEditModal();
-                renderChatMessages(currentChatMessages, currentPreviewChat.character);
-                clearChatCache();
-            } else {
-                // Revert local change on failure
-                currentChatMessages[messageIndex].mes = currentText;
-                showToast('Failed to save changes', 'error');
-            }
-        } catch (e) {
-            // Revert local change on error
-            currentChatMessages[messageIndex].mes = currentText;
-            showToast('Error: ' + e.message, 'error');
-        }
-    };
-}
-
-/**
- * Delete a specific message from the current chat
- */
-async function deleteChatMessage(messageIndex) {
-    if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
-        showToast('Message not found', 'error');
-        return;
-    }
-    
-    // Prevent deleting the first message (chat metadata header)
-    if (messageIndex === 0 && currentChatMessages[0]?.chat_metadata) {
-        showToast('Cannot delete chat metadata header', 'error');
-        return;
-    }
-    
-    const msg = currentChatMessages[messageIndex];
-    const previewText = (msg.mes || '').substring(0, 100) + (msg.mes?.length > 100 ? '...' : '');
-    
-    if (!confirm(`Delete this message?\n\n"${previewText}"\n\nThis cannot be undone!`)) {
-        return;
-    }
-    
-    try {
-        // Store the message in case we need to restore
-        const deletedMsg = currentChatMessages[messageIndex];
-        
-        // Remove from local array
-        currentChatMessages.splice(messageIndex, 1);
-        
-        // Save the entire chat
-        const success = await saveChatToServer(currentPreviewChat, currentChatMessages);
-        
-        if (success) {
-            showToast('Message deleted', 'success');
-            renderChatMessages(currentChatMessages, currentPreviewChat.character);
-            
-            // Update message count in preview
-            const countEl = document.getElementById('chatPreviewMessageCount');
-            if (countEl) {
-                countEl.textContent = currentChatMessages.length;
-            }
-            
-            clearChatCache();
-        } else {
-            // Restore the message on failure
-            currentChatMessages.splice(messageIndex, 0, deletedMsg);
-            showToast('Failed to delete message', 'error');
-        }
-    } catch (e) {
-        showToast('Error: ' + e.message, 'error');
-    }
-}
-
-/**
- * Save the entire chat array to the server
- */
-async function saveChatToServer(chat, messages) {
-    try {
-        const chatFileName = (chat.file_name || '').replace('.jsonl', '');
-        
-        const response = await apiRequest(ENDPOINTS.CHATS_SAVE, 'POST', {
-            ch_name: chat.character.name,
-            file_name: chatFileName,
-            avatar_url: chat.character.avatar,
-            chat: messages
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            return result.ok === true;
-        } else {
-            const err = await response.text();
-            console.error('Failed to save chat:', err);
-            return false;
-        }
-    } catch (e) {
-        console.error('Error saving chat:', e);
-        return false;
-    }
-}
-
-// Search input should also filter chats when in chats view (debounced)
-const searchInputForChats = document.getElementById('searchInput');
-if (searchInputForChats) {
-    searchInputForChats.addEventListener('input', debounce(() => {
-        if (currentView === 'chats') {
-            renderChats();
-        }
-    }, 150));
-}
-
-// ========================================
 // CHUBAI BROWSER
 // ========================================
 
-// CHUB_API_BASE and CHUB_AVATAR_BASE defined in CORE HELPER FUNCTIONS section
 const CHUB_CACHE_KEY = 'st_gallery_chub_cache';
 const CHUB_TOKEN_KEY = 'st_gallery_chub_urql_token';
 
@@ -20285,6 +19973,13 @@ async function initChubView() {
     // Initialize NSFW toggle state (defaults to enabled)
     updateNsfwToggleState();
     
+    // Register chub lazy-load: load characters on first visit
+    onViewEnter('chub', () => {
+        if (chubCharacters.length === 0) {
+            loadChubCharacters();
+        }
+    });
+    
     debugLog('ChubAI view initialized');
 }
 
@@ -20857,8 +20552,10 @@ async function switchChubViewMode(mode) {
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
         const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
         const tagsDropdownContainer = document.querySelector('.chub-tags-dropdown-container');
-        if (discoveryPreset) discoveryPreset.classList.remove('chub-filter-hidden');
-        if (timelineSortHeader) timelineSortHeader.classList.add('chub-filter-hidden');
+        const dpTarget = discoveryPreset?._customSelect?.container || discoveryPreset;
+        const tsTarget = timelineSortHeader?._customSelect?.container || timelineSortHeader;
+        if (dpTarget) dpTarget.classList.remove('chub-filter-hidden');
+        if (tsTarget) tsTarget.classList.add('chub-filter-hidden');
         if (tagsDropdownContainer) tagsDropdownContainer.classList.remove('chub-filter-hidden');
         
         // Clear the browse grid immediately and show loading state
@@ -20879,8 +20576,10 @@ async function switchChubViewMode(mode) {
         const discoveryPreset = document.getElementById('chubDiscoveryPreset');
         const timelineSortHeader = document.getElementById('chubTimelineSortHeader');
         const tagsDropdownContainer = document.querySelector('.chub-tags-dropdown-container');
-        if (discoveryPreset) discoveryPreset.classList.add('chub-filter-hidden');
-        if (timelineSortHeader) timelineSortHeader.classList.remove('chub-filter-hidden');
+        const dpTarget = discoveryPreset?._customSelect?.container || discoveryPreset;
+        const tsTarget = timelineSortHeader?._customSelect?.container || timelineSortHeader;
+        if (dpTarget) dpTarget.classList.add('chub-filter-hidden');
+        if (tsTarget) tsTarget.classList.remove('chub-filter-hidden');
         if (tagsDropdownContainer) tagsDropdownContainer.classList.add('chub-filter-hidden');
         
         // If favorites filter is enabled, fetch the favorite IDs first
@@ -22766,12 +22465,10 @@ async function downloadChubCharacter() {
         const metadataAvatarUrl = metadata.avatar_url || null;
         metadata = null;
         
-        // Ensure extensions object exists
         if (!characterCard.data.extensions) {
             characterCard.data.extensions = {};
         }
         
-        // Add ChubAI link metadata
         const existingChub = characterCard.data.extensions.chub || {};
         characterCard.data.extensions.chub = {
             ...existingChub,
@@ -23050,7 +22747,6 @@ document.addEventListener('keydown', (e) => {
 //
 // MODULES MUST:
 // - Import from core-api.js for all library functionality
-// - Import from shared-styles.js for CSS injection
 //
 // When adding new functionality for modules:
 // 1. Expose the function here on window.*
@@ -23068,6 +22764,7 @@ window.showToast = showToast;
 window.escapeHtml = escapeHtml;
 window.getCSRFToken = getCSRFToken;
 window.sanitizeFolderName = sanitizeFolderName;
+window.initCustomSelect = initCustomSelect;
 
 // Character Data
 window.fetchCharacters = fetchCharacters;
@@ -23082,6 +22779,21 @@ window.removeGalleryFolderOverride = removeGalleryFolderOverride;
 window.openModal = openModal;
 window.closeModal = closeModal;
 window.openChubLinkModal = openChubLinkModal;
+window.hideModal = hideModal;
+
+// View Management
+window.switchView = switchView;
+window.getCurrentView = getCurrentView;
+window.onViewEnter = onViewEnter;
+
+// DOM / Rendering helpers
+window.renderLoadingState = renderLoadingState;
+window.getCharacterAvatarUrl = getCharacterAvatarUrl;
+window.formatRichText = formatRichText;
+window.loadCharInMain = loadCharInMain;
+window.registerGalleryFolderOverride = registerGalleryFolderOverride;
+window.debugLog = debugLog;
+window.performSearch = performSearch;
 
 // Settings
 window.getSetting = getSetting;
@@ -23090,6 +22802,7 @@ window.setSetting = setSetting;
 // ChubAI Integration
 window.fetchChubMetadata = fetchChubMetadata;
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;
+window.getChubHeaders = getChubHeaders;
 
 /**
  * Apply field updates to a character card
@@ -23133,7 +22846,6 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
             setNestedValue(updatedData, field, value);
         }
         
-        // Ensure extensions are preserved
         updatedData.extensions = { ...existingExtensions, ...(updatedData.extensions || {}) };
         
         const payload = {
