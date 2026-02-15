@@ -176,62 +176,112 @@ function getChubLinkedCharacters() {
 }
 
 /**
- * Fetch remote character data from ChubAI
+ * Fetch with CORS proxy fallback (same pattern as character-versions.js)
+ */
+async function fetchWithProxy(url, opts = {}) {
+    try {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r;
+    } catch (_) {
+        const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
+        if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
+        return r;
+    }
+}
+
+/**
+ * Fetch the latest card.json from Chub's V4 Git API.
+ * This is the same source that version history uses, and represents
+ * the canonical exported state of the card (V2 spec).
+ */
+async function fetchCardJsonFromV4(projectId) {
+    if (!projectId) return null;
+    const headers = CoreAPI.getChubHeaders?.() || { Accept: 'application/json' };
+    try {
+        const commitsResp = await fetchWithProxy(
+            `https://api.chub.ai/api/v4/projects/${projectId}/repository/commits`,
+            { headers }
+        );
+        const commits = await commitsResp.json();
+        const ref = Array.isArray(commits) && commits[0]?.id;
+        if (!ref) return null;
+
+        const cardResp = await fetchWithProxy(
+            `https://api.chub.ai/api/v4/projects/${projectId}/repository/files/raw%252Fcard.json/raw?ref=${ref}`,
+            { headers }
+        );
+        const card = await cardResp.json();
+        return card || null;
+    } catch (e) {
+        console.warn('[CardUpdates] V4 Git card.json fetch failed for project', projectId, e.message);
+        return null;
+    }
+}
+
+/**
+ * Fetch remote character data from ChubAI.
+ *
+ * When the V4 Git API setting is enabled, uses the Git card.json (latest
+ * commit) as the primary source — same source version history uses, already
+ * in V2 spec format.
+ *
+ * When V4 is disabled (default), the metadata API is the primary source
+ * with manual field mapping. Both paths resolve linked lorebooks.
+ *
+ * Last resort: PNG extraction from the avatar image.
+ *
  * @param {string} fullPath - Chub full path (creator/slug)
- * @returns {Promise<Object|null>} Remote character card data
+ * @returns {Promise<Object|null>} Remote character card data (V2 format)
  */
 async function fetchRemoteCard(fullPath) {
+    const useV4 = CoreAPI.getSetting('chubUseV4Api') || false;
+
     try {
-        // Prefer API metadata — it always returns the LATEST version.
-        // The chara_card_v2.png on Chub is stale (original upload, never updated).
+        // Get metadata (always needed for project ID, fallback definition, etc.)
         const metadata = await CoreAPI.fetchChubMetadata(fullPath);
-        if (metadata?.definition) {
-            const def = metadata.definition;
-            // Build a card-like structure from API data
-            // IMPORTANT: Chub API uses its own field names, NOT V2 spec names.
-            // This mapping matches SillyTavern's downloadChubCharacter() exactly.
-            console.log('[CardUpdates] Built card from API metadata for:', fullPath);
-            return {
-                spec: 'chara_card_v2',
-                spec_version: '2.0',
-                data: {
-                    name: def.name || metadata.name,
-                    description: def.personality || '',
-                    personality: def.tavern_personality || '',
-                    scenario: def.scenario || '',
-                    first_mes: def.first_message || '',
-                    mes_example: def.example_dialogs || '',
-                    system_prompt: def.system_prompt || '',
-                    post_history_instructions: def.post_history_instructions || '',
-                    creator_notes: def.description || '',
-                    creator: metadata.fullPath?.split('/')[0] || '',
-                    character_version: def.character_version || '',
-                    tags: metadata.topics || [],
-                    alternate_greetings: def.alternate_greetings || [],
-                    extensions: {
-                        ...(def.extensions || {}),
-                        chub: {
-                            ...(def.extensions?.chub || {}),
-                            tagline: metadata.tagline || metadata.definition?.tagline || ''
+        const projectId = metadata?.id;
+
+        // V4 Git API path — fetches the exported card.json from Git repo
+        if (useV4 && projectId) {
+            const cardJson = await fetchCardJsonFromV4(projectId);
+            if (cardJson) {
+                if (cardJson.data) {
+                    // Supplement with metadata-only fields that card.json may lack
+                    if (metadata.topics && !cardJson.data.tags?.length) {
+                        cardJson.data.tags = metadata.topics;
+                    }
+                    if (metadata.tagline) {
+                        cardJson.data.extensions = cardJson.data.extensions || {};
+                        cardJson.data.extensions.chub = cardJson.data.extensions.chub || {};
+                        if (!cardJson.data.extensions.chub.tagline) {
+                            cardJson.data.extensions.chub.tagline = metadata.tagline;
                         }
-                    },
-                    character_book: def.embedded_lorebook || undefined,
+                    }
+                    console.log('[CardUpdates] Using V4 Git card.json for:', fullPath);
+                    return cardJson;
                 }
-            };
+                console.log('[CardUpdates] Normalizing raw card.json for:', fullPath);
+                return normalizeChubDefinition(cardJson, metadata);
+            }
+            // V4 failed — fall through to metadata
         }
 
-        // Fallback: try PNG extraction (may have stale data but better than nothing)
-        console.log('[CardUpdates] API failed, trying PNG extraction for:', fullPath);
-        const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
+        // Metadata API path (default, or V4 fallback)
+        if (metadata?.definition) {
+            console.log(`[CardUpdates] Using metadata API for: ${fullPath}${useV4 ? ' (V4 fallback)' : ''}`);
+            return await buildCardFromMetadata(metadata);
+        }
 
+        // Last resort: PNG extraction (may have stale data)
+        console.log('[CardUpdates] All APIs failed, trying PNG extraction for:', fullPath);
+        const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
         let response;
         try {
             response = await fetch(pngUrl);
         } catch (e) {
-            // Try proxy
             response = await fetch(`/proxy/${encodeURIComponent(pngUrl)}`);
         }
-
         if (response.ok) {
             const buffer = await response.arrayBuffer();
             const cardData = CoreAPI.extractCharacterDataFromPng(buffer);
@@ -240,12 +290,94 @@ async function fetchRemoteCard(fullPath) {
                 return cardData;
             }
         }
-        
+
         return null;
     } catch (error) {
         console.error('[CardUpdates] Failed to fetch remote card:', fullPath, error);
         return null;
     }
+}
+
+/**
+ * Normalize a raw Chub definition (non-V2) into V2 card format.
+ * Handles both Chub API field names and partial V2 objects.
+ */
+function normalizeChubDefinition(def, metadata) {
+    if (!def) return null;
+    return {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: {
+            name: def.name || metadata?.name || '',
+            description: def.personality || '',
+            personality: def.tavern_personality || '',
+            scenario: def.scenario || '',
+            first_mes: def.first_message || '',
+            mes_example: def.example_dialogs || '',
+            system_prompt: def.system_prompt || '',
+            post_history_instructions: def.post_history_instructions || '',
+            creator_notes: def.description || '',
+            creator: metadata?.fullPath?.split('/')[0] || '',
+            character_version: def.character_version || '',
+            tags: metadata?.topics || [],
+            alternate_greetings: def.alternate_greetings || [],
+            extensions: {
+                ...(def.extensions || {}),
+                chub: {
+                    ...(def.extensions?.chub || {}),
+                    tagline: metadata?.tagline || ''
+                }
+            },
+            character_book: def.embedded_lorebook || def.character_book || undefined,
+        }
+    };
+}
+
+/**
+ * Build a V2 card from metadata API response (Chub field names → V2 spec).
+ * Default primary path when V4 Git API is disabled; also used as fallback
+ * when V4 is enabled but the request fails.
+ */
+async function buildCardFromMetadata(metadata) {
+    const def = metadata.definition;
+
+    // Resolve linked lorebooks (separate Chub projects, not embedded in the definition)
+    let characterBook = def.embedded_lorebook || undefined;
+    if (!characterBook && metadata.related_lorebooks?.length > 0 && metadata.id) {
+        try {
+            characterBook = await CoreAPI.fetchChubLinkedLorebook(metadata.id) || undefined;
+        } catch (e) {
+            console.warn('[CardUpdates] Failed to fetch linked lorebook for', metadata.fullPath, e);
+        }
+    }
+
+    return {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: {
+            name: def.name || metadata.name,
+            description: def.personality || '',
+            personality: def.tavern_personality || '',
+            scenario: def.scenario || '',
+            first_mes: def.first_message || '',
+            mes_example: def.example_dialogs || '',
+            system_prompt: def.system_prompt || '',
+            post_history_instructions: def.post_history_instructions || '',
+            creator_notes: def.description || '',
+            creator: metadata.fullPath?.split('/')[0] || '',
+            character_version: def.character_version || '',
+            tags: metadata.topics || [],
+            alternate_greetings: def.alternate_greetings || [],
+            extensions: {
+                ...(def.extensions || {}),
+                chub: {
+                    ...(def.extensions?.chub || {}),
+                    tagline: metadata.tagline || metadata.definition?.tagline || ''
+                }
+            },
+            character_book: characterBook,
+        }
+    };
 }
 
 /**
@@ -539,10 +671,9 @@ function computeLineDiff(oldLines, newLines) {
  * @param {Object} localData - Local character data (char.data)
  * @param {Object} remoteCard - Remote card object
  * @param {Set|null} allowedFields - Optional filter for which fields to compare
- * @param {Object|null} worldInfoData - If present, world info data to use as local source for lorebook comparison
- * @returns {Array} Array of { field, label, local, remote, isLongText, hasWorldFile }
+ * @returns {Array} Array of { field, label, local, remote, isLongText }
  */
-function compareCards(localData, remoteCard, allowedFields = null, worldInfoData = null) {
+function compareCards(localData, remoteCard, allowedFields = null) {
     const diffs = [];
     const remoteData = remoteCard?.data || remoteCard;
     
@@ -557,46 +688,23 @@ function compareCards(localData, remoteCard, allowedFields = null, worldInfoData
             const remoteEntries = remoteValue?.entries || [];
             if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) continue;
 
-            // Decide what to compare against: /worlds data (preferred) or character_book
-            let effectiveLocalEntries;
-            let effectiveLocalBook;
-            const hasWorld = !!worldInfoData;
-
-            if (hasWorld) {
-                effectiveLocalEntries = worldEntriesToV2Array(worldInfoData);
-                // Build a pseudo-book for meta comparison
-                effectiveLocalBook = {
-                    entries: effectiveLocalEntries,
-                    name: worldInfoData.name,
-                    description: worldInfoData.description,
-                    scan_depth: worldInfoData.scan_depth,
-                    token_budget: worldInfoData.token_budget,
-                    recursive_scanning: worldInfoData.recursive_scanning,
-                };
-            } else {
-                effectiveLocalEntries = localValue?.entries || [];
-                effectiveLocalBook = localValue;
-            }
+            const localEntries = localValue?.entries || [];
 
             // Quick equality check
-            if (lorebooksEqual(effectiveLocalBook, remoteValue)) continue;
+            if (lorebooksEqual(localValue, remoteValue)) continue;
 
-            // Deeper semantic check: only look at creator content changes
-            const { matched, added, removed } = matchLorebookEntries(effectiveLocalEntries, remoteEntries);
-            // In world-based comparison, "removed" are world entries not on remote = user content. Ignore for diff.
+            // Deeper semantic check
+            const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
             const modified = matched.filter(m => m.changedFields.length > 0);
-            const metaDiffs = hasWorld ? [] : compareLorebookMeta(effectiveLocalBook, remoteValue);
+            const metaDiffs = compareLorebookMeta(localValue, remoteValue);
 
-            // Only report diffs from the creator side: new entries, modified entries, meta changes
-            // User-only entries in /worlds are invisible to this check
-            if (added.length === 0 && modified.length === 0 && metaDiffs.length === 0) continue;
+            if (added.length === 0 && modified.length === 0 && metaDiffs.length === 0 && removed.length === 0) continue;
 
             diffs.push({
                 field, label,
-                local: effectiveLocalBook,
+                local: localValue,
                 remote: remoteValue,
                 isLongText: false,
-                hasWorldFile: hasWorld,
             });
             continue;
         }
@@ -625,6 +733,9 @@ function compareCards(localData, remoteCard, allowedFields = null, worldInfoData
 function normalizeValue(value) {
     if (value === null || value === undefined) return '';
     if (Array.isArray(value)) {
+        // ST often initializes empty fields as [] where Chub returns null/undefined.
+        // Treat empty arrays as empty so [] vs null/undefined doesn't produce a false diff.
+        if (value.length === 0) return '';
         // Normalize each string element: trim whitespace and normalize line endings
         // to avoid false diffs from insignificant whitespace differences
         const normalized = [...value].map(v =>
@@ -649,6 +760,32 @@ function valuesEqual(a, b) {
 // SINGLE CHARACTER CHECK
 // ========================================
 
+// The avatar of the character currently shown in the single-check modal.
+// Stored here instead of in HTML attributes to avoid special-character escaping issues.
+let singleModalAvatar = null;
+
+/**
+ * Open the character details modal above the update checker modals.
+ * Adds body class that boosts z-index for the overlay and any child modals
+ * (confirm-modals, gallery viewer) so they all stack above the update checker.
+ * Restores when the overlay is hidden.
+ */
+function openCharModalAbove(char) {
+    const overlay = document.getElementById('charModal')?.closest('.modal-overlay')
+                 || document.querySelector('.modal-overlay');
+    if (!overlay) return;
+    document.body.classList.add('char-modal-above');
+    const restore = () => {
+        document.body.classList.remove('char-modal-above');
+        observer.disconnect();
+    };
+    const observer = new MutationObserver(() => {
+        if (overlay.classList.contains('hidden')) restore();
+    });
+    observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    CoreAPI.openCharacterModal(char);
+}
+
 /**
  * Show single character update check modal
  * @param {Object} char - Character to check
@@ -656,11 +793,17 @@ function valuesEqual(a, b) {
 function showSingleCheckModal(char) {
     const modal = document.getElementById('cardUpdateSingleModal');
     const charName = char.data?.name || char.name || 'Unknown';
+    singleModalAvatar = char.avatar;
     
-    document.getElementById('cardUpdateSingleCharName').textContent = charName;
+    const nameEl = document.getElementById('cardUpdateSingleCharName');
+    nameEl.textContent = charName;
+    nameEl.classList.add('card-update-char-link');
+    nameEl.onclick = () => openCharModalAbove(char);
+    
     document.getElementById('cardUpdateSingleStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking for updates...';
     document.getElementById('cardUpdateSingleContent').innerHTML = '';
     document.getElementById('cardUpdateSingleApplyBtn').disabled = true;
+    updateSourceBadge(modal);
     
     modal.classList.add('visible');
 }
@@ -687,11 +830,7 @@ async function performSingleCheck(char) {
         
         const localData = char.data || char;
 
-        // Fetch linked world info for lorebook comparison
-        const worldName = CoreAPI.getCharacterWorldName(char.avatar);
-        const worldInfoData = worldName ? await CoreAPI.getWorldInfoData(worldName) : null;
-
-        const diffs = compareCards(localData, remoteCard, null, worldInfoData);
+        const diffs = compareCards(localData, remoteCard);
         
         if (diffs.length === 0) {
             statusEl.innerHTML = '<i class="fa-solid fa-check"></i> Character is up to date!';
@@ -700,11 +839,11 @@ async function performSingleCheck(char) {
         
         statusEl.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left"></i> Found ${diffs.length} difference${diffs.length > 1 ? 's' : ''}`;
         
-        // Store for apply action (include world context)
-        currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs, worldName, worldInfoData });
+        currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs });
         
         // Render diff UI
-        contentEl.innerHTML = renderDiffList(diffs, char.avatar);
+        contentEl.innerHTML = renderDiffList(diffs);
+        resolveWorldFileStatus(contentEl, char.avatar).catch(e => console.error('[CardUpdates] World status check failed:', e));
         applyBtn.disabled = false;
         
     } catch (error) {
@@ -716,17 +855,16 @@ async function performSingleCheck(char) {
 /**
  * Render the diff list HTML
  * @param {Array} diffs - Array of diff objects
- * @param {string} charKey - Character key for checkbox naming
  * @returns {string} HTML string
  */
-function renderDiffList(diffs, charKey) {
+function renderDiffList(diffs) {
     return `
         <div class="card-update-diff-list">
             <label class="card-update-select-all">
-                <input type="checkbox" checked onchange="window.cardUpdatesToggleAll('${charKey}', this.checked)">
+                <input type="checkbox" checked onchange="window.cardUpdatesToggleAll(this.checked)">
                 <span>Select All</span>
             </label>
-            ${diffs.map((diff, idx) => renderDiffItem(diff, charKey, idx)).join('')}
+            ${diffs.map((diff, idx) => renderDiffItem(diff, idx)).join('')}
         </div>
     `;
 }
@@ -734,17 +872,16 @@ function renderDiffList(diffs, charKey) {
 /**
  * Render a single diff item
  * @param {Object} diff - Diff object
- * @param {string} charKey - Character key
  * @param {number} idx - Index for unique ID
  * @returns {string} HTML string
  */
-function renderDiffItem(diff, charKey, idx) {
-    const checkboxId = `diff-${charKey}-${idx}`;
+function renderDiffItem(diff, idx) {
+    const checkboxId = `diff-item-${idx}`;
     const localDisplay = formatValueForDisplay(diff.local);
     const remoteDisplay = formatValueForDisplay(diff.remote);
 
     if (diff.field === 'character_book') {
-        return renderLorebookDiff(diff, charKey, idx);
+        return renderLorebookDiff(diff, idx);
     }
 
     if (!diff.isLongText && (Array.isArray(diff.local) || Array.isArray(diff.remote))) {
@@ -833,48 +970,61 @@ function renderDiffItem(diff, charKey, idx) {
 // LOREBOOK DIFF
 // ========================================
 
-function renderLorebookDiff(diff, charKey, idx) {
-    const checkboxId = `diff-${charKey}-${idx}`;
+function renderLorebookDiff(diff, idx) {
+    const checkboxId = `diff-item-${idx}`;
     const localBook = diff.local;
     const remoteBook = diff.remote;
-    const hasWorld = diff.hasWorldFile;
     const localEntries = localBook?.entries || [];
     const remoteEntries = remoteBook?.entries || [];
 
     const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
     const modified = matched.filter(m => m.changedFields.length > 0);
-    // Skip meta diffs for world-based comparison (world meta uses different format)
-    const metaDiffs = hasWorld ? [] : compareLorebookMeta(localBook, remoteBook);
+    const metaDiffs = compareLorebookMeta(localBook, remoteBook);
 
-    // "removed" = entries in local but not remote.
-    // For world-based flow: these are user entries in /worlds, invisible to diff (already filtered in compareCards).
-    // For card-only flow: these are user-added character_book entries.
-    const userAdded = removed;
+    // "removed" = entries in embedded lorebook but not on remote
+    const localOnly = removed;
 
-    if (added.length === 0 && userAdded.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
+    if (added.length === 0 && localOnly.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
 
+    // Stat pills for the collapsed header
     const statParts = [];
-    if (added.length > 0) statParts.push(`${added.length} new from creator`);
-    if (userAdded.length > 0 && !hasWorld) statParts.push(`${userAdded.length} user-added`);
+    if (added.length > 0) statParts.push(`${added.length} new from remote`);
+    if (localOnly.length > 0) statParts.push(`${localOnly.length} local-only`);
     if (modified.length > 0) statParts.push(`${modified.length} modified`);
     if (metaDiffs.length > 0) statParts.push(`${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed`);
     const stats = statParts.join(', ');
 
     let entriesHtml = '';
 
-    // World-aware header note
-    if (hasWorld) {
-        entriesHtml += `<div class="lorebook-diff-summary">
-            Compared against linked World Info file. New and modified creator entries will be merged into the world file. Your entries are untouched.
-        </div>`;
-    }
-
-    const summaryParts = [];
-    if (matched.length > 0) summaryParts.push(`${matched.length} matched with remote`);
-    if (added.length > 0) summaryParts.push(`${added.length} new entries will be added`);
-    if (userAdded.length > 0 && !hasWorld) summaryParts.push(`${userAdded.length} local-only (not in remote)`);
-    if (modified.length > 0) summaryParts.push(`${modified.length} matched entries have changes`);
-    entriesHtml += `<div class="lorebook-diff-summary">${summaryParts.join('. ')}.</div>`;
+    // Help & tips — collapsible explainer
+    entriesHtml += `<div class="lorebook-diff-info-box">
+        <i class="fa-solid fa-circle-info"></i>
+        <div>
+            <strong>Embedded lorebook ↔ ChubAI remote</strong>
+            <details class="lorebook-diff-help-details">
+                <summary>How lorebook updates work</summary>
+                <div class="lorebook-diff-help-body">
+                    <p>SillyTavern keeps lorebook data in <em>two</em> separate places:</p>
+                    <ul>
+                        <li><strong>Embedded lorebook</strong> (inside the card) — this is the copy that Character Library compares and updates. It was created when you first imported the card and is not changed by SillyTavern's World Info editor.</li>
+                        <li><strong>World Info file</strong> (in <code>/worlds/</code>) — the live working copy that SillyTavern actually uses in chats. All edits you make in the World Info panel go here. The update checker <em>never</em> modifies this file.</li>
+                    </ul>
+                    <p>The diff below compares your card's embedded lorebook against the creator's latest version on ChubAI. Applying will replace the embedded lorebook with the remote version.</p>
+                    <p><strong>What the badges mean:</strong></p>
+                    <ul>
+                        <li><span style="color:#81c784;">+</span> <strong>New from remote</strong> — entry exists on ChubAI but not in your card. Will be added.</li>
+                        <li><span style="color:#ffcc80;">~</span> <strong>Modified</strong> — entry exists in both but some fields differ. Will be updated to match the remote.</li>
+                        <li><span style="color:#bdbdbd;">★</span> <strong>Local-only</strong> — entry is in your card but not on ChubAI. Since applying replaces the full embedded lorebook, this entry will be removed from the card.</li>
+                    </ul>
+                    <p>For local-only entries that would be removed, Character Library reads your World Info file to check whether each entry also exists there:</p>
+                    <ul>
+                        <li><i class="fa-solid fa-shield-halved" style="color:#81c784;"></i> <strong>Safe in World Info</strong> — a matching entry exists in your World Info file. Removing it from the card won't affect your chats since the live copy is untouched.</li>
+                        <li><i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i> <strong>Not in World Info</strong> — no match found. This entry only exists in the card's embedded data and will be permanently lost after applying.</li>
+                    </ul>
+                </div>
+            </details>
+        </div>
+    </div>`;
 
     if (metaDiffs.length > 0) {
         entriesHtml += `<div class="lorebook-diff-meta-section">
@@ -888,32 +1038,38 @@ function renderLorebookDiff(diff, charKey, idx) {
         </div>`;
     }
 
+    // Entries that exist on remote but not locally — will be added
     for (const entry of added) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
-        entriesHtml += `<div class="lorebook-diff-entry added">
+        entriesHtml += `<div class="lorebook-diff-entry added" title="New entry from the remote card — will be added on apply">
             <span class="lorebook-diff-badge added">+</span>
             <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
             ${keys ? `<span class="lorebook-diff-entry-keys">${CoreAPI.escapeHtml(keys)}</span>` : ''}
+            <span class="lorebook-diff-entry-tag added">new from remote</span>
         </div>`;
     }
 
-    if (!hasWorld) {
-        for (const entry of userAdded) {
-            const name = lorebookEntryName(entry);
-            const keys = (entry.keys || []).slice(0, 4).join(', ');
-            entriesHtml += `<div class="lorebook-diff-entry user-added">
-                <span class="lorebook-diff-badge user-added">&#9733;</span>
-                <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
-                <span class="lorebook-diff-entry-keys">${keys ? CoreAPI.escapeHtml(keys) + ' · ' : ''}user-added, will be kept</span>
-            </div>`;
-        }
+    // Entries in embedded lorebook but not on remote — will be lost from embedded on apply
+    for (const entry of localOnly) {
+        const name = lorebookEntryName(entry);
+        const keys = (entry.keys || []).slice(0, 4).join(', ');
+        const keysData = CoreAPI.escapeHtml(JSON.stringify(entry.keys || []));
+        const nameData = CoreAPI.escapeHtml(entry.comment || entry.name || '');
+        entriesHtml += `<div class="lorebook-diff-entry local-only" data-lb-keys="${keysData}" data-lb-name="${nameData}" title="This entry is in your embedded lorebook but not on the remote card. Applying will replace the embedded lorebook with the remote version, so this entry will be removed from the card.">
+            <span class="lorebook-diff-badge local-only">&#9733;</span>
+            <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
+            ${keys ? `<span class="lorebook-diff-entry-keys">${CoreAPI.escapeHtml(keys)}</span>` : ''}
+            <span class="lorebook-diff-entry-tag local-only">local-only</span>
+            <span class="lorebook-world-check" title="Checking World Info file…"><i class="fa-solid fa-spinner fa-spin" style="font-size:10px; opacity:0.5;"></i></span>
+        </div>`;
     }
 
+    // Matched entries with field-level changes
     for (const m of modified) {
         const name = lorebookEntryName(m.remote);
         const changes = m.changedFields.join(', ');
-        entriesHtml += `<div class="lorebook-diff-entry modified">
+        entriesHtml += `<div class="lorebook-diff-entry modified" title="Entry matched by key overlap — the following fields differ: ${CoreAPI.escapeHtml(changes)}">
             <span class="lorebook-diff-badge modified">~</span>
             <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
             <span class="lorebook-diff-entry-changes">${CoreAPI.escapeHtml(changes)}</span>
@@ -927,19 +1083,18 @@ function renderLorebookDiff(diff, charKey, idx) {
         </div>`;
     }
 
-    const mergedCount = matched.length + added.length + userAdded.length;
-    const labelSuffix = hasWorld ? ' (via World Info)' : '';
+
 
     return `
         <div class="card-update-diff-item long-text lorebook">
             <div class="card-update-diff-header">
                 <label>
                     <input type="checkbox" id="${checkboxId}" data-field="${diff.field}" checked>
-                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}${labelSuffix}</span>
+                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}</span>
                     <span class="lorebook-entry-counts">
                         <span class="local-count">${localEntries.length}</span>
                         <i class="fa-solid fa-arrow-right"></i>
-                        <span class="remote-count">${mergedCount}</span>
+                        <span class="remote-count">${remoteEntries.length}</span>
                     </span>
                 </label>
                 <span class="card-update-diff-stats">${stats}</span>
@@ -954,6 +1109,124 @@ function renderLorebookDiff(diff, charKey, idx) {
             </div>
         </div>
     `;
+}
+
+/**
+ * Post-render: fetch the linked world file and update each local-only entry
+ * row with a per-entry "safe in World Info" or "not in World Info" badge.
+ */
+async function resolveWorldFileStatus(containerEl, avatar) {
+    if (!containerEl || !avatar) return;
+    const rows = containerEl.querySelectorAll('.lorebook-diff-entry.local-only[data-lb-keys]');
+    if (rows.length === 0) return;
+
+    // Helper: clear spinners and mark all rows as "not in remote" (no world context found)
+    const markAllNoWorld = (reason) => {
+        for (const row of rows) {
+            const check = row.querySelector('.lorebook-world-check');
+            if (check) { check.innerHTML = ''; check.title = ''; }
+            const tag = row.querySelector('.lorebook-diff-entry-tag');
+            if (tag) tag.textContent = 'local-only · no World Info file';
+            row.title = `This entry is in your embedded lorebook but not on the remote card. Applying will remove it from the card. ${reason}`;
+        }
+    };
+
+    try {
+        let worldName = CoreAPI.getCharacterWorldName(avatar);
+
+        // Fallback: if the card has no stored world name, list all world files
+        // and try to match by character name (ST often names the file after the char)
+        if (!worldName) {
+            const charObj = currentUpdateChecks.get(avatar)?.char;
+            const charName = (charObj?.name || '').trim();
+            if (charName) {
+                const allWorlds = await CoreAPI.listWorldInfoFiles();
+                const lower = charName.toLowerCase();
+                worldName = allWorlds.find(w => w.toLowerCase() === lower)
+                         || allWorlds.find(w => w.toLowerCase().includes(lower) || lower.includes(w.toLowerCase()))
+                         || null;
+            }
+        }
+
+        if (!worldName) {
+            markAllNoWorld('No linked World Info file was found.');
+            return;
+        }
+
+        let worldData;
+        try {
+            worldData = await CoreAPI.getWorldInfoData(worldName);
+        } catch (_) { /* fetch failed */ }
+
+        if (!worldData?.entries) {
+            markAllNoWorld(`World Info file "${worldName}" could not be read.`);
+            return;
+        }
+
+        const worldEntries = Object.values(worldData.entries).filter(e => e && typeof e === 'object');
+
+        // Expand keys helper (handles comma-separated values inside key arrays)
+        const expandKeys = (keys) => {
+            const set = new Set();
+            for (const k of (keys || [])) {
+                for (const part of String(k).split(',')) {
+                    const t = part.toLowerCase().trim();
+                    if (t) set.add(t);
+                }
+            }
+            return set;
+        };
+
+        for (const row of rows) {
+            let entryKeys;
+            try { entryKeys = JSON.parse(row.dataset.lbKeys || '[]'); } catch (_) { entryKeys = []; }
+            const entryName = (row.dataset.lbName || '').toLowerCase().trim();
+            const embeddedKeys = expandKeys(entryKeys);
+
+            // Try to find a matching world entry by key overlap or name
+            let found = false;
+            for (const we of worldEntries) {
+                const wKeys = expandKeys(we.key);
+                // Key overlap check
+                if (embeddedKeys.size > 0 && wKeys.size > 0) {
+                    let inter = 0;
+                    for (const k of embeddedKeys) { if (wKeys.has(k)) inter++; }
+                    const union = new Set([...embeddedKeys, ...wKeys]).size;
+                    if (union > 0 && (inter / union) > 0.3) { found = true; break; }
+                }
+                // Name/comment match
+                const wName = (we.comment || '').toLowerCase().trim();
+                if (entryName && wName && (entryName === wName || entryName.includes(wName) || wName.includes(entryName))) {
+                    found = true; break;
+                }
+            }
+
+            const check = row.querySelector('.lorebook-world-check');
+            const tag = row.querySelector('.lorebook-diff-entry-tag');
+            if (found) {
+                if (check) {
+                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color: #81c784; font-size: 11px;"></i>';
+                    check.title = `Also exists in World Info file "${worldName}" — safe, won't be affected by applying`;
+                }
+                if (tag) tag.textContent = 'local-only · safe in World Info';
+                row.title = `This entry is in your embedded lorebook but not on the remote. Applying removes it from the card, but it also exists in your World Info file "${worldName}" which is not affected.`;
+            } else {
+                if (check) {
+                    check.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="color: #ffb74d; font-size: 11px;"></i>';
+                    check.title = `Not found in World Info file "${worldName}" — this entry only exists in the embedded lorebook and will be lost if you apply`;
+                }
+                if (tag) {
+                    tag.textContent = 'local-only · not in World Info';
+                    tag.classList.remove('local-only');
+                    tag.classList.add('warning');
+                }
+                row.title = `This entry exists only in the embedded lorebook (not found in World Info file "${worldName}"). Applying will remove it from the card with no backup elsewhere.`;
+            }
+        }
+    } catch (err) {
+        console.error('[CardUpdates] resolveWorldFileStatus error:', err);
+        markAllNoWorld('World Info check failed.');
+    }
 }
 
 function lorebookEntryName(entry) {
@@ -1080,63 +1353,24 @@ function normalizeLorebookEntry(entry) {
 //
 // How SillyTavern's lorebook storage works:
 //
-//   character_book (in card PNG)  — Snapshot created at import time. It seems ST does NOT
-//                                   re-embed /worlds data on normal saves. Only
-//                                   changes when explicitly exported or when we
-//                                   write to it via the API.
+//   character_book (in card PNG)  — Snapshot created at import time. ST does NOT
+//                                   re-embed /worlds data on normal saves.
 //
-//   /worlds/{name}.json           — The live working copy. All edits made in ST's
-//                                   World Info editor go here. Linked to the
-//                                   character via char.data.extensions.world.
+//   /worlds/{name}.json           — The live working copy. All edits in ST's
+//                                   World Info editor go here. Linked via
+//                                   char.data.extensions.world.
 //
-// At import ST extracts character_book → /worlds file (one-time). After that the
-// card and the world file diverge: users add entries to /worlds, but character_book
-// stays frozen. If ST ever does re-embed (export, re-import) the card ends up with
-// user entries baked in, making it look like a diff against Chub.
+// The two copies diverge independently after import.
 //
 // Our approach:
-//   - CHECK: Compare /worlds entries (converted to V2) against Chub. Entries in
-//     /worlds with no Chub match (user-added OR creator-removed) are invisible to
-//     the diff — safe default is to keep them either way.
-//   - APPLY: Write Chub's lorebook to character_book as-is (clean mirror). Then
-//     merge new/changed creator entries into /worlds. User entries in /worlds are
-//     never touched.
-//   - No linked world file: Fall back to comparing character_book directly.
+//   - CHECK: Always compare character_book (embedded) against Chub remote.
+//     World files are never read for diff purposes.
+//   - APPLY: Write Chub's lorebook to character_book (clean mirror).
+//     World files are never modified by the update checker.
+//   - If local-only entries would be lost from the embedded lorebook,
+//     the diff UI checks for a linked world file and reassures the user
+//     that their World Info entries are unaffected.
 //
-
-/**
- * Convert a ST /worlds entry (internal format) to V2 character_book entry format.
- * This allows our existing comparison/matching logic to work uniformly.
- */
-function worldEntryToV2(entry) {
-    return {
-        keys: entry.key || [],
-        secondary_keys: entry.keysecondary || [],
-        content: entry.content || '',
-        enabled: !entry.disable,
-        selective: entry.selective ?? true,
-        constant: entry.constant ?? false,
-        position: entry.position === 0 ? 'before_char' : entry.position === 1 ? 'after_char' : String(entry.position ?? 0),
-        insertion_order: entry.order ?? 100,
-        priority: entry.extensions?.priority ?? entry.order ?? 100,
-        case_sensitive: entry.caseSensitive ?? null,
-        name: entry.comment || '',
-        comment: entry.comment || '',
-        id: entry.uid,
-        // Preserve ST-internal UID for merge-back
-        _worldUid: entry.uid,
-    };
-}
-
-/**
- * Convert ST /worlds UID-keyed entries object to a V2-compatible array
- */
-function worldEntriesToV2Array(worldData) {
-    if (!worldData?.entries) return [];
-    return Object.values(worldData.entries)
-        .filter(e => e && typeof e === 'object')
-        .map(worldEntryToV2);
-}
 
 function lorebooksEqual(a, b) {
     const aEntries = a?.entries || [];
@@ -1281,6 +1515,7 @@ function showBatchCheckModal(characters) {
     batchCheckRunning = false;
     batchCheckedCount = 0;
     updateBatchFooter('idle');
+    updateSourceBadge(modal);
     
     modal.classList.add('visible');
 }
@@ -1304,7 +1539,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
         if (abortController.signal.aborted || batchCheckPaused) break;
         
         const char = characters[i];
-        const itemEl = document.querySelector(`.card-update-batch-item[data-avatar="${char.avatar}"]`);
+        const itemEl = document.querySelector(`.card-update-batch-item[data-avatar="${CSS.escape(char.avatar)}"]`);
         const statusEl = itemEl?.querySelector('.card-update-batch-item-status');
         
         // Skip already-checked items
@@ -1328,15 +1563,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
             } else {
                 const localData = char.data || char;
 
-                // Fetch linked world info for lorebook comparison if lorebook is in scope
-                let worldName = null;
-                let worldInfoData = null;
-                if (!allowedFields || allowedFields.has('character_book')) {
-                    worldName = CoreAPI.getCharacterWorldName(char.avatar);
-                    if (worldName) worldInfoData = await CoreAPI.getWorldInfoData(worldName);
-                }
-
-                const diffs = compareCards(localData, remoteCard, allowedFields, worldInfoData);
+                const diffs = compareCards(localData, remoteCard, allowedFields);
                 
                 if (diffs.length === 0) {
                     if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
@@ -1344,12 +1571,12 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                     if (statusEl) {
                         statusEl.innerHTML = `
                             <span class="has-updates">${diffs.length} update${diffs.length > 1 ? 's' : ''}</span>
-                            <button class="card-update-batch-view-btn" onclick="window.cardUpdatesViewDiffs('${char.avatar}')">
+                            <button class="card-update-batch-view-btn" data-view-avatar="${CoreAPI.escapeHtml(char.avatar)}">
                                 View
                             </button>
                         `;
                     }
-                    currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs, worldName, worldInfoData });
+                    currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs });
                     withUpdates++;
                 }
             }
@@ -1392,7 +1619,8 @@ function viewBatchItemDiffs(avatar) {
     const applyBtn = document.getElementById('cardUpdateSingleApplyBtn');
     
     statusEl.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left"></i> Found ${diffs.length} difference${diffs.length > 1 ? 's' : ''}`;
-    contentEl.innerHTML = renderDiffList(diffs, avatar);
+    contentEl.innerHTML = renderDiffList(diffs);
+    resolveWorldFileStatus(contentEl, checkData.char?.avatar).catch(e => console.error('[CardUpdates] World status check failed:', e));
     applyBtn.disabled = false;
 }
 
@@ -1412,14 +1640,9 @@ async function applySingleUpdates() {
         return;
     }
     
-    // Find the character from stored checks
-    const firstCheckbox = modal.querySelector('.card-update-diff-item input[type="checkbox"]');
-    const checkboxId = firstCheckbox?.id || '';
-    const avatarMatch = checkboxId.match(/^diff-(.+?)-\d+$/);
-    if (!avatarMatch) return;
-    
-    const avatar = avatarMatch[1];
-    const checkData = currentUpdateChecks.get(avatar);
+    // Retrieve avatar from JS variable (not from HTML) to avoid special-character issues
+    const avatar = singleModalAvatar;
+    const checkData = avatar ? currentUpdateChecks.get(avatar) : null;
     if (!checkData) return;
     
     const { char, diffs, remoteCard } = checkData;
@@ -1427,17 +1650,10 @@ async function applySingleUpdates() {
     
     // Build updated data object
     const updatedFields = {};
-    let lorebookSelected = false;
     checkboxes.forEach(cb => {
         const field = cb.dataset.field;
-        if (field === 'character_book') {
-            // Card gets remote lorebook as-is (1:1 Chub copy)
-            updatedFields[field] = getNestedValue(remoteData, field);
-            lorebookSelected = true;
-        } else {
-            const remoteValue = getNestedValue(remoteData, field);
-            updatedFields[field] = remoteValue;
-        }
+        const remoteValue = getNestedValue(remoteData, field);
+        updatedFields[field] = remoteValue;
     });
     
     // Apply via CoreAPI
@@ -1448,23 +1664,12 @@ async function applySingleUpdates() {
         }
         const success = await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields);
         
-        // Merge new creator entries into linked /worlds file
-        if (success && lorebookSelected) {
-            try {
-                const remoteBook = getNestedValue(remoteData, 'character_book');
-                await CoreAPI.mergeRemoteLorebookIntoWorldFile(char.avatar, remoteBook);
-            } catch (worldErr) {
-                console.error('[CardUpdates] World file merge failed:', worldErr);
-                CoreAPI.showToast('Card updated but world file merge failed', 'warning');
-            }
-        }
-        
         if (success) {
             CoreAPI.showToast(`Updated ${checkboxes.length} field${checkboxes.length > 1 ? 's' : ''}`, 'success');
             closeSingleModal();
             
             // Update batch list if visible
-            const batchItem = document.querySelector(`.card-update-batch-item[data-avatar="${avatar}"]`);
+            const batchItem = document.querySelector(`.card-update-batch-item[data-avatar="${CSS.escape(avatar)}"]`);
             if (batchItem) {
                 const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                 if (statusEl) {
@@ -1510,16 +1715,9 @@ async function applyAllBatchUpdates() {
         
         // Apply all diffs for this character
         const updatedFields = {};
-        let lorebookIncluded = false;
         for (const diff of diffs) {
-            if (diff.field === 'character_book') {
-                // Card gets remote lorebook as-is (1:1 Chub copy)
-                updatedFields[diff.field] = getNestedValue(remoteData, diff.field);
-                lorebookIncluded = true;
-            } else {
-                const remoteValue = getNestedValue(remoteData, diff.field);
-                updatedFields[diff.field] = remoteValue;
-            }
+            const remoteValue = getNestedValue(remoteData, diff.field);
+            updatedFields[diff.field] = remoteValue;
         }
         
         try {
@@ -1528,22 +1726,12 @@ async function applyAllBatchUpdates() {
                 try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
             }
             const success = await CoreAPI.applyCardFieldUpdates(avatar, updatedFields);
-
-            // Merge new creator entries into linked /worlds file
-            if (success && lorebookIncluded) {
-                try {
-                    const remoteBook = getNestedValue(remoteData, 'character_book');
-                    await CoreAPI.mergeRemoteLorebookIntoWorldFile(avatar, remoteBook);
-                } catch (worldErr) {
-                    console.error('[CardUpdates] World file merge failed for:', avatar, worldErr);
-                }
-            }
             
             if (success) {
                 successCount++;
                 
                 // Update batch list
-                const batchItem = document.querySelector(`.card-update-batch-item[data-avatar="${avatar}"]`);
+                const batchItem = document.querySelector(`.card-update-batch-item[data-avatar="${CSS.escape(avatar)}"]`);
                 if (batchItem) {
                     const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                     if (statusEl) {
@@ -1589,7 +1777,27 @@ async function applyAllBatchUpdates() {
 // ========================================
 
 function closeSingleModal() {
+    singleModalAvatar = null;
     document.getElementById('cardUpdateSingleModal')?.classList.remove('visible');
+}
+
+/**
+ * Show or refresh the API source badge in a modal header.
+ */
+function updateSourceBadge(modal) {
+    const header = modal?.querySelector('.cl-modal-header');
+    if (!header) return;
+    let badge = header.querySelector('.card-update-source-badge');
+    if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'card-update-source-badge';
+        header.querySelector('h3')?.appendChild(badge);
+    }
+    const useV4 = CoreAPI.getSetting('chubUseV4Api') || false;
+    badge.textContent = useV4 ? 'V4 Git API' : 'Metadata API';
+    badge.title = useV4
+        ? 'Fetching the exported card.json from Chub\u2019s Git repository. Matches version history source. Change in Settings \u2192 ChubAI.'
+        : 'Fetching from Chub\u2019s metadata API \u2014 same source as imports. Change in Settings \u2192 ChubAI.';
 }
 
 function closeBatchModal() {
@@ -1725,9 +1933,9 @@ function startBatchCheck() {
         const chubInfo = getChubLinkInfo(char);
         const name = char.data?.name || char.name || 'Unknown';
         return `
-            <div class="card-update-batch-item" data-avatar="${char.avatar}">
+            <div class="card-update-batch-item" data-avatar="${CoreAPI.escapeHtml(char.avatar)}">
                 <div class="card-update-batch-item-info">
-                    <span class="card-update-batch-item-name">${CoreAPI.escapeHtml(name)}</span>
+                    <span class="card-update-batch-item-name card-update-char-link" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">${CoreAPI.escapeHtml(name)}</span>
                     <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(chubInfo?.fullPath || '')}</span>
                 </div>
                 <div class="card-update-batch-item-status">
@@ -1751,7 +1959,7 @@ function startBatchCheck() {
 /**
  * Toggle all checkboxes for a character's diffs
  */
-function toggleAllCheckboxes(charKey, checked) {
+function toggleAllCheckboxes(checked) {
     const modal = document.getElementById('cardUpdateSingleModal');
     modal.querySelectorAll(`.card-update-diff-item input[type="checkbox"]`).forEach(cb => {
         cb.checked = checked;
@@ -1811,7 +2019,25 @@ function setupEventListeners() {
     // Expose UI helpers to window
     window.cardUpdatesToggleAll = toggleAllCheckboxes;
     window.cardUpdatesToggleExpand = toggleExpand;
-    window.cardUpdatesViewDiffs = viewBatchItemDiffs;
+
+    // Event delegation for batch list: View buttons and character name clicks
+    const batchListEl = document.getElementById('cardUpdateBatchList');
+    batchListEl?.addEventListener('click', (e) => {
+        const viewBtn = e.target.closest('.card-update-batch-view-btn');
+        if (viewBtn) {
+            const avatar = viewBtn.dataset.viewAvatar;
+            if (avatar) viewBatchItemDiffs(avatar);
+            return;
+        }
+        const nameLink = e.target.closest('.card-update-char-link[data-char-avatar]');
+        if (nameLink) {
+            const avatar = nameLink.dataset.charAvatar;
+            if (!avatar) return;
+            const allChars = CoreAPI.getAllCharacters();
+            const char = allChars.find(c => c.avatar === avatar);
+            if (char) openCharModalAbove(char);
+        }
+    });
 
     // Batch field selection
     document.getElementById('cardUpdateBatchFieldGrid')?.addEventListener('change', handleBatchFieldSelectionChange);
@@ -1841,6 +2067,17 @@ function injectStyles() {
         
         #cardUpdateSingleModal {
             z-index: 10001;
+        }
+
+        /* When character details is opened above update checker */
+        body.char-modal-above .modal-overlay {
+            z-index: 10002 !important;
+        }
+        body.char-modal-above .confirm-modal:not(.hidden) {
+            z-index: 10003 !important;
+        }
+        body.char-modal-above .gv-modal.visible {
+            z-index: 10004 !important;
         }
         
         .card-update-modal .cl-modal-overlay {
@@ -2106,6 +2343,22 @@ function injectStyles() {
             border-right: 1px solid var(--cl-border, rgba(80,80,80,0.3));
         }
         
+        .card-update-source-badge {
+            display: inline-block;
+            font-size: 0.6rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 2px 7px;
+            margin-left: 8px;
+            border-radius: 4px;
+            vertical-align: middle;
+            background: rgba(var(--cl-accent-rgb, 74,158,255), 0.12);
+            color: var(--cl-accent, #4a9eff);
+            border: 1px solid rgba(var(--cl-accent-rgb, 74,158,255), 0.25);
+            cursor: help;
+        }
+
         .card-update-diff-panel-header {
             padding: 8px 12px;
             font-size: 0.75em;
@@ -2214,6 +2467,14 @@ function injectStyles() {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+        }
+        
+        .card-update-char-link {
+            cursor: pointer;
+            color: var(--cl-accent, #4a9eff);
+        }
+        .card-update-char-link:hover {
+            text-decoration: underline;
         }
         
         .card-update-batch-item-path {
@@ -2456,6 +2717,91 @@ function injectStyles() {
             color: var(--cl-text-secondary, #999);
             border-bottom: 1px dashed rgba(255,255,255,0.08);
             line-height: 1.4;
+        }
+
+        .lorebook-diff-info-box {
+            display: flex;
+            gap: 10px;
+            padding: 10px 12px;
+            margin: 6px 10px;
+            background: rgba(74, 158, 255, 0.08);
+            border: 1px solid rgba(74, 158, 255, 0.2);
+            border-radius: 8px;
+            font-size: 0.82em;
+            line-height: 1.5;
+            color: var(--cl-text-secondary, #bbb);
+        }
+        .lorebook-diff-info-box > i {
+            color: var(--cl-accent, #4a9eff);
+            margin-top: 2px;
+            flex-shrink: 0;
+        }
+        .lorebook-diff-info-box strong {
+            color: var(--cl-text-primary, #eee);
+        }
+        .lorebook-diff-help-details { margin-top: 6px; }
+        .lorebook-diff-help-details summary {
+            cursor: pointer;
+            font-size: 0.9em;
+            color: var(--cl-accent, #4a9eff);
+            user-select: none;
+            list-style: none;
+        }
+        .lorebook-diff-help-details summary::-webkit-details-marker { display: none; }
+        .lorebook-diff-help-details summary::before {
+            content: '▸ ';
+            font-size: 0.8em;
+        }
+        .lorebook-diff-help-details[open] summary::before {
+            content: '▾ ';
+        }
+        .lorebook-diff-help-body {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(74, 158, 255, 0.15);
+            font-size: 0.92em;
+            line-height: 1.6;
+        }
+        .lorebook-diff-help-body p { margin: 6px 0; }
+        .lorebook-diff-help-body ul {
+            margin: 4px 0 6px 0;
+            padding-left: 18px;
+        }
+        .lorebook-diff-help-body li { margin: 3px 0; }
+        .lorebook-diff-help-body code {
+            background: rgba(255,255,255,0.08);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        .lorebook-diff-entry-tag {
+            margin-left: auto;
+            font-size: 0.75em;
+            padding: 1px 7px;
+            border-radius: 9px;
+            flex-shrink: 0;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .lorebook-diff-entry-tag.added {
+            background: rgba(76, 175, 80, 0.2);
+            color: #81c784;
+        }
+        .lorebook-diff-entry-tag.local-only {
+            background: rgba(158, 158, 158, 0.15);
+            color: #bdbdbd;
+        }
+        .lorebook-diff-entry-tag.warning {
+            background: rgba(255, 152, 0, 0.2);
+            color: #ffb74d;
+        }
+
+        .lorebook-world-check {
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            margin-left: 4px;
         }
 
         .lorebook-diff-local-only-section { padding: 6px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }

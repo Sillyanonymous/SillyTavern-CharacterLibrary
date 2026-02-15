@@ -28,10 +28,11 @@
 
     /* --- Topbar stability --- */
     .topbar {
-        flex-shrink: 0; /* never compress when toolbar appears */
+        flex-shrink: 0;
         position: sticky;
         top: 0;
         z-index: 100;
+        backdrop-filter: none !important;
     }
 
     /* --- Disable hover effects on touch --- */
@@ -44,6 +45,88 @@
     }
     .char-card:hover .card-image {
         transform: none !important;
+    }
+
+    /* Gallery items — critical for gallery scroll performance */
+    .sprite-item {
+        transition: none !important;
+    }
+    .sprite-item:hover {
+        transform: none !important;
+        border-color: inherit !important;
+    }
+    .sprite-item:hover .video-play-overlay,
+    .sprite-item:hover .video-play-overlay i {
+        transform: none !important;
+    }
+
+    /* Buttons & interactive elements */
+    .action-btn.primary:hover,
+    .action-btn.cancellable:hover,
+    .settings-action-btn.primary:hover,
+    .settings-action-btn.danger:hover,
+    .download-all-btn:hover,
+    .import-browse-btn:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    /* Scale-on-hover elements */
+    .favorite-btn:hover,
+    .legacy-indicator:hover,
+    .legacy-image-item:hover,
+    .orphaned-image-item:hover,
+    .creator-notes-expand-btn:hover,
+    .content-expand-btn:hover,
+    .expand-field-btn:hover,
+    .section-expand-btn:hover,
+    .chub-feature-badge:hover,
+    .chub-search-submit:hover,
+    .related-card:hover,
+    .char-dup-card-meta-item.gallery-count-item.has-images:hover {
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    /* --- GPU / compositing cost reduction --- */
+
+    /* Kill backdrop-filter on overlays and modals */
+    .modal-overlay,
+    .confirm-modal,
+    .toast,
+    .tag-autocomplete,
+    .download-media-menu,
+    .accent-icon {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+    .accent-icon { filter: none !important; }
+
+    /* Kill backdrop-filter on per-card favorite indicators */
+    .char-card .favorite-indicator {
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+    }
+
+    /* Kill infinite animations on cards in the scroll grid */
+    .char-card.is-favorite .favorite-indicator {
+        animation: none !important;
+    }
+    .favorites-filter-btn.active i {
+        animation: none !important;
+    }
+
+    /* Kill transitions on remaining scroll-visible elements */
+    .card-image,
+    .chat-card,
+    .glass-btn,
+    .glass-select,
+    .action-btn,
+    .chub-feature-badge,
+    .related-card,
+    .favorite-btn,
+    .search-box {
+        transition: none !important;
     }
 
     /* --- JS-created mobile buttons (search / settings / menu) --- */
@@ -92,7 +175,7 @@
         background: var(--bg-secondary) !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
-        backdrop-filter: blur(20px) !important;
+        backdrop-filter: blur(10px) !important;
         box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
         flex-direction: column !important;
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
@@ -149,7 +232,7 @@
         background: var(--glass-bg);
         border: 1px solid var(--glass-border);
         border-radius: 12px;
-        backdrop-filter: blur(20px);
+        backdrop-filter: blur(10px);
     }
     .mobile-search-overlay .search-box input { font-size: 16px; }
     .mobile-search-container {
@@ -178,7 +261,7 @@
     .mobile-sheet {
         position: relative;
         background: rgba(30, 30, 30, 0.95);
-        backdrop-filter: blur(20px);
+        backdrop-filter: blur(10px);
         border: 1px solid var(--glass-border);
         border-bottom: none;
         border-radius: 16px 16px 0 0;
@@ -720,9 +803,39 @@
     .vt-diff-header { padding: 8px 10px; min-height: 44px; flex-wrap: wrap; gap: 6px; }
     .vt-diff-stats { max-width: 100%; gap: 3px 4px; }
     .vt-stat { font-size: 0.68rem; padding: 1px 4px; }
+    .vt-lb-header { gap: 3px; }
+    .vt-lb-stat-row { padding-left: 0; gap: 3px 5px; }
     .vt-lb-counts { font-size: 0.8em; margin-left: 4px; gap: 3px; }
     .vt-diff-content { max-height: 220px; font-size: 0.78rem; }
     .vt-diff-line { padding: 2px 8px 2px 4px; }
+
+    /* Version history lorebook entries (mobile) */
+    .vt-lb-content { padding: 6px 8px; gap: 3px; }
+    .vt-lb-section { border-radius: 5px; }
+    .vt-lb-section-header {
+        padding: 6px 8px; min-height: 44px;
+        font-size: 0.76rem; gap: 6px;
+        touch-action: manipulation;
+    }
+    .vt-lb-section-body { padding: 3px 4px; }
+    .vt-lb-entry {
+        flex-wrap: wrap;
+        gap: 3px 6px;
+        padding: 4px 6px;
+        font-size: 0.78rem;
+    }
+    .vt-lb-badge { width: 18px; height: 18px; font-size: 10px; }
+    .vt-lb-name { max-width: 50%; }
+    .vt-lb-world-check { margin-left: 0; }
+    .vt-lb-keys { font-size: 0.75em; flex-basis: 100%; padding-left: 4px; }
+    .vt-lb-changes { font-size: 0.72em; }
+
+    .vt-lb-meta-row { flex-wrap: wrap; gap: 3px 6px; font-size: 0.78em; }
+    .vt-lb-meta-key { min-width: unset; }
+    .vt-lb-unchanged-row { padding: 3px 6px; }
+
+    /* Chub Page version entry */
+    .vt-page-version-banner { font-size: 0.75rem; padding: 6px 10px; gap: 6px; }
 
     /* Tags diff */
     .vt-tag-content { padding: 8px; }
@@ -974,6 +1087,7 @@
         background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
         z-index: 1;
     }
+    .card-update-source-badge { font-size: 0.55rem; padding: 1px 5px; margin-left: 5px; }
     .card-update-modal .cl-modal-body {
         max-height: calc(100vh - 120px);
         padding: 12px;
@@ -1124,6 +1238,36 @@
     .card-update-diff-stats { font-size: 0.75em; white-space: nowrap; }
     .lorebook-entry-counts { font-size: 0.78em; margin-left: 4px; gap: 3px; }
     .lorebook-diff-summary { font-size: 0.78em; }
+
+    /* --- Card update lorebook diff entries (mobile) --- */
+    .lorebook-diff-entries { padding: 6px 8px; gap: 3px; }
+    .lorebook-diff-info-box {
+        flex-direction: column;
+        gap: 6px;
+        padding: 8px 10px;
+        margin: 4px 6px;
+        font-size: 0.78em;
+        line-height: 1.4;
+    }
+    .lorebook-diff-info-detail { font-size: 0.88em; }
+    .lorebook-diff-entry {
+        flex-wrap: wrap;
+        gap: 4px 6px;
+        padding: 5px 8px;
+        font-size: 0.82em;
+    }
+    .lorebook-diff-badge { width: 18px; height: 18px; font-size: 10px; }
+    .lorebook-diff-entry-name { max-width: 45%; }
+    .lorebook-diff-entry-tag {
+        font-size: 0.7em;
+        padding: 1px 5px;
+        order: 10;
+    }
+    .lorebook-world-check { margin-left: 0; }
+    .lorebook-diff-entry-keys { font-size: 0.78em; flex-basis: 100%; padding-left: 26px; }
+    .lorebook-diff-entry-changes { font-size: 0.75em; }
+    .lorebook-diff-meta-row { flex-wrap: wrap; gap: 4px 6px; font-size: 0.82em; }
+    .lorebook-diff-meta-key { min-width: unset; }
 
     .card-update-diff-item.short {
         flex-direction: column;
@@ -1411,19 +1555,18 @@
         padding: 8px 10px;
         gap: 8px;
         flex-shrink: 0;
-        max-height: 120px;       /* enough for wrapped layout */
-        transition: max-height 0.2s ease, padding 0.2s ease, opacity 0.15s ease;
         overflow: hidden;
+        backdrop-filter: none !important;
+        transition: none !important;
     }
     .multi-select-toolbar.hidden {
-        display: flex !important; /* keep in flow — animate instead of display:none */
-        max-height: 0 !important;
-        padding-top: 0 !important;
-        padding-bottom: 0 !important;
-        opacity: 0;
-        pointer-events: none;
-        border-bottom: none !important;
-        box-shadow: none !important;
+        display: none !important;
+    }
+
+    /* Kill per-card checkbox transition — toggling body class repaints every card */
+    body.multi-select-mode .char-card::before,
+    body.multi-select-mode .char-card::after {
+        transition: none !important;
     }
     .multi-select-left {
         gap: 6px;
@@ -2299,6 +2442,8 @@
         border-radius: 8px;
         contain: layout style paint;
         background: var(--card-bg, #1a1a2e);
+        -webkit-user-select: none;
+        user-select: none;
     }
     .card-image {
         position: absolute;
@@ -2793,7 +2938,7 @@
         position: absolute;
         inset: 0;
         background: rgba(0, 0, 0, 0.6);
-        backdrop-filter: blur(3px);
+        backdrop-filter: none;
     }
 
     .tag-editor-sheet-panel {

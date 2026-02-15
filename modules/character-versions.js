@@ -52,6 +52,7 @@ let currentLocalSnapshots = [];
 let selectedSnapshotId = null;
 let paneDelegationHandler = null;
 let _dialogOpen = false; // re-entry guard for dialogs
+let currentMetadata = null; // stashed metadata API response for "Chub Page" version
 
 // ========================================
 // FILESYSTEM STORAGE VIA ST FILES API
@@ -483,8 +484,12 @@ function getHeaders() {
 }
 
 async function getProjectId(fullPath) {
-    try { const m = await CoreAPI.fetchChubMetadata(fullPath); return m?.id || null; }
-    catch { return null; }
+    try {
+        const m = await CoreAPI.fetchChubMetadata(fullPath);
+        currentMetadata = m || null;
+        return m?.id || null;
+    }
+    catch { currentMetadata = null; return null; }
 }
 
 async function fetchVersionList(projectId) {
@@ -585,6 +590,7 @@ export function cleanupVersionsPane() {
     currentChar = null;
     currentProjectId = null;
     currentFullPath = null;
+    currentMetadata = null;
     currentVersions = [];
     selectedVersionRef = null;
     currentLocalSnapshots = [];
@@ -703,13 +709,20 @@ function setupPaneDelegation(container) {
         const tab = e.target.closest('[data-vt-tab]');
         if (tab) { switchTab(tab.dataset.vtTab); return; }
 
-        // Remote version selection
+        // Remote version selection (including Chub Page pseudo-entry)
         const vItem = e.target.closest('.vt-item[data-ref]');
-        if (vItem) { selectVersion(vItem.dataset.ref, vItem.dataset.fullId); return; }
+        if (vItem) {
+            if (vItem.dataset.ref === '__chub_page__') { selectChubPageVersion(); return; }
+            selectVersion(vItem.dataset.ref, vItem.dataset.fullId); return;
+        }
 
         // Local snapshot selection
         const sItem = e.target.closest('.vt-item[data-snapshot-id]');
         if (sItem) { selectSnapshot(Number(sItem.dataset.snapshotId)); return; }
+
+        // Lorebook sub-section expand/collapse
+        const lbSh = e.target.closest('.vt-lb-section-header');
+        if (lbSh) { lbSh.parentElement.classList.toggle('expanded'); return; }
 
         // Greeting block expand/collapse (check first so it doesn't bubble to outer diff header)
         const gh = e.target.closest('.vt-greeting-header');
@@ -828,7 +841,38 @@ function renderRemoteList(versions) {
     const list = el('.vt-list');
     status.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i> ${versions.length} version${versions.length !== 1 ? 's' : ''} found`;
 
-    list.innerHTML = versions.map((v, idx) => {
+    // "Chub Page" entry — shows what the metadata API returns (what the Chub website displays).
+    // This can differ from the Git-exported card.json that versions are based on.
+    const pageDate = currentMetadata?.lastActivityAt ? new Date(currentMetadata.lastActivityAt) : null;
+    const pageDateValid = pageDate && !isNaN(pageDate.getTime());
+    function buildPageEntry() {
+        if (!currentMetadata?.definition) return '';
+        const dateHtml = pageDateValid
+            ? `<i class="fa-regular fa-clock"></i> <span title="${esc(pageDate.toLocaleString())}">Last activity ${relTime(pageDate)}</span>`
+            : '<i class="fa-solid fa-globe"></i> <span>Metadata API</span>';
+        return `
+            <div class="vt-item chub-page" data-ref="__chub_page__">
+                <div class="vt-item-header">
+                    <span class="vt-item-id">Chub Page</span>
+                    <span class="vt-badge chub-page">API</span>
+                </div>
+                <div class="vt-item-title">Current state shown on the ChubAI website</div>
+                <div class="vt-item-date">${dateHtml}</div>
+            </div>`;
+    }
+
+    // Insert the Chub Page entry in chronological order among versions.
+    // If we don't have a valid date, it goes at the top.
+    let insertIdx = 0;
+    if (pageDateValid && currentMetadata?.definition) {
+        for (let i = 0; i < versions.length; i++) {
+            const vDate = new Date(versions[i].committed_date || versions[i].created_at);
+            if (pageDate >= vDate) { insertIdx = i; break; }
+            insertIdx = i + 1;
+        }
+    }
+
+    const versionItems = versions.map((v, idx) => {
         const date = new Date(v.committed_date || v.created_at);
         const vid = v.short_id || v.id;
         const title = v.title || v.message || 'Update';
@@ -846,6 +890,19 @@ function renderRemoteList(versions) {
                 </div>
             </div>`;
     }).join('');
+
+    list.innerHTML = versionItems;
+
+    // Splice the Chub Page entry into its chronological position
+    const pageEntry = buildPageEntry();
+    if (pageEntry) {
+        const items = list.querySelectorAll('.vt-item');
+        if (insertIdx >= items.length) {
+            list.insertAdjacentHTML('beforeend', pageEntry);
+        } else {
+            items[insertIdx].insertAdjacentHTML('beforebegin', pageEntry);
+        }
+    }
 }
 
 // ========================================
@@ -931,8 +988,60 @@ async function selectVersion(shortId, fullId) {
         if (!data) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Could not load version data</div>'; return; }
         const card = normalizeChubDef(data);
         renderDiffPreview(preview, currentChar?.data || currentChar, card, data);
+        resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch (e) {
         preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading preview</div>';
+    }
+}
+
+/**
+ * Handle selection of the "Chub Page" pseudo-version entry.
+ * Shows a diff against the metadata API response — what the Chub website displays,
+ * which may differ from the V4 Git-exported card.json that real versions use.
+ */
+async function selectChubPageVersion() {
+    if (!currentMetadata?.definition) return;
+    selectedVersionRef = '__chub_page__';
+    selectedSnapshotId = null;
+
+    paneContainer.querySelectorAll('.vt-item').forEach(i =>
+        i.classList.toggle('selected', i.dataset.ref === '__chub_page__')
+    );
+
+    updateActionsVisibility();
+    el('.vt-container')?.classList.add('vt-detail-open');
+
+    const preview = el('.vt-preview');
+    preview.classList.remove('vt-hidden');
+    preview.innerHTML = '<div class="vt-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Chub page data...</div>';
+
+    try {
+        const def = currentMetadata.definition;
+        // Supplement with metadata-level fields before normalizing
+        const enriched = { ...def };
+        if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
+        if (currentMetadata.tagline) {
+            enriched.extensions = enriched.extensions || {};
+            enriched.extensions.chub = enriched.extensions.chub || {};
+            if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
+        }
+        if (!enriched.creator && currentMetadata.fullPath) {
+            enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
+        }
+
+        const card = normalizeChubDef(enriched);
+        renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
+
+        // Add info banner about what this is
+        const banner = document.createElement('div');
+        banner.className = 'vt-page-version-banner';
+        banner.innerHTML = '<i class="fa-solid fa-globe"></i><span>This is the Chub <strong>metadata API</strong> state — what the website displays. It can differ from the Git-exported versions above (which is what the update checker and downloads use).</span>';
+        const header = preview.querySelector('.vt-preview-header');
+        if (header) header.after(banner);
+
+        resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
+    } catch (e) {
+        preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading Chub page data</div>';
     }
 }
 
@@ -956,6 +1065,7 @@ async function selectSnapshot(id) {
         const snap = uid ? await storageGetSnapshot(uid, id) : null;
         if (!snap) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Snapshot not found</div>'; return; }
         renderDiffPreview(preview, currentChar?.data || currentChar, snap.data, null);
+        resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch {
         preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading snapshot</div>';
     }
@@ -1234,7 +1344,21 @@ async function restoreVersion() {
     let cardData = null;
     let label = '';
 
-    if (activeTab === 'remote' && selectedVersionRef && currentProjectId) {
+    if (activeTab === 'remote' && selectedVersionRef === '__chub_page__' && currentMetadata?.definition) {
+        // Chub Page pseudo-entry — data already available from metadata API
+        const enriched = { ...currentMetadata.definition };
+        if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
+        if (currentMetadata.tagline) {
+            enriched.extensions = enriched.extensions || {};
+            enriched.extensions.chub = enriched.extensions.chub || {};
+            if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
+        }
+        if (!enriched.creator && currentMetadata.fullPath) {
+            enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
+        }
+        cardData = normalizeChubDef(enriched);
+        label = 'Chub metadata API state';
+    } else if (activeTab === 'remote' && selectedVersionRef && currentProjectId) {
         const raw = await fetchVersionData(currentProjectId, selectedVersionRef);
         if (!raw) { CoreAPI.showToast('Could not fetch version data', 'error'); return; }
         cardData = normalizeChubDef(raw);
@@ -1295,10 +1419,14 @@ async function restoreVersion() {
 
         if (success) {
             if (activeTab === 'remote' && selectedVersionRef) {
+                const snapLabel = selectedVersionRef === '__chub_page__'
+                    ? 'Chub metadata API (restored)' : `Chub v${selectedVersionRef} (restored)`;
+                const restoredTag = selectedVersionRef === '__chub_page__'
+                    ? 'chub_page' : selectedVersionRef;
                 await storageSaveSnapshot(currentChar.avatar, name,
-                    `Chub v${selectedVersionRef} (restored)`, 'chub_restore', cardData, uid);
+                    snapLabel, 'chub_restore', cardData, uid);
                 await CoreAPI.applyCardFieldUpdates(currentChar.avatar, {
-                    'extensions.chub.restored_version': selectedVersionRef,
+                    'extensions.chub.restored_version': restoredTag,
                     'extensions.chub.restored_at': new Date().toISOString()
                 });
             }
@@ -1508,7 +1636,6 @@ function renderLorebookDiff(field, localBook, remoteBook) {
 
     const localOnly = removed;
 
-    // Nothing actually changed — don't render this diff item at all
     if (added.length === 0 && localOnly.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
 
     const statParts = [];
@@ -1518,59 +1645,100 @@ function renderLorebookDiff(field, localBook, remoteBook) {
     if (metaDiffs.length > 0) statParts.push(`<span class="vt-stat changed">${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''}</span>`);
     const stats = statParts.join(' ');
 
-    let entriesHtml = '';
+    let sectionsHtml = '';
 
+    // --- Settings section ---
     if (metaDiffs.length > 0) {
-        entriesHtml += `<div class="vt-lb-meta-section">
-            <div class="vt-lb-meta-title">Lorebook Settings</div>
-            ${metaDiffs.map(m => `<div class="vt-lb-meta-row">
-                <span class="vt-lb-meta-key">${esc(m.label)}</span>
-                <span class="vt-lb-meta-old">${esc(m.localStr)}</span>
-                <i class="fa-solid fa-arrow-right"></i>
-                <span class="vt-lb-meta-new">${esc(m.remoteStr)}</span>
-            </div>`).join('')}
+        sectionsHtml += `<div class="vt-lb-section">
+            <div class="vt-lb-section-header" title="Click to expand">
+                <i class="fa-solid fa-gear vt-lb-section-icon"></i>
+                <span class="vt-lb-section-title">${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed</span>
+                <i class="fa-solid fa-chevron-down vt-lb-section-chevron"></i>
+            </div>
+            <div class="vt-lb-section-body">
+                ${metaDiffs.map(m => `<div class="vt-lb-meta-row">
+                    <span class="vt-lb-meta-key">${esc(m.label)}</span>
+                    <span class="vt-lb-meta-old">${esc(m.localStr)}</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                    <span class="vt-lb-meta-new">${esc(m.remoteStr)}</span>
+                </div>`).join('')}
+            </div>
         </div>`;
     }
 
-    for (const entry of added) {
-        const name = lbEntryName(entry);
-        const keys = (entry.keys || []).slice(0, 4).join(', ');
-        entriesHtml += `<div class="vt-lb-entry added">
-            <span class="vt-lb-badge added">+</span>
-            <span class="vt-lb-name">${esc(name)}</span>
-            ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
+    // --- New entries section ---
+    if (added.length > 0) {
+        const autoExpand = added.length <= 5;
+        sectionsHtml += `<div class="vt-lb-section${autoExpand ? ' expanded' : ''}">
+            <div class="vt-lb-section-header" title="Click to expand">
+                <span class="vt-lb-badge added" style="width:16px;height:16px;font-size:10px;">+</span>
+                <span class="vt-lb-section-title">${added.length} new from remote</span>
+                <i class="fa-solid fa-chevron-down vt-lb-section-chevron"></i>
+            </div>
+            <div class="vt-lb-section-body">
+                ${added.map(entry => {
+                    const name = lbEntryName(entry);
+                    const keys = (entry.keys || []).slice(0, 4).join(', ');
+                    return `<div class="vt-lb-entry added">
+                        <span class="vt-lb-name">${esc(name)}</span>
+                        ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>
         </div>`;
     }
 
+    // --- Local-only entries section ---
     if (localOnly.length > 0) {
-        entriesHtml += `<div class="vt-lb-local-only-section">
-            <span class="vt-lb-local-note">${localOnly.length} local-only entr${localOnly.length === 1 ? 'y' : 'ies'} (preserved in World Info file)</span>
-        </div>`;
-        for (const entry of localOnly) {
-            const name = lbEntryName(entry);
-            const keys = (entry.keys || []).slice(0, 4).join(', ');
-            entriesHtml += `<div class="vt-lb-entry local-only">
-                <span class="vt-lb-badge local-only">&#9733;</span>
-                <span class="vt-lb-name">${esc(name)}</span>
-                ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
-                <span class="vt-lb-keys">local only</span>
-            </div>`;
-        }
-    }
-
-    for (const m of modified) {
-        const name = lbEntryName(m.remote);
-        const changes = m.changedFields.join(', ');
-        entriesHtml += `<div class="vt-lb-entry modified">
-            <span class="vt-lb-badge modified">~</span>
-            <span class="vt-lb-name">${esc(name)}</span>
-            <span class="vt-lb-changes">${esc(changes)}</span>
+        const autoExpand = localOnly.length <= 5;
+        sectionsHtml += `<div class="vt-lb-section${autoExpand ? ' expanded' : ''}">
+            <div class="vt-lb-section-header" title="Click to expand">
+                <span class="vt-lb-badge local-only" style="width:16px;height:16px;font-size:10px;">&#9733;</span>
+                <span class="vt-lb-section-title">${localOnly.length} local-only (not in this version)</span>
+                <i class="fa-solid fa-chevron-down vt-lb-section-chevron"></i>
+            </div>
+            <div class="vt-lb-section-body">
+                ${localOnly.map(entry => {
+                    const name = lbEntryName(entry);
+                    const keys = (entry.keys || []).slice(0, 4).join(', ');
+                    const keysJson = esc(JSON.stringify(entry.keys || []));
+                    const entryComment = esc(entry.comment || entry.name || '');
+                    return `<div class="vt-lb-entry local-only" data-lb-keys="${keysJson}" data-lb-name="${entryComment}">
+                        <span class="vt-lb-name">${esc(name)}</span>
+                        <span class="vt-lb-world-check"><i class="fa-solid fa-spinner fa-spin" style="font-size:10px;opacity:0.4;"></i></span>
+                        ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>
         </div>`;
     }
 
+    // --- Modified entries section ---
+    if (modified.length > 0) {
+        const autoExpand = modified.length <= 5;
+        sectionsHtml += `<div class="vt-lb-section${autoExpand ? ' expanded' : ''}">
+            <div class="vt-lb-section-header" title="Click to expand">
+                <span class="vt-lb-badge modified" style="width:16px;height:16px;font-size:10px;">~</span>
+                <span class="vt-lb-section-title">${modified.length} modified</span>
+                <i class="fa-solid fa-chevron-down vt-lb-section-chevron"></i>
+            </div>
+            <div class="vt-lb-section-body">
+                ${modified.map(m => {
+                    const name = lbEntryName(m.remote);
+                    const changes = m.changedFields.join(', ');
+                    return `<div class="vt-lb-entry modified">
+                        <span class="vt-lb-name">${esc(name)}</span>
+                        <span class="vt-lb-changes">${esc(changes)}</span>
+                    </div>`;
+                }).join('')}
+            </div>
+        </div>`;
+    }
+
+    // --- Unchanged summary ---
     const unchangedCount = matched.length - modified.length;
     if (unchangedCount > 0) {
-        entriesHtml += `<div class="vt-lb-entry unchanged">
+        sectionsHtml += `<div class="vt-lb-unchanged-row">
             <span class="vt-lb-unchanged">${unchangedCount} unchanged entr${unchangedCount === 1 ? 'y' : 'ies'}</span>
         </div>`;
     }
@@ -1579,19 +1747,21 @@ function renderLorebookDiff(field, localBook, remoteBook) {
 
     return `
         <div class="vt-diff-item long" data-local-only-count="${localOnly.length}">
-            <div class="vt-diff-header">
-                <span class="vt-diff-label">${fieldIcon(field)}${esc(field.label)}
-                    <span class="vt-lb-counts">
-                        <span>${localEntries.length}</span>
-                        <i class="fa-solid fa-arrow-right"></i>
-                        <span>${mergedCount}</span>
+            <div class="vt-diff-header vt-lb-header">
+                <div class="vt-lb-header-top">
+                    <span class="vt-diff-label">${fieldIcon(field)}${esc(field.label)}
+                        <span class="vt-lb-counts">
+                            <span>${localEntries.length}</span>
+                            <i class="fa-solid fa-arrow-right"></i>
+                            <span>${mergedCount}</span>
+                        </span>
                     </span>
-                </span>
-                <div class="vt-diff-stats">${stats}</div>
-                <i class="fa-solid fa-chevron-down vt-expand-icon"></i>
+                    <i class="fa-solid fa-chevron-down vt-expand-icon"></i>
+                </div>
+                <div class="vt-lb-stat-row">${stats}</div>
             </div>
             <div class="vt-diff-content vt-lb-content">
-                ${entriesHtml}
+                ${sectionsHtml}
             </div>
         </div>
     `;
@@ -1603,6 +1773,96 @@ function lbEntryName(entry) {
     const keys = entry.keys || [];
     if (keys.length > 0) return keys.slice(0, 3).join(', ');
     return `Entry #${entry.id ?? '?'}`;
+}
+
+/**
+ * Post-render: check each local-only lorebook entry against the linked
+ * World Info file and update badges with safe/not-found status.
+ */
+async function resolveVersionWorldFileStatus(containerEl, avatar) {
+    if (!containerEl || !avatar) return;
+    const rows = containerEl.querySelectorAll('.vt-lb-entry.local-only[data-lb-keys]');
+    if (rows.length === 0) return;
+
+    const clearSpinners = (reason) => {
+        for (const row of rows) {
+            const check = row.querySelector('.vt-lb-world-check');
+            if (check) { check.innerHTML = ''; check.title = reason; }
+        }
+    };
+
+    try {
+        let worldName = CoreAPI.getCharacterWorldName(avatar);
+
+        if (!worldName) {
+            const charName = (currentChar?.name || '').trim();
+            if (charName) {
+                const allWorlds = await CoreAPI.listWorldInfoFiles();
+                const lower = charName.toLowerCase();
+                worldName = allWorlds.find(w => w.toLowerCase() === lower)
+                         || allWorlds.find(w => w.toLowerCase().includes(lower) || lower.includes(w.toLowerCase()))
+                         || null;
+            }
+        }
+
+        if (!worldName) { clearSpinners('No linked World Info file found.'); return; }
+
+        let worldData;
+        try { worldData = await CoreAPI.getWorldInfoData(worldName); } catch (_) { /* fetch failed */ }
+
+        if (!worldData?.entries) { clearSpinners(`World Info file "${worldName}" could not be read.`); return; }
+
+        const worldEntries = Object.values(worldData.entries).filter(e => e && typeof e === 'object');
+
+        const expandKeys = (keys) => {
+            const set = new Set();
+            for (const k of (keys || [])) {
+                for (const part of String(k).split(',')) {
+                    const t = part.toLowerCase().trim();
+                    if (t) set.add(t);
+                }
+            }
+            return set;
+        };
+
+        for (const row of rows) {
+            let entryKeys;
+            try { entryKeys = JSON.parse(row.dataset.lbKeys || '[]'); } catch (_) { entryKeys = []; }
+            const entryName = (row.dataset.lbName || '').toLowerCase().trim();
+            const embeddedKeys = expandKeys(entryKeys);
+
+            let found = false;
+            for (const we of worldEntries) {
+                const wKeys = expandKeys(we.key);
+                if (embeddedKeys.size > 0 && wKeys.size > 0) {
+                    let inter = 0;
+                    for (const k of embeddedKeys) { if (wKeys.has(k)) inter++; }
+                    const union = new Set([...embeddedKeys, ...wKeys]).size;
+                    if (union > 0 && (inter / union) > 0.3) { found = true; break; }
+                }
+                const wName = (we.comment || '').toLowerCase().trim();
+                if (entryName && wName && (entryName === wName || entryName.includes(wName) || wName.includes(entryName))) {
+                    found = true; break;
+                }
+            }
+
+            const check = row.querySelector('.vt-lb-world-check');
+            if (found) {
+                if (check) {
+                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color:#81c784;font-size:11px;"></i>';
+                    check.title = `Also in World Info file "${worldName}"`;
+                }
+            } else {
+                if (check) {
+                    check.innerHTML = '<i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;font-size:11px;"></i>';
+                    check.title = `Not found in World Info file "${worldName}"`;
+                }
+            }
+        }
+    } catch (err) {
+        console.error('[CharVersions] resolveVersionWorldFileStatus error:', err);
+        clearSpinners('World Info check failed.');
+    }
 }
 
 function matchLbEntries(localEntries, remoteEntries) {
@@ -2045,6 +2305,13 @@ function injectStyles() {
 
 .vt-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .vt-badge.latest { background: rgba(var(--cl-accent-rgb, 74,158,255),0.15); color: var(--cl-accent, #4a9eff); border: 1px solid rgba(var(--cl-accent-rgb, 74,158,255),0.3); }
+.vt-badge.chub-page { background: rgba(245,166,35,0.15); color: #f5a623; border: 1px solid rgba(245,166,35,0.3); }
+
+.vt-item.chub-page { border-bottom: 1px solid rgba(245,166,35,0.15); }
+.vt-item.chub-page.selected { background: rgba(245,166,35,0.08); }
+
+.vt-page-version-banner { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-size: 0.8rem; line-height: 1.4; color: #d4a04a; background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.2); }
+.vt-page-version-banner i { flex-shrink: 0; margin-top: 3px; }
 
 .vt-preview {
     flex: 1;
@@ -2118,6 +2385,11 @@ function injectStyles() {
 .vt-stat.added { color: #89d185; background: rgba(137,209,133,0.1); }
 .vt-stat.removed { color: #f48771; background: rgba(244,135,113,0.1); }
 
+/* Lorebook header — two-row layout keeps stats from jumbling */
+.vt-lb-header { flex-direction: column; align-items: stretch; gap: 4px; }
+.vt-lb-header-top { display: flex; align-items: center; gap: 10px; }
+.vt-lb-stat-row { display: flex; flex-wrap: wrap; gap: 4px 6px; padding-left: 20px; }
+
 .vt-expand-icon { transition: transform 0.2s; opacity: 0.5; font-size: 0.75rem; }
 .vt-diff-item.expanded .vt-expand-icon { transform: rotate(180deg); }
 
@@ -2184,8 +2456,28 @@ function injectStyles() {
 .vt-greeting-body::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
 /* Lorebook diff */
-.vt-lb-content { flex-direction: column; gap: 4px; padding: 8px 10px; }
+.vt-lb-content { flex-direction: column; gap: 4px; padding: 8px 10px; overflow-y: auto; }
 .vt-diff-item.expanded .vt-lb-content { display: flex; }
+
+/* Collapsible sub-sections */
+.vt-lb-section { border-radius: 6px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; }
+.vt-lb-section-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; font-size: 0.8rem; font-weight: 600;
+    color: var(--cl-text-secondary, #aaa); background: rgba(255,255,255,0.03);
+    cursor: pointer; user-select: none; transition: background 0.15s;
+}
+.vt-lb-section-header:hover { background: rgba(255,255,255,0.06); }
+.vt-lb-section-icon { font-size: 0.75em; opacity: 0.6; flex-shrink: 0; }
+.vt-lb-section-title { flex: 1; min-width: 0; }
+.vt-lb-section-chevron { font-size: 0.6rem; opacity: 0.4; transition: transform 0.2s; flex-shrink: 0; }
+.vt-lb-section.expanded .vt-lb-section-chevron { transform: rotate(180deg); }
+.vt-lb-section-body { display: none; padding: 4px 6px; }
+.vt-lb-section.expanded .vt-lb-section-body { display: flex; flex-direction: column; gap: 2px; }
+
+.vt-lb-unchanged-row { padding: 3px 8px; flex-shrink: 0; }
+.vt-lb-unchanged { opacity: 0.5; font-style: italic; font-size: 0.82em; }
+
 .vt-lb-entry {
     display: flex; align-items: center; gap: 8px;
     padding: 5px 8px; border-radius: 5px; font-size: 0.82rem;
@@ -2193,19 +2485,18 @@ function injectStyles() {
 .vt-lb-entry.added { background: rgba(137,209,133,0.08); }
 .vt-lb-entry.removed { background: rgba(244,135,113,0.08); }
 .vt-lb-entry.modified { background: rgba(255,180,80,0.08); }
-.vt-lb-entry.unchanged { padding: 3px 8px; }
 .vt-lb-badge {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 20px; height: 20px; border-radius: 50%;
-    font-weight: bold; font-size: 12px; flex-shrink: 0; line-height: 1;
+    border-radius: 50%;
+    font-weight: bold; flex-shrink: 0; line-height: 1;
 }
 .vt-lb-badge.added { background: rgba(137,209,133,0.2); color: #89d185; }
 .vt-lb-badge.removed { background: rgba(244,135,113,0.2); color: #f48771; }
 .vt-lb-badge.modified { background: rgba(255,180,80,0.2); color: #ffb450; }
-.vt-lb-badge.local-only { background: rgba(158,158,158,0.2); color: #bdbdbd; font-size: 11px; }
+.vt-lb-badge.local-only { background: rgba(158,158,158,0.2); color: #bdbdbd; }
 .vt-lb-entry.local-only { opacity: 0.7; }
+.vt-lb-world-check { display: inline-flex; align-items: center; flex-shrink: 0; min-width: 14px; }
 
-.vt-lb-local-only-section { padding: 4px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
 .vt-lb-keep-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82em; color: var(--cl-text-secondary, #999); }
 .vt-lb-keep-toggle input { accent-color: var(--accent, #7b68ee); }
 .vt-stat.local-only { color: #bdbdbd; background: rgba(158,158,158,0.1); }
@@ -2220,7 +2511,6 @@ function injectStyles() {
     font-size: 0.78em; color: var(--cl-text-secondary, #999);
     margin-left: auto; flex-shrink: 0; white-space: nowrap;
 }
-.vt-lb-unchanged { opacity: 0.5; font-style: italic; font-size: 0.82em; }
 .vt-lb-counts {
     font-size: 0.85em; opacity: 0.6; margin-left: 6px;
     display: inline-flex; align-items: center; gap: 4px;
@@ -2229,11 +2519,6 @@ function injectStyles() {
 .vt-stat.changed { color: #ffb450; }
 
 /* Lorebook metadata settings diff */
-.vt-lb-meta-section { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.vt-lb-meta-title {
-    font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.5px;
-    color: var(--cl-text-secondary, #999); margin-bottom: 5px; font-weight: 600;
-}
 .vt-lb-meta-row {
     display: flex; align-items: center; gap: 6px;
     padding: 2px 0; font-size: 0.82em;

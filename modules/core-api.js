@@ -609,6 +609,16 @@ export function fetchChubMetadata(fullPath) {
 }
 
 /**
+ * Fetch the lorebook for a Chub character that uses linked (not embedded) lorebooks.
+ * Falls back to the V4 Git API's exported card.json which resolves linked lorebooks.
+ * @param {number} projectId - Chub project ID
+ * @returns {Promise<Object|null>} character_book object or null
+ */
+export function fetchChubLinkedLorebook(projectId) {
+    return window.fetchChubLinkedLorebook?.(projectId) || Promise.resolve(null);
+}
+
+/**
  * Extract character data from PNG buffer
  * @param {ArrayBuffer} pngBuffer - PNG file data
  * @returns {Object|null} Parsed character card or null
@@ -653,6 +663,14 @@ export function getWorldInfoData(worldName) {
  */
 export function saveWorldInfoData(worldName, data) {
     return window.saveWorldInfoData?.(worldName, data) || Promise.resolve(false);
+}
+
+/**
+ * List all world info file names available on the server.
+ * @returns {Promise<string[]>} Array of world info names
+ */
+export function listWorldInfoFiles() {
+    return window.listWorldInfoFiles?.() || Promise.resolve([]);
 }
 
 /**
@@ -759,11 +777,13 @@ export default {
     getChubLinkInfo,
     getChubLinkedCharacters,
     fetchChubMetadata,
+    fetchChubLinkedLorebook,
     extractCharacterDataFromPng,
     applyCardFieldUpdates,
     getCharacterWorldName,
     getWorldInfoData,
     saveWorldInfoData,
+    listWorldInfoFiles,
     mergeRemoteLorebookIntoWorldFile,
     getChubHeaders
 };

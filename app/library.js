@@ -377,6 +377,8 @@ const DEFAULT_SETTINGS = {
     showChubTagline: true,
     // Allow rich HTML/CSS in tagline rendering (sanitized)
     allowRichTagline: false,
+    // Use V4 Git API for card update checks (more complete but slower)
+    chubUseV4Api: false,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -670,6 +672,9 @@ function setupSettingsModal() {
     // Appearance
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     
+    // Card Updates
+    const chubUseV4ApiCheckbox = document.getElementById('settingsChubUseV4Api');
+
     // Version History
     const autoSnapshotOnEditCheckbox = document.getElementById('settingsAutoSnapshotOnEdit');
     const maxAutoBackupsInput = document.getElementById('settingsMaxAutoBackups');
@@ -745,6 +750,11 @@ function setupSettingsModal() {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
         }
         
+        // Card Updates
+        if (chubUseV4ApiCheckbox) {
+            chubUseV4ApiCheckbox.checked = getSetting('chubUseV4Api') || false;
+        }
+
         // Version History
         if (autoSnapshotOnEditCheckbox) {
             autoSnapshotOnEditCheckbox.checked = getSetting('autoSnapshotOnEdit') || false;
@@ -836,6 +846,7 @@ function setupSettingsModal() {
             showChubTagline: showChubTaglineCheckbox ? showChubTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
+            chubUseV4Api: chubUseV4ApiCheckbox ? chubUseV4ApiCheckbox.checked : false,
             autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
             maxAutoBackups: maxAutoBackupsInput ? parseInt(maxAutoBackupsInput.value) || 10 : 10,
         });
@@ -1004,6 +1015,7 @@ function setupSettingsModal() {
     if (batchCheckUpdatesBtn) {
         batchCheckUpdatesBtn.onclick = () => {
             if (typeof window.checkAllCardUpdates === 'function') {
+                settingsModal.classList.add('hidden');
                 window.checkAllCardUpdates();
             } else {
                 showToast('Card updates module not loaded', 'error');
@@ -10091,7 +10103,9 @@ function getLorebookFromEditor() {
 }
 
 /**
- * Build a character_book object from editor state
+ * Build a character_book object from editor state.
+ * Preserves existing book metadata (name, description, settings) from the
+ * active character so we don't nuke them when the user only edits entries.
  * @returns {Object|null} The character_book object or null if no entries
  */
 function getCharacterBookFromEditor() {
@@ -10101,12 +10115,13 @@ function getCharacterBookFromEditor() {
         return null;
     }
     
+    const existing = activeChar?.data?.character_book;
     return {
-        name: '',
-        description: '',
-        scan_depth: 2,
-        token_budget: 512,
-        recursive_scanning: false,
+        name: existing?.name ?? '',
+        description: existing?.description ?? '',
+        scan_depth: existing?.scan_depth ?? 2,
+        token_budget: existing?.token_budget ?? 512,
+        recursive_scanning: existing?.recursive_scanning ?? false,
         entries: entries
     };
 }
@@ -11400,6 +11415,16 @@ async function fetchChubMetadata(fullPath) {
                     // embedded_lorebook kept — needed for character_book in card
                     embedded_lorebook: def.embedded_lorebook,
                 },
+                // Array of project IDs for lorebooks linked (not embedded) on Chub.
+                // When non-empty and embedded_lorebook is null, the lorebook
+                // lives in a separate Chub project and only appears in the
+                // exported card.json via the V4 Git API.
+                related_lorebooks: result.related_lorebooks || [],
+                lastActivityAt: result.lastActivityAt || result.last_activity_at || null,
+                createdAt: result.createdAt || result.created_at || null,
+                starCount: result.starCount || result.star_count || 0,
+                rating: result.rating || 0,
+                nTokens: result.nTokens || result.n_tokens || 0,
             };
             // Enforce LRU cap
             while (chubMetadataCache.size >= CHUB_METADATA_CACHE_MAX) {
@@ -11412,6 +11437,51 @@ async function fetchChubMetadata(fullPath) {
         
         return result;
     } catch (error) {
+        return null;
+    }
+}
+
+// Chub characters can have "linked" lorebooks — separate lorebook projects
+// attached via the site UI rather than embedded in the card definition.
+// The metadata API returns these IDs in related_lorebooks but sets
+// embedded_lorebook to null. The V4 Git API's exported card.json resolves
+// linked lorebooks into the definition, so we fetch from there.
+async function fetchChubLinkedLorebook(projectId) {
+    if (!projectId) return null;
+    const headers = getChubHeaders(true);
+    try {
+        // Latest commit
+        const commitsUrl = `${CHUB_API_BASE}/api/v4/projects/${projectId}/repository/commits`;
+        let commitsResp;
+        try {
+            commitsResp = await fetch(commitsUrl, { headers });
+            if (!commitsResp.ok) throw new Error(`HTTP ${commitsResp.status}`);
+        } catch (_) {
+            commitsResp = await fetch(`/proxy/${encodeURIComponent(commitsUrl)}`, { headers });
+            if (!commitsResp.ok) return null;
+        }
+        const commits = await commitsResp.json();
+        const ref = Array.isArray(commits) && commits[0]?.id;
+        if (!ref) return null;
+
+        // Fetch card.json at that commit
+        const cardUrl = `${CHUB_API_BASE}/api/v4/projects/${projectId}/repository/files/raw%252Fcard.json/raw?ref=${ref}`;
+        let cardResp;
+        try {
+            cardResp = await fetch(cardUrl, { headers });
+            if (!cardResp.ok) throw new Error(`HTTP ${cardResp.status}`);
+        } catch (_) {
+            cardResp = await fetch(`/proxy/${encodeURIComponent(cardUrl)}`, { headers });
+            if (!cardResp.ok) return null;
+        }
+        const card = await cardResp.json();
+        const book = card?.data?.character_book || card?.character_book || null;
+        if (book) {
+            debugLog('[Chub] Resolved linked lorebook from V4 Git API for project', projectId, `— ${book.entries?.length ?? 0} entries`);
+        }
+        return book;
+    } catch (e) {
+        console.error('[Chub] fetchChubLinkedLorebook failed for project', projectId, e);
         return null;
     }
 }
@@ -11958,7 +12028,7 @@ function embedCharacterDataInPng(pngBuffer, characterJson) {
 // IMPORTANT: The Chub API uses its OWN field names that differ from the V2 spec.
 // This mapping matches EXACTLY what SillyTavern's own downloadChubCharacter() does
 // in src/endpoints/content-manager.js.
-function buildCharacterCardFromChub(apiData) {
+async function buildCharacterCardFromChub(apiData) {
     const def = apiData.definition || {};
     
     // Chub API field → V2 spec field mapping (from ST source):
@@ -11975,6 +12045,15 @@ function buildCharacterCardFromChub(apiData) {
     //   definition.embedded_lorebook → data.character_book
     //   metadata.topics             → data.tags (NOT definition.tags)
     //   creatorName (from path)     → data.creator
+
+    // Resolve linked lorebooks: metadata API has embedded_lorebook null for
+    // these, but the V4 Git API's card.json includes them.
+    let characterBook = def.embedded_lorebook || undefined;
+    if (!characterBook && apiData.related_lorebooks?.length > 0) {
+        debugLog('[Chub] Resolving linked lorebook for import via V4 Git API');
+        characterBook = await fetchChubLinkedLorebook(apiData.id) || undefined;
+    }
+
     const characterCard = {
         spec: 'chara_card_v2',
         spec_version: '2.0',
@@ -11993,7 +12072,7 @@ function buildCharacterCardFromChub(apiData) {
             creator: apiData.fullPath?.split('/')[0] || '',
             character_version: def.character_version || '',
             extensions: def.extensions || {},
-            character_book: def.embedded_lorebook || undefined,
+            character_book: characterBook,
         }
     };
     
@@ -12020,7 +12099,7 @@ async function importChubCharacter(fullPath) {
         const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
         
         // Build the character card from API metadata (uses ST's exact field mapping)
-        const characterCard = buildCharacterCardFromChub(metadata);
+        const characterCard = await buildCharacterCardFromChub(metadata);
         // Capture fields we need, then release the full metadata object
         const metadataId = metadata.id || null;
         const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
@@ -22456,7 +22535,7 @@ async function downloadChubCharacter() {
         
         // Build the character card from API metadata (uses ST's exact field mapping)
         // This always has the LATEST version data, unlike chara_card_v2.png which may be stale
-        const characterCard = buildCharacterCardFromChub(metadata);
+        const characterCard = await buildCharacterCardFromChub(metadata);
         // Capture fields we need after the card is built, then release the full metadata
         const metadataHasGallery = metadata.hasGallery || false;
         const metadataId = metadata.id || null;
@@ -22801,6 +22880,7 @@ window.setSetting = setSetting;
 
 // ChubAI Integration
 window.fetchChubMetadata = fetchChubMetadata;
+window.fetchChubLinkedLorebook = fetchChubLinkedLorebook;
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;
 window.getChubHeaders = getChubHeaders;
 
@@ -22809,13 +22889,18 @@ window.getChubHeaders = getChubHeaders;
 // ========================================
 
 /**
- * Get the linked world info name for a character (from data.extensions.world)
+ * Get the linked world info name for a character.
+ * Checks extensions.world first, falls back to character_book.name
+ * (the name ST conventionally uses when creating a world from the embedded lorebook).
  * @param {string} avatar - Character avatar filename
  * @returns {string|null} The world info name or null
  */
 window.getCharacterWorldName = function(avatar) {
     const char = allCharacters.find(c => c.avatar === avatar);
-    return char?.data?.extensions?.world || null;
+    if (!char) return null;
+    return char.data?.extensions?.world
+        || char.data?.character_book?.name
+        || null;
 };
 
 /**
@@ -22826,7 +22911,7 @@ window.getCharacterWorldName = function(avatar) {
 window.getWorldInfoData = async function(worldName) {
     if (!worldName) return null;
     try {
-        const response = await apiRequest('/api/worldinfo/get', 'POST', { name: worldName });
+        const response = await apiRequest('/worldinfo/get', 'POST', { name: worldName });
         if (response.ok) {
             return await response.json();
         }
@@ -22847,7 +22932,7 @@ window.getWorldInfoData = async function(worldName) {
 window.saveWorldInfoData = async function(worldName, data) {
     if (!worldName || !data) return false;
     try {
-        const response = await apiRequest('/api/worldinfo/edit', 'POST', {
+        const response = await apiRequest('/worldinfo/edit', 'POST', {
             name: worldName,
             data: data
         });
@@ -22856,6 +22941,29 @@ window.saveWorldInfoData = async function(worldName, data) {
         console.error('[saveWorldInfoData] Error:', error);
         return false;
     }
+};
+
+/**
+ * List all world info file names available on the server.
+ * Tries ST's /api/worldinfo/search endpoint first, falls back to
+ * common alternatives. Returns an array of name strings (no .json suffix).
+ * @returns {Promise<string[]>} Array of world info names
+ */
+window.listWorldInfoFiles = async function() {
+    const endpoints = [
+        { url: '/worldinfo/search', method: 'POST', body: { term: '' } },
+        { url: '/worldinfo', method: 'GET', body: null },
+    ];
+    for (const ep of endpoints) {
+        try {
+            const response = await apiRequest(ep.url, ep.method, ep.body);
+            if (response.ok) {
+                const data = await response.json();
+                if (Array.isArray(data)) return data.map(n => String(n).replace(/\.json$/i, ''));
+            }
+        } catch (_) { /* try next */ }
+    }
+    return [];
 };
 
 /**

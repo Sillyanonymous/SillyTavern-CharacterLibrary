@@ -299,6 +299,17 @@
             ['#clContextMenu.visible',         el => el.classList.remove('visible')],
             ['.custom-select-menu:not(.hidden)', el => el.classList.add('hidden')],
             ['#batchTagModal.visible',         el => el.classList.remove('visible')],
+
+            // When char details is stacked above the update checker, unwind its layers first
+            () => {
+                if (!document.body.classList.contains('char-modal-above')) return false;
+                const confirmModal = document.querySelector('.confirm-modal:not(.hidden)');
+                if (confirmModal) { confirmModal.classList.add('hidden'); return true; }
+                const charModal = document.getElementById('charModal');
+                if (charModal && !charModal.classList.contains('hidden')) { window.closeModal?.(); return true; }
+                return false;
+            },
+
             ['#cardUpdateSingleModal.visible', el => el.classList.remove('visible')],
             ['#cardUpdateBatchModal.visible',  el => el.classList.remove('visible')],
 

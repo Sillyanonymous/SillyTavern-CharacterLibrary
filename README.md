@@ -360,6 +360,19 @@ Some image hosts (Imgur, Catbox, etc.) block direct browser requests due to CORS
 
 This affects embedded media downloads, ChubAI gallery downloads, and bulk localization. If the proxy is disabled, you'll see "CORS blocked and proxy is disabled" in the browser console.
 
+### Character fields are empty or settings don't save
+
+If character details (Description, First Message, Personality, etc.) show up blank — but Creator Notes and name still work — or if settings like Unique Gallery Folders don't persist after reload, this has been reported to be caused by **lazy loading** in SillyTavern's config.
+
+Open `config.yaml` in your SillyTavern root folder and make sure lazy loading is **disabled**:
+
+```yaml
+performance:
+  lazyLoadCharacters: false
+```
+
+Restart SillyTavern after changing this. Lazy loading prevents Character Library from reading the full character data through the API, which causes incomplete fields and broken saves.
+
 ---
 
 ## 🚧 TODO
