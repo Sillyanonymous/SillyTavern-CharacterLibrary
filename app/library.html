@@ -1384,10 +1384,15 @@ https://chub.ai/characters/author/another-character
                     <h4><i class="fa-solid fa-clock-rotate-left"></i> Version History</h4>
                     <p>Track changes to your character cards with snapshots and diffs:</p>
                     <ul>
-                        <li><strong>Auto-backup:</strong> A snapshot is saved automatically before every edit, restore, or card update — you can always undo</li>
+                        <li><strong>Auto-backup:</strong> A snapshot is saved automatically before every edit, restore, or card update, so you can always undo</li>
                         <li><strong>Manual snapshots:</strong> Save the current state of any character at any time</li>
                         <li><strong>Diff preview:</strong> Side-by-side comparison for every card field with added/removed highlighting</li>
                         <li><strong>Remote versions:</strong> For ChubAI-linked characters, browse the full published version history and restore any version</li>
+                    </ul>
+                    <p><strong>How remote versions work:</strong></p>
+                    <ul>
+                        <li><strong>"Chub Page" entry</strong>, shows the current state on ChubAI. Uses the metadata API for card fields, but when a linked lorebook project exists the lorebook is fetched from the V4 Git API and merged in. We use the metadata API here because the V4 Git API has data issues with some characters.</li>
+                        <li><strong>Git version history</strong>, each commit is fetched directly from the V4 Git API (<code>card.json</code>). These are the actual exported snapshots including the full merged lorebook.</li>
                     </ul>
                     <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure max auto-backup count in Settings → Version History.</p>
                 </div>
@@ -1408,13 +1413,23 @@ https://chub.ai/characters/author/another-character
                     <h4><i class="fa-solid fa-book-bookmark"></i> Lorebooks & Card Updates</h4>
                     <p>When a character card includes a lorebook (World Info), SillyTavern stores it in two places:</p>
                     <ul>
-                        <li><strong>Embedded lorebook</strong> (inside the card) — created at import time. SillyTavern does not modify this copy when you edit entries in the World Info editor.</li>
-                        <li><strong>World Info file</strong> (in <code>/worlds/</code>) — the live working copy that SillyTavern uses in chats. All edits you make in the World Info panel go here.</li>
+                        <li><strong>Embedded lorebook</strong> (inside the card), created at import time. SillyTavern does not modify this copy when you edit entries in the World Info editor.</li>
+                        <li><strong>World Info file</strong> (in <code>/worlds/</code>), the live working copy that SillyTavern uses in chats. All edits you make in the World Info panel go here.</li>
                     </ul>
                     <p>These two copies are <strong>independent</strong> and diverge after import.</p>
+
+                    <p><strong>How ChubAI stores lorebooks (it's messy):</strong></p>
+                    <p>ChubAI has two ways a character can have lorebook entries:</p>
+                    <ul>
+                        <li><strong>Embedded entries</strong>, baked directly into the card definition and returned by the metadata API</li>
+                        <li><strong>Linked lorebook</strong>, a separate lorebook project attached to the character. ChubAI merges these entries into the card when you export/download it, but the metadata API returns them separately (or sometimes partially)</li>
+                    </ul>
+                    <p>The metadata API can return incomplete lorebook data. For example, only the embedded entries while the linked lorebook project has dozens more. The V4 Git API (which serves the actual exported <code>card.json</code>) returns the fully merged result with all entries.</p>
+                    <p>Character Library always resolves linked lorebooks: when a character has a linked lorebook project, we fetch the full merged lorebook from the V4 Git API regardless of which API source is used for other fields. This ensures update checks and imports always see the complete lorebook.</p>
+
                     <p><strong>What happens during a card update check:</strong></p>
                     <ul>
-                        <li>Character Library compares the card's <strong>embedded lorebook</strong> against the creator's latest version on ChubAI</li>
+                        <li>Character Library compares the card's <strong>embedded lorebook</strong> against the creator's latest version on ChubAI (with linked lorebook entries resolved)</li>
                         <li>New entries, modified entries, and entries only in your card (local-only) are shown in the diff</li>
                         <li>Your World Info file is <strong>never modified</strong> by the update checker</li>
                     </ul>
@@ -1422,15 +1437,15 @@ https://chub.ai/characters/author/another-character
                     <ul>
                         <li>The card's embedded lorebook is replaced with the latest version from ChubAI</li>
                         <li>Local-only entries (in your card but not on ChubAI) will be removed from the embedded copy</li>
-                        <li>Your World Info file is <strong>not touched</strong> — it keeps all your entries and edits as-is</li>
+                        <li>Your World Info file is <strong>not touched</strong>. It keeps all your entries and edits as-is</li>
                     </ul>
                     <p><strong>Safety check for local-only entries:</strong></p>
                     <ul>
                         <li>For entries that would be removed from the card, Character Library checks whether they also exist in your World Info file</li>
-                        <li><i class="fa-solid fa-shield-halved" style="color:#81c784;"></i> <strong>Safe</strong> — the entry also exists in your World Info file, so removing it from the card won't affect your chats</li>
-                        <li><i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i> <strong>Warning</strong> — the entry was not found in your World Info file and will be permanently lost after applying</li>
+                        <li><i class="fa-solid fa-shield-halved" style="color:#81c784;"></i> <strong>Safe</strong>, the entry also exists in your World Info file, so removing it from the card won't affect your chats</li>
+                        <li><i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i> <strong>Warning</strong>, the entry was not found in your World Info file and will be permanently lost after applying</li>
                     </ul>
-                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> <strong>TL;DR:</strong> Updates only change the card's embedded data. Your World Info file (the copy that actually matters for chats) is never modified.</p>
+                    <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> <strong>TL;DR:</strong> Updates only change the card's embedded data. Your World Info file (the copy that actually matters for chats) is never modified. Linked lorebooks from ChubAI are always resolved to the full merged version.</p>
                 </div>
 
                 <div class="info-section">
@@ -1765,9 +1780,9 @@ https://chub.ai/characters/author/another-character
                             <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Card Updates</div>
                             <div class="settings-row">
                                 <label>
-                                    <input type="checkbox" id="settingsChubUseV4Api"> Use V4 Git API for update checks
+                                    <input type="checkbox" id="settingsChubUseV4Api"> Use V4 Git API for update checks (debug)
                                 </label>
-                                <span class="settings-hint">Fetches the exported card.json from Chub's Git repository instead of the metadata API. Matches the version history data source, but slower and may fail for some characters. When off, updates use the same source as imports.</span>
+                                <span class="settings-hint">Uses the Git repository's card.json for all update check fields instead of the metadata API. Slower and may fail for some characters. Lorebooks from linked projects are always resolved via V4 regardless of this setting.</span>
                             </div>
                             <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
                                 <span class="settings-hint" style="margin-bottom: 4px;">Check all Chub-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
@@ -1980,7 +1995,7 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.0.1</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.0.2</span>
                             </div>
                         </div>
                     </div>

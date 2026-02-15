@@ -995,6 +995,43 @@ async function selectVersion(shortId, fullId) {
 }
 
 /**
+ * Build a normalized card from the stashed metadata API response,
+ * resolving linked lorebooks when needed (same logic as import & update checker).
+ */
+async function buildChubPageCard() {
+    const def = currentMetadata.definition;
+    const enriched = { ...def };
+    if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
+    if (currentMetadata.tagline) {
+        enriched.extensions = enriched.extensions || {};
+        enriched.extensions.chub = enriched.extensions.chub || {};
+        if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
+    }
+    if (!enriched.creator && currentMetadata.fullPath) {
+        enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
+    }
+
+    const card = normalizeChubDef(enriched);
+
+    // Resolve linked lorebook — same as import/update paths
+    const embeddedCount = card.character_book?.entries?.length || 0;
+    if (currentMetadata.related_lorebooks?.length > 0 && currentMetadata.id) {
+        try {
+            const linked = await CoreAPI.fetchChubLinkedLorebook(currentMetadata.id);
+            if (linked?.entries?.length > 0) {
+                card._metaLorebookEntries = embeddedCount;
+                card._linkedLorebook = true;
+                card.character_book = linked;
+            }
+        } catch (e) {
+            console.warn('[CharVersions] Failed to resolve linked lorebook for Chub Page entry', e);
+        }
+    }
+
+    return card;
+}
+
+/**
  * Handle selection of the "Chub Page" pseudo-version entry.
  * Shows a diff against the metadata API response — what the Chub website displays,
  * which may differ from the V4 Git-exported card.json that real versions use.
@@ -1016,26 +1053,19 @@ async function selectChubPageVersion() {
     preview.innerHTML = '<div class="vt-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Chub page data...</div>';
 
     try {
-        const def = currentMetadata.definition;
-        // Supplement with metadata-level fields before normalizing
-        const enriched = { ...def };
-        if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
-        if (currentMetadata.tagline) {
-            enriched.extensions = enriched.extensions || {};
-            enriched.extensions.chub = enriched.extensions.chub || {};
-            if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
-        }
-        if (!enriched.creator && currentMetadata.fullPath) {
-            enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
-        }
-
-        const card = normalizeChubDef(enriched);
+        const card = await buildChubPageCard();
         renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
 
         // Add info banner about what this is
         const banner = document.createElement('div');
         banner.className = 'vt-page-version-banner';
-        banner.innerHTML = '<i class="fa-solid fa-globe"></i><span>This is the Chub <strong>metadata API</strong> state — what the website displays. It can differ from the Git-exported versions above (which is what the update checker and downloads use).</span>';
+        let bannerText;
+        if (card._linkedLorebook) {
+            bannerText = `Character fields come from the Chub <strong>metadata API</strong>. The lorebook is a <strong>linked lorebook</strong> (separate Chub project) resolved via the V4 Git API — the metadata API only stores ${card._metaLorebookEntries ?? 0} embedded entr${(card._metaLorebookEntries ?? 0) === 1 ? 'y' : 'ies'}.`;
+        } else {
+            bannerText = 'Shows the current state from the Chub <strong>metadata API</strong>. Text fields may differ from the Git-exported versions above if the creator edited via the Chub website without committing a new export.';
+        }
+        banner.innerHTML = `<i class="fa-solid fa-globe"></i><span>${bannerText}</span>`;
         const header = preview.querySelector('.vt-preview-header');
         if (header) header.after(banner);
 
@@ -1345,18 +1375,7 @@ async function restoreVersion() {
     let label = '';
 
     if (activeTab === 'remote' && selectedVersionRef === '__chub_page__' && currentMetadata?.definition) {
-        // Chub Page pseudo-entry — data already available from metadata API
-        const enriched = { ...currentMetadata.definition };
-        if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
-        if (currentMetadata.tagline) {
-            enriched.extensions = enriched.extensions || {};
-            enriched.extensions.chub = enriched.extensions.chub || {};
-            if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
-        }
-        if (!enriched.creator && currentMetadata.fullPath) {
-            enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
-        }
-        cardData = normalizeChubDef(enriched);
+        cardData = await buildChubPageCard();
         label = 'Chub metadata API state';
     } else if (activeTab === 'remote' && selectedVersionRef && currentProjectId) {
         const raw = await fetchVersionData(currentProjectId, selectedVersionRef);
@@ -1395,14 +1414,20 @@ async function restoreVersion() {
         const updates = {};
         let lorebookRestored = false;
         for (const f of CARD_FIELDS) {
-            if (cardData[f] !== undefined) {
-                if (f === 'character_book' && activeTab === 'remote') {
-                    // Card gets remote lorebook as-is (1:1 Chub copy)
+            if (f === 'character_book') {
+                const hasLocal = currentChar.data?.character_book?.entries?.length > 0;
+                const hasRemote = cardData[f]?.entries?.length > 0;
+                if (hasRemote) {
                     updates[f] = cardData[f];
-                    lorebookRestored = true;
-                } else {
-                    updates[f] = cardData[f];
+                    if (activeTab === 'remote') lorebookRestored = true;
+                } else if (hasLocal && !hasRemote) {
+                    // Remote has no lorebook — clear embedded copy
+                    updates[f] = null;
                 }
+                continue;
+            }
+            if (cardData[f] !== undefined) {
+                updates[f] = cardData[f];
             }
         }
 

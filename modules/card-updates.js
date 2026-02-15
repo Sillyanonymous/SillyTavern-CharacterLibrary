@@ -341,11 +341,14 @@ function normalizeChubDefinition(def, metadata) {
 async function buildCardFromMetadata(metadata) {
     const def = metadata.definition;
 
-    // Resolve linked lorebooks (separate Chub projects, not embedded in the definition)
+    // Resolve linked lorebooks: the metadata API may return a partial embedded_lorebook
+    // but the full merged result (embedded + linked project entries) is only in the V4 Git
+    // API's exported card.json. Always prefer V4 when related_lorebooks is present.
     let characterBook = def.embedded_lorebook || undefined;
-    if (!characterBook && metadata.related_lorebooks?.length > 0 && metadata.id) {
+    if (metadata.related_lorebooks?.length > 0 && metadata.id) {
         try {
-            characterBook = await CoreAPI.fetchChubLinkedLorebook(metadata.id) || undefined;
+            const linked = await CoreAPI.fetchChubLinkedLorebook(metadata.id);
+            if (linked?.entries?.length > 0) characterBook = linked;
         } catch (e) {
             console.warn('[CardUpdates] Failed to fetch linked lorebook for', metadata.fullPath, e);
         }
@@ -686,9 +689,15 @@ function compareCards(localData, remoteCard, allowedFields = null) {
 
         if (field === 'character_book') {
             const remoteEntries = remoteValue?.entries || [];
-            if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) continue;
-
             const localEntries = localValue?.entries || [];
+
+            // Remote has no lorebook but local does — lorebook was removed upstream
+            if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) {
+                if (localEntries.length > 0) {
+                    diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
+                }
+                continue;
+            }
 
             // Quick equality check
             if (lorebooksEqual(localValue, remoteValue)) continue;
@@ -994,7 +1003,18 @@ function renderLorebookDiff(diff, idx) {
     if (metaDiffs.length > 0) statParts.push(`${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed`);
     const stats = statParts.join(', ');
 
+    const remoteRemoved = remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteBook);
     let entriesHtml = '';
+
+    if (remoteRemoved) {
+        entriesHtml += `<div class="lorebook-diff-info-box" style="border-color:rgba(255,152,0,0.3); background:rgba(255,152,0,0.06);">
+            <i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i>
+            <div>
+                <strong>Lorebook removed on remote</strong>
+                <p style="margin:4px 0 0;">The remote card no longer includes an embedded lorebook. Applying this change will clear the ${localEntries.length} embedded entr${localEntries.length === 1 ? 'y' : 'ies'} from your card. Your World Info file (if any) is never modified.</p>
+            </div>
+        </div>`;
+    }
 
     // Help & tips — collapsible explainer
     entriesHtml += `<div class="lorebook-diff-info-box">
@@ -1653,7 +1673,8 @@ async function applySingleUpdates() {
     checkboxes.forEach(cb => {
         const field = cb.dataset.field;
         const remoteValue = getNestedValue(remoteData, field);
-        updatedFields[field] = remoteValue;
+        // null means "clear this field" — undefined would be silently dropped by JSON
+        updatedFields[field] = remoteValue ?? null;
     });
     
     // Apply via CoreAPI
@@ -1717,7 +1738,7 @@ async function applyAllBatchUpdates() {
         const updatedFields = {};
         for (const diff of diffs) {
             const remoteValue = getNestedValue(remoteData, diff.field);
-            updatedFields[diff.field] = remoteValue;
+            updatedFields[diff.field] = remoteValue ?? null;
         }
         
         try {

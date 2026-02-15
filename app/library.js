@@ -12046,12 +12046,14 @@ async function buildCharacterCardFromChub(apiData) {
     //   metadata.topics             → data.tags (NOT definition.tags)
     //   creatorName (from path)     → data.creator
 
-    // Resolve linked lorebooks: metadata API has embedded_lorebook null for
-    // these, but the V4 Git API's card.json includes them.
+    // Resolve linked lorebooks: the metadata API may return a partial embedded_lorebook
+    // but the full merged result (embedded + linked project entries) is only in the V4 Git
+    // API's exported card.json. Always prefer V4 when related_lorebooks is present.
     let characterBook = def.embedded_lorebook || undefined;
-    if (!characterBook && apiData.related_lorebooks?.length > 0) {
+    if (apiData.related_lorebooks?.length > 0) {
         debugLog('[Chub] Resolving linked lorebook for import via V4 Git API');
-        characterBook = await fetchChubLinkedLorebook(apiData.id) || undefined;
+        const linked = await fetchChubLinkedLorebook(apiData.id);
+        if (linked?.entries?.length > 0) characterBook = linked;
     }
 
     const characterCard = {
