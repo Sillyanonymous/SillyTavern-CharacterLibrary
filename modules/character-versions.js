@@ -1269,13 +1269,13 @@ async function restoreVersion() {
             `Restore - ${ts}`, 'auto_backup', curData, uid);
 
         const updates = {};
+        let lorebookRestored = false;
         for (const f of CARD_FIELDS) {
             if (cardData[f] !== undefined) {
                 if (f === 'character_book' && activeTab === 'remote') {
-                    // Read the keep-local toggle from the versions preview
-                    const keepToggle = paneContainer?.querySelector('.vt-lb-keep-local-toggle');
-                    const keepLocal = keepToggle ? keepToggle.checked : false;
-                    updates[f] = mergeLorebookForRestore(curData.character_book, cardData[f], keepLocal);
+                    // Card gets remote lorebook as-is (1:1 Chub copy)
+                    updates[f] = cardData[f];
+                    lorebookRestored = true;
                 } else {
                     updates[f] = cardData[f];
                 }
@@ -1283,6 +1283,15 @@ async function restoreVersion() {
         }
 
         const success = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, updates);
+
+        // Merge remote lorebook entries into linked /worlds file
+        if (success && lorebookRestored) {
+            try {
+                await CoreAPI.mergeRemoteLorebookIntoWorldFile(currentChar.avatar, cardData.character_book);
+            } catch (worldErr) {
+                console.error('[CharVersions] World file merge failed:', worldErr);
+            }
+        }
 
         if (success) {
             if (activeTab === 'remote' && selectedVersionRef) {
@@ -1535,16 +1544,13 @@ function renderLorebookDiff(field, localBook, remoteBook) {
 
     if (localOnly.length > 0) {
         entriesHtml += `<div class="vt-lb-local-only-section">
-            <label class="vt-lb-keep-toggle">
-                <input type="checkbox" class="vt-lb-keep-local-toggle" checked>
-                <span>Keep ${localOnly.length} local-only entr${localOnly.length === 1 ? 'y' : 'ies'}</span>
-            </label>
+            <span class="vt-lb-local-note">${localOnly.length} local-only entr${localOnly.length === 1 ? 'y' : 'ies'} (preserved in World Info file)</span>
         </div>`;
         for (const entry of localOnly) {
             const name = lbEntryName(entry);
             const keys = (entry.keys || []).slice(0, 4).join(', ');
             entriesHtml += `<div class="vt-lb-entry local-only">
-                <span class="vt-lb-badge local-only">?</span>
+                <span class="vt-lb-badge local-only">&#9733;</span>
                 <span class="vt-lb-name">${esc(name)}</span>
                 ${keys ? `<span class="vt-lb-keys">${esc(keys)}</span>` : ''}
                 <span class="vt-lb-keys">local only</span>

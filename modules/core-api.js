@@ -628,6 +628,45 @@ export function applyCardFieldUpdates(avatar, fieldUpdates) {
 }
 
 /**
+ * Get the linked world info name for a character
+ * @param {string} avatar - Character avatar filename
+ * @returns {string|null} The world info name or null
+ */
+export function getCharacterWorldName(avatar) {
+    return window.getCharacterWorldName?.(avatar) || null;
+}
+
+/**
+ * Fetch world info data from ST
+ * @param {string} worldName - The world name to fetch
+ * @returns {Promise<Object|null>} World info data or null
+ */
+export function getWorldInfoData(worldName) {
+    return window.getWorldInfoData?.(worldName) || Promise.resolve(null);
+}
+
+/**
+ * Save world info data to ST
+ * @param {string} worldName - The world name to save
+ * @param {Object} data - World info data object
+ * @returns {Promise<boolean>} Success
+ */
+export function saveWorldInfoData(worldName, data) {
+    return window.saveWorldInfoData?.(worldName, data) || Promise.resolve(false);
+}
+
+/**
+ * Merge remote V2 lorebook entries into the character's linked /worlds file.
+ * Matched entries get updated; new entries are added; user entries are preserved.
+ * @param {string} avatar - Character avatar filename
+ * @param {Object} remoteBook - Remote V2 character_book object
+ * @returns {Promise<boolean>} Success
+ */
+export function mergeRemoteLorebookIntoWorldFile(avatar, remoteBook) {
+    return window.mergeRemoteLorebookIntoWorldFile?.(avatar, remoteBook) || Promise.resolve(false);
+}
+
+/**
  * Get Chub API headers (with optional auth token)
  * @returns {Object} Headers object
  */
@@ -722,5 +761,9 @@ export default {
     fetchChubMetadata,
     extractCharacterDataFromPng,
     applyCardFieldUpdates,
+    getCharacterWorldName,
+    getWorldInfoData,
+    saveWorldInfoData,
+    mergeRemoteLorebookIntoWorldFile,
     getChubHeaders
 };

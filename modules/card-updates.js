@@ -48,7 +48,7 @@ const COMPARABLE_FIELDS = {
 };
 
 let batchFieldSelection = new Set(
-    Object.keys(COMPARABLE_FIELDS).filter(k => k !== 'character_book')
+    Object.keys(COMPARABLE_FIELDS)
 );
 
 // Fields that should use text diff view
@@ -538,9 +538,11 @@ function computeLineDiff(oldLines, newLines) {
  * Compare two cards and find differences
  * @param {Object} localData - Local character data (char.data)
  * @param {Object} remoteCard - Remote card object
- * @returns {Array} Array of { field, label, local, remote, isLongText }
+ * @param {Set|null} allowedFields - Optional filter for which fields to compare
+ * @param {Object|null} worldInfoData - If present, world info data to use as local source for lorebook comparison
+ * @returns {Array} Array of { field, label, local, remote, isLongText, hasWorldFile }
  */
-function compareCards(localData, remoteCard, allowedFields = null) {
+function compareCards(localData, remoteCard, allowedFields = null, worldInfoData = null) {
     const diffs = [];
     const remoteData = remoteCard?.data || remoteCard;
     
@@ -551,17 +553,51 @@ function compareCards(localData, remoteCard, allowedFields = null) {
         const localValue = getNestedValue(localData, field);
         const remoteValue = getNestedValue(remoteData, field);
 
-        // Treat missing/null/empty lorebooks as equivalent
         if (field === 'character_book') {
-            if (lorebooksEqual(localValue, remoteValue)) continue;
-            // Deeper semantic check: fuzzy-match entries to see if anything truly changed
-            const localEntries = localValue?.entries || [];
             const remoteEntries = remoteValue?.entries || [];
-            const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
+            if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) continue;
+
+            // Decide what to compare against: /worlds data (preferred) or character_book
+            let effectiveLocalEntries;
+            let effectiveLocalBook;
+            const hasWorld = !!worldInfoData;
+
+            if (hasWorld) {
+                effectiveLocalEntries = worldEntriesToV2Array(worldInfoData);
+                // Build a pseudo-book for meta comparison
+                effectiveLocalBook = {
+                    entries: effectiveLocalEntries,
+                    name: worldInfoData.name,
+                    description: worldInfoData.description,
+                    scan_depth: worldInfoData.scan_depth,
+                    token_budget: worldInfoData.token_budget,
+                    recursive_scanning: worldInfoData.recursive_scanning,
+                };
+            } else {
+                effectiveLocalEntries = localValue?.entries || [];
+                effectiveLocalBook = localValue;
+            }
+
+            // Quick equality check
+            if (lorebooksEqual(effectiveLocalBook, remoteValue)) continue;
+
+            // Deeper semantic check: only look at creator content changes
+            const { matched, added, removed } = matchLorebookEntries(effectiveLocalEntries, remoteEntries);
+            // In world-based comparison, "removed" are world entries not on remote = user content. Ignore for diff.
             const modified = matched.filter(m => m.changedFields.length > 0);
-            const metaDiffs = compareLorebookMeta(localValue, remoteValue);
-            if (added.length === 0 && removed.length === 0 && modified.length === 0 && metaDiffs.length === 0) continue;
-            diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
+            const metaDiffs = hasWorld ? [] : compareLorebookMeta(effectiveLocalBook, remoteValue);
+
+            // Only report diffs from the creator side: new entries, modified entries, meta changes
+            // User-only entries in /worlds are invisible to this check
+            if (added.length === 0 && modified.length === 0 && metaDiffs.length === 0) continue;
+
+            diffs.push({
+                field, label,
+                local: effectiveLocalBook,
+                remote: remoteValue,
+                isLongText: false,
+                hasWorldFile: hasWorld,
+            });
             continue;
         }
         
@@ -650,7 +686,12 @@ async function performSingleCheck(char) {
         }
         
         const localData = char.data || char;
-        const diffs = compareCards(localData, remoteCard);
+
+        // Fetch linked world info for lorebook comparison
+        const worldName = CoreAPI.getCharacterWorldName(char.avatar);
+        const worldInfoData = worldName ? await CoreAPI.getWorldInfoData(worldName) : null;
+
+        const diffs = compareCards(localData, remoteCard, null, worldInfoData);
         
         if (diffs.length === 0) {
             statusEl.innerHTML = '<i class="fa-solid fa-check"></i> Character is up to date!';
@@ -659,8 +700,8 @@ async function performSingleCheck(char) {
         
         statusEl.innerHTML = `<i class="fa-solid fa-arrow-right-arrow-left"></i> Found ${diffs.length} difference${diffs.length > 1 ? 's' : ''}`;
         
-        // Store for apply action
-        currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs });
+        // Store for apply action (include world context)
+        currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs, worldName, worldInfoData });
         
         // Render diff UI
         contentEl.innerHTML = renderDiffList(diffs, char.avatar);
@@ -796,33 +837,42 @@ function renderLorebookDiff(diff, charKey, idx) {
     const checkboxId = `diff-${charKey}-${idx}`;
     const localBook = diff.local;
     const remoteBook = diff.remote;
+    const hasWorld = diff.hasWorldFile;
     const localEntries = localBook?.entries || [];
     const remoteEntries = remoteBook?.entries || [];
 
     const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
     const modified = matched.filter(m => m.changedFields.length > 0);
-    const metaDiffs = compareLorebookMeta(localBook, remoteBook);
+    // Skip meta diffs for world-based comparison (world meta uses different format)
+    const metaDiffs = hasWorld ? [] : compareLorebookMeta(localBook, remoteBook);
 
-    // "removed" = entries in local but not remote. These are user-added entries, not creator deletions.
+    // "removed" = entries in local but not remote.
+    // For world-based flow: these are user entries in /worlds, invisible to diff (already filtered in compareCards).
+    // For card-only flow: these are user-added character_book entries.
     const userAdded = removed;
 
-    // Nothing actually changed after fuzzy matching — skip
     if (added.length === 0 && userAdded.length === 0 && modified.length === 0 && metaDiffs.length === 0) return '';
 
     const statParts = [];
     if (added.length > 0) statParts.push(`${added.length} new from creator`);
-    if (userAdded.length > 0) statParts.push(`${userAdded.length} user-added`);
+    if (userAdded.length > 0 && !hasWorld) statParts.push(`${userAdded.length} user-added`);
     if (modified.length > 0) statParts.push(`${modified.length} modified`);
     if (metaDiffs.length > 0) statParts.push(`${metaDiffs.length} setting${metaDiffs.length > 1 ? 's' : ''} changed`);
     const stats = statParts.join(', ');
 
     let entriesHtml = '';
 
-    // Summary of what will happen on apply
+    // World-aware header note
+    if (hasWorld) {
+        entriesHtml += `<div class="lorebook-diff-summary">
+            Compared against linked World Info file. New and modified creator entries will be merged into the world file. Your entries are untouched.
+        </div>`;
+    }
+
     const summaryParts = [];
     if (matched.length > 0) summaryParts.push(`${matched.length} matched with remote`);
-    if (added.length > 0) summaryParts.push(`${added.length} new entries from remote will be added`);
-    if (userAdded.length > 0) summaryParts.push(`${userAdded.length} local-only (not in remote)`);
+    if (added.length > 0) summaryParts.push(`${added.length} new entries will be added`);
+    if (userAdded.length > 0 && !hasWorld) summaryParts.push(`${userAdded.length} local-only (not in remote)`);
     if (modified.length > 0) summaryParts.push(`${modified.length} matched entries have changes`);
     entriesHtml += `<div class="lorebook-diff-summary">${summaryParts.join('. ')}.</div>`;
 
@@ -848,14 +898,16 @@ function renderLorebookDiff(diff, charKey, idx) {
         </div>`;
     }
 
-    for (const entry of userAdded) {
-        const name = lorebookEntryName(entry);
-        const keys = (entry.keys || []).slice(0, 4).join(', ');
-        entriesHtml += `<div class="lorebook-diff-entry user-added">
-            <span class="lorebook-diff-badge user-added">&#9733;</span>
-            <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
-            <span class="lorebook-diff-entry-keys">${keys ? CoreAPI.escapeHtml(keys) + ' · ' : ''}user-added, will be kept</span>
-        </div>`;
+    if (!hasWorld) {
+        for (const entry of userAdded) {
+            const name = lorebookEntryName(entry);
+            const keys = (entry.keys || []).slice(0, 4).join(', ');
+            entriesHtml += `<div class="lorebook-diff-entry user-added">
+                <span class="lorebook-diff-badge user-added">&#9733;</span>
+                <span class="lorebook-diff-entry-name">${CoreAPI.escapeHtml(name)}</span>
+                <span class="lorebook-diff-entry-keys">${keys ? CoreAPI.escapeHtml(keys) + ' · ' : ''}user-added, will be kept</span>
+            </div>`;
+        }
     }
 
     for (const m of modified) {
@@ -876,13 +928,14 @@ function renderLorebookDiff(diff, charKey, idx) {
     }
 
     const mergedCount = matched.length + added.length + userAdded.length;
+    const labelSuffix = hasWorld ? ' (via World Info)' : '';
 
     return `
         <div class="card-update-diff-item long-text lorebook">
             <div class="card-update-diff-header">
                 <label>
                     <input type="checkbox" id="${checkboxId}" data-field="${diff.field}" checked>
-                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}</span>
+                    <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}${labelSuffix}</span>
                     <span class="lorebook-entry-counts">
                         <span class="local-count">${localEntries.length}</span>
                         <i class="fa-solid fa-arrow-right"></i>
@@ -1021,6 +1074,70 @@ function normalizeLorebookEntry(entry) {
     return out;
 }
 
+// ========================================
+// WORLD INFO ↔ V2 FORMAT CONVERSION
+// ========================================
+//
+// How SillyTavern's lorebook storage works:
+//
+//   character_book (in card PNG)  — Snapshot created at import time. It seems ST does NOT
+//                                   re-embed /worlds data on normal saves. Only
+//                                   changes when explicitly exported or when we
+//                                   write to it via the API.
+//
+//   /worlds/{name}.json           — The live working copy. All edits made in ST's
+//                                   World Info editor go here. Linked to the
+//                                   character via char.data.extensions.world.
+//
+// At import ST extracts character_book → /worlds file (one-time). After that the
+// card and the world file diverge: users add entries to /worlds, but character_book
+// stays frozen. If ST ever does re-embed (export, re-import) the card ends up with
+// user entries baked in, making it look like a diff against Chub.
+//
+// Our approach:
+//   - CHECK: Compare /worlds entries (converted to V2) against Chub. Entries in
+//     /worlds with no Chub match (user-added OR creator-removed) are invisible to
+//     the diff — safe default is to keep them either way.
+//   - APPLY: Write Chub's lorebook to character_book as-is (clean mirror). Then
+//     merge new/changed creator entries into /worlds. User entries in /worlds are
+//     never touched.
+//   - No linked world file: Fall back to comparing character_book directly.
+//
+
+/**
+ * Convert a ST /worlds entry (internal format) to V2 character_book entry format.
+ * This allows our existing comparison/matching logic to work uniformly.
+ */
+function worldEntryToV2(entry) {
+    return {
+        keys: entry.key || [],
+        secondary_keys: entry.keysecondary || [],
+        content: entry.content || '',
+        enabled: !entry.disable,
+        selective: entry.selective ?? true,
+        constant: entry.constant ?? false,
+        position: entry.position === 0 ? 'before_char' : entry.position === 1 ? 'after_char' : String(entry.position ?? 0),
+        insertion_order: entry.order ?? 100,
+        priority: entry.extensions?.priority ?? entry.order ?? 100,
+        case_sensitive: entry.caseSensitive ?? null,
+        name: entry.comment || '',
+        comment: entry.comment || '',
+        id: entry.uid,
+        // Preserve ST-internal UID for merge-back
+        _worldUid: entry.uid,
+    };
+}
+
+/**
+ * Convert ST /worlds UID-keyed entries object to a V2-compatible array
+ */
+function worldEntriesToV2Array(worldData) {
+    if (!worldData?.entries) return [];
+    return Object.values(worldData.entries)
+        .filter(e => e && typeof e === 'object')
+        .map(worldEntryToV2);
+}
+
 function lorebooksEqual(a, b) {
     const aEntries = a?.entries || [];
     const bEntries = b?.entries || [];
@@ -1046,47 +1163,6 @@ function lorebooksEqual(a, b) {
 function hasRemoteLorebookMeta(book) {
     if (!book) return false;
     return Object.keys(LOREBOOK_META_FIELDS).some(k => book[k] != null);
-}
-
-/**
- * Merge remote lorebook into local.
- * - Matched entries: replaced with remote version
- * - Remote-only entries: added
- * - Local-only entries: kept only if keepLocalOnly is true
- * - Meta fields: taken from remote when available
- */
-function mergeLorebookForApply(localBook, remoteBook, keepLocalOnly = true) {
-    const localEntries = localBook?.entries || [];
-    const remoteEntries = remoteBook?.entries || [];
-
-    if (remoteEntries.length === 0 && localEntries.length === 0) {
-        return remoteBook || localBook;
-    }
-
-    const { matched, added, removed } = matchLorebookEntries(localEntries, remoteEntries);
-
-    // Use remote meta when available, fall back to local meta
-    const base = remoteBook ? { ...remoteBook } : { ...(localBook || {}) };
-    const merged = { ...base };
-
-    const mergedEntries = [];
-    // Matched entries: use remote version
-    for (const m of matched) {
-        mergedEntries.push(m.remote);
-    }
-    // Remote-only (new from creator): add them
-    for (const entry of added) {
-        mergedEntries.push(entry);
-    }
-    // Local-only: keep only if user chose to
-    if (keepLocalOnly) {
-        for (const entry of removed) {
-            mergedEntries.push(entry);
-        }
-    }
-
-    merged.entries = mergedEntries;
-    return merged;
 }
 
 function compareLorebookMeta(localBook, remoteBook) {
@@ -1183,14 +1259,10 @@ function showBatchCheckModal(characters) {
     if (fieldGridEl) {
         fieldGridEl.innerHTML = Object.entries(COMPARABLE_FIELDS).map(([field, label]) => {
             const isChecked = batchFieldSelection.has(field);
-            const isLorebook = field === 'character_book';
-            const tooltip = isLorebook
-                ? 'title="Lorebook matching may misidentify entries the creator removed vs. ones you added locally. Review lorebook changes per-character instead."'
-                : '';
             return `
-                <label class="card-update-field-option" ${tooltip}>
+                <label class="card-update-field-option">
                     <input type="checkbox" data-field="${field}" ${isChecked ? 'checked' : ''}>
-                    <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}${isLorebook ? ' <i class="fa-solid fa-circle-info" style="opacity:0.4;font-size:0.8em;"></i>' : ''}</span>
+                    <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}</span>
                 </label>
             `;
         }).join('');
@@ -1255,7 +1327,16 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 errors++;
             } else {
                 const localData = char.data || char;
-                const diffs = compareCards(localData, remoteCard, allowedFields);
+
+                // Fetch linked world info for lorebook comparison if lorebook is in scope
+                let worldName = null;
+                let worldInfoData = null;
+                if (!allowedFields || allowedFields.has('character_book')) {
+                    worldName = CoreAPI.getCharacterWorldName(char.avatar);
+                    if (worldName) worldInfoData = await CoreAPI.getWorldInfoData(worldName);
+                }
+
+                const diffs = compareCards(localData, remoteCard, allowedFields, worldInfoData);
                 
                 if (diffs.length === 0) {
                     if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
@@ -1268,7 +1349,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                             </button>
                         `;
                     }
-                    currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs });
+                    currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs, worldName, worldInfoData });
                     withUpdates++;
                 }
             }
@@ -1346,18 +1427,13 @@ async function applySingleUpdates() {
     
     // Build updated data object
     const updatedFields = {};
+    let lorebookSelected = false;
     checkboxes.forEach(cb => {
         const field = cb.dataset.field;
         if (field === 'character_book') {
-            // Check the keep-local toggle inside this lorebook diff
-            const lbItem = cb.closest('.card-update-diff-item');
-            const keepToggle = lbItem?.querySelector('.lb-keep-local-toggle');
-            const keepLocal = keepToggle ? keepToggle.checked : false;
-            updatedFields[field] = mergeLorebookForApply(
-                getNestedValue(char.data || char, field),
-                getNestedValue(remoteData, field),
-                keepLocal
-            );
+            // Card gets remote lorebook as-is (1:1 Chub copy)
+            updatedFields[field] = getNestedValue(remoteData, field);
+            lorebookSelected = true;
         } else {
             const remoteValue = getNestedValue(remoteData, field);
             updatedFields[field] = remoteValue;
@@ -1371,6 +1447,17 @@ async function applySingleUpdates() {
             try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
         }
         const success = await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields);
+        
+        // Merge new creator entries into linked /worlds file
+        if (success && lorebookSelected) {
+            try {
+                const remoteBook = getNestedValue(remoteData, 'character_book');
+                await CoreAPI.mergeRemoteLorebookIntoWorldFile(char.avatar, remoteBook);
+            } catch (worldErr) {
+                console.error('[CardUpdates] World file merge failed:', worldErr);
+                CoreAPI.showToast('Card updated but world file merge failed', 'warning');
+            }
+        }
         
         if (success) {
             CoreAPI.showToast(`Updated ${checkboxes.length} field${checkboxes.length > 1 ? 's' : ''}`, 'success');
@@ -1423,14 +1510,12 @@ async function applyAllBatchUpdates() {
         
         // Apply all diffs for this character
         const updatedFields = {};
+        let lorebookIncluded = false;
         for (const diff of diffs) {
             if (diff.field === 'character_book') {
-                // Batch apply: don't keep local-only entries (no UI toggle available)
-                updatedFields[diff.field] = mergeLorebookForApply(
-                    getNestedValue(char.data || char, diff.field),
-                    getNestedValue(remoteData, diff.field),
-                    false
-                );
+                // Card gets remote lorebook as-is (1:1 Chub copy)
+                updatedFields[diff.field] = getNestedValue(remoteData, diff.field);
+                lorebookIncluded = true;
             } else {
                 const remoteValue = getNestedValue(remoteData, diff.field);
                 updatedFields[diff.field] = remoteValue;
@@ -1443,6 +1528,16 @@ async function applyAllBatchUpdates() {
                 try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
             }
             const success = await CoreAPI.applyCardFieldUpdates(avatar, updatedFields);
+
+            // Merge new creator entries into linked /worlds file
+            if (success && lorebookIncluded) {
+                try {
+                    const remoteBook = getNestedValue(remoteData, 'character_book');
+                    await CoreAPI.mergeRemoteLorebookIntoWorldFile(avatar, remoteBook);
+                } catch (worldErr) {
+                    console.error('[CardUpdates] World file merge failed for:', avatar, worldErr);
+                }
+            }
             
             if (success) {
                 successCount++;

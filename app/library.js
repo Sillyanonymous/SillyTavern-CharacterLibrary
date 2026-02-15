@@ -22804,6 +22804,219 @@ window.fetchChubMetadata = fetchChubMetadata;
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;
 window.getChubHeaders = getChubHeaders;
 
+// ========================================
+// WORLD INFO API
+// ========================================
+
+/**
+ * Get the linked world info name for a character (from data.extensions.world)
+ * @param {string} avatar - Character avatar filename
+ * @returns {string|null} The world info name or null
+ */
+window.getCharacterWorldName = function(avatar) {
+    const char = allCharacters.find(c => c.avatar === avatar);
+    return char?.data?.extensions?.world || null;
+};
+
+/**
+ * Fetch world info data from ST's /api/worldinfo/get endpoint
+ * @param {string} worldName - The world name to fetch
+ * @returns {Promise<Object|null>} World info data { entries: {uid: entry, ...}, ...meta } or null
+ */
+window.getWorldInfoData = async function(worldName) {
+    if (!worldName) return null;
+    try {
+        const response = await apiRequest('/api/worldinfo/get', 'POST', { name: worldName });
+        if (response.ok) {
+            return await response.json();
+        }
+        console.error('[getWorldInfoData] API error:', response.status);
+        return null;
+    } catch (error) {
+        console.error('[getWorldInfoData] Error:', error);
+        return null;
+    }
+};
+
+/**
+ * Save world info data via ST's /api/worldinfo/edit endpoint
+ * @param {string} worldName - The world name to save
+ * @param {Object} data - World info data object
+ * @returns {Promise<boolean>} Success
+ */
+window.saveWorldInfoData = async function(worldName, data) {
+    if (!worldName || !data) return false;
+    try {
+        const response = await apiRequest('/api/worldinfo/edit', 'POST', {
+            name: worldName,
+            data: data
+        });
+        return response.ok;
+    } catch (error) {
+        console.error('[saveWorldInfoData] Error:', error);
+        return false;
+    }
+};
+
+/**
+ * Merge remote V2 lorebook entries into the character's linked /worlds file.
+ * Matched entries get their V2-spec fields updated; new entries are added;
+ * user-only entries are preserved untouched.
+ *
+ * /worlds entries with no Chub match are left alone — they may be user-created
+ * or creator-removed, but the safe choice for both cases is to keep them.
+ * Only V2-spec fields (keys, content, enabled, etc.) are written on matched
+ * entries; ST-internal fields (probability, depth, group, vectorized…) are
+ * preserved so user customizations survive.
+ *
+ * @param {string} avatar - Character avatar filename
+ * @param {Object} remoteBook - Remote V2 character_book object { entries: [...], ... }
+ * @returns {Promise<boolean>} Success
+ */
+window.mergeRemoteLorebookIntoWorldFile = async function(avatar, remoteBook) {
+    const worldName = window.getCharacterWorldName(avatar);
+    if (!worldName) return false;
+    const worldData = await window.getWorldInfoData(worldName);
+    if (!worldData?.entries) return false;
+
+    const remoteEntries = remoteBook?.entries || [];
+    if (remoteEntries.length === 0) return true;
+
+    // Build a quick lookup of world entries by expanded keys for matching
+    const worldList = Object.values(worldData.entries).filter(e => e && typeof e === 'object');
+
+    const expandKeys = (keys) => {
+        const set = new Set();
+        for (const k of (keys || [])) {
+            for (const part of String(k).split(',')) {
+                const t = part.toLowerCase().trim();
+                if (t) set.add(t);
+            }
+        }
+        return set;
+    };
+
+    const jaccard = (a, b) => {
+        if (a.size === 0 || b.size === 0) return 0;
+        let inter = 0;
+        for (const k of a) { if (b.has(k)) inter++; }
+        const union = new Set([...a, ...b]).size;
+        return union > 0 ? inter / union : 0;
+    };
+
+    const nameMatch = (wa, rb) => {
+        const a = (wa.comment || '').toLowerCase().trim();
+        const b = (rb.name || rb.comment || '').toLowerCase().trim();
+        if (!a || !b) return 0;
+        if (a === b) return 1;
+        if (a.includes(b) || b.includes(a)) return 0.8;
+        return 0;
+    };
+
+    // Match each remote entry against world entries
+    const matchedWorldUids = new Set();
+    const unmatched = [];
+
+    for (const remote of remoteEntries) {
+        const rKeys = expandKeys(remote.keys);
+        let bestUid = null;
+        let bestScore = 0;
+
+        for (const we of worldList) {
+            if (matchedWorldUids.has(we.uid)) continue;
+            const wKeys = expandKeys(we.key);
+            let score = jaccard(rKeys, wKeys);
+            if (score === 0) score = nameMatch(we, remote);
+            if (score > bestScore) {
+                bestScore = score;
+                bestUid = we.uid;
+            }
+        }
+
+        if (bestUid != null && bestScore > 0.3) {
+            matchedWorldUids.add(bestUid);
+            // Update the matched world entry's V2-spec fields
+            const target = worldData.entries[bestUid];
+            if (remote.keys !== undefined) target.key = remote.keys;
+            if (remote.secondary_keys !== undefined) target.keysecondary = remote.secondary_keys;
+            if (remote.content !== undefined) target.content = remote.content;
+            if (remote.enabled !== undefined) target.disable = !remote.enabled;
+            if (remote.selective !== undefined) target.selective = remote.selective;
+            if (remote.constant !== undefined) target.constant = remote.constant;
+            if (remote.insertion_order !== undefined) target.order = remote.insertion_order;
+            if (remote.name !== undefined) target.comment = remote.name;
+            if (remote.case_sensitive !== undefined) target.caseSensitive = remote.case_sensitive;
+        } else {
+            unmatched.push(remote);
+        }
+    }
+
+    // Add unmatched remote entries as new world entries
+    const existingUids = Object.keys(worldData.entries).map(Number).filter(n => !isNaN(n));
+    let nextUid = existingUids.length > 0 ? Math.max(...existingUids) + 1 : 0;
+
+    for (const entry of unmatched) {
+        const uid = nextUid++;
+        worldData.entries[uid] = {
+            uid,
+            key: entry.keys || [],
+            keysecondary: entry.secondary_keys || [],
+            comment: entry.name || entry.comment || '',
+            content: entry.content || '',
+            constant: entry.constant ?? false,
+            selective: entry.selective ?? true,
+            selectiveLogic: 0,
+            addMemo: !!(entry.name || entry.comment),
+            order: entry.insertion_order ?? 100,
+            position: entry.position === 'before_char' ? 0 : entry.position === 'after_char' ? 1 : Number(entry.position) || 0,
+            disable: !(entry.enabled ?? true),
+            excludeRecursion: false,
+            preventRecursion: false,
+            delayUntilRecursion: false,
+            probability: 100,
+            useProbability: true,
+            depth: 4,
+            group: '',
+            groupOverride: false,
+            groupWeight: 100,
+            scanDepth: null,
+            caseSensitive: entry.case_sensitive ?? null,
+            matchWholeWords: null,
+            useGroupScoring: null,
+            automationId: '',
+            role: 0,
+            vectorized: false,
+            sticky: null,
+            cooldown: null,
+            delay: null,
+            displayIndex: uid,
+            extensions: {
+                position: entry.position === 'before_char' ? 0 : entry.position === 'after_char' ? 1 : Number(entry.position) || 0,
+                exclude_recursion: false,
+                display_index: uid,
+                probability: 100,
+                useProbability: true,
+                depth: 4,
+                selectiveLogic: 0,
+                group: '',
+                group_override: false,
+                group_weight: 100,
+                prevent_recursion: false,
+                delay_until_recursion: false,
+                scan_depth: null,
+                case_sensitive: entry.case_sensitive ?? null,
+                match_whole_words: null,
+                use_group_scoring: null,
+                automation_id: '',
+                role: 0,
+                vectorized: false,
+            },
+        };
+    }
+
+    return await window.saveWorldInfoData(worldName, worldData);
+};
+
 /**
  * Apply field updates to a character card
  * Used by card-updates module to apply selective field changes
