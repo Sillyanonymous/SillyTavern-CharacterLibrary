@@ -16,6 +16,8 @@ let pendingBatchCharacters = [];
 let batchCheckPaused = false;
 let batchCheckRunning = false;
 let batchCheckedCount = 0;
+let batchSelectedAvatars = new Set(); // Characters checked for inclusion in Apply All
+let batchStatusFilter = 'all'; // Active filter: 'all' | 'has-updates' | 'up-to-date' | 'errors' | 'unavailable' | 'applied'
 
 // Fields to compare (key -> display label)
 const COMPARABLE_FIELDS = {
@@ -46,6 +48,34 @@ const COMPARABLE_FIELDS = {
     'depth_prompt.role': 'Depth Prompt Role', // Not mapped from Chub API yet
     'character_book': 'Embedded Lorebook',
 };
+
+const FIELD_ICONS = {
+    'name': 'fa-solid fa-signature',
+    'description': 'fa-solid fa-scroll',
+    'personality': 'fa-solid fa-brain',
+    'scenario': 'fa-solid fa-map',
+    'first_mes': 'fa-solid fa-comment',
+    'mes_example': 'fa-solid fa-comments',
+    'system_prompt': 'fa-solid fa-terminal',
+    'post_history_instructions': 'fa-solid fa-clock-rotate-left',
+    'creator_notes': 'fa-solid fa-sticky-note',
+    'creator': 'fa-solid fa-pen-nib',
+    'tags': 'fa-solid fa-tags',
+    'alternate_greetings': 'fa-solid fa-list',
+    'extensions.chub.tagline': 'fa-solid fa-quote-left',
+    'nickname': 'fa-solid fa-id-badge',
+    'group_only_greetings': 'fa-solid fa-users',
+    'depth_prompt.prompt': 'fa-solid fa-layer-group',
+    'depth_prompt.depth': 'fa-solid fa-arrow-down-1-9',
+    'depth_prompt.role': 'fa-solid fa-user-tag',
+    'character_book': 'fa-solid fa-book',
+};
+
+function fieldIcon(field) {
+    const icon = FIELD_ICONS[field] || 'fa-solid fa-file-alt';
+    const label = COMPARABLE_FIELDS[field] || field;
+    return `<i class="${icon} batch-field-icon" title="${label}"></i>`;
+}
 
 let batchFieldSelection = new Set(
     Object.keys(COMPARABLE_FIELDS)
@@ -772,6 +802,7 @@ function valuesEqual(a, b) {
 // The avatar of the character currently shown in the single-check modal.
 // Stored here instead of in HTML attributes to avoid special-character escaping issues.
 let singleModalAvatar = null;
+let singleModalClosedAt = 0;
 
 /**
  * Open the character details modal above the update checker modals.
@@ -1508,6 +1539,17 @@ function showBatchCheckModal(characters) {
     actionsEl.style.display = 'none';
     currentUpdateChecks.clear();
     pendingBatchCharacters = characters;
+    batchSelectedAvatars.clear();
+    batchStatusFilter = 'all';
+    
+    // Reset filter bar
+    const filterBar = document.getElementById('cardUpdateBatchFilterBar');
+    if (filterBar) filterBar.classList.add('hidden');
+    resetBatchFilterPills();
+    
+    // Hide pre-apply summary if visible
+    const summaryEl = document.getElementById('cardUpdateBatchSummary');
+    if (summaryEl) summaryEl.classList.add('hidden');
     
     // Build field selection
     if (fieldGridEl) {
@@ -1565,7 +1607,8 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
         // Skip already-checked items
         const curStatus = statusEl?.textContent?.trim() || '';
         if (curStatus.includes('Up to date') || curStatus.includes('update') || 
-            curStatus.includes('Updated') || curStatus.includes('Failed') || curStatus.includes('Error')) {
+            curStatus.includes('Updated') || curStatus.includes('Failed') || curStatus.includes('Error') ||
+            curStatus.includes('Removed')) {
             continue;
         }
         
@@ -1578,7 +1621,12 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
             const remoteCard = await fetchRemoteCard(chubInfo.fullPath);
             
             if (!remoteCard) {
-                if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Failed';
+                if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-ghost"></i> Removed / Private';
+                if (itemEl) itemEl.dataset.status = 'unavailable';
+                // Auto-uncheck -- nothing to apply
+                batchSelectedAvatars.delete(char.avatar);
+                const cb = itemEl?.querySelector('.card-update-batch-checkbox');
+                if (cb) { cb.checked = false; cb.disabled = true; }
                 errors++;
             } else {
                 const localData = char.data || char;
@@ -1587,15 +1635,19 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 
                 if (diffs.length === 0) {
                     if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
+                    if (itemEl) itemEl.dataset.status = 'up-to-date';
                 } else {
                     if (statusEl) {
+                        const fieldIcons = diffs.map(d => fieldIcon(d.field)).join('');
                         statusEl.innerHTML = `
                             <span class="has-updates">${diffs.length} update${diffs.length > 1 ? 's' : ''}</span>
+                            <span class="card-update-batch-item-fields">${fieldIcons}</span>
                             <button class="card-update-batch-view-btn" data-view-avatar="${CoreAPI.escapeHtml(char.avatar)}">
                                 View
                             </button>
                         `;
                     }
+                    if (itemEl) itemEl.dataset.status = 'has-updates';
                     currentUpdateChecks.set(char.avatar, { char, localData, remoteCard, diffs });
                     withUpdates++;
                 }
@@ -1603,23 +1655,31 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
         } catch (error) {
             console.error('[CardUpdates] Batch check error for:', char.avatar, error);
             if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-xmark"></i> Error';
+            if (itemEl) itemEl.dataset.status = 'error';
             errors++;
         }
         
         batchCheckedCount++;
         progressEl.innerHTML = `Checked ${batchCheckedCount}/${characters.length}`;
         updateBatchFooter('checking');
+        updateBatchFilterCounts();
     }
     
     batchCheckRunning = false;
     
     if (batchCheckPaused) {
-        progressEl.innerHTML = `Paused — Checked ${batchCheckedCount}/${characters.length}`;
+        progressEl.innerHTML = `Paused -- Checked ${batchCheckedCount}/${characters.length}`;
         updateBatchFooter('paused');
     } else {
-        progressEl.innerHTML = `Done! ${withUpdates} with updates, ${errors} error${errors !== 1 ? 's' : ''}`;
+        const unavailableCount = document.querySelectorAll('#cardUpdateBatchList .card-update-batch-item[data-status="unavailable"]').length;
+        const realErrors = errors - unavailableCount;
+        let doneMsg = `Done! ${withUpdates} with updates`;
+        if (unavailableCount > 0) doneMsg += `, ${unavailableCount} unavailable`;
+        if (realErrors > 0) doneMsg += `, ${realErrors} error${realErrors !== 1 ? 's' : ''}`;
+        progressEl.innerHTML = doneMsg;
         updateBatchFooter('done');
     }
+    updateBatchFilterCounts();
 }
 
 /**
@@ -1696,6 +1756,8 @@ async function applySingleUpdates() {
                 if (statusEl) {
                     statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
                 }
+                batchItem.dataset.status = 'applied';
+                updateBatchFilterCounts();
             }
             
             currentUpdateChecks.delete(avatar);
@@ -1709,10 +1771,146 @@ async function applySingleUpdates() {
 }
 
 /**
- * Apply all updates to all characters with diffs
+ * Show pre-apply summary before applying batch updates.
+ * Groups changes by field across selected characters so the user can review.
+ */
+function showPreApplySummary() {
+    // Build entries from selected characters that have updates
+    const entries = Array.from(currentUpdateChecks.entries())
+        .filter(([avatar]) => batchSelectedAvatars.has(avatar));
+    
+    if (entries.length === 0) {
+        CoreAPI.showToast('No characters selected for update', 'info');
+        return;
+    }
+    
+    // Group changes by field
+    const fieldMap = new Map(); // field -> [{ avatar, charName, diff }]
+    let totalFieldChanges = 0;
+    for (const [avatar, checkData] of entries) {
+        const charName = checkData.char.data?.name || checkData.char.name || 'Unknown';
+        for (const diff of checkData.diffs) {
+            if (!fieldMap.has(diff.field)) fieldMap.set(diff.field, []);
+            fieldMap.get(diff.field).push({ avatar, charName, diff });
+            totalFieldChanges++;
+        }
+    }
+    
+    // Build summary HTML
+    let summaryHtml = `
+        <div class="batch-summary-header">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <div>
+                <strong>${entries.length} character${entries.length !== 1 ? 's' : ''}</strong> with
+                <strong>${totalFieldChanges} field change${totalFieldChanges !== 1 ? 's' : ''}</strong>
+            </div>
+        </div>
+        <div class="batch-summary-fields">
+    `;
+    
+    for (const [field, items] of fieldMap) {
+        const label = COMPARABLE_FIELDS[field] || field;
+        summaryHtml += `
+            <div class="batch-summary-field-group">
+                <div class="batch-summary-field-name">
+                    ${fieldIcon(field)}
+                    <span>${CoreAPI.escapeHtml(label)}</span>
+                    <span class="batch-summary-field-count">${items.length} character${items.length !== 1 ? 's' : ''}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    summaryHtml += `</div>`;
+    
+    // Per-character deselection (last-chance)
+    summaryHtml += `
+        <div class="batch-summary-chars-header">
+            <span>Characters to update</span>
+            <label class="batch-summary-toggle-all">
+                <input type="checkbox" id="batchSummaryToggleAll" checked>
+                <span>Select All</span>
+            </label>
+        </div>
+        <div class="batch-summary-char-list">
+    `;
+    
+    for (const [avatar, checkData] of entries) {
+        const charName = checkData.char.data?.name || checkData.char.name || 'Unknown';
+        const fieldIconsHtml = checkData.diffs.map(d => fieldIcon(d.field)).join('');
+        summaryHtml += `
+            <div class="batch-summary-char-item" data-avatar="${CoreAPI.escapeHtml(avatar)}">
+                <input type="checkbox" class="batch-summary-char-cb" data-avatar="${CoreAPI.escapeHtml(avatar)}" checked>
+                <div class="batch-summary-char-info">
+                    <span class="batch-summary-char-name card-update-char-link" data-char-avatar="${CoreAPI.escapeHtml(avatar)}">${CoreAPI.escapeHtml(charName)}</span>
+                    <span class="batch-summary-char-fields">${fieldIconsHtml}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    summaryHtml += `</div>`;
+    
+    // Show summary section, hide list
+    const summaryEl = document.getElementById('cardUpdateBatchSummary');
+    const listEl = document.getElementById('cardUpdateBatchList');
+    const filterBar = document.getElementById('cardUpdateBatchFilterBar');
+    const progressEl = document.getElementById('cardUpdateBatchProgress');
+    
+    if (summaryEl) {
+        summaryEl.innerHTML = summaryHtml;
+        summaryEl.classList.remove('hidden');
+    }
+    if (listEl) listEl.classList.add('hidden');
+    if (filterBar) filterBar.classList.add('hidden');
+    if (progressEl) progressEl.classList.add('hidden');
+    
+    // Switch footer to summary mode
+    updateBatchFooter('summary');
+}
+
+/**
+ * Go back from pre-apply summary to the batch list
+ */
+function hidePreApplySummary() {
+    const summaryEl = document.getElementById('cardUpdateBatchSummary');
+    const listEl = document.getElementById('cardUpdateBatchList');
+    const filterBar = document.getElementById('cardUpdateBatchFilterBar');
+    const progressEl = document.getElementById('cardUpdateBatchProgress');
+    
+    if (summaryEl) summaryEl.classList.add('hidden');
+    if (listEl) listEl.classList.remove('hidden');
+    if (filterBar) filterBar.classList.remove('hidden');
+    if (progressEl) progressEl.classList.remove('hidden');
+    
+    // Restore footer state
+    if (batchCheckPaused && batchCheckedCount < pendingBatchCharacters.length) {
+        updateBatchFooter('paused');
+    } else {
+        updateBatchFooter('done');
+    }
+}
+
+/**
+ * Apply updates for characters selected in the pre-apply summary
  */
 async function applyAllBatchUpdates() {
-    const entries = Array.from(currentUpdateChecks.entries());
+    // Read which characters are checked in the summary
+    const summaryEl = document.getElementById('cardUpdateBatchSummary');
+    let selectedAvatars;
+    
+    if (summaryEl && !summaryEl.classList.contains('hidden')) {
+        // Summary is visible -- apply only checked characters
+        const checkboxes = summaryEl.querySelectorAll('.batch-summary-char-cb:checked');
+        selectedAvatars = new Set(Array.from(checkboxes).map(cb => cb.dataset.avatar));
+    } else {
+        // Direct apply (shouldn't happen in normal flow, but handle gracefully)
+        selectedAvatars = new Set(batchSelectedAvatars);
+    }
+    
+    const entries = Array.from(currentUpdateChecks.entries())
+        .filter(([avatar]) => selectedAvatars.has(avatar));
+    
     if (entries.length === 0) {
         CoreAPI.showToast('No updates to apply', 'info');
         return;
@@ -1758,6 +1956,7 @@ async function applyAllBatchUpdates() {
                     if (statusEl) {
                         statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
                     }
+                    batchItem.dataset.status = 'applied';
                 }
             } else {
                 errorCount++;
@@ -1785,6 +1984,10 @@ async function applyAllBatchUpdates() {
     if (progressWrap) progressWrap.style.display = 'none';
     if (progressFill) progressFill.style.width = '0%';
     
+    // Return from summary to list view
+    hidePreApplySummary();
+    updateBatchFilterCounts();
+    
     // Update footer: if we were paused and unchecked characters remain, show resume; otherwise done
     if (batchCheckPaused && batchCheckedCount < pendingBatchCharacters.length) {
         updateBatchFooter('paused');
@@ -1799,6 +2002,7 @@ async function applyAllBatchUpdates() {
 
 function closeSingleModal() {
     singleModalAvatar = null;
+    singleModalClosedAt = Date.now();
     document.getElementById('cardUpdateSingleModal')?.classList.remove('visible');
 }
 
@@ -1826,6 +2030,8 @@ function closeBatchModal() {
     batchCheckPaused = false;
     batchCheckRunning = false;
     batchCheckedCount = 0;
+    batchSelectedAvatars.clear();
+    batchStatusFilter = 'all';
     document.getElementById('cardUpdateBatchModal')?.classList.remove('visible');
     currentUpdateChecks.clear();
     pendingBatchCharacters = [];
@@ -1858,12 +2064,21 @@ function updateBatchFooter(state) {
     const applyBtn = document.getElementById('cardUpdateBatchApplyAllBtn');
     const closeBtn = document.getElementById('cardUpdateBatchCloseFooterBtn');
     const actionsWrap = document.getElementById('cardUpdateBatchActions');
+    const summaryBackBtn = document.getElementById('cardUpdateBatchSummaryBackBtn');
+    const summaryConfirmBtn = document.getElementById('cardUpdateBatchSummaryConfirmBtn');
     
-    // Update apply button count
-    const updateCount = currentUpdateChecks.size;
+    // Count selected characters that have updates
+    const selectedUpdateCount = Array.from(currentUpdateChecks.keys())
+        .filter(avatar => batchSelectedAvatars.has(avatar)).length;
+    
     if (applyBtn) {
-        applyBtn.innerHTML = `<i class="fa-solid fa-check-double"></i> Apply All ${updateCount} Update${updateCount !== 1 ? 's' : ''}`;
+        applyBtn.innerHTML = `<i class="fa-solid fa-clipboard-check"></i> Apply All Selected (${selectedUpdateCount})`;
+        applyBtn.disabled = selectedUpdateCount === 0;
     }
+    
+    // Hide summary buttons by default
+    if (summaryBackBtn) summaryBackBtn.style.display = 'none';
+    if (summaryConfirmBtn) summaryConfirmBtn.style.display = 'none';
     
     switch (state) {
         case 'idle':
@@ -1891,14 +2106,25 @@ function updateBatchFooter(state) {
                 pauseBtn.classList.remove('pause');
                 pauseBtn.classList.add('resume');
             }
-            if (actionsWrap) actionsWrap.style.display = updateCount > 0 ? 'flex' : 'none';
+            if (actionsWrap) actionsWrap.style.display = selectedUpdateCount > 0 ? 'flex' : 'none';
             if (closeBtn) closeBtn.style.display = '';
             break;
         case 'done':
             if (startBtn) startBtn.style.display = 'none';
             if (pauseBtn) pauseBtn.style.display = 'none';
-            if (actionsWrap) actionsWrap.style.display = updateCount > 0 ? 'flex' : 'none';
+            if (actionsWrap) actionsWrap.style.display = selectedUpdateCount > 0 ? 'flex' : 'none';
             if (closeBtn) closeBtn.style.display = '';
+            break;
+        case 'summary':
+            if (startBtn) startBtn.style.display = 'none';
+            if (pauseBtn) pauseBtn.style.display = 'none';
+            if (actionsWrap) actionsWrap.style.display = 'none';
+            if (closeBtn) closeBtn.style.display = 'none';
+            if (summaryBackBtn) summaryBackBtn.style.display = '';
+            if (summaryConfirmBtn) {
+                summaryConfirmBtn.style.display = '';
+                summaryConfirmBtn.disabled = selectedUpdateCount === 0;
+            }
             break;
     }
 }
@@ -1948,13 +2174,18 @@ function startBatchCheck() {
     // Reset counters
     batchCheckedCount = 0;
     currentUpdateChecks.clear();
+    batchSelectedAvatars.clear();
 
-    // Build initial list
+    // Build initial list with checkboxes
     listEl.innerHTML = pendingBatchCharacters.map(char => {
         const chubInfo = getChubLinkInfo(char);
         const name = char.data?.name || char.name || 'Unknown';
+        batchSelectedAvatars.add(char.avatar);
         return `
-            <div class="card-update-batch-item" data-avatar="${CoreAPI.escapeHtml(char.avatar)}">
+            <div class="card-update-batch-item" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" data-status="pending">
+                <label class="card-update-batch-item-check">
+                    <input type="checkbox" class="card-update-batch-checkbox" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" checked>
+                </label>
                 <div class="card-update-batch-item-info">
                     <span class="card-update-batch-item-name card-update-char-link" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">${CoreAPI.escapeHtml(name)}</span>
                     <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(chubInfo?.fullPath || '')}</span>
@@ -1970,7 +2201,133 @@ function startBatchCheck() {
     listEl.classList.remove('hidden');
     progressEl.classList.remove('hidden');
 
+    // Show filter bar (counters update as results come in)
+    const filterBar = document.getElementById('cardUpdateBatchFilterBar');
+    if (filterBar) filterBar.classList.remove('hidden');
+    updateBatchFilterCounts();
+
     performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection), 0);
+}
+
+// ========================================
+// BATCH FILTERING & SELECTION
+// ========================================
+
+/**
+ * Count batch items by status and update filter pill badges
+ */
+function updateBatchFilterCounts() {
+    const items = document.querySelectorAll('#cardUpdateBatchList .card-update-batch-item');
+    const counts = { all: 0, 'has-updates': 0, 'up-to-date': 0, errors: 0, unavailable: 0, applied: 0 };
+    
+    for (const item of items) {
+        counts.all++;
+        const status = item.dataset.status || 'pending';
+        if (status === 'has-updates') counts['has-updates']++;
+        else if (status === 'up-to-date') counts['up-to-date']++;
+        else if (status === 'error') counts.errors++;
+        else if (status === 'unavailable') counts.unavailable++;
+        else if (status === 'applied') counts.applied++;
+    }
+    
+    const ids = {
+        all: 'batchFilterCountAll',
+        'has-updates': 'batchFilterCountUpdates',
+        'up-to-date': 'batchFilterCountUpToDate',
+        errors: 'batchFilterCountErrors',
+        unavailable: 'batchFilterCountUnavailable',
+        applied: 'batchFilterCountApplied'
+    };
+    
+    for (const [key, id] of Object.entries(ids)) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = counts[key];
+    }
+    
+    // Re-apply active filter so newly checked items show/hide during scan
+    if (batchStatusFilter !== 'all') {
+        applyBatchStatusFilter(batchStatusFilter);
+    }
+}
+
+/**
+ * Filter batch list items by status category
+ */
+function applyBatchStatusFilter(filter) {
+    batchStatusFilter = filter;
+    
+    // Update active pill
+    const pills = document.querySelectorAll('#cardUpdateBatchFilterBar .card-update-filter-pill');
+    for (const pill of pills) {
+        pill.classList.toggle('active', pill.dataset.filter === filter);
+    }
+    
+    // Show/hide items
+    const items = document.querySelectorAll('#cardUpdateBatchList .card-update-batch-item');
+    for (const item of items) {
+        if (filter === 'all') {
+            item.style.display = '';
+        } else {
+            const status = item.dataset.status || 'pending';
+            const matches = (filter === 'errors' && status === 'error')
+                || (filter === 'unavailable' && status === 'unavailable')
+                || (filter === status);
+            item.style.display = matches ? '' : 'none';
+        }
+    }
+}
+
+/**
+ * Reset filter pills to default state
+ */
+function resetBatchFilterPills() {
+    const pills = document.querySelectorAll('#cardUpdateBatchFilterBar .card-update-filter-pill');
+    for (const pill of pills) {
+        pill.classList.toggle('active', pill.dataset.filter === 'all');
+    }
+    const ids = ['batchFilterCountAll', 'batchFilterCountUpdates', 'batchFilterCountUpToDate', 'batchFilterCountErrors', 'batchFilterCountUnavailable', 'batchFilterCountApplied'];
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0';
+    }
+}
+
+/**
+ * Handle batch item checkbox toggle
+ */
+function handleBatchCheckboxChange(e) {
+    const cb = e.target.closest('.card-update-batch-checkbox');
+    if (!cb) return;
+    const avatar = cb.dataset.avatar;
+    if (!avatar) return;
+    
+    if (cb.checked) {
+        batchSelectedAvatars.add(avatar);
+    } else {
+        batchSelectedAvatars.delete(avatar);
+    }
+    
+    // Refresh footer count
+    const state = batchCheckRunning ? 'checking' : batchCheckPaused ? 'paused' : 'done';
+    updateBatchFooter(state);
+}
+
+/**
+ * Select or deselect all visible batch item checkboxes
+ */
+function setBatchItemsChecked(checked) {
+    const items = document.querySelectorAll('#cardUpdateBatchList .card-update-batch-item');
+    for (const item of items) {
+        if (item.style.display === 'none') continue; // skip filtered-out
+        const cb = item.querySelector('.card-update-batch-checkbox');
+        if (!cb || cb.disabled) continue; // skip unavailable cards
+        cb.checked = checked;
+        const avatar = cb.dataset.avatar;
+        if (checked) batchSelectedAvatars.add(avatar);
+        else batchSelectedAvatars.delete(avatar);
+    }
+    const state = batchCheckRunning ? 'checking' : batchCheckPaused ? 'paused' : 'done';
+    updateBatchFooter(state);
 }
 
 // ========================================
@@ -2012,13 +2369,18 @@ function toggleExpand(button) {
 function setupEventListeners() {
     // Close buttons
     document.getElementById('cardUpdateSingleCloseBtn')?.addEventListener('click', closeSingleModal);
+    document.getElementById('cardUpdateSingleCancelBtn')?.addEventListener('click', closeSingleModal);
     document.getElementById('cardUpdateBatchCloseBtn')?.addEventListener('click', closeBatchModal);
     document.getElementById('cardUpdateBatchCloseFooterBtn')?.addEventListener('click', closeBatchModal);
     
     // Apply buttons
     document.getElementById('cardUpdateSingleApplyBtn')?.addEventListener('click', applySingleUpdates);
-    document.getElementById('cardUpdateBatchApplyAllBtn')?.addEventListener('click', applyAllBatchUpdates);
+    document.getElementById('cardUpdateBatchApplyAllBtn')?.addEventListener('click', showPreApplySummary);
     document.getElementById('cardUpdateBatchStartBtn')?.addEventListener('click', startBatchCheck);
+    
+    // Pre-apply summary buttons
+    document.getElementById('cardUpdateBatchSummaryBackBtn')?.addEventListener('click', hidePreApplySummary);
+    document.getElementById('cardUpdateBatchSummaryConfirmBtn')?.addEventListener('click', applyAllBatchUpdates);
     
     // Pause/Resume button
     document.getElementById('cardUpdateBatchPauseBtn')?.addEventListener('click', () => {
@@ -2034,14 +2396,18 @@ function setupEventListeners() {
         if (e.target.classList.contains('cl-modal-overlay')) closeSingleModal();
     });
     document.getElementById('cardUpdateBatchModal')?.addEventListener('click', (e) => {
-        if (e.target.classList.contains('cl-modal-overlay')) closeBatchModal();
+        if (e.target.classList.contains('cl-modal-overlay')) {
+            // Guard against ghost taps that pass through when the single modal just closed
+            if (Date.now() - singleModalClosedAt < 400) return;
+            closeBatchModal();
+        }
     });
     
     // Expose UI helpers to window
     window.cardUpdatesToggleAll = toggleAllCheckboxes;
     window.cardUpdatesToggleExpand = toggleExpand;
 
-    // Event delegation for batch list: View buttons and character name clicks
+    // Event delegation for batch list: View buttons, character name clicks, and checkboxes
     const batchListEl = document.getElementById('cardUpdateBatchList');
     batchListEl?.addEventListener('click', (e) => {
         const viewBtn = e.target.closest('.card-update-batch-view-btn');
@@ -2057,6 +2423,38 @@ function setupEventListeners() {
             const allChars = CoreAPI.getAllCharacters();
             const char = allChars.find(c => c.avatar === avatar);
             if (char) openCharModalAbove(char);
+        }
+    });
+    batchListEl?.addEventListener('change', handleBatchCheckboxChange);
+    
+    // Filter bar clicks
+    document.getElementById('cardUpdateBatchFilterBar')?.addEventListener('click', (e) => {
+        const pill = e.target.closest('.card-update-filter-pill');
+        if (pill?.dataset.filter) applyBatchStatusFilter(pill.dataset.filter);
+    });
+    
+    // Batch select all / deselect all
+    document.getElementById('cardUpdateBatchSelectAll')?.addEventListener('click', () => setBatchItemsChecked(true));
+    document.getElementById('cardUpdateBatchDeselectAll')?.addEventListener('click', () => setBatchItemsChecked(false));
+    
+    // Pre-apply summary: clickable character names
+    document.getElementById('cardUpdateBatchSummary')?.addEventListener('click', (e) => {
+        const nameLink = e.target.closest('.card-update-char-link[data-char-avatar]');
+        if (nameLink) {
+            const avatar = nameLink.dataset.charAvatar;
+            if (!avatar) return;
+            const allChars = CoreAPI.getAllCharacters();
+            const char = allChars.find(c => c.avatar === avatar);
+            if (char) openCharModalAbove(char);
+        }
+    });
+    
+    // Pre-apply summary: toggle all / individual character checkboxes
+    document.getElementById('cardUpdateBatchSummary')?.addEventListener('change', (e) => {
+        if (e.target.id === 'batchSummaryToggleAll') {
+            const checked = e.target.checked;
+            const cbs = document.querySelectorAll('.batch-summary-char-cb');
+            cbs.forEach(cb => cb.checked = checked);
         }
     });
 
@@ -2509,9 +2907,11 @@ function injectStyles() {
         .card-update-batch-item-status {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             font-size: 0.9em;
             flex-shrink: 0;
+            flex-wrap: wrap;
+            justify-content: flex-end;
         }
         
         .card-update-batch-item-status .has-updates {
@@ -2520,6 +2920,19 @@ function injectStyles() {
             padding: 2px 8px;
             border-radius: 4px;
             font-weight: 500;
+        }
+
+        .card-update-batch-item[data-status="unavailable"] {
+            opacity: 0.55;
+        }
+
+        .card-update-batch-item[data-status="unavailable"] .card-update-batch-item-status {
+            color: #ffab91;
+        }
+
+        .card-update-batch-item[data-status="unavailable"] .card-update-batch-checkbox {
+            opacity: 0.4;
+            cursor: not-allowed;
         }
         
         .card-update-batch-view-btn {
@@ -2689,6 +3102,259 @@ function injectStyles() {
 
         .card-update-field-label {
             font-size: 0.9rem;
+        }
+
+        /* ========================================
+           BATCH FILTER BAR
+           ======================================== */
+        .card-update-batch-filter-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .card-update-batch-filter-bar.hidden {
+            display: none;
+        }
+
+        .card-update-filter-pills {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .card-update-filter-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--cl-text-secondary, #999);
+            font-size: 0.82em;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .card-update-filter-pill:hover {
+            border-color: rgba(74, 158, 255, 0.4);
+            background: rgba(74, 158, 255, 0.08);
+            color: var(--cl-text-primary, #eee);
+        }
+
+        .card-update-filter-pill.active {
+            border-color: var(--cl-accent, #4a9eff);
+            background: rgba(74, 158, 255, 0.15);
+            color: var(--cl-accent, #4a9eff);
+            font-weight: 500;
+        }
+
+        .filter-count {
+            font-size: 0.85em;
+            padding: 1px 5px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.1);
+            min-width: 16px;
+            text-align: center;
+        }
+
+        .card-update-filter-pill.active .filter-count {
+            background: rgba(74, 158, 255, 0.25);
+        }
+
+        /* Batch selection controls */
+        .card-update-batch-selection-controls {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.82em;
+        }
+
+        .card-update-select-link {
+            background: none;
+            border: none;
+            color: var(--cl-accent, #4a9eff);
+            cursor: pointer;
+            font-size: inherit;
+            padding: 2px 4px;
+        }
+
+        .card-update-select-link:hover {
+            text-decoration: underline;
+        }
+
+        .card-update-select-divider {
+            color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Batch item checkbox */
+        .card-update-batch-item-check {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .card-update-batch-checkbox {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--cl-accent, #4a9eff);
+            cursor: pointer;
+        }
+
+        /* Inline field icons (inside status area, next to update count + View) */
+        .card-update-batch-item-fields {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .batch-field-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 5px;
+            background: rgba(74, 158, 255, 0.12);
+            color: var(--cl-accent, #4a9eff);
+            font-size: 0.72em;
+        }
+
+        /* ========================================
+           PRE-APPLY SUMMARY
+           ======================================== */
+        .card-update-batch-summary {
+            padding: 0;
+        }
+
+        .card-update-batch-summary.hidden {
+            display: none;
+        }
+
+        .batch-summary-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: rgba(74, 158, 255, 0.08);
+            border: 1px solid rgba(74, 158, 255, 0.2);
+            border-radius: 10px;
+            margin-bottom: 14px;
+        }
+
+        .batch-summary-header i {
+            color: var(--cl-accent, #4a9eff);
+            font-size: 1.1em;
+        }
+
+        .batch-summary-fields {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+
+        .batch-summary-field-group {
+            display: inline-flex;
+        }
+
+        .batch-summary-field-name {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .batch-summary-field-count {
+            font-size: 0.8em;
+            color: var(--cl-text-secondary, #999);
+        }
+
+        .batch-summary-chars-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+            margin-bottom: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 0.9em;
+            font-weight: 500;
+        }
+
+        .batch-summary-toggle-all {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85em;
+            color: var(--cl-text-secondary, #999);
+            cursor: pointer;
+        }
+
+        .batch-summary-toggle-all input {
+            accent-color: var(--cl-accent, #4a9eff);
+        }
+
+        .batch-summary-char-list {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            max-height: 45vh;
+            overflow-y: auto;
+        }
+
+        .batch-summary-char-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            background: rgba(0, 0, 0, 0.15);
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+
+        .batch-summary-char-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .batch-summary-char-cb {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--cl-accent, #4a9eff);
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+
+        .batch-summary-char-info {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .batch-summary-char-name {
+            font-weight: 500;
+            font-size: 0.9em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .batch-summary-char-name.card-update-char-link {
+            color: var(--cl-accent, #4a9eff);
+            cursor: pointer;
+        }
+        .batch-summary-char-name.card-update-char-link:hover {
+            text-decoration: underline;
+        }
+
+        .batch-summary-char-fields {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+            flex-wrap: wrap;
         }
 
         /* Lorebook diff */
@@ -2959,7 +3625,7 @@ function injectModals() {
                     <div id="cardUpdateSingleContent"></div>
                 </div>
                 <div class="cl-modal-footer">
-                    <button class="cl-btn cl-btn-secondary" onclick="document.getElementById('cardUpdateSingleModal').classList.remove('visible')">Cancel</button>
+                    <button class="cl-btn cl-btn-secondary" id="cardUpdateSingleCancelBtn">Cancel</button>
                     <button class="cl-btn cl-btn-primary" id="cardUpdateSingleApplyBtn" disabled>
                         <i class="fa-solid fa-check"></i> Apply Selected
                     </button>
@@ -2995,7 +3661,23 @@ function injectModals() {
                         </div>
                         <div id="cardUpdateBatchFieldGrid" class="card-update-field-grid"></div>
                     </div>
+                    <div id="cardUpdateBatchFilterBar" class="card-update-batch-filter-bar hidden">
+                        <div class="card-update-filter-pills">
+                            <button class="card-update-filter-pill active" data-filter="all">All <span class="filter-count" id="batchFilterCountAll">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="has-updates">Updates <span class="filter-count" id="batchFilterCountUpdates">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="up-to-date">Up to Date <span class="filter-count" id="batchFilterCountUpToDate">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="errors">Errors <span class="filter-count" id="batchFilterCountErrors">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="unavailable">Unavailable <span class="filter-count" id="batchFilterCountUnavailable">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="applied">Applied <span class="filter-count" id="batchFilterCountApplied">0</span></button>
+                        </div>
+                        <div class="card-update-batch-selection-controls">
+                            <button class="card-update-select-link" id="cardUpdateBatchSelectAll">Select All</button>
+                            <span class="card-update-select-divider">|</span>
+                            <button class="card-update-select-link" id="cardUpdateBatchDeselectAll">Deselect All</button>
+                        </div>
+                    </div>
                     <div id="cardUpdateBatchList" class="card-update-batch-list"></div>
+                    <div id="cardUpdateBatchSummary" class="card-update-batch-summary hidden"></div>
                     <div id="cardUpdateBatchProgress" class="card-update-batch-progress"></div>
                 </div>
                 <div class="cl-modal-footer">
@@ -3007,7 +3689,7 @@ function injectModals() {
                     </div>
                     <div id="cardUpdateBatchActions" class="card-update-batch-actions" style="display: none;">
                         <button class="cl-btn cl-btn-primary" id="cardUpdateBatchApplyAllBtn">
-                            <i class="fa-solid fa-check-double"></i> Apply All Updates
+                            <i class="fa-solid fa-clipboard-check"></i> Apply All Selected (0)
                         </button>
                     </div>
                     <button class="cl-btn cl-btn-primary" id="cardUpdateBatchStartBtn">
@@ -3016,15 +3698,19 @@ function injectModals() {
                     <button class="cl-btn cl-btn-warning card-update-pause-btn" id="cardUpdateBatchPauseBtn" style="display: none;">
                         <i class="fa-solid fa-pause"></i> Pause
                     </button>
+                    <button class="cl-btn cl-btn-secondary" id="cardUpdateBatchSummaryBackBtn" style="display: none;">
+                        <i class="fa-solid fa-arrow-left"></i> Back
+                    </button>
+                    <button class="cl-btn cl-btn-primary" id="cardUpdateBatchSummaryConfirmBtn" style="display: none;">
+                        <i class="fa-solid fa-check-double"></i> Confirm & Apply
+                    </button>
                     <button class="cl-btn cl-btn-secondary" id="cardUpdateBatchCloseFooterBtn">Close</button>
                 </div>
             </div>
         </div>
     `;
     
-    const container = document.createElement('div');
-    container.innerHTML = modalsHtml;
-    document.body.appendChild(container);
+    document.body.insertAdjacentHTML('beforeend', modalsHtml);
 }
 
 // ========================================

@@ -235,6 +235,9 @@
 
     if (!isMobile()) return;
 
+    // Enable bidirectional image unloading for chub cards (desktop keeps images loaded)
+    window.chubImageUnloadEnabled = true;
+
     // Ensure viewport-fit=cover for safe-area-inset to work
     (function fixViewport() {
         var meta = document.querySelector('meta[name="viewport"]');
@@ -388,83 +391,135 @@
             ['#chubTagsDropdown:not(.hidden)',    el => el.classList.add('hidden')],
         ];
 
-        // Baseline guard so back works before any modal is opened
-        history.pushState({ clBackGuard: true }, '', location.href);
+        // ── location.hash guards ──
+        // Chromium (and especially Brave) silently skips pushState entries
+        // during back-button traversal via the "history manipulation
+        // intervention." Using location.hash creates real same-document
+        // navigation entries that browsers treat as genuine history.
+        //
+        // Strategy: each modal open pushes one guard. Each back press
+        // consumes one guard and closes one layer. If the browser skips
+        // intermediate guards (landing on '' with modals still open), a
+        // new guard is pushed so remaining modals can still be closed.
+        let guardId = 0;
+        let processedHash = null;
 
-        // Push a guard entry whenever an overlay/modal opens.
-        // Each back press consumes one guard — this keeps them balanced
-        // without needing a re-push inside the popstate handler.
         function pushGuard() {
-            history.pushState({ clBackGuard: true }, '', location.href);
+            guardId++;
+            processedHash = null;
+            location.hash = 'g' + guardId;
+        }
+
+        function closeTopLayer() {
+            for (let i = 0; i < stack.length; i++) {
+                const entry = stack[i];
+                if (typeof entry === 'function') {
+                    if (entry()) return true;
+                    continue;
+                }
+                const [selector, closeFn] = entry;
+                const el = document.querySelector(selector);
+                if (el) { closeFn(el); return true; }
+            }
+            return false;
+        }
+
+        function hasOpenModals() {
+            for (let i = 0; i < stack.length; i++) {
+                const entry = stack[i];
+                if (typeof entry === 'function') {
+                    if (entry === stack[stack.length - 5]) {
+                        if (window.MultiSelect?.enabled) return true;
+                    }
+                    continue;
+                }
+                const [selector] = entry;
+                if (document.querySelector(selector)) return true;
+            }
+            return false;
         }
 
         const classObserver = new MutationObserver((mutations) => {
             for (const m of mutations) {
                 const el = m.target;
-                // modal-overlay / confirm-modal: hidden removed → opening
-                if ((el.classList.contains('modal-overlay') || el.classList.contains('confirm-modal')) &&
-                    !el.classList.contains('hidden')) {
-                    pushGuard();
-                    return;
+                const oldClasses = m.oldValue || '';
+
+                if (el.classList.contains('modal-overlay') || el.classList.contains('confirm-modal')) {
+                    const wasHidden = oldClasses.includes('hidden');
+                    const isHidden = el.classList.contains('hidden');
+                    if (wasHidden && !isHidden) {
+                        pushGuard();
+                        return;
+                    }
                 }
-                // gv-modal / cl-modal: visible added → opening
-                if ((el.classList.contains('gv-modal') || el.classList.contains('cl-modal')) &&
-                    el.classList.contains('visible')) {
-                    pushGuard();
-                    return;
+                if (el.classList.contains('gv-modal') || el.classList.contains('cl-modal')) {
+                    const wasVisible = oldClasses.includes('visible');
+                    const isVisible = el.classList.contains('visible');
+                    if (!wasVisible && isVisible) {
+                        pushGuard();
+                        return;
+                    }
                 }
-                // multi-select-mode added to body → entering multi-select
-                if (el === document.body && el.classList.contains('multi-select-mode')) {
-                    pushGuard();
-                    return;
+                if (el === document.body) {
+                    const had = oldClasses.includes('multi-select-mode');
+                    const has = el.classList.contains('multi-select-mode');
+                    if (!had && has) { pushGuard(); return; }
                 }
             }
         });
 
-        // Observe class changes on existing static modals
-        document.querySelectorAll('.modal-overlay, .cl-modal, .confirm-modal').forEach(el => {
-            classObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+        document.querySelectorAll('.modal-overlay, .cl-modal, .gv-modal, .confirm-modal').forEach(el => {
+            classObserver.observe(el, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
         });
+        classObserver.observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
 
-        // Observe body for multi-select-mode class
-        classObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
-
-        // Watch body's direct children for dynamically added modals
         const childObserver = new MutationObserver((mutations) => {
             for (const m of mutations) {
                 for (const node of m.addedNodes) {
                     if (node.nodeType !== 1) continue;
-                    if (node.classList.contains('modal-overlay') || node.classList.contains('confirm-modal')) {
+                    if (node.classList.contains('modal-overlay') ||
+                        node.classList.contains('confirm-modal') ||
+                        node.classList.contains('mobile-avatar-viewer')) {
                         pushGuard();
-                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'] });
+                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
                     }
                     if (node.classList.contains('gv-modal') || node.classList.contains('cl-modal')) {
-                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'] });
+                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
                     }
                 }
             }
         });
         childObserver.observe(document.body, { childList: true });
 
-        window.addEventListener('popstate', () => {
-            try {
-                for (const entry of stack) {
-                    if (typeof entry === 'function') {
-                        if (entry()) return;
-                        continue;
-                    }
-                    const [selector, closeFn] = entry;
-                    const el = document.querySelector(selector);
-                    if (el) {
-                        closeFn(el);
-                        return;
-                    }
-                }
-            } catch (e) {
-                // Swallow errors — fall through to re-push below
+        // ── Back-press handler ──
+        function onBack() {
+            const h = location.hash;
+            // Ignore our own guard pushes, and deduplicate hashchange+popstate
+            // firing for the same back press (both see the same hash value).
+            // processedHash is null (not '') so it never collides with the base URL.
+            if (h === '#g' + guardId || (processedHash !== null && h === processedHash)) return;
+            processedHash = h;
+            if (closeTopLayer() && !location.hash && hasOpenModals()) {
+                // Browser skipped intermediate guards and landed at the base URL
+                // while modals are still open — replenish so the next press closes
+                // the remaining layer instead of letting the tab navigate away.
+                pushGuard();
             }
-            // Nothing was open — re-push baseline guard
-            history.pushState({ clBackGuard: true }, '', location.href);
+        }
+
+        window.addEventListener('hashchange', onBack);
+        window.addEventListener('popstate', onBack);
+
+        // ── Safety net: prevent tab close when modals are open ──
+        // On Android, if hash guards are exhausted or skipped by the
+        // browser, this shows a native "Leave site?" dialog instead of
+        // silently killing the tab.
+        window.addEventListener('beforeunload', function(e) {
+            if (hasOpenModals()) {
+                e.preventDefault();
+                e.returnValue = '';
+                return '';
+            }
         });
     }
 
@@ -1084,9 +1139,7 @@
         overlay.appendChild(img);
         overlay.addEventListener('click', () => closeAvatarViewer());
         document.body.appendChild(overlay);
-
-        // Push history guard for back button
-        history.pushState({ clBackGuard: true }, '', location.href);
+        // Guard is pushed automatically by childObserver detecting the added element
     }
 
     function closeAvatarViewer() {

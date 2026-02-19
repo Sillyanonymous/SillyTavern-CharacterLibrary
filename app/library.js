@@ -1770,6 +1770,21 @@ function switchView(view) {
     hide('chatsView');
     hide('chubView');
 
+    // When leaving chub view, clean up observer and (on mobile) clear DOM.
+    // Desktop: keep grid DOM intact for instant re-entry (images stay decoded).
+    // Mobile: clear DOM + decoded images to free memory.
+    if (view !== 'chub') {
+        chubTimelineRenderToken++;
+        if (chubImageObserver) chubImageObserver.disconnect();
+        if (window.chubImageUnloadEnabled) {
+            chubGridRenderedCount = 0;
+            const chubGrid = document.getElementById('chubGrid');
+            const timelineGrid = document.getElementById('chubTimelineGrid');
+            if (chubGrid && chubGrid.children.length > 0) chubGrid.innerHTML = '';
+            if (timelineGrid && timelineGrid.children.length > 0) timelineGrid.innerHTML = '';
+        }
+    }
+
     // Reset scroll position when switching views
     const scrollContainer = document.querySelector('.gallery-content');
     if (scrollContainer) {
@@ -12874,6 +12889,12 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
 
+    // On mobile, free decoded images during media download to reclaim GPU memory
+    if (window.chubImageUnloadEnabled) {
+        if (chubImageObserver) chubImageObserver.disconnect();
+        unloadAllChubImages();
+    }
+
     importSummaryDownloadState.active = true;
     importSummaryDownloadState.abort = false;
     importSummaryDownloadState.controller?.abort();
@@ -12960,6 +12981,7 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     
     importSummaryDownloadState.active = false;
     importSummaryDownloadState.controller = null;
+    if (window.chubImageUnloadEnabled) reconnectChubImageObserver();
     if (wasAborted) {
         showToast('Downloads cancelled', 'info');
         if (progressWrap && progressFill && progressLabel && progressCount) {
@@ -18761,16 +18783,28 @@ let chubTimelineCharacters = [];
 let chubTimelinePage = 1;
 let chubTimelineCursor = null; // Cursor for pagination
 let chubTimelineHasMore = true;
+let chubTimelineAuthorPage = 1;      // Per-author supplemental page (increments on Load More)
+let chubTimelineAuthorHasMore = false; // True if any author returned a full page of results
 let chubTimelineSort = 'newest'; // Sort for timeline view (client-side)
 let chubFollowedAuthors = []; // Cache of followed author usernames
 let chubUserFavoriteIds = new Set(); // Cache of user's favorited character IDs
 let chubCurrentUsername = null; // Current logged-in username
+let chubTimelineRenderToken = 0; // Cancels in-flight chunked timeline renders
+let chubTimelineLoadInFlight = false;
+const CHUB_MOBILE_TIMELINE_MAX_ITEMS = 480;
 let chubCardLookup = new Map();
 let chubTimelineLookup = new Map();
 let chubDelegatesInitialized = false;
 let chubDetailFetchController = null; // AbortController for in-flight detail fetches
 const chubDetailCache = new Map();
 const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (stripped entries only)
+
+// Append-only rendering: track how many cards are already in DOM to avoid full re-render on Load More
+let chubGridRenderedCount = 0;
+
+// IntersectionObserver for lazy-loading chub card images
+let chubImageObserver = null;
+const CHUB_IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
 
 // Local library lookup for marking characters as "In Library"
 let localLibraryLookup = {
@@ -19843,11 +19877,48 @@ async function initChubView() {
         toggleFollowAuthor();
     });
     
-    // Timeline load more button (uses cursor-based pagination)
-    on('chubTimelineLoadMoreBtn', 'click', () => {
-        if (chubTimelineCursor) {
-            chubTimelinePage++;
-            loadChubTimeline(false);
+    // Timeline load more button
+    on('chubTimelineLoadMoreBtn', 'click', async () => {
+        if (chubTimelineLoadInFlight) return;
+        chubTimelineLoadInFlight = true;
+        const loadMoreBtn = document.getElementById('chubTimelineLoadMoreBtn');
+        const originalLoadMoreHtml = loadMoreBtn ? loadMoreBtn.innerHTML : '';
+        if (loadMoreBtn) {
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+        }
+
+        const prevCount = document.querySelectorAll('#chubTimelineGrid .chub-card').length;
+
+        try {
+            if (chubTimelineCursor) {
+                // Timeline API still has pages
+                chubTimelinePage++;
+                await loadChubTimeline(false);
+            } else if (chubTimelineAuthorHasMore) {
+                // Timeline cursor exhausted, but authors have more characters
+                chubTimelineAuthorPage++;
+                const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
+                await supplementTimelineWithAuthorFetches(chubTimelineAuthorPage);
+                renderChubTimeline();
+                if (loadMoreContainer) {
+                    loadMoreContainer.style.display = chubTimelineAuthorHasMore ? 'flex' : 'none';
+                }
+            }
+            
+            // Scroll to the first new card so the user doesn't lose their place
+            requestAnimationFrame(() => {
+                const cards = document.querySelectorAll('#chubTimelineGrid .chub-card');
+                if (prevCount > 0 && cards.length > prevCount) {
+                    cards[prevCount].scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            });
+        } finally {
+            chubTimelineLoadInFlight = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = originalLoadMoreHtml || '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     });
     
@@ -19975,6 +20046,8 @@ async function initChubView() {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
             chubTimelineCursor = null;
+            chubTimelineAuthorPage = 1;
+            chubTimelineAuthorHasMore = false;
             loadChubTimeline(true);
         } else {
             chubCharacters = [];
@@ -19989,6 +20062,8 @@ async function initChubView() {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
             chubTimelineCursor = null;
+            chubTimelineAuthorPage = 1;
+            chubTimelineAuthorHasMore = false;
             loadChubTimeline(true);
         } else {
             chubCharacters = [];
@@ -19997,8 +20072,9 @@ async function initChubView() {
         }
     });
     
-    // Load more button
+    // Load more button (guard against rapid clicks — don't increment page while loading)
     on('chubLoadMoreBtn', 'click', () => {
+        if (chubIsLoading) return;
         chubCurrentPage++;
         loadChubCharacters();
     });
@@ -20054,10 +20130,26 @@ async function initChubView() {
     // Initialize NSFW toggle state (defaults to enabled)
     updateNsfwToggleState();
     
-    // Register chub lazy-load: load characters on first visit
+    // Register chub lazy-load: load characters on first visit, re-render or
+    // reconnect observer on re-entry depending on whether DOM was preserved.
     onViewEnter('chub', () => {
-        if (chubCharacters.length === 0) {
-            loadChubCharacters();
+        if (chubCharacters.length === 0 && chubTimelineCharacters.length === 0) {
+            if (chubViewMode === 'browse') {
+                loadChubCharacters();
+            } else {
+                loadChubTimeline();
+            }
+        } else {
+            const browseGrid = document.getElementById('chubGrid');
+            const timelineGrid = document.getElementById('chubTimelineGrid');
+            if (chubViewMode === 'browse' && browseGrid && browseGrid.children.length === 0 && chubCharacters.length > 0) {
+                renderChubGrid();
+            } else if (chubViewMode === 'timeline' && timelineGrid && timelineGrid.children.length === 0 && chubTimelineCharacters.length > 0) {
+                renderChubTimeline();
+            } else {
+                // DOM preserved (desktop) — just reconnect observer
+                reconnectChubImageObserver();
+            }
         }
     });
     
@@ -20682,7 +20774,7 @@ async function switchChubViewMode(mode) {
 // CHUBAI TIMELINE (New from followed authors)
 // ============================================================================
 
-async function loadChubTimeline(forceRefresh = false) {
+async function loadChubTimeline(forceRefresh = false, _isAutoPage = false) {
     if (!chubToken) {
         renderTimelineEmpty('login');
         return;
@@ -20690,6 +20782,7 @@ async function loadChubTimeline(forceRefresh = false) {
     
     const grid = document.getElementById('chubTimelineGrid');
     const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
+    const isInitialLoad = !_isAutoPage;
     
     if (forceRefresh || (!chubTimelineCursor && chubTimelineCharacters.length === 0)) {
         renderLoadingState(grid, 'Loading timeline...', 'chub-loading');
@@ -20697,6 +20790,8 @@ async function loadChubTimeline(forceRefresh = false) {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
             chubTimelineCursor = null;
+            chubTimelineAuthorPage = 1;
+            chubTimelineAuthorHasMore = false;
         }
     }
     
@@ -20704,12 +20799,14 @@ async function loadChubTimeline(forceRefresh = false) {
         // Use the dedicated timeline endpoint which returns updates from followed authors
         // This API uses cursor-based pagination, not page-based
         const params = new URLSearchParams();
-        params.set('first', '50'); // Request more items per page
+        const isMobileMemoryMode = !!window.chubImageUnloadEnabled;
+        params.set('first', isMobileMemoryMode ? '30' : '50');
         params.set('nsfw', chubNsfwEnabled.toString());
         params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
         params.set('count', 'true'); // Request total count for better pagination info
         
         // Use cursor for pagination if we have one (for loading more)
+        const hadCursor = !!chubTimelineCursor;
         if (chubTimelineCursor) {
             params.set('cursor', chubTimelineCursor);
             debugLog('[ChubTimeline] Loading next page with cursor');
@@ -20805,6 +20902,8 @@ async function loadChubTimeline(forceRefresh = false) {
                 }
             }
         }
+
+        capMobileTimelineItems(!hadCursor);
         
         debugLog('[ChubTimeline] Total characters:', chubTimelineCharacters.length);
         
@@ -20828,10 +20927,12 @@ async function loadChubTimeline(forceRefresh = false) {
         // 2. Or we want more characters (up to 96 for good coverage)
         // 3. The oldest item is still recent (less than 14 days old)
         let shouldAutoLoad = false;
+        const autoLoadTarget = isMobileMemoryMode ? 60 : 96;
+        const autoLoadPageLimit = isMobileMemoryMode ? 4 : 8;
         if (nextCursor) {
             if (characterNodes.length === 0) {
                 shouldAutoLoad = true; // All filtered out
-            } else if (chubTimelineCharacters.length < 96) {
+            } else if (chubTimelineCharacters.length < autoLoadTarget) {
                 // Check age of oldest item - keep loading if less than 14 days old
                 if (oldestInBatch) {
                     const oldestDate = new Date(oldestInBatch);
@@ -20843,17 +20944,17 @@ async function loadChubTimeline(forceRefresh = false) {
             }
         }
         
-        // Limit auto-loading to prevent infinite loops (max 8 pages)
-        if (shouldAutoLoad && chubTimelinePage < 8) {
+        // Limit auto-loading to prevent infinite loops
+        if (shouldAutoLoad && chubTimelinePage < autoLoadPageLimit) {
             debugLog('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
             chubTimelinePage++;
-            await loadChubTimeline(false);
+            await loadChubTimeline(false, true);
             return;
         }
         
-        // Timeline API is unreliable - supplement with direct author fetches
-        // Only do this on first load (no cursor yet used)
-        if (!chubTimelineCursor && chubTimelinePage === 1) {
+        // Timeline API is unreliable -- supplement with direct author fetches
+        // on any initial/forced load (not on auto-page recursion or Load More)
+        if (isInitialLoad) {
             debugLog('[ChubTimeline] Supplementing with direct author fetches...');
             await supplementTimelineWithAuthorFetches();
         }
@@ -20864,9 +20965,9 @@ async function loadChubTimeline(forceRefresh = false) {
             renderChubTimeline();
         }
         
-        // Show/hide load more button
+        // Show/hide load more button (visible if timeline cursor OR author pages remain)
         if (loadMoreContainer) {
-            loadMoreContainer.style.display = chubTimelineHasMore ? 'flex' : 'none';
+            loadMoreContainer.style.display = (chubTimelineHasMore || chubTimelineAuthorHasMore) ? 'flex' : 'none';
         }
         
     } catch (e) {
@@ -20885,30 +20986,32 @@ async function loadChubTimeline(forceRefresh = false) {
 }
 
 /**
- * Supplement timeline with direct fetches from followed authors
- * This works around the broken timeline API that doesn't return all items
+ * Supplement timeline with direct fetches from followed authors.
+ * Supports pagination: page 1 fetches the 24 newest per author,
+ * page 2 fetches 25-48, etc. Sets chubTimelineAuthorHasMore if
+ * any author returned a full page (indicating deeper content exists).
  */
-async function supplementTimelineWithAuthorFetches() {
+async function supplementTimelineWithAuthorFetches(page = 1) {
     try {
-        // Get list of followed authors
         const followedAuthors = await fetchMyFollowsList();
         if (!followedAuthors || followedAuthors.size === 0) {
             debugLog('[ChubTimeline] No followed authors to fetch from');
+            chubTimelineAuthorHasMore = false;
             return;
         }
         
-        debugLog('[ChubTimeline] Fetching recent chars from', followedAuthors.size, 'followed authors');
+        debugLog('[ChubTimeline] Fetching page', page, 'from', followedAuthors.size, 'followed authors');
         
-        // Get existing paths to avoid duplicates
         const existingPaths = new Set(chubTimelineCharacters.map(c => 
             (c.fullPath || c.full_path || '').toLowerCase()
         ));
         
-        // Fetch recent characters from each author (limit to first 10 authors to avoid rate limits)
-        const authorsToFetch = [...followedAuthors].slice(0, 15);
-        
-        // Fetch in parallel with small batches
-        const batchSize = 5;
+        const authorsToFetch = [...followedAuthors];
+        const isMobileMemoryMode = !!window.chubImageUnloadEnabled;
+        const PAGE_SIZE = isMobileMemoryMode ? 12 : 24;
+        let anyFullPage = false;
+
+        const batchSize = isMobileMemoryMode ? 2 : 5;
         for (let i = 0; i < authorsToFetch.length; i += batchSize) {
             const batch = authorsToFetch.slice(i, i + batchSize);
             
@@ -20916,15 +21019,14 @@ async function supplementTimelineWithAuthorFetches() {
                 try {
                     const params = new URLSearchParams();
                     params.set('username', author);
-                    params.set('first', '12'); // Get 12 most recent from each author
-                    params.set('sort', 'id'); // Use 'id' for most recent (higher id = newer)
+                    params.set('first', PAGE_SIZE.toString());
+                    params.set('page', page.toString());
+                    params.set('sort', 'id');
                     params.set('nsfw', chubNsfwEnabled.toString());
-                    params.set('nsfl', chubNsfwEnabled.toString()); // NSFL follows NSFW setting
-                    params.set('include_forks', 'true'); // Include forked characters
+                    params.set('nsfl', chubNsfwEnabled.toString());
+                    params.set('include_forks', 'true');
                     
-                    const url = `${CHUB_API_BASE}/search?${params.toString()}`;
-                    
-                    const response = await fetch(url, {
+                    const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
                         headers: getChubHeaders(true)
                     });
                     
@@ -20935,6 +21037,7 @@ async function supplementTimelineWithAuthorFetches() {
                     
                     const data = await response.json();
                     const nodes = data.nodes || data.data?.nodes || [];
+                    if (nodes.length >= PAGE_SIZE) anyFullPage = true;
                     return nodes;
                 } catch (e) {
                     debugLog(`[ChubTimeline] Error fetching from ${author}:`, e.message);
@@ -20944,7 +21047,6 @@ async function supplementTimelineWithAuthorFetches() {
             
             const results = await Promise.all(promises);
             
-            // Merge results, avoiding duplicates
             for (const authorChars of results) {
                 for (const char of authorChars) {
                     const path = (char.fullPath || char.full_path || '').toLowerCase();
@@ -20954,13 +21056,33 @@ async function supplementTimelineWithAuthorFetches() {
                     }
                 }
             }
+
+            capMobileTimelineItems(page <= 1);
         }
         
-        debugLog('[ChubTimeline] After supplement, have', chubTimelineCharacters.length, 'total characters');
+        chubTimelineAuthorHasMore = anyFullPage;
+        debugLog('[ChubTimeline] After supplement page', page, '- have', chubTimelineCharacters.length, 'total chars, hasMore:', anyFullPage);
         
     } catch (e) {
         console.error('[ChubTimeline] Error supplementing timeline:', e);
+        chubTimelineAuthorHasMore = false;
     }
+}
+
+function capMobileTimelineItems(keepNewest = true) {
+    if (!window.chubImageUnloadEnabled) return;
+    if (chubTimelineCharacters.length <= CHUB_MOBILE_TIMELINE_MAX_ITEMS) return;
+
+    const overflow = chubTimelineCharacters.length - CHUB_MOBILE_TIMELINE_MAX_ITEMS;
+    chubTimelineCharacters = keepNewest
+        ? chubTimelineCharacters.slice(0, CHUB_MOBILE_TIMELINE_MAX_ITEMS)
+        : chubTimelineCharacters.slice(overflow);
+
+    debugLog('[ChubTimeline] Mobile cap applied:', {
+        keepNewest,
+        overflow,
+        size: chubTimelineCharacters.length
+    });
 }
 
 function renderTimelineEmpty(reason) {
@@ -21081,31 +21203,23 @@ function sortTimelineCharacters(characters) {
 function renderChubTimeline() {
     const grid = document.getElementById('chubTimelineGrid');
     
-    // Apply client-side filtering (use slice instead of spread to avoid deopt on large arrays)
-    let filteredCharacters = chubTimelineCharacters.slice();
+    // Single-pass filter instead of chaining multiple .filter() calls (fewer intermediate arrays)
+    const anyFilterActive = chubFilterImages || chubFilterLore || chubFilterExpressions ||
+        chubFilterGreetings || chubFilterHideOwned || (chubFilterFavorites && chubUserFavoriteIds.size > 0);
     
-    // Feature filters (client-side for timeline)
-    if (chubFilterImages) {
-        filteredCharacters = filteredCharacters.filter(c => c.hasGallery || c.has_gallery);
-    }
-    if (chubFilterLore) {
-        filteredCharacters = filteredCharacters.filter(c => c.has_lore || c.related_lorebooks?.length > 0);
-    }
-    if (chubFilterExpressions) {
-        filteredCharacters = filteredCharacters.filter(c => c.has_expression_pack);
-    }
-    if (chubFilterGreetings) {
-        filteredCharacters = filteredCharacters.filter(c => c.alternate_greetings?.length > 0 || c.n_greetings > 1);
-    }
-    if (chubFilterHideOwned) {
-        filteredCharacters = filteredCharacters.filter(c => !isCharInLocalLibrary(c));
-    }
-    // Favorites filter - use cached favorite IDs
-    if (chubFilterFavorites && chubUserFavoriteIds.size > 0) {
-        filteredCharacters = filteredCharacters.filter(c => {
-            const charId = c.id || c.project_id;
-            return chubUserFavoriteIds.has(charId);
+    let filteredCharacters;
+    if (anyFilterActive) {
+        filteredCharacters = chubTimelineCharacters.filter(c => {
+            if (chubFilterImages && !(c.hasGallery || c.has_gallery)) return false;
+            if (chubFilterLore && !(c.has_lore || c.related_lorebooks?.length > 0)) return false;
+            if (chubFilterExpressions && !c.has_expression_pack) return false;
+            if (chubFilterGreetings && !(c.alternate_greetings?.length > 0 || c.n_greetings > 1)) return false;
+            if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
+            if (chubFilterFavorites && chubUserFavoriteIds.size > 0 && !chubUserFavoriteIds.has(c.id || c.project_id)) return false;
+            return true;
         });
+    } else {
+        filteredCharacters = chubTimelineCharacters.slice();
     }
     
     // Sort the characters based on chubTimelineSort
@@ -21113,6 +21227,7 @@ function renderChubTimeline() {
     
     // Check if filtering resulted in no characters
     if (sortedCharacters.length === 0 && chubTimelineCharacters.length > 0) {
+        chubTimelineRenderToken++;
         chubTimelineLookup.clear();
         grid.innerHTML = `
             <div class="chub-timeline-empty">
@@ -21125,7 +21240,162 @@ function renderChubTimeline() {
     }
 
     buildChubLookup(chubTimelineLookup, sortedCharacters);
+    if (chubImageObserver) chubImageObserver.disconnect();
+
+    if (window.chubImageUnloadEnabled && sortedCharacters.length > 180) {
+        const token = ++chubTimelineRenderToken;
+        const chunkSize = 60;
+        let index = 0;
+        grid.innerHTML = '';
+
+        const appendNextChunk = () => {
+            if (token !== chubTimelineRenderToken || currentView !== 'chub' || chubViewMode !== 'timeline') return;
+            const end = Math.min(index + chunkSize, sortedCharacters.length);
+            grid.insertAdjacentHTML('beforeend', sortedCharacters.slice(index, end).map(char => createChubCard(char, true)).join(''));
+            index = end;
+            if (index < sortedCharacters.length) {
+                requestAnimationFrame(appendNextChunk);
+            } else {
+                eagerLoadVisibleChubImages(grid);
+                observeChubImages(grid);
+            }
+        };
+
+        requestAnimationFrame(appendNextChunk);
+        return;
+    }
+
+    chubTimelineRenderToken++;
     grid.innerHTML = sortedCharacters.map(char => createChubCard(char, true)).join('');
+    eagerLoadVisibleChubImages(grid);
+    observeChubImages(grid);
+}
+
+// ============================================================================
+// CHUB IMAGE LAZY LOADING (IntersectionObserver)
+// Desktop: one-directional — loads images near the viewport, never unloads.
+// Mobile: bidirectional — also unloads off-screen images to cap decoded memory
+//   at ~20-30 images (mobile.js sets window.chubImageUnloadEnabled = true).
+// ============================================================================
+
+function initChubImageObserver() {
+    if (chubImageObserver) return;
+    const rootMargin = window.chubImageUnloadEnabled ? '480px' : '600px';
+    chubImageObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            const img = entry.target;
+            if (entry.isIntersecting) {
+                const realSrc = img.dataset.src;
+                if (realSrc && !img.dataset.failed && img.src !== realSrc) {
+                    img.src = realSrc;
+                }
+            } else if (window.chubImageUnloadEnabled) {
+                if (img.dataset.src && !img.dataset.failed && img.src !== CHUB_IMG_PLACEHOLDER) {
+                    img.src = CHUB_IMG_PLACEHOLDER;
+                }
+            }
+        }
+    }, {
+        rootMargin
+    });
+}
+
+function observeChubImages(container) {
+    if (!chubImageObserver) initChubImageObserver();
+    // Defer observer hookup to the next frame so innerHTML paint isn't blocked
+    requestAnimationFrame(() => {
+        eagerLoadVisibleChubImages(container);
+        eagerPreloadDesktopChubImages(container);
+        const images = Array.from(container.querySelectorAll('.chub-card-image img')).filter(img => !img.dataset.observed);
+        if (images.length === 0) return;
+
+        if (window.chubImageUnloadEnabled && images.length > 120) {
+            const batchSize = 80;
+            let index = 0;
+            const observeBatch = () => {
+                const end = Math.min(index + batchSize, images.length);
+                for (let i = index; i < end; i++) {
+                    const img = images[i];
+                    img.dataset.observed = '1';
+                    chubImageObserver.observe(img);
+                }
+                index = end;
+                if (index < images.length) {
+                    requestAnimationFrame(observeBatch);
+                }
+            };
+            observeBatch();
+            return;
+        }
+
+        for (const img of images) {
+            img.dataset.observed = '1';
+            chubImageObserver.observe(img);
+        }
+    });
+}
+
+function eagerLoadVisibleChubImages(container) {
+    if (!container) return;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+    const preloadBottom = viewportHeight + 700;
+    const images = container.querySelectorAll('.chub-card-image img[data-src]');
+    for (const img of images) {
+        if (img.dataset.failed) continue;
+        const rect = img.getBoundingClientRect();
+        if (rect.bottom > -160 && rect.top < preloadBottom) {
+            const realSrc = img.dataset.src;
+            if (realSrc && img.src !== realSrc) {
+                img.src = realSrc;
+            }
+        }
+    }
+}
+
+function eagerPreloadDesktopChubImages(container) {
+    if (!container || window.chubImageUnloadEnabled) return;
+    const images = container.querySelectorAll('.chub-card-image img[data-src]');
+    let loaded = 0;
+    const MAX_PRELOAD = 90;
+    for (const img of images) {
+        if (loaded >= MAX_PRELOAD) break;
+        if (img.dataset.failed) continue;
+        const realSrc = img.dataset.src;
+        if (realSrc && img.src !== realSrc) {
+            img.src = realSrc;
+            loaded++;
+        }
+    }
+}
+
+/**
+ * Unload all chub card images back to placeholder, freeing decoded image memory.
+ * Only active on mobile (window.chubImageUnloadEnabled). On desktop, images
+ * stay loaded — there's plenty of memory and unloading causes visible flickering.
+ */
+function unloadAllChubImages() {
+    if (!window.chubImageUnloadEnabled) return;
+    const imgs = document.querySelectorAll('.chub-card-image img[data-src]');
+    for (const img of imgs) {
+        if (img.src !== CHUB_IMG_PLACEHOLDER && !img.dataset.failed) {
+            img.src = CHUB_IMG_PLACEHOLDER;
+        }
+    }
+}
+
+/**
+ * Reconnect the image observer to whichever chub grid is currently visible.
+ * Clears data-observed flags first since disconnect() doesn't remove them.
+ */
+function reconnectChubImageObserver() {
+    const gridId = chubViewMode === 'timeline' ? 'chubTimelineGrid' : 'chubGrid';
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    eagerLoadVisibleChubImages(grid);
+    eagerPreloadDesktopChubImages(grid);
+    const imgs = grid.querySelectorAll('.chub-card-image img[data-observed]');
+    for (const img of imgs) delete img.dataset.observed;
+    observeChubImages(grid);
 }
 
 // ============================================================================
@@ -21565,8 +21835,48 @@ async function loadChubCharacters(forceRefresh = false) {
         }
         
         chubHasMore = nodes.length >= 24;
+        const wasAppend = chubCurrentPage > 1;
         
-        renderChubGrid();
+        // When "hide owned" is active, auto-fetch additional pages if too many
+        // cards were filtered out, so the grid doesn't look sparse.
+        // Targets a full page (24) of visible cards per user action; capped at
+        // 3 extra fetches to avoid runaway requests when most results are owned.
+        // Cost: up to 3 additional lightweight search API calls (JSON-only, no
+        // image data). The extra card objects in chubCharacters are ~1-2 KB each
+        // and the bidirectional image observer already manages decoded-image memory.
+        if (chubFilterHideOwned && chubHasMore) {
+            let visibleNew = nodes.filter(c => !isCharInLocalLibrary(c)).length;
+            let autoFetches = 0;
+            
+            while (visibleNew < 24 && chubHasMore && autoFetches < 3) {
+                autoFetches++;
+                chubCurrentPage++;
+                params.set('page', chubCurrentPage.toString());
+                
+                const moreRes = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                    method: 'GET',
+                    headers
+                });
+                if (!moreRes.ok) break;
+                
+                const moreData = await moreRes.json();
+                let moreNodes = [];
+                if (moreData.nodes) moreNodes = moreData.nodes;
+                else if (moreData.data?.nodes) moreNodes = moreData.data.nodes;
+                else if (Array.isArray(moreData.data)) moreNodes = moreData.data;
+                else if (Array.isArray(moreData)) moreNodes = moreData;
+                
+                for (const node of moreNodes) chubCharacters.push(node);
+                chubHasMore = moreNodes.length >= 24;
+                visibleNew += moreNodes.filter(c => !isCharInLocalLibrary(c)).length;
+            }
+            
+            if (autoFetches > 0) {
+                debugLog(`[ChubAI] Auto-fetched ${autoFetches} extra page(s) to compensate for "hide owned" filter (${visibleNew} visible)`);
+            }
+        }
+        
+        renderChubGrid(wasAppend);
         
         // Show/hide load more button
         if (loadMoreContainer) {
@@ -21714,7 +22024,7 @@ async function loadChubFavorites(forceRefresh = false) {
         // Check if there's more data
         chubHasMore = data.cursor !== null && nodes.length > 0;
         
-        renderChubGrid();
+        renderChubGrid(chubCurrentPage > 1);
         
         // Show/hide load more button
         if (loadMoreContainer) {
@@ -21742,7 +22052,7 @@ async function loadChubFavorites(forceRefresh = false) {
     }
 }
 
-function renderChubGrid() {
+function renderChubGrid(appendOnly = false) {
     const grid = document.getElementById('chubGrid');
     
     // Apply client-side "hide owned" filter (other filters are server-side)
@@ -21752,7 +22062,9 @@ function renderChubGrid() {
     }
     
     if (displayCharacters.length === 0) {
+        chubGridRenderedCount = 0;
         chubCardLookup.clear();
+        if (chubImageObserver) chubImageObserver.disconnect();
         const message = chubCharacters.length > 0 && chubFilterHideOwned
             ? 'All characters in this view are already in your library.'
             : 'Try a different search term or adjust your filters.';
@@ -21767,7 +22079,22 @@ function renderChubGrid() {
     }
 
     buildChubLookup(chubCardLookup, displayCharacters);
-    grid.innerHTML = displayCharacters.map(char => createChubCard(char)).join('');
+
+    if (appendOnly && chubGridRenderedCount > 0 && chubGridRenderedCount < displayCharacters.length) {
+        // Only append new cards instead of rebuilding the entire grid
+        const newChars = displayCharacters.slice(chubGridRenderedCount);
+        if (newChars.length > 0) {
+            grid.insertAdjacentHTML('beforeend', newChars.map(char => createChubCard(char)).join(''));
+        }
+    } else {
+        // Full re-render: disconnect all tracked images before replacing DOM
+        if (chubImageObserver) chubImageObserver.disconnect();
+        grid.innerHTML = displayCharacters.map(char => createChubCard(char)).join('');
+    }
+
+    chubGridRenderedCount = displayCharacters.length;
+    eagerLoadVisibleChubImages(grid);
+    observeChubImages(grid);
 }
 
 function setupChubGridDelegates() {
@@ -21865,7 +22192,7 @@ function createChubCard(char, isTimeline = false) {
     return `
         <div class="${cardClass}" data-full-path="${escapeHtml(fullPath)}" ${taglineTooltip ? `title="${taglineTooltip}"` : ''}>
             <div class="chub-card-image">
-                <img src="${escapeHtml(avatarUrl)}" alt="${escapeHtml(name)}" loading="lazy" onerror="this.src='/img/ai4.png'">
+                <img data-src="${escapeHtml(avatarUrl)}" src="${CHUB_IMG_PLACEHOLDER}" alt="${escapeHtml(name)}" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
                 ${char.nsfw ? '<span class="chub-nsfw-badge">NSFW</span>' : ''}
                 ${badges.length > 0 ? `<div class="chub-feature-badges">${badges.join('')}</div>` : ''}
             </div>
@@ -22456,6 +22783,12 @@ async function downloadChubCharacter() {
     // Abort any in-flight detail fetch — we're downloading now, no need for preview data
     abortChubDetailFetch();
     
+    // On mobile, pause observer callbacks during import pipeline.
+    // Do not force-unload visible grid images here — that causes long empty states.
+    if (window.chubImageUnloadEnabled) {
+        if (chubImageObserver) chubImageObserver.disconnect();
+    }
+    
     const downloadBtn = document.getElementById('chubDownloadBtn');
     const originalHtml = downloadBtn.innerHTML;
     downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
@@ -22692,6 +23025,9 @@ async function downloadChubCharacter() {
         // Remove the just-imported entry — it's no longer needed and frees memory
         chubMetadataCache.delete(fullPath);
         
+        // Yield one frame so modal hidden state is applied before summary opens
+        await new Promise(r => requestAnimationFrame(r));
+        
         showToast(`Downloaded "${characterName}" successfully!`, 'success');
         
         // Get the local avatar filename from the import result
@@ -22726,7 +23062,8 @@ async function downloadChubCharacter() {
         // Yield to browser for GC before heavy refresh (critical for mobile memory).
         // 500ms gives mobile browsers enough time to collect the download pipeline garbage
         // (embeddedPng, canvas backing stores, Blob internals, etc.) before allocating
-        // the full character list reload.
+        // the full character list reload. Images are already unloaded from the top of
+        // downloadChubCharacter, so no extra disconnect needed here.
         await new Promise(r => setTimeout(r, 500));
         await fetchCharacters(true);
         
@@ -22755,6 +23092,7 @@ async function downloadChubCharacter() {
     } finally {
         downloadBtn.innerHTML = originalHtml;
         downloadBtn.disabled = false;
+        if (window.chubImageUnloadEnabled) reconnectChubImageObserver();
     }
 }
 

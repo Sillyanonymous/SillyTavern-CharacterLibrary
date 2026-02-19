@@ -1401,6 +1401,172 @@
         margin-top: 8px;
     }
 
+    /* =============================================
+       Batch filter bar, checkboxes, field pills,
+       selection controls, pre-apply summary
+       ============================================= */
+
+    /* Filter bar — horizontal scroll on narrow screens */
+    .card-update-batch-filter-bar {
+        gap: 8px;
+        margin-bottom: 10px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: 2px;
+    }
+
+    .card-update-filter-pills {
+        flex-wrap: nowrap;
+        gap: 5px;
+        flex-shrink: 0;
+    }
+
+    /* Touch-friendly pills */
+    .card-update-filter-pill {
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        min-height: 32px;
+        white-space: nowrap;
+        touch-action: manipulation;
+    }
+    .card-update-filter-pill:hover {
+        border-color: rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.05);
+        color: var(--cl-text-secondary, #999);
+    }
+    .card-update-filter-pill.active:hover {
+        border-color: var(--cl-accent, #4a9eff);
+        background: rgba(74, 158, 255, 0.15);
+        color: var(--cl-accent, #4a9eff);
+    }
+
+    .filter-count {
+        font-size: 0.8em;
+        padding: 0 4px;
+        min-width: 14px;
+    }
+
+    /* Selection controls — compact row */
+    .card-update-batch-selection-controls {
+        font-size: 0.78rem;
+        flex-shrink: 0;
+        gap: 4px;
+    }
+    .card-update-select-link {
+        padding: 4px 6px;
+        min-height: 32px;
+        display: inline-flex;
+        align-items: center;
+        touch-action: manipulation;
+    }
+
+    /* Batch item checkbox — 44px touch target */
+    .card-update-batch-item-check {
+        min-width: 44px;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: -9px -6px -9px -8px;
+    }
+    .card-update-batch-checkbox {
+        width: 18px;
+        height: 18px;
+    }
+
+    /* Inline field icons in status area */
+    .card-update-batch-item-fields {
+        gap: 2px;
+    }
+    .batch-field-icon {
+        width: 20px;
+        height: 20px;
+        font-size: 0.65em;
+    }
+
+    /* Pre-apply summary — full-width mobile layout */
+    .batch-summary-header {
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        gap: 8px;
+        font-size: 0.88rem;
+    }
+
+    .batch-summary-fields {
+        gap: 5px;
+        margin-bottom: 12px;
+    }
+    .batch-summary-field-count {
+        font-size: 0.75em;
+    }
+
+    .batch-summary-chars-header {
+        padding: 6px 0;
+        margin-bottom: 4px;
+        font-size: 0.85em;
+    }
+
+    .batch-summary-toggle-all {
+        font-size: 0.8em;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        touch-action: manipulation;
+    }
+    .batch-summary-toggle-all input {
+        width: 18px;
+        height: 18px;
+    }
+
+    .batch-summary-char-list {
+        max-height: 55vh;
+        gap: 1px;
+    }
+
+    .batch-summary-char-item {
+        gap: 10px;
+        padding: 10px 10px;
+        min-height: 44px;
+        border-radius: 4px;
+        touch-action: manipulation;
+    }
+    .batch-summary-char-item:hover {
+        background: rgba(0, 0, 0, 0.15);
+    }
+
+    .batch-summary-char-cb {
+        width: 18px;
+        height: 18px;
+    }
+
+    .batch-summary-char-name {
+        font-size: 0.85em;
+    }
+    .batch-summary-char-fields {
+        gap: 2px;
+    }
+    .batch-summary-char-fields .batch-field-icon {
+        width: 18px;
+        height: 18px;
+        font-size: 0.6em;
+    }
+
+    /* Summary footer buttons — match existing batch footer styling */
+    #cardUpdateBatchSummaryBackBtn,
+    #cardUpdateBatchSummaryConfirmBtn {
+        height: 44px;
+        border-radius: 12px;
+        font-size: 0.92rem;
+        font-weight: 500;
+        touch-action: manipulation;
+    }
+    #cardUpdateBatchSummaryConfirmBtn {
+        height: 48px;
+        font-weight: 600;
+    }
+
     /* ---------------------------------------------------
        TOAST NOTIFICATIONS – top-anchored on mobile
        Keeps toasts out of the way of bottom buttons
@@ -2797,8 +2963,14 @@
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: 8px;
     }
-    .chub-card { border-radius: 10px; }
+    .chub-card {
+        border-radius: 10px;
+        transition: none;
+        content-visibility: auto;
+        contain-intrinsic-size: 140px 220px;
+    }
     .chub-card:hover { transform: none; } /* disable hover lift on touch */
+    .chub-card-image img { transition: none; } /* kill scale transition on touch */
     .chub-card-body { padding: 8px; min-height: 60px; }
     .chub-card-name { font-size: 0.8rem; }
     .chub-card-creator { font-size: 0.7rem; margin-bottom: 4px; }
@@ -2879,6 +3051,7 @@
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 6px;
     }
+    .chub-card { contain-intrinsic-size: 120px 190px; }
 
     /* ---- Inline Tags Row in Edit tab ---- */
     .edit-tags-row {
