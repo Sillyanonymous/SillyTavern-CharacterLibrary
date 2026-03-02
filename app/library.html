@@ -27,8 +27,8 @@
                 <button class="view-toggle-btn" data-view="chats">
                     <i class="fa-solid fa-comments"></i> Chats
                 </button>
-                <button class="view-toggle-btn" data-view="chub">
-                    <i class="fa-solid fa-cloud-arrow-down"></i> ChubAI
+                <button class="view-toggle-btn" data-view="online">
+                    <i class="fa-solid fa-globe"></i> Online
                 </button>
             </div>
 
@@ -84,7 +84,7 @@
                 <button id="refreshBtn" class="glass-btn icon-only" title="Refresh">
                     <i class="fa-solid fa-sync"></i>
                 </button>
-                <div class="gallery-sync-container">
+                <div class="gallery-sync-container hidden">
                     <button id="gallerySyncStatusBtn" class="glass-btn icon-only gallery-sync-btn" title="Gallery sync status">
                         <i class="fa-solid fa-circle-info"></i>
                         <span class="warning-badge hidden"></span>
@@ -108,8 +108,8 @@
                         <button id="checkDuplicatesBtn" class="dropdown-item">
                             <i class="fa-solid fa-clone"></i> Find Duplicates
                         </button>
-                        <button id="bulkChubLinkBtn" class="dropdown-item">
-                            <i class="fa-solid fa-link"></i> Link ChubAI Characters
+                        <button id="bulkAutoLinkBtn" class="dropdown-item">
+                            <i class="fa-solid fa-link"></i> Auto-Link Characters
                         </button>
                         <div class="dropdown-divider"></div>
                         <button id="menuRefreshBtn" class="dropdown-item topbar-overflow-item">
@@ -169,131 +169,10 @@
                     </button>
                 </div>
 
-                <!-- ChubAI-specific filters (hidden by default) -->
-                <div class="filter-area chub-filters" id="chubFilterArea">
-                    <!-- Discovery Mode Toggle -->
-                    <div class="chub-view-toggle">
-                        <button class="chub-view-btn active" data-chub-view="browse" title="Browse all characters">
-                            <i class="fa-solid fa-compass"></i> Browse
-                        </button>
-                        <button class="chub-view-btn" data-chub-view="timeline" title="New from followed authors (requires token)">
-                            <i class="fa-solid fa-users"></i> Following
-                        </button>
-                    </div>
-                    
-                    <!-- Sort dropdown container - holds both Browse and Following sorts in same spot -->
-                    <div class="chub-sort-container">
-                        <!-- Discovery Preset (combined sort + time logic) - Browse mode -->
-                        <select id="chubDiscoveryPreset" class="glass-select" title="Discovery mode">
-                            <optgroup label="Popular">
-                                <option value="popular_week" selected>🔥 Hot This Week</option>
-                                <option value="popular_month">📈 Hot This Month</option>
-                                <option value="popular_all">👑 Most Downloaded</option>
-                            </optgroup>
-                            <optgroup label="Quality">
-                                <option value="rated_week">⭐ Top Rated (Week)</option>
-                                <option value="rated_all">⭐ Top Rated (All Time)</option>
-                            </optgroup>
-                            <optgroup label="Discovery">
-                                <option value="newest">🆕 Newest</option>
-                                <option value="updated">🔄 Recently Updated</option>
-                                <option value="recent_hits">🌟 Recent Hits</option>
-                                <option value="random">🎲 Random</option>
-                            </optgroup>
-                        </select>
-                        
-                        <!-- Timeline Sort (Following mode) - hidden by default -->
-                        <select id="chubTimelineSortHeader" class="glass-select chub-filter-hidden" title="Sort timeline">
-                            <option value="newest">🆕 Newest Created</option>
-                            <option value="updated">🔄 Recently Updated</option>
-                            <option value="oldest">🕐 Oldest First</option>
-                            <option value="name_asc">📝 Name A-Z</option>
-                            <option value="name_desc">📝 Name Z-A</option>
-                            <option value="downloads">📥 Most Downloads</option>
-                            <option value="favorites">❤️ Most Favorites</option>
-                            <option value="rating">⭐ Top Rated</option>
-                        </select>
-                    </div>
-                    
-                    <!-- Tags & Advanced Filters -->
-                    <div class="chub-tags-dropdown-container" style="position: relative;">
-                        <button id="chubTagsBtn" class="glass-btn" title="Tag filters and advanced options">
-                            <i class="fa-solid fa-tags"></i> <span id="chubTagsBtnLabel">Tags</span>
-                        </button>
-                        <div id="chubTagsDropdown" class="dropdown-menu chub-tags-dropdown hidden">
-                            <!-- Tag Search -->
-                            <div class="chub-tags-search-row">
-                                <input type="text" id="chubTagsSearchInput" placeholder="Search tags...">
-                                <button id="chubTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
-                                    <i class="fa-solid fa-rotate-left"></i>
-                                </button>
-                            </div>
-                            
-                            <!-- Tag List (tri-state) -->
-                            <div class="chub-tags-list" id="chubTagsList">
-                                <div class="chub-tags-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading tags...</div>
-                            </div>
-                            
-                            <hr style="margin: 10px 0; border-color: var(--glass-border);">
-                            
-                            <!-- Advanced Options -->
-                            <div class="dropdown-section-title"><i class="fa-solid fa-gear"></i> Advanced Options</div>
-                            
-                            <!-- Sort Direction -->
-                            <div class="chub-advanced-option">
-                                <label><i class="fa-solid fa-arrow-down-wide-short"></i> Sort Direction</label>
-                                <select id="chubSortDirection" class="glass-select-small">
-                                    <option value="desc" selected data-icon="fa-solid fa-arrow-down-wide-short">Descending</option>
-                                    <option value="asc" data-icon="fa-solid fa-arrow-up-short-wide">Ascending</option>
-                                </select>
-                            </div>
-                            
-                            <!-- Min Tokens -->
-                            <div class="chub-advanced-option">
-                                <label><i class="fa-solid fa-text-width"></i> Min Tokens</label>
-                                <input type="number" id="chubMinTokens" class="glass-input-small" value="50" min="0" max="100000" step="100">
-                            </div>
-                            
-                            <!-- Max Tokens -->
-                            <div class="chub-advanced-option">
-                                <label><i class="fa-solid fa-text-width"></i> Max Tokens</label>
-                                <input type="number" id="chubMaxTokens" class="glass-input-small" value="100000" min="0" max="500000" step="1000">
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Feature Filters -->
-                    <div class="chub-more-filters" style="position: relative;">
-                        <button id="chubFiltersBtn" class="glass-btn" title="Filter by character features">
-                            <i class="fa-solid fa-sliders"></i> Features
-                        </button>
-                        <div id="chubFiltersDropdown" class="dropdown-menu hidden" style="width: 240px;">
-                            <div class="dropdown-section-title">Character must have:</div>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterImages"> <i class="fa-solid fa-images"></i> Image Gallery</label>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterLore"> <i class="fa-solid fa-book"></i> Lorebook</label>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterExpressions"> <i class="fa-solid fa-face-smile"></i> Expressions</label>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterGreetings"> <i class="fa-solid fa-comments"></i> Alt Greetings</label>
-                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                            <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires login)</span>:</div>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
-                            <hr style="margin: 8px 0; border-color: var(--glass-border);">
-                            <div class="dropdown-section-title">Library:</div>
-                            <label class="filter-checkbox"><input type="checkbox" id="chubFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
-                        </div>
-                    </div>
-                    
-                    <!-- Content Toggles -->
-                    <button id="chubNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
-                        <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
-                    </button>
-                    
-                    <!-- Account & Refresh -->
-                    <button id="chubLoginBtn" class="glass-btn icon-only" title="ChubAI Login Settings">
-                        <i class="fa-solid fa-user-circle"></i>
-                    </button>
-                    <button id="refreshChubBtn" class="glass-btn icon-only" title="Refresh">
-                        <i class="fa-solid fa-sync"></i>
-                    </button>
+                <!-- Online view — provider selector + filters -->
+                <div class="filter-area online-filters" id="onlineFilterArea">
+                    <div id="providerSelectorArea"></div>
+                    <div id="onlineFilterContent"></div>
                 </div>
             </div>
         </header>
@@ -318,86 +197,13 @@
                 </div>
             </div>
 
-            <!-- ChubAI View (hidden by default) -->
-            <div id="chubView" class="chub-view hidden">
-                <!-- Browse Section -->
-                <div id="chubBrowseSection" class="chub-section">
-                    <!-- Search Bar for ChubAI -->
-                    <div class="chub-search-bar">
-                        <div class="chub-search-input-wrapper">
-                            <i class="fa-solid fa-search"></i>
-                            <input type="text" id="chubSearchInput" placeholder="Search ChubAI characters...">
-                            <button id="chubClearSearchBtn" class="chub-search-clear hidden" title="Clear search">
-                                <i class="fa-solid fa-xmark"></i>
-                            </button>
-                            <button id="chubSearchBtn" class="chub-search-submit">
-                                <i class="fa-solid fa-arrow-right"></i>
-                            </button>
-                        </div>
-                        <!-- Creator Search -->
-                        <div class="chub-creator-search">
-                            <div class="chub-creator-search-wrapper">
-                                <i class="fa-solid fa-user"></i>
-                                <input type="text" id="chubCreatorSearchInput" placeholder="Search by creator...">
-                                <button id="chubCreatorSearchBtn" class="chub-search-submit" title="Search by creator">
-                                    <i class="fa-solid fa-arrow-right"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Author Filter Banner (shown when filtering by author) -->
-                    <div id="chubAuthorBanner" class="chub-author-banner hidden">
-                        <div class="chub-author-banner-content">
-                            <i class="fa-solid fa-user"></i>
-                            <span>Showing characters by <strong id="chubAuthorBannerName">Author</strong></span>
-                        </div>
-                        <div class="chub-author-banner-actions">
-                            <select id="chubAuthorSortSelect" class="glass-select" title="Sort author's characters">
-                                <option value="id" selected>🆕 Newest Created</option>
-                                <option value="last_activity_at">🔄 Recently Updated</option>
-                                <option value="download_count">📥 Most Downloaded</option>
-                                <option value="star_count">⭐ Top Rated</option>
-                            </select>
-                            <button id="chubFollowAuthorBtn" class="glass-btn" title="Follow this author on ChubAI">
-                                <i class="fa-solid fa-heart"></i> <span>Follow</span>
-                            </button>
-                            <button id="chubClearAuthorBtn" class="glass-btn icon-only" title="Clear author filter">
-                                <i class="fa-solid fa-times"></i>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Results Grid -->
-                    <div id="chubGrid" class="chub-grid">
-                        <!-- ChubAI cards will be injected here -->
-                    </div>
-                    
-                    <!-- Load More Button -->
-                    <div class="chub-load-more" id="chubLoadMore" style="display: none;">
-                        <button id="chubLoadMoreBtn" class="glass-btn">
-                            <i class="fa-solid fa-plus"></i> Load More
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- Timeline Section (hidden by default) -->
-                <div id="chubTimelineSection" class="chub-section hidden">
-                    <div class="chub-timeline-header">
-                        <div class="chub-timeline-header-left">
-                            <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
-                            <p>New characters from authors you follow</p>
-                        </div>
-                    </div>
-                    <div id="chubTimelineGrid" class="chub-grid">
-                        <!-- Timeline cards will be injected here -->
-                    </div>
-                    <div class="chub-load-more" id="chubTimelineLoadMore" style="display: none;">
-                        <button id="chubTimelineLoadMoreBtn" class="glass-btn">
-                            <i class="fa-solid fa-plus"></i> Load More
-                        </button>
-                    </div>
-                </div>
+            <!-- Online View — populated by active provider -->
+            <div id="browseRecoveryBanner" class="browse-recovery-banner hidden">
+                <i class="fa-solid fa-sync fa-spin"></i>
+                <span>Loading library data — some <em>In Library</em> badges may be incomplete</span>
+                <button class="browse-recovery-dismiss" title="Dismiss">&times;</button>
+            </div>
+            <div id="onlineView" class="online-view hidden">
             </div>
         </main>
     </div>
@@ -431,177 +237,7 @@
         </div>
     </div>
 
-    <!-- ChubAI Login Modal -->
-    <div id="chubLoginModal" class="modal-overlay hidden">
-        <div class="modal-glass chub-login-modal">
-            <div class="modal-header">
-                <h2><i class="fa-solid fa-key"></i> ChubAI Authentication</h2>
-                <button class="close-btn" id="chubLoginClose">&times;</button>
-            </div>
-            <div class="chub-login-body">
-                <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
-                    <strong>Browsing and downloading public characters works without a token!</strong>
-                </p>
-                <p class="chub-login-info">
-                    <i class="fa-solid fa-key" style="color: var(--accent);"></i>
-                    <strong>Optional:</strong> Add your URQL_TOKEN to access your favorites and restricted content.
-                </p>
-                
-                <div class="chub-login-form">
-                    <div class="form-group">
-                        <label for="chubApiKeyInput">URQL_TOKEN</label>
-                        <input type="password" id="chubApiKeyInput" class="glass-input" placeholder="Paste your URQL_TOKEN here..." autocomplete="off">
-                    </div>
-                    <label class="checkbox-label" style="margin-top: 10px;">
-                        <input type="checkbox" id="chubRememberKey"> Remember token
-                    </label>
-                    <div class="chub-login-status" style="display:none;"></div>
-                </div>
-                
-                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
-                    <summary style="cursor: pointer; color: var(--accent);">
-                        <i class="fa-solid fa-question-circle"></i> How to get your URQL_TOKEN
-                    </summary>
-                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border); font-size: 0.9rem; color: var(--text-secondary);">
-                        <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
-                            <li>Go to <a href="https://chub.ai" target="_blank" style="color: var(--accent);">chub.ai</a> and log in</li>
-                            <li>Open your browser's Developer Tools (F12)</li>
-                            <li>Go to the <strong>Application</strong> tab (or Storage in Firefox)</li>
-                            <li>In the left sidebar, expand <strong>Local Storage</strong></li>
-                            <li>Click on <code>https://chub.ai</code></li>
-                            <li>Find the key <code style="color: #e74c3c; font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
-                        </ol>
-                        <p style="margin-top: 10px; font-style: italic;">
-                            The token is a long string that authenticates you with ChubAI's API.
-                        </p>
-                    </div>
-                </details>
-                
-                <div class="chub-login-actions">
-                    <button id="chubSaveKeyBtn" class="action-btn primary">
-                        <i class="fa-solid fa-save"></i> Save Token
-                    </button>
-                    <button id="chubClearKeyBtn" class="action-btn secondary" style="display:none;">
-                        <i class="fa-solid fa-trash"></i> Clear Token
-                    </button>
-                    <a href="https://chub.ai" target="_blank" class="action-btn secondary">
-                        <i class="fa-solid fa-external-link"></i> ChubAI Website
-                    </a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ChubAI Character Preview Modal -->
-    <div id="chubCharModal" class="modal-overlay hidden">
-        <div class="modal-glass chub-char-modal">
-            <div class="modal-header">
-                <div class="chub-char-header-info">
-                    <img id="chubCharAvatar" src="" alt="" class="chub-char-avatar">
-                    <div>
-                        <h2 id="chubCharName">Character Name</h2>
-                        <p class="chub-char-meta">
-                            by <a id="chubCharCreator" href="#" title="Click to see all characters by this author">Creator</a>
-                            <a id="chubCreatorExternal" href="#" target="_blank" class="creator-external-link" title="Open author's ChubAI profile"><i class="fa-solid fa-external-link"></i></a> •
-                            <span id="chubCharRating" title="Rating"><i class="fa-solid fa-star"></i> 0</span> •
-                            <span id="chubCharDownloads" title="Downloads"><i class="fa-solid fa-download"></i> 0</span> •
-                            <span id="chubCharFavoriteBtn" class="chub-favorite-btn-inline" title="Add to favorites on ChubAI"><i class="fa-regular fa-heart"></i> <span id="chubCharFavoriteCount">0</span></span>
-                        </p>
-                    </div>
-                </div>
-                <div class="modal-controls">
-                    <a id="chubOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on ChubAI">
-                        <i class="fa-solid fa-external-link"></i> Open
-                    </a>
-                    <button id="chubDownloadBtn" class="action-btn primary" title="Download to SillyTavern">
-                        <i class="fa-solid fa-download"></i> Import
-                    </button>
-                    <button class="close-btn" id="chubCharClose">&times;</button>
-                </div>
-            </div>
-            <div class="chub-char-body">
-                <div class="chub-char-tagline" id="chubCharTaglineSection" style="display: none;">
-                    <i class="fa-solid fa-quote-left"></i>
-                    <div id="chubCharTagline" class="chub-tagline-text"></div>
-                </div>
-
-                <div class="chub-char-meta-grid">
-                    <div class="chub-char-stats">
-                        <div class="chub-stat">
-                            <i class="fa-solid fa-message"></i>
-                            <span id="chubCharTokens">0</span> tokens
-                        </div>
-                        <div class="chub-stat">
-                            <i class="fa-solid fa-calendar"></i>
-                            <span id="chubCharDate">Unknown</span>
-                        </div>
-                        <div class="chub-stat" id="chubCharGreetingsStat" style="display: none;">
-                            <i class="fa-solid fa-comment-dots"></i>
-                            <span id="chubCharGreetingsCount">0</span> greetings
-                        </div>
-                        <div class="chub-stat" id="chubCharLorebookStat" style="display: none;">
-                            <i class="fa-solid fa-book"></i>
-                            Lorebook
-                        </div>
-                    </div>
-                    <div class="chub-char-tags" id="chubCharTags">
-                        <!-- Tags injected here -->
-                    </div>
-                </div>
-                
-                <!-- Creator's Notes Section (public ChubAI description) -->
-                <div class="chub-char-section">
-                    <h3 class="chub-section-title" data-section="chubCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
-                        <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
-                    </h3>
-                    <div id="chubCharCreatorNotes" class="scrolling-text">
-                        No description available.
-                    </div>
-                </div>
-                
-                <!-- Character Definition Description Section -->
-                <div class="chub-char-section" id="chubCharDescriptionSection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharDescription" data-label="Description" data-icon="fa-solid fa-scroll" title="Click to expand">
-                        <i class="fa-solid fa-scroll"></i> Description
-                    </h3>
-                    <div id="chubCharDescription" class="scrolling-text"></div>
-                </div>
-                
-                <!-- Personality Section -->
-                <div class="chub-char-section" id="chubCharPersonalitySection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharPersonality" data-label="Personality" data-icon="fa-solid fa-brain" title="Click to expand">
-                        <i class="fa-solid fa-brain"></i> Personality
-                    </h3>
-                    <div id="chubCharPersonality" class="scrolling-text"></div>
-                </div>
-                
-                <!-- Scenario Section -->
-                <div class="chub-char-section" id="chubCharScenarioSection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharScenario" data-label="Scenario" data-icon="fa-solid fa-theater-masks" title="Click to expand">
-                        <i class="fa-solid fa-theater-masks"></i> Scenario
-                    </h3>
-                    <div id="chubCharScenario" class="scrolling-text"></div>
-                </div>
-                
-                <!-- First Message Section -->
-                <div class="chub-char-section" id="chubCharFirstMsgSection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharFirstMsg" data-label="First Message" data-icon="fa-solid fa-message" title="Click to expand">
-                        <i class="fa-solid fa-message"></i> First Message
-                    </h3>
-                    <div id="chubCharFirstMsg" class="scrolling-text first-message-preview"></div>
-                </div>
-
-                <!-- Alternate Greetings Section -->
-                <div class="chub-char-section" id="chubCharAltGreetingsSection" style="display: none;">
-                    <h3 class="chub-section-title" data-section="chubCharAltGreetings" data-label="Alternate Greetings" data-icon="fa-solid fa-comments" title="Click to expand">
-                        <i class="fa-solid fa-comments"></i> Alternate Greetings <span class="chub-section-count" id="chubCharAltGreetingsCount"></span>
-                    </h3>
-                    <div id="chubCharAltGreetings" class="chub-alt-greetings-list"></div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- ChubAI modals (login + preview) are injected by the provider at runtime -->
 
     <!-- Edit/Detail Modal -->
     <div id="charModal" class="modal-overlay hidden">
@@ -666,13 +302,13 @@
                         <p class="meta-info">
                             Created: <span id="modalDate"></span> 
                             <span id="modalAuthorContainer" style="display:none">• Author: <a href="#" id="modalAuthor" class="creator-link" title="Click to filter by this creator"></a></span>
-                            <span class="chub-link-indicator" id="chubLinkIndicator" title="Click to link/manage ChubAI connection">
-                                • <i class="fa-solid fa-link"></i> <span class="chub-link-text">ChubAI</span>
+                            <span class="provider-link-indicator" id="providerLinkIndicator" title="Click to link to a provider">
+                                • <i class="fa-solid fa-link"></i> <span class="provider-link-text">Link</span>
                             </span>
                         </p>
 
-                        <div class="chub-tagline-row" id="modalChubTaglineRow" style="display:none;">
-                            <span class="chub-tagline-text" id="modalChubTagline"></span>
+                        <div class="provider-tagline-row" id="modalProviderTaglineRow" style="display:none;">
+                            <span class="provider-tagline-text" id="modalProviderTagline"></span>
                         </div>
                         
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
@@ -1029,7 +665,7 @@
                         <div class="chub-link-divider"><span>or paste URL</span></div>
                         
                         <div class="chub-link-url-row">
-                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="https://chub.ai/characters/..." autocomplete="off">
+                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="off">
                             <button id="chubLinkUrlBtn" class="chub-link-btn primary compact">
                                 <i class="fa-solid fa-link"></i>
                             </button>
@@ -1098,19 +734,19 @@
             <div class="confirm-modal-body">
                 <!-- Import source toggle -->
                 <div class="import-source-toggle">
-                    <button class="import-source-btn active" data-source="chub">
-                        <i class="fa-solid fa-link"></i> Chub URLs
+                    <button class="import-source-btn active" data-source="url">
+                        <i class="fa-solid fa-link"></i> URLs
                     </button>
                     <button class="import-source-btn" data-source="local">
                         <i class="fa-solid fa-file-image"></i> Local PNG
                     </button>
                 </div>
 
-                <!-- Chub URL input (default) -->
-                <div id="importSourceChub" class="import-source-panel">
-                    <p>Paste Chub AI character URLs below (one per line):</p>
+                <!-- URL input (default) -->
+                <div id="importSourceUrl" class="import-source-panel">
+                    <p>Paste character URLs below (one per line):</p>
                     <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
-https://chub.ai/characters/author/another-character
+https://jannyai.com/characters/uuid_slug
 ..."></textarea>
                 </div>
 
@@ -1150,7 +786,7 @@ https://chub.ai/characters/author/another-character
                 </div>
                 <div class="import-info" id="importInfoHint">
                     <i class="fa-solid fa-info-circle"></i>
-                    <span>Supports chub.ai and characterhub.org links. Characters will be imported as PNG files.</span>
+                    <span>Supports URLs from any registered provider. Characters will be imported as PNG files.</span>
                 </div>
                 <div id="importProgress" class="import-progress hidden">
                     <div class="import-progress-header">
@@ -1291,63 +927,63 @@ https://chub.ai/characters/author/another-character
     </div>
 
     <!-- Bulk ChubAI Link Modal -->
-    <div id="bulkChubLinkModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content bulk-chub-link-modal-content">
+    <div id="bulkAutoLinkModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content bulk-auto-link-modal-content">
             <div class="confirm-modal-header">
-                <h3><i class="fa-solid fa-link"></i> Link Characters to ChubAI</h3>
-                <button class="close-confirm-btn" id="closeBulkChubLinkModal">&times;</button>
+                <h3><i class="fa-solid fa-link"></i> Auto-Link Characters</h3>
+                <button class="close-confirm-btn" id="closeBulkAutoLinkModal">&times;</button>
             </div>
             <div class="confirm-modal-body">
                 <!-- Scanning Phase -->
-                <div id="bulkChubLinkScanning" class="bulk-chub-link-phase">
-                    <div class="bulk-chub-link-scan-info">
-                        <img id="bulkChubLinkScanAvatar" src="" alt="">
-                        <span id="bulkChubLinkScanName">Preparing...</span>
+                <div id="bulkAutoLinkScanning" class="bulk-auto-link-phase">
+                    <div class="bulk-auto-link-scan-info">
+                        <img id="bulkAutoLinkScanAvatar" src="" alt="">
+                        <span id="bulkAutoLinkScanName">Preparing...</span>
                     </div>
-                    <p id="bulkChubLinkScanStatus">Scanning library for unlinked characters...</p>
+                    <p id="bulkAutoLinkScanStatus">Scanning library for unlinked characters...</p>
                     <div class="import-progress">
                         <div class="import-progress-header">
                             <span>Progress</span>
-                            <span id="bulkChubLinkScanProgress">0/0</span>
+                            <span id="bulkAutoLinkScanProgress">0/0</span>
                         </div>
                         <div class="import-progress-bar">
-                            <div id="bulkChubLinkScanFill" class="import-progress-fill"></div>
+                            <div id="bulkAutoLinkScanFill" class="import-progress-fill"></div>
                         </div>
                     </div>
-                    <div class="bulk-chub-link-scan-stats">
-                        <span><i class="fa-solid fa-check-circle"></i> <span id="bulkChubLinkConfidentCount">0</span> confident</span>
-                        <span><i class="fa-solid fa-question-circle"></i> <span id="bulkChubLinkUncertainCount">0</span> need review</span>
-                        <span><i class="fa-solid fa-times-circle"></i> <span id="bulkChubLinkNoMatchCount">0</span> no match</span>
+                    <div class="bulk-auto-link-scan-stats">
+                        <span><i class="fa-solid fa-check-circle"></i> <span id="bulkAutoLinkConfidentCount">0</span> confident</span>
+                        <span><i class="fa-solid fa-question-circle"></i> <span id="bulkAutoLinkUncertainCount">0</span> need review</span>
+                        <span><i class="fa-solid fa-times-circle"></i> <span id="bulkAutoLinkNoMatchCount">0</span> no match</span>
                     </div>
                 </div>
                 
                 <!-- Results Phase -->
-                <div id="bulkChubLinkResults" class="bulk-chub-link-phase hidden">
-                    <div class="bulk-chub-link-tabs">
-                        <button class="bulk-chub-link-tab active" data-tab="confident" onclick="switchBulkChubLinkTab('confident')">
-                            <i class="fa-solid fa-check-circle"></i> Confident (<span id="bulkChubLinkConfidentTabCount">0</span>)
+                <div id="bulkAutoLinkResults" class="bulk-auto-link-phase hidden">
+                    <div class="bulk-auto-link-tabs">
+                        <button class="bulk-auto-link-tab active" data-tab="confident" onclick="switchBulkAutoLinkTab('confident')">
+                            <i class="fa-solid fa-check-circle"></i> Confident (<span id="bulkAutoLinkConfidentTabCount">0</span>)
                         </button>
-                        <button class="bulk-chub-link-tab" data-tab="uncertain" onclick="switchBulkChubLinkTab('uncertain')">
-                            <i class="fa-solid fa-question-circle"></i> Needs Review (<span id="bulkChubLinkUncertainTabCount">0</span>)
+                        <button class="bulk-auto-link-tab" data-tab="uncertain" onclick="switchBulkAutoLinkTab('uncertain')">
+                            <i class="fa-solid fa-question-circle"></i> Needs Review (<span id="bulkAutoLinkUncertainTabCount">0</span>)
                         </button>
-                        <button class="bulk-chub-link-tab" data-tab="nomatch" onclick="switchBulkChubLinkTab('nomatch')">
-                            <i class="fa-solid fa-times-circle"></i> No Match (<span id="bulkChubLinkNoMatchTabCount">0</span>)
+                        <button class="bulk-auto-link-tab" data-tab="nomatch" onclick="switchBulkAutoLinkTab('nomatch')">
+                            <i class="fa-solid fa-times-circle"></i> No Match (<span id="bulkAutoLinkNoMatchTabCount">0</span>)
                         </button>
                     </div>
-                    <div class="bulk-chub-link-actions" id="bulkChubLinkConfidentActions">
-                        <button class="action-btn small secondary" onclick="bulkChubLinkSelectAll()"><i class="fa-solid fa-check-double"></i> Select All</button>
-                        <button class="action-btn small secondary" onclick="bulkChubLinkDeselectAll()"><i class="fa-solid fa-square"></i> Deselect All</button>
+                    <div class="bulk-auto-link-actions" id="bulkAutoLinkConfidentActions">
+                        <button class="action-btn small secondary" onclick="bulkAutoLinkSelectAll()"><i class="fa-solid fa-check-double"></i> Select All</button>
+                        <button class="action-btn small secondary" onclick="bulkAutoLinkDeselectAll()"><i class="fa-solid fa-square"></i> Deselect All</button>
                     </div>
-                    <div class="bulk-chub-link-list-container">
-                        <div id="bulkChubLinkConfidentList" class="bulk-chub-link-list"></div>
-                        <div id="bulkChubLinkUncertainList" class="bulk-chub-link-list" style="display: none;"></div>
-                        <div id="bulkChubLinkNoMatchList" class="bulk-chub-link-list" style="display: none;"></div>
+                    <div class="bulk-auto-link-list-container">
+                        <div id="bulkAutoLinkConfidentList" class="bulk-auto-link-list"></div>
+                        <div id="bulkAutoLinkUncertainList" class="bulk-auto-link-list" style="display: none;"></div>
+                        <div id="bulkAutoLinkNoMatchList" class="bulk-auto-link-list" style="display: none;"></div>
                     </div>
                 </div>
             </div>
             <div class="confirm-modal-footer">
-                <button id="bulkChubLinkCancelBtn" class="action-btn secondary"><i class="fa-solid fa-stop"></i> Stop</button>
-                <button id="bulkChubLinkApplyBtn" class="action-btn primary hidden"><i class="fa-solid fa-link"></i> Link Selected (<span id="bulkChubLinkSelectedCount">0</span>)</button>
+                <button id="bulkAutoLinkCancelBtn" class="action-btn secondary"><i class="fa-solid fa-stop"></i> Stop</button>
+                <button id="bulkAutoLinkApplyBtn" class="action-btn primary hidden"><i class="fa-solid fa-link"></i> Link Selected (<span id="bulkAutoLinkSelectedCount">0</span>)</button>
             </div>
         </div>
     </div>
@@ -1370,12 +1006,36 @@ https://chub.ai/characters/author/another-character
                             <span>Filter by author/creator name</span>
                         </div>
                         <div class="info-code-item">
+                            <code>linked:yes</code> / <code>linked:no</code>
+                            <span>Filter characters linked/not linked to any provider</span>
+                        </div>
+                        <div class="info-code-item">
                             <code>chub:yes</code> / <code>chub:no</code>
-                            <span>Filter characters linked/not linked to ChubAI</span>
+                            <span>Filter by ChubAI link status</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>janny:yes</code> / <code>janny:no</code>
+                            <span>Filter by JanitorAI link status</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>ct:yes</code> / <code>ct:no</code>
+                            <span>Filter by CharacterTavern link status</span>
                         </div>
                         <div class="info-code-item">
                             <code>favorite:yes</code> / <code>fav:no</code>
                             <span>Filter by favorite status</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>version:text</code>
+                            <span>Filter by character_version field (<code>version:none</code> for empty)</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>gallery:id</code>
+                            <span>Filter by gallery_id (<code>gallery:none</code> for characters without one)</span>
+                        </div>
+                        <div class="info-code-item">
+                            <code>uid:id</code>
+                            <span>Filter by version_uid (<code>uid:none</code> for characters without one)</span>
                         </div>
                     </div>
                 </div>
@@ -1405,7 +1065,7 @@ https://chub.ai/characters/author/another-character
                         <li><strong>Gallery Downloads:</strong> Download character gallery images from ChubAI</li>
                         <li><strong>Version History:</strong> Browse the full published version history from ChubAI</li>
                         <li><strong>Quick Navigation:</strong> Jump to the ChubAI page from character details</li>
-                        <li><strong>Bulk Linking:</strong> Use "Link ChubAI Characters" to auto-match by name, creator, and content similarity</li>
+                        <li><strong>Bulk Linking:</strong> Use "Auto-Link Characters" to auto-match by name, creator, and content similarity</li>
                     </ul>
                 </div>
 
@@ -1619,9 +1279,9 @@ https://chub.ai/characters/author/another-character
                             <i class="fa-solid fa-sliders"></i>
                             <span>General</span>
                         </li>
-                        <li class="settings-nav-item" data-section="chub">
-                            <i class="fa-solid fa-cloud"></i>
-                            <span>ChubAI</span>
+                        <li class="settings-nav-item" data-section="online">
+                            <i class="fa-solid fa-globe"></i>
+                            <span>Online</span>
                         </li>
                         <li class="settings-nav-item" data-section="media">
                             <i class="fa-solid fa-photo-film"></i>
@@ -1706,9 +1366,9 @@ https://chub.ai/characters/author/another-character
                             </div>
                             <div class="settings-row">
                                 <label>
-                                    <input type="checkbox" id="settingsShowChubTagline" checked> Show ChubAI tagline in character details
+                                    <input type="checkbox" id="settingsShowProviderTagline" checked> Show provider tagline in character details
                                 </label>
-                                <span class="settings-hint">Display the ChubAI tagline below metadata in the Details tab.</span>
+                                <span class="settings-hint">Display the provider tagline below metadata in the Details tab (ChubAI, CharacterTavern, etc.)</span>
                             </div>
                             <div class="settings-row">
                                 <label>
@@ -1750,42 +1410,55 @@ https://chub.ai/characters/author/another-character
                         </div>
                     </div>
                     
-                    <!-- ChubAI Section -->
-                    <div class="settings-panel" data-section="chub">
+                    <!-- Online Providers Section -->
+                    <div class="settings-panel" data-section="online">
                         <div class="settings-panel-header">
-                            <h4><i class="fa-solid fa-cloud"></i> ChubAI Integration</h4>
-                            <p class="settings-panel-desc">Configure ChubAI connection and features</p>
+                            <h4><i class="fa-solid fa-globe"></i> Online Providers</h4>
+                            <p class="settings-panel-desc">Configure online character source connections and features</p>
                         </div>
-                        
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
-                            <div class="settings-row">
-                                <label for="settingsChubToken">URQL Token:</label>
-                                <div class="settings-input-group">
-                                    <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
-                                    <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
-                                        <i class="fa-solid fa-eye"></i>
-                                    </button>
+
+                        <!-- ChubAI provider settings -->
+                        <details class="settings-provider-section" open>
+                            <summary>
+                                <i class="fa-solid fa-cloud-arrow-down provider-icon"></i> ChubAI
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
+                                    <div class="settings-row">
+                                        <label for="settingsChubToken">URQL Token:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
+                                            <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>
+                                            <input type="checkbox" id="settingsRememberToken"> Remember token
+                                        </label>
+                                        <span class="settings-hint">Token location: DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Update Source</div>
+                                    <div class="settings-row">
+                                        <label>
+                                            <input type="checkbox" id="settingsChubUseV4Api"> Use V4 Git API for update checks (debug)
+                                        </label>
+                                        <span class="settings-hint">Uses the Git repository's card.json instead of the metadata API. Slower and may fail for some characters. Lorebooks from linked projects always use V4 regardless.</span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsRememberToken"> Remember token
-                                </label>
-                                <span class="settings-hint">Token location: DevTools → Application → Cookies → "__Secure-next-auth.session-token"</span>
-                            </div>
-                        </div>
-                        
+                        </details>
+
+                        <!-- Card Updates (shared across providers) -->
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-arrows-rotate"></i> Card Updates</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsChubUseV4Api"> Use V4 Git API for update checks (debug)
-                                </label>
-                                <span class="settings-hint">Uses the Git repository's card.json for all update check fields instead of the metadata API. Slower and may fail for some characters. Lorebooks from linked projects are always resolved via V4 regardless of this setting.</span>
-                            </div>
                             <div class="settings-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-                                <span class="settings-hint" style="margin-bottom: 4px;">Check all Chub-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
+                                <span class="settings-hint" style="margin-bottom: 4px;">Check all provider-linked characters for differences against the remote version. You can review each change and selectively apply updates.</span>
                                 <button id="batchCheckUpdatesBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-arrows-rotate"></i> Check All for Updates
                                 </button>
@@ -1833,15 +1506,27 @@ https://chub.ai/characters/author/another-character
                             <div class="settings-group-title"><i class="fa-solid fa-gear"></i> Options</div>
                             <div class="settings-row">
                                 <label>
-                                    <input type="checkbox" id="settingsIncludeChubGallery"> Include ChubAI Gallery
+                                    <input type="checkbox" id="settingsIncludeProviderGallery"> Include Provider Gallery
                                 </label>
-                                <span class="settings-hint">Also download Chub gallery images for linked characters.</span>
+                                <span class="settings-hint">Also download gallery images from linked providers that support galleries.</span>
                             </div>
                             <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsFixFilenames" checked> Fix filenames during localization
                                 </label>
                                 <span class="settings-hint">Rename files to localized_media_* format when duplicates are detected.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsFastFilenameSkip"> Fast skip (filename match)
+                                </label>
+                                <span class="settings-hint">Skip already-localized files by matching filenames instead of downloading and hashing. Much faster for re-runs, but won't detect corrupted or truncated files.</span>
+                            </div>
+                            <div class="settings-row" id="fastSkipValidateRow" style="padding-left: 24px; display: none;">
+                                <label>
+                                    <input type="checkbox" id="settingsFastSkipValidateHeaders"> Validate file size on match
+                                </label>
+                                <span class="settings-hint">When a filename match is found, verify the file is at least 1 KB via a HEAD request. Catches empty or truncated files.</span>
                             </div>
                         </div>
                     </div>
@@ -1995,7 +1680,7 @@ https://chub.ai/characters/author/another-character
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.1.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.5.0</span>
                             </div>
                         </div>
                     </div>
@@ -2012,7 +1697,7 @@ https://chub.ai/characters/author/another-character
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=74"></script>
+    <script src="library.js?v=77"></script>
     <script type="module" src="../modules/module-loader.js?v=2"></script>
     <script src="library-mobile.js?v=1"></script>
 </body>

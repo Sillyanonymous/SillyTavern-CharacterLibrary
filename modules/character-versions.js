@@ -1,30 +1,4 @@
-/**
- * Character Versions Module for SillyTavern Character Library
- * 
- * Provides version history + local snapshots, rendered inline as a tab pane
- * inside the character detail modal.
- * 
- * Two data sources:
- * - Remote: ChubAI V4 API (GitLab-compatible) — published version history
- * - Local: User-created snapshots stored on the filesystem via ST's Files API
- * 
- * Storage: Per-character JSON files in ST's `user/files/` directory,
- * accessed via `/api/files/upload`, `/api/files/delete`, and static
- * serve at `/user/files/`. An index file provides O(1) lookups even
- * with 10k+ character libraries.
- * 
- * File layout in `user/files/`:
- *   _clv_index.json           — master index (version_uid → metadata + avatar map)
- *   _clv_{version_uid}.json   — per-character snapshots + backup
- * 
- * Identity: Each character gets a stable `version_uid` (stored in
- * data.extensions.version_uid) on first snapshot. This UID travels WITH
- * the card PNG, surviving renames and reimports. Lookups fall back to
- * `avatar` filename for backwards compatibility via the index's avatarMap.
- * 
- * @module CharacterVersions
- * @version 4.0.0
- */
+// Character version history — local snapshots + remote provider versions
 
 import * as CoreAPI from './core-api.js';
 
@@ -35,16 +9,16 @@ import * as CoreAPI from './core-api.js';
 let isInitialized = false;
 
 // Remote version caches
-const versionListCache = new Map(); // fullPath -> { versions, fetchedAt, projectId }
+const versionListCache = new Map(); // cacheKey -> { versions, fetchedAt }
 const VERSION_LIST_CACHE_TTL = 5 * 60 * 1000;
-const versionDataCache = new Map(); // projectId:ref -> cardData
+const versionDataCache = new Map(); // cacheKey:ref -> cardData
 const VERSION_DATA_CACHE_MAX = 20;
 
 // Active pane state
 let paneContainer = null;
 let currentChar = null;
-let currentProjectId = null;
-let currentFullPath = null;
+let currentProvider = null; // ProviderBase instance for the active character
+let currentLinkInfo = null; // ProviderLinkInfo for the active character
 let currentVersions = [];
 let selectedVersionRef = null;
 let activeTab = 'remote';
@@ -52,7 +26,6 @@ let currentLocalSnapshots = [];
 let selectedSnapshotId = null;
 let paneDelegationHandler = null;
 let _dialogOpen = false; // re-entry guard for dialogs
-let currentMetadata = null; // stashed metadata API response for "Chub Page" version
 
 // ========================================
 // FILESYSTEM STORAGE VIA ST FILES API
@@ -76,9 +49,6 @@ const CARD_FIELDS = [
 
 // --- Low-level File I/O ---
 
-/**
- * Encode a string to base64 (unicode-safe)
- */
 function toBase64(str) {
     const bytes = new TextEncoder().encode(str);
     let binary = '';
@@ -86,11 +56,6 @@ function toBase64(str) {
     return btoa(binary);
 }
 
-/**
- * Upload a JSON object as a file to ST's user/files/ directory
- * @param {string} name - Filename (e.g., '_clv_index.json')
- * @param {Object} data - Data to serialize as JSON
- */
 async function fileUpload(name, data) {
     const jsonStr = JSON.stringify(data);
     const base64 = toBase64(jsonStr);
@@ -102,11 +67,6 @@ async function fileUpload(name, data) {
     return resp.json();
 }
 
-/**
- * Read a JSON file from ST's user/files/ directory
- * @param {string} name - Filename
- * @returns {Object|null} Parsed JSON or null if not found
- */
 async function fileRead(name) {
     try {
         const resp = await fetch(`/user/files/${name}`);
@@ -120,11 +80,6 @@ async function fileRead(name) {
     }
 }
 
-/**
- * Delete a file from ST's user/files/ directory
- * @param {string} name - Filename
- * @returns {boolean} Success
- */
 async function fileDelete(name) {
     try {
         const resp = await CoreAPI.apiRequest('/files/delete', 'POST', { path: `user/files/${name}` });
@@ -137,17 +92,10 @@ async function fileDelete(name) {
 
 // --- Index Management ---
 
-/**
- * Create an empty index object
- */
 function createEmptyIndex() {
     return { version: 1, characters: {}, avatarMap: {} };
 }
 
-/**
- * Ensure the master index is loaded into memory.
- * Loads from filesystem on first call, then cached.
- */
 async function ensureIndexLoaded() {
     if (cachedIndex) return cachedIndex;
     cachedIndex = await fileRead(INDEX_FILE);
@@ -157,21 +105,11 @@ async function ensureIndexLoaded() {
     return cachedIndex;
 }
 
-/**
- * Persist the in-memory index to filesystem
- */
 async function saveIndex() {
     if (!cachedIndex) return;
     await fileUpload(INDEX_FILE, cachedIndex);
 }
 
-/**
- * Update the index entry for a character and persist
- * @param {string} versionUid - Character's version_uid
- * @param {string} name - Character name
- * @param {string} avatar - Current avatar filename
- * @param {number} snapshotCount - Number of snapshots
- */
 async function updateIndex(versionUid, name, avatar, snapshotCount) {
     await ensureIndexLoaded();
     cachedIndex.characters[versionUid] = {
@@ -188,9 +126,6 @@ async function updateIndex(versionUid, name, avatar, snapshotCount) {
     await saveIndex();
 }
 
-/**
- * Remove a character from the index
- */
 async function removeFromIndex(versionUid) {
     await ensureIndexLoaded();
     delete cachedIndex.characters[versionUid];
@@ -200,9 +135,6 @@ async function removeFromIndex(versionUid) {
     await saveIndex();
 }
 
-/**
- * Look up a version_uid by avatar filename (fallback for chars without uid)
- */
 async function lookupUidByAvatar(avatar) {
     await ensureIndexLoaded();
     return cachedIndex.avatarMap[avatar] || null;
@@ -225,9 +157,6 @@ function createEmptyCharFile(versionUid, name, avatar) {
     };
 }
 
-/**
- * Load a character's version file (with in-memory cache)
- */
 async function loadCharFile(versionUid) {
     if (charDataCache.has(versionUid)) return charDataCache.get(versionUid);
     const data = await fileRead(charFileName(versionUid));
@@ -235,9 +164,6 @@ async function loadCharFile(versionUid) {
     return data;
 }
 
-/**
- * Save a character's version file and update index
- */
 async function saveCharFile(versionUid, charFile) {
     charDataCache.set(versionUid, charFile);
     await fileUpload(charFileName(versionUid), charFile);
@@ -246,11 +172,7 @@ async function saveCharFile(versionUid, charFile) {
 
 // --- Storage API ---
 
-/**
- * Save a snapshot for a character.
- * For auto_backup snapshots: deduplicates against the latest auto_backup
- * and caps the total count to the configured max (default 10).
- */
+// Deduplicates auto_backup snapshots and caps to configured max (default 10)
 async function storageSaveSnapshot(avatar, charName, label, source, data, versionUid) {
     if (!versionUid) throw new Error('version_uid required');
     let charFile = await loadCharFile(versionUid);
@@ -301,9 +223,6 @@ async function storageSaveSnapshot(avatar, charName, label, source, data, versio
     return id;
 }
 
-/**
- * Get all snapshots for a character (by version_uid with avatar fallback)
- */
 async function storageGetSnapshots(avatar, versionUid) {
     let uid = versionUid;
     if (!uid) uid = await lookupUidByAvatar(avatar);
@@ -316,9 +235,6 @@ async function storageGetSnapshots(avatar, versionUid) {
     return [...charFile.snapshots].sort((a, b) => b.timestamp - a.timestamp);
 }
 
-/**
- * Get a single snapshot by ID
- */
 async function storageGetSnapshot(versionUid, snapshotId) {
     if (!versionUid) return null;
     const charFile = await loadCharFile(versionUid);
@@ -326,9 +242,6 @@ async function storageGetSnapshot(versionUid, snapshotId) {
     return charFile.snapshots.find(s => s.id === snapshotId) || null;
 }
 
-/**
- * Delete a snapshot by ID
- */
 async function storageDeleteSnapshot(versionUid, snapshotId) {
     if (!versionUid) return;
     const charFile = await loadCharFile(versionUid);
@@ -345,9 +258,6 @@ async function storageDeleteSnapshot(versionUid, snapshotId) {
     }
 }
 
-/**
- * Rename a snapshot
- */
 async function storageRenameSnapshot(versionUid, snapshotId, newLabel) {
     if (!versionUid) return;
     const charFile = await loadCharFile(versionUid);
@@ -358,9 +268,6 @@ async function storageRenameSnapshot(versionUid, snapshotId, newLabel) {
     await saveCharFile(versionUid, charFile);
 }
 
-/**
- * Save a pre-restore backup
- */
 async function storageSaveBackup(avatar, versionUid, data) {
     if (!versionUid) return;
     let charFile = await loadCharFile(versionUid);
@@ -373,18 +280,12 @@ async function storageSaveBackup(avatar, versionUid, data) {
     await saveCharFile(versionUid, charFile);
 }
 
-/**
- * Get the pre-restore backup
- */
 async function storageGetBackup(versionUid) {
     if (!versionUid) return null;
     const charFile = await loadCharFile(versionUid);
     return charFile?.backup || null;
 }
 
-/**
- * Clear the pre-restore backup
- */
 async function storageClearBackup(versionUid) {
     if (!versionUid) return;
     const charFile = await loadCharFile(versionUid);
@@ -414,11 +315,6 @@ function getVersionUid(char) {
     return char?.data?.extensions?.version_uid || null;
 }
 
-/**
- * Ensure a character has a version_uid. Creates and persists one if missing.
- * @param {Object} char - Character object
- * @returns {Promise<string>} The version_uid
- */
 async function ensureVersionUid(char) {
     let uid = getVersionUid(char);
     if (uid) return uid;
@@ -458,69 +354,6 @@ function extractCardData(char) {
 }
 
 // ========================================
-// CHUB V4 API
-// ========================================
-
-async function fetchWithProxy(url, opts = {}) {
-    try {
-        const r = await fetch(url, opts);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r;
-    } catch (_) {
-        const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
-        if (!r.ok) {
-            if (r.status === 404) {
-                const t = await r.text();
-                if (t.includes('CORS proxy is disabled')) throw new Error('CORS proxy is disabled in SillyTavern settings');
-            }
-            throw new Error(`HTTP ${r.status}`);
-        }
-        return r;
-    }
-}
-
-function getHeaders() {
-    return CoreAPI.getChubHeaders?.() || { Accept: 'application/json' };
-}
-
-async function getProjectId(fullPath) {
-    try {
-        const m = await CoreAPI.fetchChubMetadata(fullPath);
-        currentMetadata = m || null;
-        return m?.id || null;
-    }
-    catch { currentMetadata = null; return null; }
-}
-
-async function fetchVersionList(projectId) {
-    const r = await fetchWithProxy(
-        `https://api.chub.ai/api/v4/projects/${projectId}/repository/commits`,
-        { headers: getHeaders() }
-    );
-    const d = await r.json();
-    return Array.isArray(d) ? d : [];
-}
-
-async function fetchVersionData(projectId, ref) {
-    const key = `${projectId}:${ref}`;
-    if (versionDataCache.has(key)) return versionDataCache.get(key);
-
-    const url = `https://api.chub.ai/api/v4/projects/${projectId}/repository/files/raw%252Fcard.json/raw?ref=${ref}`;
-    try {
-        const r = await fetchWithProxy(url, { headers: getHeaders() });
-        const d = await r.json();
-        if (versionDataCache.size >= VERSION_DATA_CACHE_MAX) {
-            versionDataCache.delete(versionDataCache.keys().next().value);
-        }
-        versionDataCache.set(key, d);
-        return d;
-    } catch (e) {
-        console.error('[CharVersions] fetchVersionData:', ref, e);
-        return null;
-    }
-}
-
-// ========================================
 // INITIALIZATION
 // ========================================
 
@@ -538,10 +371,6 @@ export function init(deps) {
 // PUBLIC API
 // ========================================
 
-/**
- * Open the character detail modal and switch to the Versions tab.
- * Called from context menu, ChubAI Link modal button, etc.
- */
 export function openVersionHistory(char) {
     if (!char) return;
     CoreAPI.openCharacterModal(char);
@@ -551,46 +380,39 @@ export function openVersionHistory(char) {
     }, 100);
 }
 
-/**
- * Render the Versions pane inside a container element.
- * Called by the Versions tab click handler in library.js.
- * @param {HTMLElement} container - The tab pane container
- * @param {Object} char - Character object
- */
 export function renderVersionsPane(container, char) {
     if (!container || !char) return;
 
     paneContainer = container;
     currentChar = char;
-    currentFullPath = CoreAPI.getChubLinkInfo(char)?.fullPath || null;
-    currentProjectId = null;
+
+    const match = CoreAPI.getCharacterProvider(char);
+    currentProvider = match?.provider?.supportsVersionHistory ? match.provider : null;
+    currentLinkInfo = match?.linkInfo || null;
+
     currentVersions = [];
     selectedVersionRef = null;
     currentLocalSnapshots = [];
     selectedSnapshotId = null;
-    activeTab = currentFullPath ? 'remote' : 'local';
+    activeTab = currentProvider ? 'remote' : 'local';
 
     container.innerHTML = buildPaneHtml();
     setupPaneDelegation(container);
 
     if (activeTab === 'remote') {
-        loadRemoteVersions(currentFullPath);
+        loadRemoteVersions();
     } else {
         loadLocalSnapshots();
     }
 }
 
-/**
- * Cleanup when the modal closes or tab switches away.
- */
 export function cleanupVersionsPane() {
     if (paneContainer && paneDelegationHandler) {
         paneContainer.removeEventListener('click', paneDelegationHandler);
     }
     currentChar = null;
-    currentProjectId = null;
-    currentFullPath = null;
-    currentMetadata = null;
+    currentProvider = null;
+    currentLinkInfo = null;
     currentVersions = [];
     selectedVersionRef = null;
     currentLocalSnapshots = [];
@@ -599,9 +421,6 @@ export function cleanupVersionsPane() {
     paneDelegationHandler = null;
 }
 
-/**
- * Quick-save a snapshot of the current character (callable externally)
- */
 export async function saveCurrentSnapshot(char, label = '') {
     const uid = await ensureVersionUid(char);
     const data = extractCardData(char);
@@ -611,12 +430,6 @@ export async function saveCurrentSnapshot(char, label = '') {
     CoreAPI.showToast(`Snapshot saved: "${finalLabel}"`, 'success');
 }
 
-/**
- * Auto-snapshot before a change (edit, update, restore).
- * Only runs if the autoSnapshotOnEdit setting is enabled.
- * @param {Object} char - Character object (with current pre-change data)
- * @param {'edit'|'update'|'restore'} source - What triggered the snapshot
- */
 export async function autoSnapshotBeforeChange(char, source = 'edit') {
     if (!char) return;
     const enabled = CoreAPI.getSetting('autoSnapshotOnEdit');
@@ -644,12 +457,12 @@ function el(sel) { return paneContainer?.querySelector(sel); }
 // ========================================
 
 function buildPaneHtml() {
-    const hasChub = !!currentFullPath;
+    const hasRemote = !!currentProvider;
     return `
         <div class="vt-container">
             <button class="vt-btn vt-back-btn"><i class="fa-solid fa-arrow-left"></i> Back to list</button>
             <div class="vt-toolbar">
-                ${hasChub ? `
+                ${hasRemote ? `
                 <div class="vt-sub-tabs">
                     <button class="vt-sub-tab ${activeTab === 'remote' ? 'active' : ''}" data-vt-tab="remote">
                         <i class="fa-solid fa-cloud"></i> Remote
@@ -709,10 +522,10 @@ function setupPaneDelegation(container) {
         const tab = e.target.closest('[data-vt-tab]');
         if (tab) { switchTab(tab.dataset.vtTab); return; }
 
-        // Remote version selection (including Chub Page pseudo-entry)
+        // Remote version selection (including provider page pseudo-entry)
         const vItem = e.target.closest('.vt-item[data-ref]');
         if (vItem) {
-            if (vItem.dataset.ref === '__chub_page__') { selectChubPageVersion(); return; }
+            if (vItem.dataset.ref === '__provider_page__') { selectProviderPageVersion(); return; }
             selectVersion(vItem.dataset.ref, vItem.dataset.fullId); return;
         }
 
@@ -771,8 +584,8 @@ async function switchTab(tab) {
     if (actions) actions.classList.add('vt-hidden');
     el('.vt-container')?.classList.remove('vt-detail-open');
 
-    if (tab === 'remote' && currentFullPath) {
-        await loadRemoteVersions(currentFullPath);
+    if (tab === 'remote' && currentProvider) {
+        await loadRemoteVersions();
     } else if (tab === 'local') {
         await loadLocalSnapshots();
     }
@@ -783,9 +596,10 @@ function closeMobileDetail() {
 }
 
 function handleRefresh() {
-    if (activeTab === 'remote' && currentFullPath) {
-        versionListCache.delete(currentFullPath);
-        loadRemoteVersions(currentFullPath);
+    if (activeTab === 'remote' && currentProvider) {
+        const cacheKey = `${currentProvider.id}:${currentLinkInfo?.fullPath}`;
+        versionListCache.delete(cacheKey);
+        loadRemoteVersions();
     } else if (activeTab === 'local') {
         loadLocalSnapshots();
     }
@@ -795,32 +609,25 @@ function handleRefresh() {
 // REMOTE VERSIONS
 // ========================================
 
-async function loadRemoteVersions(fullPath) {
+async function loadRemoteVersions() {
     const status = el('.vt-status');
     const list = el('.vt-list');
-    if (!status || !list) return;
+    if (!status || !list || !currentProvider || !currentLinkInfo) return;
+
+    const cacheKey = `${currentProvider.id}:${currentLinkInfo.fullPath}`;
 
     try {
-        const cached = versionListCache.get(fullPath);
+        const cached = versionListCache.get(cacheKey);
         if (cached && Date.now() - cached.fetchedAt < VERSION_LIST_CACHE_TTL) {
-            currentProjectId = cached.projectId;
             currentVersions = cached.versions;
             renderRemoteList(cached.versions);
             return;
         }
 
-        status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching project info...';
+        status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching version history...';
         list.innerHTML = '';
 
-        const projectId = await getProjectId(fullPath);
-        if (!projectId) {
-            status.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Could not find project on ChubAI';
-            return;
-        }
-        currentProjectId = projectId;
-
-        status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading version history...';
-        const versions = await fetchVersionList(projectId);
+        const versions = await currentProvider.fetchVersionList(currentLinkInfo);
 
         if (!versions.length) {
             status.innerHTML = '<i class="fa-solid fa-info-circle"></i> No version history found';
@@ -828,7 +635,7 @@ async function loadRemoteVersions(fullPath) {
         }
 
         currentVersions = versions;
-        versionListCache.set(fullPath, { projectId, versions, fetchedAt: Date.now() });
+        versionListCache.set(cacheKey, { versions, fetchedAt: Date.now() });
         renderRemoteList(versions);
     } catch (e) {
         console.error('[CharVersions] loadRemoteVersions:', e);
@@ -841,44 +648,47 @@ function renderRemoteList(versions) {
     const list = el('.vt-list');
     status.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i> ${versions.length} version${versions.length !== 1 ? 's' : ''} found`;
 
-    // "Chub Page" entry — shows what the metadata API returns (what the Chub website displays).
-    // This can differ from the Git-exported card.json that versions are based on.
-    const pageDate = currentMetadata?.lastActivityAt ? new Date(currentMetadata.lastActivityAt) : null;
+    // Provider "page" entry — shows what the provider's metadata API returns,
+    // which can differ from the Git-exported card.json that versions are based on.
+    const showPageEntry = currentProvider?.supportsRemotePageVersion;
+    const pageInfo = showPageEntry ? currentProvider.getRemotePageInfo() : null;
+    const pageDate = pageInfo?.date ? new Date(pageInfo.date) : null;
     const pageDateValid = pageDate && !isNaN(pageDate.getTime());
+    const pageLabel = currentProvider?.remoteVersionLabel || 'Provider Page';
+
     function buildPageEntry() {
-        if (!currentMetadata?.definition) return '';
+        if (!showPageEntry) return '';
         const dateHtml = pageDateValid
             ? `<i class="fa-regular fa-clock"></i> <span title="${esc(pageDate.toLocaleString())}">Last activity ${relTime(pageDate)}</span>`
-            : '<i class="fa-solid fa-globe"></i> <span>Metadata API</span>';
+            : `<i class="fa-solid fa-globe"></i> <span>Metadata API</span>`;
         return `
-            <div class="vt-item chub-page" data-ref="__chub_page__">
+            <div class="vt-item provider-page" data-ref="__provider_page__">
                 <div class="vt-item-header">
-                    <span class="vt-item-id">Chub Page</span>
-                    <span class="vt-badge chub-page">API</span>
+                    <span class="vt-item-id">${esc(pageLabel)}</span>
+                    <span class="vt-badge provider-page">API</span>
                 </div>
-                <div class="vt-item-title">Current state shown on the ChubAI website</div>
+                <div class="vt-item-title">Current published state from ${esc(currentProvider.name)}</div>
                 <div class="vt-item-date">${dateHtml}</div>
             </div>`;
     }
 
-    // Insert the Chub Page entry in chronological order among versions.
-    // If we don't have a valid date, it goes at the top.
+    // Insert the page entry in chronological order among versions.
     let insertIdx = 0;
-    if (pageDateValid && currentMetadata?.definition) {
+    if (pageDateValid && showPageEntry) {
         for (let i = 0; i < versions.length; i++) {
-            const vDate = new Date(versions[i].committed_date || versions[i].created_at);
+            const vDate = new Date(versions[i].date);
             if (pageDate >= vDate) { insertIdx = i; break; }
             insertIdx = i + 1;
         }
     }
 
     const versionItems = versions.map((v, idx) => {
-        const date = new Date(v.committed_date || v.created_at);
-        const vid = v.short_id || v.id;
-        const title = v.title || v.message || 'Update';
+        const date = new Date(v.date);
+        const vid = v.ref?.substring(0, 8) || v.ref;
+        const title = v.message || 'Update';
         const isLatest = idx === 0;
         return `
-            <div class="vt-item ${isLatest ? 'latest' : ''}" data-ref="${esc(vid)}" data-full-id="${esc(v.id)}">
+            <div class="vt-item ${isLatest ? 'latest' : ''}" data-ref="${esc(vid)}" data-full-id="${esc(v.ref)}">
                 <div class="vt-item-header">
                     <span class="vt-item-id">${esc(vid)}</span>
                     ${isLatest ? '<span class="vt-badge latest">Latest</span>' : ''}
@@ -893,7 +703,7 @@ function renderRemoteList(versions) {
 
     list.innerHTML = versionItems;
 
-    // Splice the Chub Page entry into its chronological position
+    // Splice the page entry into its chronological position
     const pageEntry = buildPageEntry();
     if (pageEntry) {
         const items = list.querySelectorAll('.vt-item');
@@ -945,7 +755,8 @@ function renderSnapshotList(snaps) {
         const date = new Date(s.timestamp);
         let icon;
         switch (s.source) {
-            case 'chub_restore': icon = 'fa-cloud-arrow-down'; break;
+            case 'chub_restore':  // legacy
+            case 'remote_restore': icon = 'fa-cloud-arrow-down'; break;
             case 'auto_backup': icon = 'fa-shield-halved'; break;
             default: icon = 'fa-bookmark';
         }
@@ -968,7 +779,7 @@ function renderSnapshotList(snaps) {
 // ========================================
 
 async function selectVersion(shortId, fullId) {
-    if (!currentProjectId) return;
+    if (!currentProvider) return;
     selectedVersionRef = shortId;
     selectedSnapshotId = null;
 
@@ -983,11 +794,23 @@ async function selectVersion(shortId, fullId) {
     preview.classList.remove('vt-hidden');
     preview.innerHTML = '<div class="vt-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading version data...</div>';
 
+    const ref = fullId || shortId;
+    const cacheKey = `${currentProvider.id}:${ref}`;
+
     try {
-        const data = await fetchVersionData(currentProjectId, shortId);
-        if (!data) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Could not load version data</div>'; return; }
-        const card = normalizeChubDef(data);
-        renderDiffPreview(preview, currentChar?.data || currentChar, card, data);
+        let card;
+        if (versionDataCache.has(cacheKey)) {
+            card = versionDataCache.get(cacheKey);
+        } else {
+            card = await currentProvider.fetchVersionData(currentLinkInfo, ref);
+            if (card) {
+                if (versionDataCache.size >= VERSION_DATA_CACHE_MAX)
+                    versionDataCache.delete(versionDataCache.keys().next().value);
+                versionDataCache.set(cacheKey, card);
+            }
+        }
+        if (!card) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Could not load version data</div>'; return; }
+        renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
         resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch (e) {
         preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading preview</div>';
@@ -995,54 +818,17 @@ async function selectVersion(shortId, fullId) {
 }
 
 /**
- * Build a normalized card from the stashed metadata API response,
- * resolving linked lorebooks when needed (same logic as import & update checker).
+ * Handle selection of the provider page pseudo-version entry.
+ * Shows a diff against the provider's metadata API response — what the
+ * provider website displays, which may differ from the Git-exported card.json.
  */
-async function buildChubPageCard() {
-    const def = currentMetadata.definition;
-    const enriched = { ...def };
-    if (!enriched.tags && currentMetadata.topics) enriched.tags = currentMetadata.topics;
-    if (currentMetadata.tagline) {
-        enriched.extensions = enriched.extensions || {};
-        enriched.extensions.chub = enriched.extensions.chub || {};
-        if (!enriched.extensions.chub.tagline) enriched.extensions.chub.tagline = currentMetadata.tagline;
-    }
-    if (!enriched.creator && currentMetadata.fullPath) {
-        enriched.creator = currentMetadata.fullPath.split('/')[0] || '';
-    }
-
-    const card = normalizeChubDef(enriched);
-
-    // Resolve linked lorebook — same as import/update paths
-    const embeddedCount = card.character_book?.entries?.length || 0;
-    if (currentMetadata.related_lorebooks?.length > 0 && currentMetadata.id) {
-        try {
-            const linked = await CoreAPI.fetchChubLinkedLorebook(currentMetadata.id);
-            if (linked?.entries?.length > 0) {
-                card._metaLorebookEntries = embeddedCount;
-                card._linkedLorebook = true;
-                card.character_book = linked;
-            }
-        } catch (e) {
-            console.warn('[CharVersions] Failed to resolve linked lorebook for Chub Page entry', e);
-        }
-    }
-
-    return card;
-}
-
-/**
- * Handle selection of the "Chub Page" pseudo-version entry.
- * Shows a diff against the metadata API response — what the Chub website displays,
- * which may differ from the V4 Git-exported card.json that real versions use.
- */
-async function selectChubPageVersion() {
-    if (!currentMetadata?.definition) return;
-    selectedVersionRef = '__chub_page__';
+async function selectProviderPageVersion() {
+    if (!currentProvider?.supportsRemotePageVersion) return;
+    selectedVersionRef = '__provider_page__';
     selectedSnapshotId = null;
 
     paneContainer.querySelectorAll('.vt-item').forEach(i =>
-        i.classList.toggle('selected', i.dataset.ref === '__chub_page__')
+        i.classList.toggle('selected', i.dataset.ref === '__provider_page__')
     );
 
     updateActionsVisibility();
@@ -1050,20 +836,23 @@ async function selectChubPageVersion() {
 
     const preview = el('.vt-preview');
     preview.classList.remove('vt-hidden');
-    preview.innerHTML = '<div class="vt-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading Chub page data...</div>';
+    const provName = currentProvider.name;
+    preview.innerHTML = `<div class="vt-loading"><i class="fa-solid fa-spinner fa-spin"></i> Loading ${esc(provName)} page data...</div>`;
 
     try {
-        const card = await buildChubPageCard();
+        const card = await currentProvider.fetchRemotePageCard(currentLinkInfo);
+        if (!card) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Could not load page data</div>'; return; }
         renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
 
-        // Add info banner about what this is
+        // Info banner about what this entry represents
+        const pageInfo = currentProvider.getRemotePageInfo();
         const banner = document.createElement('div');
         banner.className = 'vt-page-version-banner';
         let bannerText;
         if (card._linkedLorebook) {
-            bannerText = `Character fields come from the Chub <strong>metadata API</strong>. The lorebook is a <strong>linked lorebook</strong> (separate Chub project) resolved via the V4 Git API — the metadata API only stores ${card._metaLorebookEntries ?? 0} embedded entr${(card._metaLorebookEntries ?? 0) === 1 ? 'y' : 'ies'}.`;
+            bannerText = `Character fields come from the ${esc(provName)} <strong>metadata API</strong>. The lorebook is a <strong>linked lorebook</strong> (separate project) resolved via a secondary API — the metadata API only stores ${card._metaLorebookEntries ?? 0} embedded entr${(card._metaLorebookEntries ?? 0) === 1 ? 'y' : 'ies'}.`;
         } else {
-            bannerText = 'Shows the current state from the Chub <strong>metadata API</strong>. Text fields may differ from the Git-exported versions above if the creator edited via the Chub website without committing a new export.';
+            bannerText = pageInfo?.description || `Shows the current state from the ${esc(provName)} metadata API.`;
         }
         banner.innerHTML = `<i class="fa-solid fa-globe"></i><span>${bannerText}</span>`;
         const header = preview.querySelector('.vt-preview-header');
@@ -1071,7 +860,7 @@ async function selectChubPageVersion() {
 
         resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch (e) {
-        preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading Chub page data</div>';
+        preview.innerHTML = `<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading ${esc(provName)} page data</div>`;
     }
 }
 
@@ -1119,13 +908,7 @@ function updateActionsVisibility() {
 // DIFF PREVIEW
 // ========================================
 
-/**
- * @param {HTMLElement} previewEl
- * @param {Object} localData - current card data
- * @param {Object} compareData - normalized version/snapshot data
- * @param {Object|null} rawChubData - raw card.json (for avatar URL)
- */
-function renderDiffPreview(previewEl, localData, compareData, rawChubData) {
+function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
     const fields = [
         { key: 'name', label: 'Name', icon: 'fa-signature' },
         { key: 'description', label: 'Description', long: true, icon: 'fa-align-left' },
@@ -1137,7 +920,6 @@ function renderDiffPreview(previewEl, localData, compareData, rawChubData) {
         { key: 'post_history_instructions', label: 'Post-History Instructions', long: true, icon: 'fa-clipboard-list' },
         { key: 'creator_notes', label: 'Creator Notes', long: true, icon: 'fa-note-sticky' },
         { key: 'creator', label: 'Creator', icon: 'fa-user-pen' },
-        // { key: 'character_version', label: 'Character Version' }, // Always "main" on ChubAI — excluded
         { key: 'tags', label: 'Tags', isArray: true, icon: 'fa-tags' },
         { key: 'alternate_greetings', label: 'Alternate Greetings', long: true, isArray: true, icon: 'fa-comments' },
         { key: 'character_book', label: 'Embedded Lorebook', icon: 'fa-book' },
@@ -1148,7 +930,7 @@ function renderDiffPreview(previewEl, localData, compareData, rawChubData) {
 
     // Avatar image — show the selected version/snapshot's avatar
     const snapshotAvatar = compareData._avatarUrl;
-    const remoteAvatar = rawChubData?.data?.avatar;
+    const remoteAvatar = rawRemoteData?.data?.avatar;
     const avatarUrl = remoteAvatar || snapshotAvatar;
     if (avatarUrl) {
         html += renderAvatarPreview(avatarUrl);
@@ -1195,9 +977,6 @@ function renderDiffPreview(previewEl, localData, compareData, rawChubData) {
     `;
 }
 
-/**
- * Render the avatar thumbnail for the selected version/snapshot with apply button.
- */
 function renderAvatarPreview(avatarUrl) {
     if (!avatarUrl) return '';
     return `
@@ -1262,9 +1041,6 @@ function renderLongDiff(field, lv, rv) {
         </div>`;
 }
 
-/**
- * Render tags diff as pill badges with added/removed highlighting.
- */
 function renderTagsDiff(field, localTags, remoteTags) {
     const local = Array.isArray(localTags) ? localTags.map(t => String(t).trim()).filter(Boolean) : [];
     const remote = Array.isArray(remoteTags) ? remoteTags.map(t => String(t).trim()).filter(Boolean) : [];
@@ -1300,9 +1076,6 @@ function renderTagsDiff(field, localTags, remoteTags) {
         </div>`;
 }
 
-/**
- * Render alternate greetings as numbered expandable blocks.
- */
 function renderGreetingsDiff(field, localGreets, remoteGreets) {
     const local = Array.isArray(localGreets) ? localGreets : [];
     const remote = Array.isArray(remoteGreets) ? remoteGreets : [];
@@ -1374,14 +1147,14 @@ async function restoreVersion() {
     let cardData = null;
     let label = '';
 
-    if (activeTab === 'remote' && selectedVersionRef === '__chub_page__' && currentMetadata?.definition) {
-        cardData = await buildChubPageCard();
-        label = 'Chub metadata API state';
-    } else if (activeTab === 'remote' && selectedVersionRef && currentProjectId) {
-        const raw = await fetchVersionData(currentProjectId, selectedVersionRef);
+    if (activeTab === 'remote' && selectedVersionRef === '__provider_page__' && currentProvider?.supportsRemotePageVersion) {
+        cardData = await currentProvider.fetchRemotePageCard(currentLinkInfo);
+        label = `${currentProvider.name} metadata API state`;
+    } else if (activeTab === 'remote' && selectedVersionRef && currentProvider) {
+        const raw = await currentProvider.fetchVersionData(currentLinkInfo, selectedVersionRef);
         if (!raw) { CoreAPI.showToast('Could not fetch version data', 'error'); return; }
-        cardData = normalizeChubDef(raw);
-        label = `Chub version ${selectedVersionRef}`;
+        cardData = raw; // provider returns flat card fields
+        label = `${currentProvider.name} version ${selectedVersionRef}`;
     } else if (activeTab === 'local' && selectedSnapshotId) {
         const lookupUid = getVersionUid(currentChar) || await lookupUidByAvatar(currentChar.avatar);
         const snap = lookupUid ? await storageGetSnapshot(lookupUid, selectedSnapshotId) : null;
@@ -1443,16 +1216,17 @@ async function restoreVersion() {
         }
 
         if (success) {
-            if (activeTab === 'remote' && selectedVersionRef) {
-                const snapLabel = selectedVersionRef === '__chub_page__'
-                    ? 'Chub metadata API (restored)' : `Chub v${selectedVersionRef} (restored)`;
-                const restoredTag = selectedVersionRef === '__chub_page__'
-                    ? 'chub_page' : selectedVersionRef;
+            if (activeTab === 'remote' && selectedVersionRef && currentProvider) {
+                const snapLabel = selectedVersionRef === '__provider_page__'
+                    ? `${currentProvider.name} metadata API (restored)` : `${currentProvider.name} v${selectedVersionRef} (restored)`;
+                const restoredTag = selectedVersionRef === '__provider_page__'
+                    ? 'provider_page' : selectedVersionRef;
                 await storageSaveSnapshot(currentChar.avatar, name,
-                    snapLabel, 'chub_restore', cardData, uid);
+                    snapLabel, 'remote_restore', cardData, uid);
+                const extKey = `extensions.${currentProvider.id}`;
                 await CoreAPI.applyCardFieldUpdates(currentChar.avatar, {
-                    'extensions.chub.restored_version': restoredTag,
-                    'extensions.chub.restored_at': new Date().toISOString()
+                    [`${extKey}.restored_version`]: restoredTag,
+                    [`${extKey}.restored_at`]: new Date().toISOString()
                 });
             }
             CoreAPI.showToast(`Restored ${label}`, 'success');
@@ -1487,10 +1261,15 @@ async function undoRestore() {
         const s = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, backup.data);
         if (s) {
             await storageClearBackup(uid);
-            await CoreAPI.applyCardFieldUpdates(currentChar.avatar, {
-                'extensions.chub.restored_version': null,
-                'extensions.chub.restored_at': null
-            });
+            // Clear restore metadata for the active provider
+            const provId = currentProvider?.id;
+            if (provId) {
+                const extKey = `extensions.${provId}`;
+                await CoreAPI.applyCardFieldUpdates(currentChar.avatar, {
+                    [`${extKey}.restored_version`]: null,
+                    [`${extKey}.restored_at`]: null
+                });
+            }
             CoreAPI.showToast('Backup restored', 'success');
             status.innerHTML = '<i class="fa-solid fa-check" style="color:var(--cl-success);"></i> Restored';
             await CoreAPI.refreshCharacters(true);
@@ -1504,10 +1283,6 @@ async function undoRestore() {
     }
 }
 
-/**
- * Apply an avatar image from a URL to the current character.
- * Fetches the image, uploads via /api/characters/edit-avatar FormData endpoint.
- */
 async function handleApplyAvatar(avatarUrl) {
     if (!currentChar || !avatarUrl) return;
 
@@ -1614,11 +1389,10 @@ async function handleRenameSnapshot() {
 // NORMALIZATION & HELPERS
 // ========================================
 
-function normalizeChubDef(def) {
+function flattenCard(def) {
     if (!def) return {};
     if (def.spec === 'chara_card_v2' && def.data) {
         const out = { ...def.data };
-        // Preserve avatar URL from ChubAI if present
         if (def.data.avatar) out._avatarUrl = def.data.avatar;
         return out;
     }
@@ -1800,10 +1574,6 @@ function lbEntryName(entry) {
     return `Entry #${entry.id ?? '?'}`;
 }
 
-/**
- * Post-render: check each local-only lorebook entry against the linked
- * World Info file and update badges with safe/not-found status.
- */
 async function resolveVersionWorldFileStatus(containerEl, avatar) {
     if (!containerEl || !avatar) return;
     const rows = containerEl.querySelectorAll('.vt-lb-entry.local-only[data-lb-keys]');
@@ -2330,10 +2100,10 @@ function injectStyles() {
 
 .vt-badge { font-size: 0.65rem; padding: 1px 5px; border-radius: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
 .vt-badge.latest { background: rgba(var(--cl-accent-rgb, 74,158,255),0.15); color: var(--cl-accent, #4a9eff); border: 1px solid rgba(var(--cl-accent-rgb, 74,158,255),0.3); }
-.vt-badge.chub-page { background: rgba(245,166,35,0.15); color: #f5a623; border: 1px solid rgba(245,166,35,0.3); }
+.vt-badge.provider-page { background: rgba(245,166,35,0.15); color: #f5a623; border: 1px solid rgba(245,166,35,0.3); }
 
-.vt-item.chub-page { border-bottom: 1px solid rgba(245,166,35,0.15); }
-.vt-item.chub-page.selected { background: rgba(245,166,35,0.08); }
+.vt-item.provider-page { border-bottom: 1px solid rgba(245,166,35,0.15); }
+.vt-item.provider-page.selected { background: rgba(245,166,35,0.08); }
 
 .vt-page-version-banner { display: flex; align-items: flex-start; gap: 8px; padding: 8px 12px; margin: 0 0 10px; border-radius: 6px; font-size: 0.8rem; line-height: 1.4; color: #d4a04a; background: rgba(245,166,35,0.08); border: 1px solid rgba(245,166,35,0.2); }
 .vt-page-version-banner i { flex-shrink: 0; margin-top: 3px; }

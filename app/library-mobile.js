@@ -235,9 +235,6 @@
 
     if (!isMobile()) return;
 
-    // Enable bidirectional image unloading for chub cards (desktop keeps images loaded)
-    window.chubImageUnloadEnabled = true;
-
     // Ensure viewport-fit=cover for safe-area-inset to work
     (function fixViewport() {
         var meta = document.querySelector('meta[name="viewport"]');
@@ -288,9 +285,27 @@
        ANDROID BACK BUTTON
        ======================================== */
     function setupBackButton() {
-        const STATIC_OVERLAYS = new Set([
-            'charModal', 'chubCharModal', 'chatPreviewModal', 'chubLoginModal'
-        ]);
+        // Built lazily — ProviderRegistry may not exist yet at setup time
+        // (ES modules load async, this runs 200ms after DOMContentLoaded)
+        const BASE_STATIC = ['charModal', 'chatPreviewModal', 'chubLoginModal'];
+        let _staticOverlays = null;
+        function getStaticOverlays() {
+            if (!_staticOverlays) {
+                const providerIds = window.ProviderRegistry?.getPreviewModalIds?.() || [];
+                if (providerIds.length > 0) {
+                    _staticOverlays = new Set([...BASE_STATIC, ...providerIds]);
+                }
+            }
+            return _staticOverlays || new Set(BASE_STATIC);
+        }
+
+        const multiSelectHandler = () => {
+            if (window.MultiSelect?.enabled) {
+                window.MultiSelect.disable();
+                return true;
+            }
+            return false;
+        };
 
         const stack = [
             // Tier 0 — avatar quick-view (highest z-index)
@@ -303,11 +318,13 @@
             ['.custom-select-menu:not(.hidden)', el => el.classList.add('hidden')],
             ['#batchTagModal.visible',         el => el.classList.remove('visible')],
 
-            // When char details is stacked above the update checker, unwind its layers first
+            // When char details is stacked above another modal, unwind its layers first
             () => {
                 if (!document.body.classList.contains('char-modal-above')) return false;
-                const confirmModal = document.querySelector('.confirm-modal:not(.hidden)');
-                if (confirmModal) { confirmModal.classList.add('hidden'); return true; }
+                // Close the topmost non-pinned confirm-modal first (e.g. localizeModal over charModal)
+                const visibleConfirms = [...document.querySelectorAll('.confirm-modal:not(.hidden)')];
+                const unpinned = visibleConfirms.filter(m => !m.style.getPropertyPriority('z-index'));
+                if (unpinned.length > 0) { unpinned[unpinned.length - 1].classList.add('hidden'); return true; }
                 const charModal = document.getElementById('charModal');
                 if (charModal && !charModal.classList.contains('hidden')) { window.closeModal?.(); return true; }
                 return false;
@@ -319,7 +336,7 @@
             // Tier 1.5 — catch-all for dynamic modal-overlays
             () => {
                 for (const el of document.querySelectorAll('.modal-overlay:not(.hidden)')) {
-                    if (!STATIC_OVERLAYS.has(el.id)) {
+                    if (!getStaticOverlays().has(el.id)) {
                         el.remove();
                         return true;
                     }
@@ -367,7 +384,18 @@
             // Tier 3 — full-screen modals
             ['#chatPreviewModal:not(.hidden)',  el => el.classList.add('hidden')],
             ['#chubLoginModal:not(.hidden)',    el => el.classList.add('hidden')],
-            ['#chubCharModal:not(.hidden)',     () => { window.cleanupChubCharModal?.(); document.getElementById('chubCharModal')?.classList.add('hidden'); }],
+            () => {
+                const reg = window.ProviderRegistry;
+                const ids = reg?.getPreviewModalIds?.() || [];
+                for (const id of ids) {
+                    const el = document.getElementById(id);
+                    if (el && !el.classList.contains('hidden')) {
+                        reg.closeActivePreviewModal();
+                        return true;
+                    }
+                }
+                return false;
+            },
 
             // Tier 4 — in-modal sub-views
             ['.vt-container.vt-detail-open', el => el.classList.remove('vt-detail-open')],
@@ -376,19 +404,18 @@
             ['#charModal:not(.hidden)', () => window.closeModal?.()],
 
             // Tier 5.5 — multi-select mode
-            () => {
-                if (window.MultiSelect?.enabled) {
-                    window.MultiSelect.disable();
-                    return true;
-                }
-                return false;
-            },
+            multiSelectHandler,
 
-            // Tier 6 — dropdowns
+            // Tier 6 — dropdowns (browse filter dropdowns are relocated to body on mobile)
             ['#moreOptionsMenu:not(.hidden)',     el => el.classList.add('hidden')],
             ['#settingsMenu:not(.hidden)',        el => el.classList.add('hidden')],
-            ['#chubFiltersDropdown:not(.hidden)', el => el.classList.add('hidden')],
-            ['#chubTagsDropdown:not(.hidden)',    el => el.classList.add('hidden')],
+            () => {
+                const dd = document.querySelector('body > .dropdown-menu[data-mobile-relocated]:not(.hidden)');
+                if (dd) { dd.classList.add('hidden'); return true; }
+                const tags = document.querySelector('body > .browse-tags-dropdown[data-mobile-relocated]:not(.hidden)');
+                if (tags) { tags.classList.add('hidden'); return true; }
+                return false;
+            },
         ];
 
         // ── location.hash guards ──
@@ -428,7 +455,7 @@
             for (let i = 0; i < stack.length; i++) {
                 const entry = stack[i];
                 if (typeof entry === 'function') {
-                    if (entry === stack[stack.length - 5]) {
+                    if (entry === multiSelectHandler) {
                         if (window.MultiSelect?.enabled) return true;
                     }
                     continue;
@@ -701,7 +728,7 @@
         // ===== CHUBAI SECTION =====
         const chubSection = document.createElement('div');
         chubSection.className = 'mobile-settings-view-section';
-        chubSection.dataset.view = 'chub';
+        chubSection.dataset.view = 'online';
         body.appendChild(chubSection);
 
         // Mode toggle (Browse / Following)
@@ -745,38 +772,30 @@
         chubSection.appendChild(modeSection);
 
         // Sort — two selects: Browse preset + Following sort, toggled by mode
+        // Options are populated lazily when the sheet opens (filter bar may not exist at setup time)
         const chubSortSection = createSection('Sort By');
 
         const chubBrowseSortSelect = document.createElement('select');
         chubBrowseSortSelect.className = 'mobile-settings-select';
-        const realChubSort = document.getElementById('chubDiscoveryPreset');
-        if (realChubSort) {
-            chubBrowseSortSelect.innerHTML = realChubSort.innerHTML;
-            chubBrowseSortSelect.value = realChubSort.value;
-            chubBrowseSortSelect.addEventListener('change', () => {
-                realChubSort.value = chubBrowseSortSelect.value;
-                realChubSort.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-        }
+        chubBrowseSortSelect.addEventListener('change', () => {
+            const real = document.getElementById('chubDiscoveryPreset');
+            if (real) {
+                real.value = chubBrowseSortSelect.value;
+                real.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
         chubSortSection.appendChild(chubBrowseSortSelect);
 
         const chubFollowSortSelect = document.createElement('select');
         chubFollowSortSelect.className = 'mobile-settings-select';
         chubFollowSortSelect.style.display = 'none';
-        const realTimelineSort = document.getElementById('chubTimelineSortHeader');
-        if (realTimelineSort) {
-            Array.from(realTimelineSort.options).forEach(opt => {
-                const o = document.createElement('option');
-                o.value = opt.value;
-                o.textContent = opt.textContent;
-                o.selected = opt.selected;
-                chubFollowSortSelect.appendChild(o);
-            });
-            chubFollowSortSelect.addEventListener('change', () => {
-                realTimelineSort.value = chubFollowSortSelect.value;
-                realTimelineSort.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-        }
+        chubFollowSortSelect.addEventListener('change', () => {
+            const real = document.getElementById('chubTimelineSortHeader');
+            if (real) {
+                real.value = chubFollowSortSelect.value;
+                real.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
         chubSortSection.appendChild(chubFollowSortSelect);
         chubSection.appendChild(chubSortSection);
 
@@ -824,22 +843,98 @@
         const chubActionsRow = document.createElement('div');
         chubActionsRow.className = 'mobile-settings-row';
 
-        const chubLoginChip = createChip('<i class="fa-solid fa-user-circle"></i> Login');
-        chubLoginChip.addEventListener('click', () => {
-            const realBtn = document.getElementById('chubLoginBtn');
-            if (realBtn) { realBtn.click(); close(); }
-        });
-
         const chubRefreshChip = createChip('<i class="fa-solid fa-sync"></i> Refresh');
+        chubRefreshChip.style.width = '100%';
         chubRefreshChip.addEventListener('click', () => {
             const realBtn = document.getElementById('refreshChubBtn');
             if (realBtn) { realBtn.click(); close(); }
         });
 
-        chubActionsRow.appendChild(chubLoginChip);
         chubActionsRow.appendChild(chubRefreshChip);
         chubActionsSection.appendChild(chubActionsRow);
         chubSection.appendChild(chubActionsSection);
+
+        // ===== GENERIC PROVIDER SECTION (Janny, CT, future providers) =====
+        const genericSection = document.createElement('div');
+        genericSection.className = 'mobile-settings-view-section';
+        genericSection.style.display = 'none';
+
+        const genericProviderLabel = document.createElement('div');
+        genericProviderLabel.className = 'mobile-settings-label';
+        genericProviderLabel.id = 'mobileProviderName';
+        genericProviderLabel.textContent = '';
+
+        // Sort
+        const genericSortSection = createSection('Sort By');
+        const genericSortSelect = document.createElement('select');
+        genericSortSelect.className = 'mobile-settings-select';
+        genericSortSelect.addEventListener('change', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const real = ids?.sort ? document.getElementById(ids.sort) : null;
+            if (real) {
+                real.value = genericSortSelect.value;
+                real.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        });
+        genericSortSection.appendChild(genericSortSelect);
+        genericSection.appendChild(genericProviderLabel);
+        genericSection.appendChild(genericSortSection);
+
+        // Filters row (Tags, Features, NSFW)
+        const genericFilterSection = createSection('Filters');
+        const genericFilterRow = document.createElement('div');
+        genericFilterRow.className = 'mobile-settings-row';
+        genericFilterRow.style.flexWrap = 'wrap';
+
+        const genericTagsChip = createChip('<i class="fa-solid fa-tags"></i> Tags');
+        genericTagsChip.addEventListener('click', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.tags ? document.getElementById(ids.tags) : null;
+            if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
+        });
+
+        const genericFeaturesChip = createChip('<i class="fa-solid fa-sliders"></i> Features');
+        genericFeaturesChip.addEventListener('click', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.filters ? document.getElementById(ids.filters) : null;
+            if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
+        });
+
+        const genericNsfwChip = createChip('<i class="fa-solid fa-shield-halved"></i> SFW Only');
+        function syncGenericNsfwState() {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.nsfw ? document.getElementById(ids.nsfw) : null;
+            if (realBtn) {
+                const span = realBtn.querySelector('span');
+                const label = span ? span.textContent.trim() : 'SFW Only';
+                genericNsfwChip.innerHTML = '<i class="fa-solid fa-shield-halved"></i> ' + label;
+                genericNsfwChip.classList.toggle('active', realBtn.classList.contains('active'));
+            }
+        }
+        genericNsfwChip.addEventListener('click', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.nsfw ? document.getElementById(ids.nsfw) : null;
+            if (realBtn) { realBtn.click(); setTimeout(syncGenericNsfwState, 100); }
+        });
+
+        genericFilterRow.appendChild(genericTagsChip);
+        genericFilterRow.appendChild(genericFeaturesChip);
+        genericFilterRow.appendChild(genericNsfwChip);
+        genericFilterSection.appendChild(genericFilterRow);
+        genericSection.appendChild(genericFilterSection);
+
+        // Refresh
+        const genericActionsSection = createSection('');
+        const genericRefreshChip = createChip('<i class="fa-solid fa-sync"></i> Refresh');
+        genericRefreshChip.style.width = '100%';
+        genericRefreshChip.addEventListener('click', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.refresh ? document.getElementById(ids.refresh) : null;
+            if (realBtn) { realBtn.click(); close(); }
+        });
+        genericActionsSection.appendChild(genericRefreshChip);
+        genericSection.appendChild(genericActionsSection);
+        chubSection.appendChild(genericSection);
 
         // ===== CHATS SECTION =====
         const chatsSection = document.createElement('div');
@@ -924,12 +1019,56 @@
             });
 
             // Sync state before opening
-            if (activeView === 'chub') {
-                syncChubMode();
-                syncNsfwState();
-                syncChubSort();
-                if (realChubSort) chubBrowseSortSelect.value = realChubSort.value;
-                if (realTimelineSort) chubFollowSortSelect.value = realTimelineSort.value;
+            if (activeView === 'online') {
+                const reg = window.ProviderRegistry;
+                const hasModeToggle = reg?.activeProviderHasModeToggle?.() || false;
+                const ids = reg?.getActiveMobileFilterIds?.();
+
+                // Toggle mode-toggle provider section vs generic controls
+                modeSection.style.display = hasModeToggle ? '' : 'none';
+                chubSortSection.style.display = hasModeToggle ? '' : 'none';
+                chubFilterSection.style.display = hasModeToggle ? '' : 'none';
+                chubActionsSection.style.display = hasModeToggle ? '' : 'none';
+                genericSection.style.display = hasModeToggle ? 'none' : '';
+
+                if (!hasModeToggle) {
+                    const prov = reg?.getActiveProvider?.();
+                    genericProviderLabel.textContent = prov ? prov.name : 'Online';
+
+                    const realSort = ids?.sort ? document.getElementById(ids.sort) : null;
+                    if (realSort) {
+                        genericSortSelect.innerHTML = realSort.innerHTML;
+                        genericSortSelect.value = realSort.value;
+                    }
+                    syncGenericNsfwState();
+                }
+
+                if (hasModeToggle) {
+                    const realChubSort = ids?.sort ? document.getElementById(ids.sort) : null;
+                    if (realChubSort) {
+                        if (chubBrowseSortSelect.options.length === 0) {
+                            chubBrowseSortSelect.innerHTML = realChubSort.innerHTML;
+                        }
+                        chubBrowseSortSelect.value = realChubSort.value;
+                    }
+
+                    const realTimelineSort = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
+                    if (realTimelineSort) {
+                        if (chubFollowSortSelect.options.length === 0) {
+                            Array.from(realTimelineSort.options).forEach(opt => {
+                                const o = document.createElement('option');
+                                o.value = opt.value;
+                                o.textContent = opt.textContent;
+                                chubFollowSortSelect.appendChild(o);
+                            });
+                        }
+                        chubFollowSortSelect.value = realTimelineSort.value;
+                    }
+
+                    syncChubMode();
+                    syncNsfwState();
+                    syncChubSort();
+                }
             } else if (activeView === 'chats') {
                 syncGrouping();
                 if (realChatsSort) chatsSortSelect.value = realChatsSort.value;
@@ -944,9 +1083,9 @@
     }
 
     function getActiveView() {
-        const chubView = document.getElementById('chubView');
+        const onlineView = document.getElementById('onlineView');
         const chatsView = document.getElementById('chatsView');
-        if (chubView && !chubView.classList.contains('hidden')) return 'chub';
+        if (onlineView && !onlineView.classList.contains('hidden')) return 'online';
         if (chatsView && !chatsView.classList.contains('hidden')) return 'chats';
         return 'characters';
     }
@@ -1021,7 +1160,60 @@
             sheet.appendChild(syncItem);
         }
 
-        btn.addEventListener('click', () => openSheet(overlay, sheet));
+        // Provider switcher button (shown only when online view is active)
+        const providerSwitchItem = document.createElement('button');
+        providerSwitchItem.className = 'mobile-sheet-item';
+        providerSwitchItem.style.display = 'none';
+        providerSwitchItem.innerHTML = '<i class="fa-solid fa-shuffle"></i> Switch Provider <i class="fa-solid fa-chevron-right" style="margin-left:auto;font-size:0.7rem;opacity:0.5;"></i>';
+        sheet.appendChild(providerSwitchItem);
+
+        // Sub-drawer for provider selection
+        const { overlay: provSubOverlay, sheet: provSubSheet, close: closeProvSub } = createBottomSheet();
+
+        providerSwitchItem.addEventListener('click', () => {
+            if (!window.ProviderRegistry) return;
+            const providers = window.ProviderRegistry.getViewProviders();
+            const activeId = window.ProviderRegistry.getActiveProviderId();
+            provSubSheet.innerHTML = '';
+
+            const subTitle = document.createElement('div');
+            subTitle.style.cssText = 'font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; padding: 16px 20px 8px;';
+            subTitle.textContent = 'Switch Provider';
+            provSubSheet.appendChild(subTitle);
+
+            providers.forEach(p => {
+                const item = document.createElement('button');
+                item.className = 'mobile-sheet-item';
+                if (p.id === activeId) item.style.color = 'var(--accent)';
+                const check = p.id === activeId ? ' <i class="fa-solid fa-check" style="margin-left:auto;font-size:0.8rem;"></i>' : '';
+                item.innerHTML = '<i class="' + p.icon + '"></i> ' + p.name + check;
+                item.addEventListener('click', () => {
+                    if (p.id !== activeId) {
+                        const select = document.getElementById('providerSelect');
+                        if (select) {
+                            select.value = p.id;
+                            select.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    closeProvSub();
+                });
+                provSubSheet.appendChild(item);
+            });
+
+            // Close the main menu before opening the sub-drawer
+            close();
+            // Small delay so the main sheet animates out first
+            setTimeout(() => openSheet(provSubOverlay, provSubSheet), 180);
+        });
+
+        document.body.appendChild(provSubOverlay);
+
+        btn.addEventListener('click', () => {
+            const isOnline = getActiveView() === 'online';
+            providerSwitchItem.style.display = isOnline ? '' : 'none';
+
+            openSheet(overlay, sheet);
+        });
         document.body.appendChild(overlay);
     }
 
@@ -1106,16 +1298,27 @@
 
         observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
 
-        // ChubAI character preview modal avatar — load full-size on tap
-        const chubAvatar = document.getElementById('chubCharAvatar');
-        if (chubAvatar) {
-            chubAvatar.addEventListener('click', (e) => {
+        // Browse-view avatar tap → full-size image viewer (delegated because
+        // modal elements are injected lazily when the Online tab first activates)
+        document.addEventListener('click', (e) => {
+            const target = e.target.closest('.browse-char-avatar');
+            if (!target || !target.src) return;
+
+            if (target.id === 'chubCharAvatar') {
                 e.stopPropagation();
-                if (!chubAvatar.src) return;
-                const fullSrc = chubAvatar.src.replace(/\/avatar\.webp$/, '/chara_card_v2.png');
-                openAvatarViewer(fullSrc, chubAvatar.src);
-            });
-        }
+                const fullSrc = target.src.replace(/\/avatar\.webp$/, '/chara_card_v2.png');
+                openAvatarViewer(fullSrc, target.src);
+            } else if (target.id === 'jannyCharAvatar') {
+                if (target.src.endsWith('/img/ai4.png')) return;
+                e.stopPropagation();
+                openAvatarViewer(target.src);
+            } else if (target.id === 'ctCharAvatar') {
+                if (target.src.endsWith('/img/ai4.png')) return;
+                e.stopPropagation();
+                const fullSrc = target.src.replace(/\/cdn-cgi\/image\/[^/]+\//, '/');
+                openAvatarViewer(fullSrc, target.src);
+            }
+        });
     }
 
     /* ========================================
@@ -1835,29 +2038,46 @@
     }
 
     /* ========================================
-       CHUB FILTER AREA SETUP
+       ONLINE FILTER AREA SETUP
        Move dropdowns out of scrollable filter strip
        and manage topbar wrapping class
        ======================================== */
     function setupChubFilterArea() {
         const topbar = document.querySelector('.topbar');
-        const chubFilters = document.getElementById('chubFilterArea');
-        if (!topbar || !chubFilters) return;
+        const onlineFilters = document.getElementById('onlineFilterArea');
+        const filterContent = document.getElementById('onlineFilterContent');
+        if (!topbar || !onlineFilters || !filterContent) return;
 
         // Move fixed-position dropdowns to body so they aren't
-        // clipped by the filter strip's overflow-x: auto
-        const tagsDropdown = document.getElementById('chubTagsDropdown');
-        const filtersDropdown = document.getElementById('chubFiltersDropdown');
-        if (tagsDropdown) document.body.appendChild(tagsDropdown);
-        if (filtersDropdown) document.body.appendChild(filtersDropdown);
+        // clipped by the filter strip's overflow-x: auto.
+        // Runs once initially and re-runs whenever the filter bar DOM is recreated
+        // (provider switches destroy+rebuild the filter content).
+        function relocateDropdowns() {
+            // Remove any previously-relocated orphans from body
+            document.querySelectorAll('body > .browse-tags-dropdown[data-mobile-relocated]').forEach(el => el.remove());
+            document.querySelectorAll('body > .browse-features-dropdown[data-mobile-relocated]').forEach(el => el.remove());
 
-        // Toggle topbar wrapping when ChubAI filter area is visible
+            // Move all browse dropdown panels (tags, features) from filter bar to body
+            const dropdowns = filterContent.querySelectorAll('.browse-tags-dropdown, .browse-features-dropdown');
+            dropdowns.forEach(dd => {
+                dd.setAttribute('data-mobile-relocated', '');
+                document.body.appendChild(dd);
+            });
+        }
+
+        relocateDropdowns();
+
+        // Re-run whenever provider switch rebuilds the filter bar content
+        new MutationObserver(() => relocateDropdowns())
+            .observe(filterContent, { childList: true });
+
+        // Toggle topbar wrapping when online filter area is visible
         function syncTopbar() {
-            const visible = chubFilters.style.display && chubFilters.style.display !== 'none';
+            const visible = onlineFilters.style.display && onlineFilters.style.display !== 'none';
             topbar.classList.toggle('chub-active', visible);
         }
 
-        new MutationObserver(syncTopbar).observe(chubFilters, {
+        new MutationObserver(syncTopbar).observe(onlineFilters, {
             attributes: true, attributeFilter: ['style']
         });
         syncTopbar();
@@ -1913,10 +2133,10 @@
         dropdown.classList.remove('hidden');
 
         // Run audit using globally exposed functions (set by module-loader.js)
-        setTimeout(() => {
+        setTimeout(async () => {
             try {
                 if (typeof window.auditGalleryIntegrity === 'function') {
-                    const audit = window.auditGalleryIntegrity();
+                    const audit = await window.auditGalleryIntegrity();
                     // updateGallerySyncWarning is updateWarningIndicator — updates dropdown content
                     if (typeof window.updateGallerySyncWarning === 'function') {
                         window.updateGallerySyncWarning(audit);
@@ -2027,7 +2247,7 @@
             '#greetingsExpandModal',     // Greetings Expand Modal
             '#expandedFieldEditor',      // Expanded Field Editor
             '#editMessageModal',         // Edit Message Modal
-            '.chub-tags-dropdown'        // ChubAI Tags dropdown
+            '.browse-tags-dropdown'      // Browse tags dropdown
         ];
 
         // Use focusin (bubbles) on document to catch programmatic .focus() calls

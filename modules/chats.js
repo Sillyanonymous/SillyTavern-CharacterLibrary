@@ -1,16 +1,3 @@
-/**
- * Chats Module for SillyTavern Character Library
- * 
- * Handles all chat-related functionality:
- * - Character modal chats tab (per-character chat list)
- * - Top-level chats view (browse all chats across all characters)
- * - Chat preview modal with message viewing/editing/deleting
- * - Chat caching for performance
- * 
- * @module Chats
- * @version 1.0.0
- */
-
 import * as CoreAPI from './core-api.js';
 
 // ========================================
@@ -85,10 +72,6 @@ function clearChatCache() {
 // CHARACTER MODAL — CHATS TAB
 // ========================================
 
-/**
- * Fetch and render chats for a character in the modal chats tab
- * @param {Object} char - Character object
- */
 async function fetchCharacterChats(char) {
     _modalChatsChar = char;
     const chatsList = document.getElementById('chatsList');
@@ -160,11 +143,6 @@ async function fetchCharacterChats(char) {
     }
 }
 
-/**
- * Open a specific chat in the main SillyTavern window
- * @param {Object} char - Character object
- * @param {string} chatFile - Chat filename (with .jsonl extension)
- */
 async function openChat(char, chatFile) {
     try {
         const chatName = chatFile.replace('.jsonl', '');
@@ -225,11 +203,6 @@ async function openChat(char, chatFile) {
     }
 }
 
-/**
- * Delete a chat file (used from character modal chats tab)
- * @param {Object} char - Character object
- * @param {string} chatFile - Chat filename
- */
 async function deleteChat(char, chatFile) {
     if (!confirm(`Are you sure you want to delete this chat?\n\n${chatFile}\n\nThis cannot be undone!`)) {
         return;
@@ -252,10 +225,6 @@ async function deleteChat(char, chatFile) {
     }
 }
 
-/**
- * Create a new chat for a character
- * @param {Object} char - Character object
- */
 async function createNewChat(char) {
     try {
         if (await CoreAPI.loadCharInMain(char, true)) {
@@ -270,20 +239,7 @@ async function createNewChat(char) {
 // TOP-LEVEL CHATS VIEW
 // ========================================
 
-/**
- * Initialize all event handlers for the chats view
- */
 function initChatsView() {
-    // View Toggle Handlers
-    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            const view = btn.dataset.view;
-            CoreAPI.debugLog('View toggle clicked:', view);
-            CoreAPI.switchView(view);
-        });
-    });
-
     // Register chats lazy-load: load on first visit
     CoreAPI.onViewEnter('chats', () => {
         if (allChats.length === 0) {
@@ -439,9 +395,6 @@ function initChatsView() {
     CoreAPI.debugLog('Chats view initialized');
 }
 
-/**
- * Look up a chat object from allChats via a card/item element's data attributes
- */
 function findChatByElement(el) {
     const chatFile = el.dataset.chatFile;
     const charAvatar = el.dataset.charAvatar;
@@ -452,10 +405,6 @@ function findChatByElement(el) {
 // LOADING & FETCHING
 // ========================================
 
-/**
- * Load all chats - uses cache first, then background refresh if stale
- * @param {boolean} forceRefresh - Bypass cache and load fresh
- */
 async function loadAllChats(forceRefresh = false) {
     const chatsGrid = document.getElementById('chatsGrid');
     const allCharacters = CoreAPI.getAllCharacters();
@@ -513,10 +462,6 @@ function showRefreshIndicator(show) {
     }
 }
 
-/**
- * Fetch fresh chats from the server for all characters
- * @param {boolean} isBackground - Whether this is a background refresh
- */
 async function fetchFreshChats(isBackground = false) {
     const chatsGrid = document.getElementById('chatsGrid');
     const allCharacters = CoreAPI.getAllCharacters();
@@ -597,10 +542,6 @@ async function fetchFreshChats(isBackground = false) {
     }
 }
 
-/**
- * Fetch chat previews in parallel batches
- * @param {Array|null} chatsToLoad - Specific chats to load previews for, or null for all
- */
 async function loadChatPreviews(chatsToLoad = null) {
     const BATCH_SIZE = 5;
     const targetChats = chatsToLoad || allChats;
@@ -659,10 +600,6 @@ async function loadChatPreviews(chatsToLoad = null) {
     CoreAPI.debugLog(`[ChatPreviews] Finished loading all previews`);
 }
 
-/**
- * Update a chat card's preview text in the DOM
- * @param {Object} chat - Chat object
- */
 function updateChatCardPreview(chat) {
     const card = document.querySelector(`.chat-card[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
     if (card) {
@@ -855,11 +792,6 @@ function renderGroupedChats(chats) {
 // MODEL EXTRACTION
 // ========================================
 
-/**
- * Extract AI model usage stats from chat messages
- * @param {Array} messages - Array of chat message objects
- * @returns {Object|null} Map of model names to message counts, or null if no model data
- */
 function extractModelStats(messages) {
     if (!messages || !messages.length) return null;
     const counts = {};
@@ -885,11 +817,6 @@ function shortModelName(model) {
     return parts[parts.length - 1] || model;
 }
 
-/**
- * Get the dominant (most-used) model from a stats map
- * @param {Object} models - { modelName: count, ... }
- * @returns {{ name: string, count: number }} Top model
- */
 function getDominantModel(models) {
     if (!models) return null;
     let top = null;
@@ -899,11 +826,6 @@ function getDominantModel(models) {
     return top;
 }
 
-/**
- * Build HTML for the model badge with tooltip
- * @param {Object} models - { modelName: count, ... }
- * @returns {string} HTML string
- */
 function buildModelBadgeHtml(models) {
     if (!models) return '';
     const dominant = getDominantModel(models);
@@ -1019,10 +941,6 @@ function createGroupedChatItem(chat) {
 // CHAT PREVIEW MODAL
 // ========================================
 
-/**
- * Open the chat preview modal showing all messages
- * @param {Object} chat - Chat object with file_name, character, etc.
- */
 async function openChatPreview(chat) {
     currentPreviewChat = chat;
     currentPreviewChar = chat.character;
@@ -1237,9 +1155,6 @@ async function deleteChatFromView(chat) {
     }
 }
 
-/**
- * Open character details modal from the Chats view
- */
 function openCharacterDetailsFromChats(char) {
     if (!char) return;
     CoreAPI.openCharacterModal(char);
@@ -1249,9 +1164,6 @@ function openCharacterDetailsFromChats(char) {
 // MESSAGE EDITING / DELETING
 // ========================================
 
-/**
- * Edit a specific message in the current chat
- */
 async function editChatMessage(messageIndex) {
     if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
         CoreAPI.showToast('Message not found', 'error');
@@ -1326,9 +1238,6 @@ async function editChatMessage(messageIndex) {
     };
 }
 
-/**
- * Delete a specific message from the current chat
- */
 async function deleteChatMessage(messageIndex) {
     if (!currentPreviewChat || !currentChatMessages[messageIndex]) {
         CoreAPI.showToast('Message not found', 'error');
@@ -1372,9 +1281,6 @@ async function deleteChatMessage(messageIndex) {
     }
 }
 
-/**
- * Save the entire chat array to the server
- */
 async function saveChatToServer(chat, messages) {
     try {
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
@@ -1420,10 +1326,6 @@ function debounce(func, wait) {
 // PUBLIC API
 // ========================================
 
-/**
- * Get current view state
- * @returns {string} Current view ('characters', 'chats', 'chub')
- */
 // ========================================
 // MODULE INIT & EXPORTS
 // ========================================

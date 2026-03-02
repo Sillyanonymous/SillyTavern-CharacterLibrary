@@ -12,7 +12,6 @@ const MultiSelect = {
         this.enabled = true;
         document.body.classList.add('multi-select-mode');
 
-        // Add active state to toggle button
         document.getElementById('multiSelectToggleBtn')?.classList.add('active');
 
         this.updateToolbar();
@@ -24,12 +23,10 @@ const MultiSelect = {
         this.selectedCharacters.clear();
         document.body.classList.remove('multi-select-mode');
 
-        // Remove selection UI from all cards
         document.querySelectorAll('.char-card.selected').forEach(card => {
             card.classList.remove('selected');
         });
 
-        // Remove active state from toggle button
         document.getElementById('multiSelectToggleBtn')?.classList.remove('active');
 
         this.updateToolbar();
@@ -104,7 +101,6 @@ const MultiSelect = {
             if (countEl) {
                 countEl.textContent = this.selectedCharacters.size;
             }
-            // Update favorite toggle button state
             updateFavoriteToggleState();
         } else {
             toolbar.classList.add('hidden');
@@ -159,7 +155,6 @@ function updateFavoriteToggleState() {
 // ========================================
 
 function injectMultiSelectToolbar() {
-    // Check if already injected
     if (document.getElementById('multiSelectToolbar')) return;
 
     const toolbarHtml = `
@@ -192,7 +187,7 @@ function injectMultiSelectToolbar() {
                 <i class="fa-solid fa-download"></i>
                 <span>Export</span>
             </button>
-            <button id="multiSelectCheckUpdatesBtn" class="ms-btn" title="Check selected characters for updates on ChubAI">
+            <button id="multiSelectCheckUpdatesBtn" class="ms-btn" title="Check selected characters for updates from linked providers">
                 <i class="fa-solid fa-arrows-rotate"></i>
                 <span>Updates</span>
             </button>
@@ -212,7 +207,6 @@ function injectMultiSelectToolbar() {
         </div>
     </div>`;
 
-    // Insert before the main gallery content (after header)
     const galleryContent = document.querySelector('.gallery-content');
     if (galleryContent) {
         galleryContent.insertAdjacentHTML('beforebegin', toolbarHtml);
@@ -263,7 +257,6 @@ function injectMultiSelectToolbar() {
 }
 
 function injectMultiSelectToggle() {
-    // Add toggle button to filter area (next to refresh button)
     const filterArea = document.getElementById('filterArea');
     const refreshBtn = document.getElementById('refreshBtn');
 
@@ -272,7 +265,6 @@ function injectMultiSelectToggle() {
         return;
     }
 
-    // Check if already exists
     if (document.getElementById('multiSelectToggleBtn')) return;
 
     const toggleHtml = `
@@ -280,7 +272,6 @@ function injectMultiSelectToggle() {
         <i class="fa-solid fa-object-group"></i>
     </button>`;
 
-    // Insert after the refresh button
     refreshBtn.insertAdjacentHTML('afterend', toggleHtml);
 
     document.getElementById('multiSelectToggleBtn')?.addEventListener('click', () => {
@@ -520,18 +511,14 @@ function injectMultiSelectStyles() {
     document.head.insertAdjacentHTML('beforeend', styles);
 }
 
-// Setup keyboard shortcut for Space to toggle selection
 function setupKeyboardShortcuts() {
-    // Space to toggle multi-select mode
     document.addEventListener('keydown', (e) => {
         // Ignore if typing in input/textarea
         if (e.target.matches('input, textarea, [contenteditable]')) return;
 
-        // Space key to toggle multi-select mode
         if (e.key === ' ' || e.code === 'Space') {
             e.preventDefault();
 
-            // Toggle multi-select mode on/off
             if (MultiSelect.enabled) {
                 MultiSelect.disable();
             } else {

@@ -1,33 +1,17 @@
-/**
- * Context Menu Module for SillyTavern Character Library
- * Provides right-click context menu functionality for character cards
- * 
- * @module ContextMenu
- * @version 1.0.0
- */
-
 import * as CoreAPI from './core-api.js';
 
-// Module state
 let isInitialized = false;
 let menuElement = null;
 let currentCharacter = null;
 let currentCard = null;
 
-/**
- * Initialize the context menu module
- * @param {Object} deps - Dependencies from gallery.js
- */
 export function init(deps) {
     if (isInitialized) {
         console.warn('[ContextMenu] Already initialized');
         return;
     }
     
-    // Create menu element
     createMenu();
-    
-    // Setup global event listeners
     setupGlobalListeners();
 
     // Bridge for legacy card creation paths
@@ -40,9 +24,6 @@ export function init(deps) {
     console.log('[ContextMenu] Module initialized');
 }
 
-/**
- * Create the context menu DOM element
- */
 function createMenu() {
     menuElement = document.createElement('div');
     menuElement.id = 'clContextMenu';
@@ -50,25 +31,19 @@ function createMenu() {
     document.body.appendChild(menuElement);
 }
 
-/**
- * Setup global event listeners
- */
 function setupGlobalListeners() {
-    // Close menu on click outside
     document.addEventListener('click', (e) => {
         if (!menuElement.contains(e.target)) {
             hide();
         }
     });
     
-    // Close menu on escape
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
             hide();
         }
     });
     
-    // Close menu on scroll
     document.addEventListener('scroll', () => hide(), true);
     
     // Use event delegation for context menu on character cards
@@ -87,12 +62,6 @@ function setupGlobalListeners() {
     });
 }
 
-/**
- * Show context menu for a character card
- * @param {MouseEvent} event - The contextmenu event
- * @param {Object} char - Character object
- * @param {HTMLElement} cardElement - The card DOM element
- */
 export function show(event, char, cardElement) {
     event.preventDefault();
     event.stopPropagation();
@@ -100,54 +69,34 @@ export function show(event, char, cardElement) {
     currentCharacter = char;
     currentCard = cardElement;
     
-    // Build menu items based on context
     const menuItems = buildMenuItems(char, cardElement);
     renderMenu(menuItems);
     
-    // Position menu
     positionMenu(event.clientX, event.clientY);
     
-    // Show with animation
     menuElement.classList.add('visible');
 }
 
-/**
- * Hide the context menu
- */
 export function hide() {
     menuElement.classList.remove('visible');
     currentCharacter = null;
     currentCard = null;
 }
 
-/**
- * Build menu items based on character and context
- * @param {Object} char - Character object
- * @param {HTMLElement} cardElement - Card element
- * @returns {Array} Menu items configuration
- */
 function buildMenuItems(char, cardElement) {
     const isSelected = CoreAPI.isCharacterSelected(char.avatar);
     const selectionCount = CoreAPI.getSelectionCount();
     
-    // If this card is selected and we have multiple selections, show bulk menu
     if (isSelected && selectionCount > 1) {
         return buildBulkMenuItems(selectionCount);
     }
     
-    // Otherwise show single character menu
     return buildSingleMenuItems(char, cardElement);
 }
 
-/**
- * Build menu items for bulk operations on multiple selected characters
- * @param {number} count - Number of selected characters
- * @returns {Array} Menu items configuration
- */
 function buildBulkMenuItems(count) {
     const items = [];
     
-    // Header
     items.push({
         type: 'header',
         label: `${count} Characters Selected`
@@ -165,7 +114,7 @@ function buildBulkMenuItems(count) {
         }
     });
     
-    // Bulk check for updates (ChubAI linked only)
+    // Bulk check for updates (provider-linked only)
     items.push({
         icon: 'fa-solid fa-arrows-rotate',
         label: 'Check for Updates',
@@ -224,12 +173,6 @@ function buildBulkMenuItems(count) {
     return items;
 }
 
-/**
- * Build menu items for a single character
- * @param {Object} char - Character object
- * @param {HTMLElement} cardElement - Card element
- * @returns {Array} Menu items configuration
- */
 function buildSingleMenuItems(char, cardElement) {
     const isFavorite = cardElement?.classList.contains('is-favorite') || 
                        char.fav === true || 
@@ -238,19 +181,18 @@ function buildSingleMenuItems(char, cardElement) {
     const isSelected = CoreAPI.isCharacterSelected(char.avatar);
     const multiSelectEnabled = CoreAPI.isMultiSelectEnabled();
     
-    // Check for ChubAI link - getChubLinkInfo normalizes full_path vs fullPath
-    const chubInfo = CoreAPI.getChubLinkInfo(char);
-    const chubId = chubInfo?.fullPath || char.chub_id;
+    // Check for provider link (provider-agnostic)
+    const providerMatch = CoreAPI.getCharacterProvider(char);
+    const provider = providerMatch?.provider || null;
+    const linkInfo = providerMatch?.linkInfo || null;
     
     const items = [];
     
-    // Character actions header
     items.push({
         type: 'header',
         label: truncateName(char.name || 'Character', 25)
     });
     
-    // Primary actions
     items.push({
         icon: 'fa-solid fa-expand',
         label: 'Open Character',
@@ -278,12 +220,12 @@ function buildSingleMenuItems(char, cardElement) {
         }
     });
     
-    // ChubAI link
-    if (chubId) {
+    // Provider link
+    if (provider && linkInfo) {
         items.push({
             icon: 'fa-solid fa-link',
-            label: 'ChubAI Info',
-            action: () => CoreAPI.openChubLinkModal(char)
+            label: `${provider.name} Info`,
+            action: () => provider.openLinkUI(char)
         });
         
         // Check for updates
@@ -298,14 +240,15 @@ function buildSingleMenuItems(char, cardElement) {
             }
         });
     } else {
+        // Unlinked — single entry that opens the global link modal (searches all providers)
         items.push({
             icon: 'fa-solid fa-link',
-            label: 'Link to ChubAI',
-            action: () => CoreAPI.openChubLinkModal(char)
+            label: 'Link to Provider',
+            action: () => CoreAPI.openProviderLinkModal(char)
         });
     }
     
-    // Version history (available for ALL characters — local snapshots + remote if Chub-linked)
+    // Version history (available for ALL characters — local snapshots + remote if provider-linked)
     items.push({
         icon: 'fa-solid fa-clock-rotate-left',
         label: 'Version History',
@@ -351,10 +294,6 @@ function buildSingleMenuItems(char, cardElement) {
     return items;
 }
 
-/**
- * Render menu items into the menu element
- * @param {Array} items - Menu items configuration
- */
 function renderMenu(items) {
     menuElement.innerHTML = items.map(item => {
         if (item.type === 'separator') {
@@ -374,7 +313,6 @@ function renderMenu(items) {
         `;
     }).join('');
     
-    // Attach click handlers
     menuElement.querySelectorAll('.cl-context-menu-item:not(.disabled)').forEach((el, index) => {
         const item = items.filter(i => i.type !== 'separator' && i.type !== 'header')[index];
         if (item?.action) {
@@ -386,11 +324,6 @@ function renderMenu(items) {
     });
 }
 
-/**
- * Position the menu near the cursor, keeping it on screen
- * @param {number} x - Cursor X position
- * @param {number} y - Cursor Y position
- */
 function positionMenu(x, y) {
     // Reset position for measurement
     menuElement.style.left = '0';
@@ -423,10 +356,6 @@ function positionMenu(x, y) {
     menuElement.style.top = `${finalY}px`;
 }
 
-/**
- * Toggle favorite status for a character
- * @param {Object} char - Character object
- */
 async function toggleFavorite(char) {
     // Check both root and extensions location
     const currentFav = char.fav === true || char.fav === 'true' || 
@@ -459,7 +388,6 @@ async function toggleFavorite(char) {
             if (!char.data.extensions) char.data.extensions = {};
             char.data.extensions.fav = newFav;
             
-            // Update card UI - find card fresh by avatar instead of using stale reference
             const card = CoreAPI.findCardElement(char.avatar);
             if (card) {
                 if (newFav) {
@@ -484,10 +412,6 @@ async function toggleFavorite(char) {
     }
 }
 
-/**
- * Bulk toggle favorites for all selected characters
- * @param {boolean} setFavorite - Whether to add or remove from favorites
- */
 async function bulkToggleFavorites(setFavorite) {
     const selected = CoreAPI.getSelectedCharacters();
     if (selected.length === 0) return;
@@ -554,9 +478,6 @@ async function bulkToggleFavorites(setFavorite) {
     }
 }
 
-/**
- * Bulk export all selected characters
- */
 async function bulkExport() {
     const selected = CoreAPI.getSelectedCharacters();
     if (selected.length === 0) return;
@@ -594,9 +515,6 @@ async function bulkExport() {
     CoreAPI.showToast(`Exported ${successCount}/${selected.length} characters`, 'success');
 }
 
-/**
- * Bulk delete all selected characters with confirmation
- */
 async function bulkDelete() {
     const selected = CoreAPI.getSelectedCharacters();
     if (selected.length === 0) return;
@@ -620,11 +538,9 @@ async function bulkDelete() {
     const charsWithSharedGallery = galleryInfos.filter(g => g.info.count > 0 && (!g.hasUniqueGallery || !uniqueFoldersEnabled));
     const totalUniqueGalleryFiles = charsWithUniqueGallery.reduce((sum, g) => sum + g.info.count, 0);
     
-    // Build character list preview
     const names = selected.slice(0, 5).map(c => c.name).join(', ');
     const andMore = selected.length > 5 ? ` and ${selected.length - 5} more` : '';
     
-    // Create confirmation modal
     const modal = document.createElement('div');
     modal.className = 'confirm-modal';
     modal.id = 'bulkDeleteConfirmModal';
@@ -727,7 +643,6 @@ async function bulkDelete() {
                     }
                 }
                 
-                // Delete character
                 const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
                     avatar_url: char.avatar,
                     delete_chats: false
@@ -754,7 +669,6 @@ async function bulkDelete() {
         closeModal();
         CoreAPI.clearSelection();
         
-        // Show results
         let message = `Deleted ${successCount} character${successCount !== 1 ? 's' : ''}`;
         if (galleryDeleted > 0) {
             message += ` and ${galleryDeleted} gallery file${galleryDeleted !== 1 ? 's' : ''}`;
@@ -786,10 +700,6 @@ async function bulkDelete() {
     });
 }
 
-/**
- * Export character as PNG (character card with embedded data)
- * @param {Object} char - Character object
- */
 async function exportCharacter(char) {
     try {
         // Character PNGs are served directly at /characters/avatar.png
@@ -820,10 +730,6 @@ async function exportCharacter(char) {
     }
 }
 
-/**
- * Show delete confirmation dialog
- * @param {Object} char - Character object
- */
 function confirmDelete(char) {
     // Use existing delete confirmation if available
     const deleteBtn = document.getElementById('deleteCharBtn');
@@ -840,10 +746,6 @@ function confirmDelete(char) {
     }
 }
 
-/**
- * Delete a character
- * @param {Object} char - Character object
- */
 async function deleteCharacter(char) {
     try {
         const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
@@ -862,32 +764,15 @@ async function deleteCharacter(char) {
     }
 }
 
-/**
- * Escape HTML to prevent XSS
- * @param {string} text - Text to escape
- * @returns {string} Escaped text
- */
 function escapeHtml(text) {
     return CoreAPI.escapeHtml(text);
 }
 
-/**
- * Truncate name with ellipsis
- * @param {string} name - Name to truncate
- * @param {number} maxLength - Maximum length
- * @returns {string} Truncated name
- */
 function truncateName(name, maxLength) {
     if (name.length <= maxLength) return name;
     return name.substring(0, maxLength - 1) + '…';
 }
 
-/**
- * Attach context menu to a card element
- * Call this when creating cards
- * @param {HTMLElement} cardElement - The card DOM element
- * @param {Object} char - Character object
- */
 export function attachToCard(cardElement, char) {
     cardElement.addEventListener('contextmenu', (e) => {
         show(e, char, cardElement);

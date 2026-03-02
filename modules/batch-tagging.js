@@ -1,11 +1,3 @@
-/**
- * Batch Tagging Module for SillyTavern Character Library
- * Allows adding/removing multiple tags to/from multiple selected characters
- * 
- * @module BatchTagging
- * @version 1.1.0
- */
-
 import * as CoreAPI from './core-api.js';
 
 const debugLog = (...args) => {
@@ -14,37 +6,23 @@ const debugLog = (...args) => {
     }
 };
 
-// Module state
 let isInitialized = false;
-let currentTagAnalysis = null; // Store current tag analysis for remove suggestions
+let currentTagAnalysis = null;
 
-/**
- * Initialize the batch tagging module
- * @param {Object} deps - Dependencies (legacy, now using CoreAPI)
- */
 export function init(deps) {
     if (isInitialized) {
         console.warn('[BatchTagging] Already initialized');
         return;
     }
     
-    // Inject module-specific styles (only what's unique to batch tagging)
     injectStyles();
-    
-    // Inject modal HTML
     injectModal();
-    
-    // Setup event listeners
     setupEventListeners();
     
     isInitialized = true;
     debugLog('[BatchTagging] Module initialized');
 }
 
-/**
- * Open the batch tagging modal
- * Called from gallery.js when user triggers batch tag action
- */
 export function openModal() {
     if (!isInitialized) {
         console.error('[BatchTagging] Module not initialized');
@@ -57,34 +35,22 @@ export function openModal() {
         return;
     }
     
-    // Update modal header with count
     const countEl = document.getElementById('batchTagCharCount');
     if (countEl) {
         countEl.textContent = selected.length;
     }
     
-    // Analyze existing tags across selected characters
     const tagAnalysis = analyzeSelectedTags(selected);
-    currentTagAnalysis = tagAnalysis; // Store for remove suggestions
+    currentTagAnalysis = tagAnalysis;
     renderExistingTags(tagAnalysis);
     
-    // Clear input fields
     document.getElementById('batchTagAddInput').value = '';
     document.getElementById('batchTagRemoveInput').value = '';
-    
-    // Clear tag pills
     document.getElementById('batchTagAddPills').innerHTML = '';
     document.getElementById('batchTagRemovePills').innerHTML = '';
-    
-    // Show modal
     document.getElementById('batchTagModal').classList.add('visible');
 }
 
-/**
- * Analyze tags across all selected characters
- * @param {Array} characters - Selected characters
- * @returns {Object} Tag analysis with counts
- */
 function analyzeSelectedTags(characters) {
     const tagCounts = {};
     const totalChars = characters.length;
@@ -106,7 +72,6 @@ function analyzeSelectedTags(characters) {
         }
     }
     
-    // Categorize tags
     const result = {
         all: [],      // Tags on ALL selected characters
         some: [],     // Tags on SOME selected characters
@@ -121,18 +86,12 @@ function analyzeSelectedTags(characters) {
         }
     }
     
-    // Sort alphabetically
     result.all.sort((a, b) => a.localeCompare(b));
     result.some.sort((a, b) => a.name.localeCompare(b.name));
     
     return result;
 }
 
-/**
- * Get tags from a character object
- * @param {Object} char - Character object
- * @returns {Array} Array of tag strings
- */
 function getCharacterTags(char) {
     // Tags can be in multiple places - check for non-empty arrays
     // Note: empty arrays are truthy, so we need explicit length checks
@@ -156,10 +115,6 @@ function getCharacterTags(char) {
     return Array.isArray(tags) ? tags : [];
 }
 
-/**
- * Render existing tags analysis in the modal
- * @param {Object} analysis - Tag analysis object
- */
 function renderExistingTags(analysis) {
     const container = document.getElementById('batchTagExisting');
     if (!container) return;
@@ -198,7 +153,7 @@ function renderExistingTags(analysis) {
     
     container.innerHTML = html;
     
-    // Add click handlers to existing tag pills (to quickly add to remove list)
+    // Click-to-remove shortcut
     container.querySelectorAll('.cl-tag').forEach(pill => {
         pill.addEventListener('click', () => {
             const tag = pill.dataset.tag;
@@ -207,17 +162,11 @@ function renderExistingTags(analysis) {
     });
 }
 
-/**
- * Add a tag pill to the "add" list
- * @param {string} tag - Tag to add
- */
 function addTagToAddList(tag) {
     const normalized = tag.trim();
     if (!normalized) return;
     
     const container = document.getElementById('batchTagAddPills');
-    
-    // Check if already exists
     if (container.querySelector(`[data-tag="${CSS.escape(normalized)}"]`)) {
         return;
     }
@@ -234,17 +183,11 @@ function addTagToAddList(tag) {
     container.appendChild(pill);
 }
 
-/**
- * Add a tag pill to the "remove" list
- * @param {string} tag - Tag to remove
- */
 function addTagToRemoveList(tag) {
     const normalized = tag.trim();
     if (!normalized) return;
     
     const container = document.getElementById('batchTagRemovePills');
-    
-    // Check if already exists
     if (container.querySelector(`[data-tag="${CSS.escape(normalized)}"]`)) {
         return;
     }
@@ -261,27 +204,16 @@ function addTagToRemoveList(tag) {
     container.appendChild(pill);
 }
 
-/**
- * Get all tags from the "add" list
- * @returns {Array} Tags to add
- */
 function getTagsToAdd() {
     const pills = document.querySelectorAll('#batchTagAddPills .cl-tag');
     return Array.from(pills).map(p => p.dataset.tag);
 }
 
-/**
- * Get all tags from the "remove" list
- * @returns {Array} Tags to remove
- */
 function getTagsToRemove() {
     const pills = document.querySelectorAll('#batchTagRemovePills .cl-tag');
     return Array.from(pills).map(p => p.dataset.tag);
 }
 
-/**
- * Apply the batch tag changes
- */
 async function applyBatchTags() {
     const tagsToAdd = getTagsToAdd();
     const tagsToRemove = getTagsToRemove();
@@ -305,17 +237,13 @@ async function applyBatchTags() {
     let successCount = 0;
     let errorCount = 0;
     
-    // Process each character
     for (const char of selected) {
         try {
-            // Get current tags
             let currentTags = getCharacterTags(char);
             
-            // Remove tags (case-insensitive matching)
             const tagsToRemoveLower = tagsToRemove.map(t => t.toLowerCase());
             currentTags = currentTags.filter(t => !tagsToRemoveLower.includes(t.toLowerCase()));
             
-            // Add new tags (avoid duplicates, case-insensitive)
             const currentTagsLower = currentTags.map(t => t.toLowerCase());
             for (const tag of tagsToAdd) {
                 if (!currentTagsLower.includes(tag.toLowerCase())) {
@@ -324,7 +252,6 @@ async function applyBatchTags() {
                 }
             }
             
-            // Save via merge-attributes API
             // IMPORTANT: SillyTavern reads tags from data.tags, not root level
             // Must include data object with tags while preserving existing data fields
             const existingData = char.data || {};
@@ -344,7 +271,6 @@ async function applyBatchTags() {
             const response = await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', payload);
             
             if (response.ok) {
-                // Update local character data
                 char.tags = currentTags;
                 if (char.data) char.data.tags = currentTags;
                 successCount++;
@@ -358,48 +284,28 @@ async function applyBatchTags() {
         }
     }
     
-    // Restore button
     applyBtn.disabled = false;
     applyBtn.innerHTML = originalHtml;
     
-    // Show result
     if (errorCount === 0) {
         CoreAPI.showToast(`Updated tags for ${successCount} character(s)`, 'success');
     } else {
         CoreAPI.showToast(`Updated ${successCount}, failed ${errorCount}`, 'warning');
     }
     
-    // Close modal and clear selection
     closeModal();
-    
-    // Refresh the display
     await CoreAPI.refreshCharacters();
-    
-    // Clear selection
     CoreAPI.clearSelection();
 }
 
-/**
- * Close the batch tagging modal
- */
 function closeModal() {
     document.getElementById('batchTagModal')?.classList.remove('visible');
 }
 
-/**
- * Setup event listeners for the modal
- */
 function setupEventListeners() {
-    // Close button
     document.getElementById('batchTagCloseBtn')?.addEventListener('click', closeModal);
-    
-    // Cancel button
     document.getElementById('batchTagCancelBtn')?.addEventListener('click', closeModal);
-    
-    // Apply button
     document.getElementById('batchTagApplyBtn')?.addEventListener('click', applyBatchTags);
-    
-    // Close on backdrop click
     document.getElementById('batchTagModal')?.addEventListener('click', (e) => {
         if (e.target.id === 'batchTagModal') {
             closeModal();
@@ -411,12 +317,6 @@ function setupEventListeners() {
     setupAutocomplete('batchTagRemoveInput', 'batchTagRemoveSuggestions', 'remove');
 }
 
-/**
- * Setup autocomplete for a tag input
- * @param {string} inputId - ID of the input element
- * @param {string} suggestionsId - ID of the suggestions container
- * @param {string} mode - 'add' for all tags, 'remove' for selected character tags only
- */
 function setupAutocomplete(inputId, suggestionsId, mode) {
     const input = document.getElementById(inputId);
     const suggestions = document.getElementById(suggestionsId);
@@ -424,7 +324,6 @@ function setupAutocomplete(inputId, suggestionsId, mode) {
     
     let selectedIndex = -1;
     
-    // Input event - show suggestions as user types
     input.addEventListener('input', () => {
         const value = input.value.trim().toLowerCase();
         
@@ -437,7 +336,6 @@ function setupAutocomplete(inputId, suggestionsId, mode) {
             return;
         }
         
-        // Get available tags based on mode
         const availableTags = getAvailableTags(mode);
         
         // Filter tags that match the current input
@@ -451,7 +349,6 @@ function setupAutocomplete(inputId, suggestionsId, mode) {
             return;
         }
         
-        // Render suggestions
         renderSuggestions(suggestions, matches, currentPart, mode);
         selectedIndex = -1;
     });
@@ -528,14 +425,8 @@ function setupAutocomplete(inputId, suggestionsId, mode) {
     });
 }
 
-/**
- * Get available tags based on mode
- * @param {string} mode - 'add' or 'remove'
- * @returns {Array<string>} Available tags
- */
 function getAvailableTags(mode) {
     if (mode === 'add') {
-        // All known tags in the library
         return CoreAPI.getAllTags();
     } else {
         // Only tags from selected characters
@@ -548,25 +439,12 @@ function getAvailableTags(mode) {
     }
 }
 
-/**
- * Check if a tag is already in the add/remove list
- * @param {string} tag - Tag to check
- * @param {string} mode - 'add' or 'remove'
- * @returns {boolean} True if tag is already added
- */
 function isTagAlreadyAdded(tag, mode) {
     const containerId = mode === 'add' ? 'batchTagAddPills' : 'batchTagRemovePills';
     const container = document.getElementById(containerId);
     return container?.querySelector(`[data-tag="${CSS.escape(tag)}"]`) !== null;
 }
 
-/**
- * Render suggestions dropdown
- * @param {HTMLElement} container - Suggestions container
- * @param {Array<string>} tags - Tags to show
- * @param {string} highlight - Text to highlight
- * @param {string} mode - 'add' or 'remove'
- */
 function renderSuggestions(container, tags, highlight, mode) {
     const html = tags.map(tag => {
         // Highlight matching part
@@ -586,7 +464,6 @@ function renderSuggestions(container, tags, highlight, mode) {
     container.innerHTML = html;
     container.classList.remove('hidden');
     
-    // Add click handlers
     container.querySelectorAll('.bt-suggestion-item').forEach(item => {
         item.addEventListener('mousedown', (e) => {
             e.preventDefault(); // Prevent blur
@@ -596,39 +473,22 @@ function renderSuggestions(container, tags, highlight, mode) {
     });
 }
 
-/**
- * Hide suggestions dropdown
- * @param {HTMLElement} container - Suggestions container
- */
 function hideSuggestions(container) {
     container.classList.add('hidden');
     container.innerHTML = '';
 }
 
-/**
- * Update visual selection in suggestions
- * @param {NodeList} items - Suggestion items
- * @param {number} index - Selected index
- */
 function updateSelectedSuggestion(items, index) {
     items.forEach((item, i) => {
         item.classList.toggle('selected', i === index);
     });
 }
 
-/**
- * Select a suggestion and add it as a tag
- * @param {HTMLInputElement} input - Input element
- * @param {HTMLElement} suggestions - Suggestions container
- * @param {string} tag - Tag to add
- * @param {string} mode - 'add' or 'remove'
- */
 function selectSuggestion(input, suggestions, tag, mode) {
     // If there's comma-separated input, keep the previous parts
     const parts = input.value.split(',');
     parts.pop(); // Remove the part we're replacing
     
-    // Add the tag
     if (mode === 'add') {
         addTagToAddList(tag);
     } else {
@@ -641,10 +501,6 @@ function selectSuggestion(input, suggestions, tag, mode) {
     input.focus();
 }
 
-/**
- * Inject the modal HTML into the document
- * Uses shared cl-* classes for common elements
- */
 function injectModal() {
     const modalHtml = `
     <div id="batchTagModal" class="cl-modal">
@@ -696,9 +552,6 @@ function injectModal() {
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 }
 
-/**
- * Inject module-specific styles (only what's unique to batch tagging)
- */
 function injectStyles() {
     if (document.getElementById('batch-tagging-styles')) return;
     
@@ -840,7 +693,6 @@ function injectStyles() {
     document.head.insertAdjacentHTML('beforeend', styles);
 }
 
-// Export for external access
 export default {
     init,
     openModal

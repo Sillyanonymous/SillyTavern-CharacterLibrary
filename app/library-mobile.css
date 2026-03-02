@@ -22,7 +22,7 @@
         -webkit-tap-highlight-color: transparent;
     }
     button, a, .glass-btn, .view-toggle-btn, .char-card, .chat-card,
-    .ms-btn, .chub-card, .mobile-sheet-item, .dropdown-item {
+    .ms-btn, .browse-card, .mobile-sheet-item, .dropdown-item {
         touch-action: manipulation; /* eliminate 300ms tap delay */
     }
 
@@ -80,8 +80,8 @@
     .content-expand-btn:hover,
     .expand-field-btn:hover,
     .section-expand-btn:hover,
-    .chub-feature-badge:hover,
-    .chub-search-submit:hover,
+    .browse-feature-badge:hover,
+    .browse-search-submit:hover,
     .related-card:hover,
     .char-dup-card-meta-item.gallery-count-item.has-images:hover {
         transform: none !important;
@@ -122,7 +122,7 @@
     .glass-btn,
     .glass-select,
     .action-btn,
-    .chub-feature-badge,
+    .browse-feature-badge,
     .related-card,
     .favorite-btn,
     .search-box {
@@ -154,7 +154,7 @@
     /* --- Hide desktop-only chrome --- */
     .search-box,
     .search-settings-container,
-    .filter-area:not(.chub-filters),
+    .filter-area:not(.online-filters),
     .filters-wrapper,
     .gallery-sync-container,
     .more-options-container {
@@ -374,7 +374,7 @@
     /* Full-viewport for every modal-glass variant */
     .modal-glass,
     .section-expand-modal,
-    .chub-expand-modal,
+    .browse-expand-modal,
     .lorebook-expand-modal,
     .creator-notes-fullscreen-modal,
     .content-fullscreen-modal {
@@ -385,11 +385,12 @@
         border-radius: 0 !important;
         border: none !important;
         box-sizing: border-box;
+        background: #141414 !important;
     }
     /* Override data-size attributes that set explicit widths */
     .creator-notes-fullscreen-modal[data-size],
     .content-fullscreen-modal[data-size],
-    .chub-expand-modal[data-size] {
+    .browse-expand-modal[data-size] {
         width: 100% !important;
         max-width: 100% !important;
         height: 100% !important;
@@ -415,7 +416,7 @@
         min-width: 0;
     }
 
-    .chub-tagline-row {
+    .provider-tagline-row {
         font-size: 0.85rem;
         margin: -10px 0 16px 0;
         padding: 0 12px 0 3px;
@@ -451,7 +452,7 @@
     .mobile-header-avatar {
         cursor: pointer;
     }
-    .chub-char-avatar {
+    .browse-char-avatar {
         cursor: pointer;
     }
 
@@ -509,7 +510,7 @@
     /* The display-control containers: show only for zoom +/- */
     .creator-notes-display-controls,
     .modal-header-controls,
-    .chub-expand-display-controls {
+    .browse-expand-display-controls {
         display: flex !important;
         align-items: center;
         gap: 4px;
@@ -518,7 +519,7 @@
 
     /* Expanded modal titles – smaller */
     .section-expand-modal .modal-header h2,
-    .chub-expand-modal .modal-header h2,
+    .browse-expand-modal .modal-header h2,
     .creator-notes-fullscreen-modal .modal-header h2,
     .content-fullscreen-modal .modal-header h2 {
         font-size: 0.8rem;
@@ -526,7 +527,7 @@
 
     /* Hide save/apply action buttons in expanded modals */
     .section-expand-modal .modal-controls .action-btn,
-    .chub-expand-modal .modal-controls .action-btn {
+    .browse-expand-modal .modal-controls .action-btn {
         display: none !important;
     }
 
@@ -834,7 +835,7 @@
     .vt-lb-meta-key { min-width: unset; }
     .vt-lb-unchanged-row { padding: 3px 6px; }
 
-    /* Chub Page version entry */
+    /* Provider page version entry */
     .vt-page-version-banner { font-size: 0.75rem; padding: 6px 10px; gap: 6px; }
 
     /* Tags diff */
@@ -951,7 +952,7 @@
     .expanded-section-label { font-size: 0.85rem; margin-bottom: 6px; padding: 0 4px; }
     .expanded-greeting-textarea,
     .expand-field-textarea { font-size: 0.85rem; padding: 8px; border-radius: 6px; }
-    .chub-expand-body { padding: 4px; }
+    .browse-expand-body { padding: 4px; }
     .creator-notes-fullscreen-body { padding: 4px; }
     .content-fullscreen-body { padding: 4px; }
     .content-fullscreen-body .content-wrapper {
@@ -961,7 +962,7 @@
     }
     /* Expanded modal headers – tighter */
     .section-expand-modal .modal-header,
-    .chub-expand-modal .modal-header,
+    .browse-expand-modal .modal-header,
     .creator-notes-fullscreen-modal .modal-header,
     .content-fullscreen-modal .modal-header {
         padding: 8px 10px;
@@ -982,31 +983,31 @@
     .confirm-modal-footer { padding: 10px 16px; }
 
     /* ChubAI character detail modal */
-    .chub-char-modal {
+    .browse-char-modal {
         width: 100% !important;
         max-width: 100% !important;
         max-height: 100% !important;
         height: 100% !important;
         border-radius: 0 !important;
     }
-    .chub-char-modal .modal-header {
+    .browse-char-modal .modal-header {
         padding: 10px 12px;
         padding-right: 40px; /* room for absolute close btn */
         position: relative;
         flex-wrap: wrap;
         gap: 6px 8px;
     }
-    .chub-char-modal .chub-char-header-info {
+    .browse-char-modal .browse-char-header-info {
         width: 100%; /* force controls to wrap below */
     }
-    .chub-char-modal .modal-controls {
+    .browse-char-modal .modal-controls {
         display: flex;
         gap: 6px;
         flex-wrap: nowrap;
         align-items: center;
         justify-content: flex-start;
     }
-    .chub-char-modal .modal-controls > .close-btn {
+    .browse-char-modal .modal-controls > .close-btn {
         display: flex !important;
         position: absolute;
         top: 8px;
@@ -1014,60 +1015,60 @@
         width: 30px; height: 30px;
         font-size: 1.1rem;
     }
-    .chub-char-modal .action-btn {
+    .browse-char-modal .action-btn {
         font-size: 0.72rem;
         padding: 5px 10px;
         min-height: 28px;
         gap: 5px;
         white-space: nowrap;
     }
-    .chub-char-avatar { width: 40px; height: 40px; border-radius: 8px; }
-    .chub-char-header-info { gap: 10px; min-width: 0; overflow: hidden; }
-    .chub-char-header-info > div { min-width: 0; overflow: hidden; }
-    .chub-char-header-info h2 { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .chub-char-meta { font-size: 0.75rem; overflow: hidden; }
-    .chub-char-body { overflow-x: hidden !important; padding: 12px; }
-    .chub-char-body { gap: 12px; }
-    .chub-char-tagline {
+    .browse-char-avatar { width: 40px; height: 40px; border-radius: 8px; }
+    .browse-char-header-info { gap: 10px; min-width: 0; overflow: hidden; }
+    .browse-char-header-info > div { min-width: 0; overflow: hidden; }
+    .browse-char-header-info h2 { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .browse-char-meta { font-size: 0.75rem; overflow: hidden; }
+    .browse-char-body { overflow-x: hidden !important; padding: 12px; }
+    .browse-char-body { gap: 12px; }
+    .browse-char-tagline {
         padding: 10px 12px;
         border-radius: 10px;
         font-size: 0.85rem;
         line-height: 1.5;
     }
-    .chub-tagline-text { font-size: 0.85rem; }
-    .chub-char-meta-grid {
+    .provider-tagline-text { font-size: 0.85rem; }
+    .browse-char-meta-grid {
         grid-template-columns: 1fr;
         gap: 10px;
     }
-    .chub-char-stats {
+    .browse-char-stats {
         display: flex;
         flex-wrap: wrap;
         gap: 8px 12px;
         padding: 8px 10px;
         font-size: 0.8rem;
     }
-    .chub-stat { gap: 5px; font-size: 0.8rem; white-space: nowrap; }
-    .chub-char-tags { gap: 5px; }
-    .chub-char-tags { --chub-tags-max-height: 56px; }
-    .chub-tag { font-size: 0.75rem; padding: 3px 8px; }
-    .chub-tags-more { font-size: 0.7rem; padding: 2px 6px; }
-    .chub-char-section { padding: 10px 12px; }
-    .chub-section-title {
+    .browse-stat { gap: 5px; font-size: 0.8rem; white-space: nowrap; }
+    .browse-char-tags { gap: 5px; }
+    .browse-char-tags { --browse-tags-max-height: 56px; }
+    .browse-tag { font-size: 0.75rem; padding: 3px 8px; }
+    .browse-tags-more { font-size: 0.7rem; padding: 2px 6px; }
+    .browse-char-section { padding: 10px 12px; }
+    .browse-section-title {
         font-size: 0.85rem;
         padding: 8px 0;
         min-height: 36px;
         display: flex;
         align-items: center;
     }
-    .chub-section-count { font-size: 0.75rem; }
+    .browse-section-count { font-size: 0.75rem; }
     .scrolling-text {
         font-size: 0.85rem;
         line-height: 1.6;
     }
-    .chub-alt-greeting summary { padding: 8px 10px; gap: 8px; }
-    .chub-alt-greeting-index { font-size: 0.7rem; padding: 2px 6px; }
-    .chub-alt-greeting-preview { font-size: 0.78rem; }
-    .chub-alt-greeting-body { font-size: 0.85rem; }
+    .browse-alt-greeting summary { padding: 8px 10px; gap: 8px; }
+    .browse-alt-greeting-index { font-size: 0.7rem; padding: 2px 6px; }
+    .browse-alt-greeting-preview { font-size: 0.78rem; }
+    .browse-alt-greeting-body { font-size: 0.85rem; }
 
     /* Card updates modal (mobile) */
     .card-update-modal .cl-modal-content {
@@ -1824,7 +1825,7 @@
     }
 
     /* ---------------------------------------------------
-       CHUB LINK MODAL
+       PROVIDER LINK MODAL
        --------------------------------------------------- */
     .chub-link-modal-content {
         width: 100% !important;
@@ -2057,7 +2058,7 @@
 
     /* Full-viewport confirm modals (complex ones) */
     .import-modal-content,
-    .bulk-chub-link-modal-content,
+    .bulk-auto-link-modal-content,
     .char-duplicates-modal-content,
     .gallery-info-modal-content,
     .bulk-summary-modal-content,
@@ -2294,13 +2295,13 @@
         min-width: 36px;
     }
 
-    /* --- Bulk ChubAI Link --- */
-    .bulk-chub-link-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .bulk-chub-link-list-container { max-height: 40vh; }
-    .bulk-chub-link-scan-stats { flex-wrap: wrap; gap: 6px; }
-    .bulk-chub-link-scan-stats .stat-item { font-size: 0.75rem; }
-    .bulk-chub-link-actions { flex-wrap: wrap; gap: 6px; }
-    .bulk-chub-link-actions .action-btn { flex: 1; min-width: 120px; }
+    /* --- Bulk Provider Link --- */
+    .bulk-auto-link-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .bulk-auto-link-list-container { max-height: 40vh; }
+    .bulk-auto-link-scan-stats { flex-wrap: wrap; gap: 6px; }
+    .bulk-auto-link-scan-stats .stat-item { font-size: 0.75rem; }
+    .bulk-auto-link-actions { flex-wrap: wrap; gap: 6px; }
+    .bulk-auto-link-actions .action-btn { flex: 1; min-width: 120px; }
 
     /* --- Gallery info / Help & Tips modal (fullscreen like settings) --- */
     .gallery-info-modal-content {
@@ -2619,7 +2620,15 @@
         object-fit: cover;
     }
     .card-overlay { padding: 6px 5px 5px; }
-    .card-name { font-size: 0.75rem; margin-bottom: 2px; }
+    .card-name {
+        font-size: 0.75rem;
+        margin-bottom: 2px;
+        -webkit-line-clamp: 1;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        display: block;
+        overflow: hidden;
+    }
     .card-tags { gap: 2px; font-size: 0.55rem; }
     .card-tag { padding: 1px 4px; border-radius: 3px; }
     .char-card .favorite-indicator {
@@ -2856,7 +2865,7 @@
     .topbar.chub-active {
         flex-wrap: wrap !important;
     }
-    .filter-area.chub-filters {
+    .filter-area.online-filters {
         width: 100% !important;
         order: 99;
         flex-wrap: nowrap !important;
@@ -2868,36 +2877,55 @@
         border-top: 1px solid var(--glass-border);
         align-items: center;
     }
-    .filter-area.chub-filters::-webkit-scrollbar { display: none; }
-    .filter-area.chub-filters .glass-btn {
+    .filter-area.online-filters::-webkit-scrollbar { display: none; }
+    .filter-area.online-filters .glass-btn {
         flex-shrink: 0;
         font-size: 0.75rem;
         padding: 5px 8px;
         min-height: 30px;
         white-space: nowrap;
     }
-    .filter-area.chub-filters .glass-select {
+    .filter-area.online-filters .glass-select {
         flex-shrink: 0;
         font-size: 0.75rem;
         max-width: 170px;
     }
-    .filter-area.chub-filters .chub-sort-container {
+    .filter-area.online-filters .browse-sort-container {
         flex-shrink: 0;
     }
-    .filter-area.chub-filters .chub-view-toggle {
+    .filter-area.online-filters .chub-view-toggle {
         flex-shrink: 0;
         padding: 1px;
         gap: 2px;
     }
-    .filter-area.chub-filters .chub-view-btn {
+    .filter-area.online-filters .chub-view-btn {
         font-size: 0.72rem;
         padding: 4px 7px;
     }
-    .filter-area.chub-filters .nsfw-toggle {
+    .filter-area.online-filters .nsfw-toggle {
         min-width: auto;
     }
-    .filter-area.chub-filters .nsfw-toggle span {
+    .filter-area.online-filters .nsfw-toggle span {
         display: none; /* icon only on mobile */
+    }
+
+    /* Provider selector */
+    #providerSelectorArea {
+        flex-shrink: 0;
+    }
+    #onlineFilterContent {
+        margin-left: 0;
+        gap: 6px;
+    }
+    #providerSelectorArea .custom-select-container {
+        min-width: 0;
+    }
+    #providerSelectorArea .custom-select-trigger {
+        font-size: 0.75rem;
+        padding: 5px 8px;
+        min-height: 30px;
+        white-space: nowrap;
+        touch-action: manipulation;
     }
 
     /* ---------------------------------------------------
@@ -2905,7 +2933,7 @@
        --------------------------------------------------- */
 
     /* Tags dropdown – full width on mobile */
-    .chub-tags-dropdown {
+    .browse-tags-dropdown {
         position: fixed !important;
         left: 0 !important;
         right: 0 !important;
@@ -2918,12 +2946,12 @@
         z-index: 1100 !important;
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
-    .chub-tags-search-row input { font-size: 16px; } /* prevent iOS zoom */
-    .chub-tag-filter-item { padding: 8px 6px; } /* bigger tap targets */
-    .chub-tag-state-btn { width: 28px; height: 28px; min-width: 28px; }
+    .browse-tags-search-row input { font-size: 16px; } /* prevent iOS zoom */
+    .browse-tag-filter-item { padding: 8px 6px; } /* bigger tap targets */
+    .browse-tag-state-btn { width: 28px; height: 28px; min-width: 28px; }
 
-    /* Features dropdown – full width */
-    #chubFiltersDropdown {
+    /* Features dropdown – bottom sheet for all providers */
+    .browse-features-dropdown {
         position: fixed !important;
         left: 0 !important;
         right: 0 !important;
@@ -2937,21 +2965,25 @@
     }
     .filter-checkbox { padding: 8px 12px; font-size: 0.85rem; }
 
-    /* Chub view container */
-    .chub-view { padding: 0; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); gap: 12px; }
-    .chub-section { gap: 12px; }
+    /* Online/Chub view container */
+    .online-view, .chub-view { padding: 0; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); gap: 12px; }
+    .browse-recovery-banner { margin: 8px 8px -4px 8px; padding: 8px 12px; font-size: 12px; border-radius: 6px; }
+    .browse-section { gap: 12px; }
 
     /* Search bar */
-    .chub-search-bar { padding: 12px; border-radius: 10px; gap: 8px; }
-    .chub-search-input-wrapper { padding: 0 10px; gap: 8px; border-radius: 8px; }
-    .chub-search-input-wrapper input { padding: 12px 0; font-size: 16px; } /* 16px prevents iOS zoom */
-    .chub-search-input-wrapper i { font-size: 0.9rem; }
-    .chub-search-submit { width: 34px; height: 34px; border-radius: 6px; }
-    .chub-creator-search { margin-top: 6px; }
-    .chub-creator-search-wrapper { max-width: 100%; padding: 0 10px; gap: 8px; border-radius: 8px; }
-    .chub-creator-search-wrapper input { padding: 10px 0; font-size: 16px; }
+    .browse-search-bar { padding: 12px; border-radius: 10px; gap: 8px; }
+    .browse-search-input-wrapper { padding: 0 10px; gap: 8px; border-radius: 8px; }
+    .browse-search-input-wrapper input { padding: 12px 0; font-size: 16px; } /* 16px prevents iOS zoom */
+    .browse-search-input-wrapper i { font-size: 0.9rem; }
+    .browse-search-submit { width: 34px; height: 34px; border-radius: 6px; }
+    .browse-creator-search { margin-top: 6px; }
+    .browse-creator-search-wrapper { max-width: 100%; padding: 0 10px; gap: 8px; border-radius: 8px; }
+    .browse-creator-search-wrapper input { padding: 10px 0; font-size: 16px; }
 
     /* Author banner */
+    .browse-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
+    .browse-author-banner-content { font-size: 0.85rem; }
+    .browse-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
     .chub-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
     .chub-author-banner-content { font-size: 0.85rem; }
     .chub-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
@@ -2959,30 +2991,30 @@
     #chubFollowAuthorBtn { font-size: 0.8rem; padding: 6px 10px; }
 
     /* Card grid */
-    .chub-grid {
+    .browse-grid {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
         gap: 8px;
     }
-    .chub-card {
+    .browse-card {
         border-radius: 10px;
         transition: none;
         content-visibility: auto;
         contain-intrinsic-size: 140px 220px;
     }
-    .chub-card:hover { transform: none; } /* disable hover lift on touch */
-    .chub-card-image img { transition: none; } /* kill scale transition on touch */
-    .chub-card-body { padding: 8px; min-height: 60px; }
-    .chub-card-name { font-size: 0.8rem; }
-    .chub-card-creator { font-size: 0.7rem; margin-bottom: 4px; }
-    .chub-card-tags { display: none !important; }
-    .chub-nsfw-badge { font-size: 0.6rem; padding: 2px 5px; top: 5px; right: 5px; }
-    .chub-card-footer { padding: 6px 8px; font-size: 0.65rem; min-height: 32px; }
-    .chub-card-stat { font-size: 0.65rem; }
-    .chub-card-date { font-size: 0.6rem; }
+    .browse-card:hover { transform: none; } /* disable hover lift on touch */
+    .browse-card-image img { transition: none; } /* kill scale transition on touch */
+    .browse-card-body { padding: 8px; min-height: 60px; }
+    .browse-card-name { font-size: 0.8rem; }
+    .browse-card-creator { font-size: 0.7rem; margin-bottom: 4px; }
+    .browse-card-tags { display: none !important; }
+    .browse-nsfw-badge { font-size: 0.6rem; padding: 2px 5px; top: 5px; right: 5px; }
+    .browse-card-footer { padding: 6px 8px; font-size: 0.65rem; min-height: 32px; }
+    .browse-card-stat { font-size: 0.65rem; }
+    .browse-card-date { font-size: 0.6rem; }
 
     /* Load more */
-    .chub-load-more { padding: 12px; }
-    .chub-load-more .glass-btn { padding: 10px 24px; font-size: 0.85rem; }
+    .browse-load-more { padding: 12px; }
+    .browse-load-more .glass-btn { padding: 10px 24px; font-size: 0.85rem; }
 
     /* Timeline header */
     .chub-timeline-header { padding: 12px 14px; border-radius: 10px; margin-bottom: 10px; }
@@ -2995,11 +3027,11 @@
     .chub-timeline-empty h3 { font-size: 1rem; }
 
     /* Chub loading/error/empty states */
-    .chub-loading, .chub-error, .chub-empty { padding: 40px 16px; }
+    .browse-loading, .browse-error, .browse-empty { padding: 40px 16px; }
 
     /* ChubAI character detail modal */
-    .chub-char-body { padding: 12px; }
-    .chub-char-description { font-size: 0.85rem; line-height: 1.6; }
+    .browse-char-body { padding: 12px; }
+    .browse-char-description { font-size: 0.85rem; line-height: 1.6; }
 }
 
 
@@ -3047,11 +3079,21 @@
     }
 
     /* Chub grid tighter */
-    .chub-grid {
+    .browse-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 6px;
     }
-    .chub-card { contain-intrinsic-size: 120px 190px; }
+    .browse-card { contain-intrinsic-size: 120px 190px; }
+
+    /* Provider selector — icon only on phones */
+    .provider-tab-btn {
+        font-size: 0;
+        gap: 0;
+        padding: 5px 8px;
+    }
+    .provider-tab-btn i {
+        font-size: 0.8rem;
+    }
 
     /* ---- Inline Tags Row in Edit tab ---- */
     .edit-tags-row {

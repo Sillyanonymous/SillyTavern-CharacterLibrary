@@ -31,22 +31,18 @@ export function auditGalleryIntegrity() {
     const result = {
         timestamp: Date.now(),
         uniqueFoldersEnabled,
+        stContextAvailable: context !== null,
         totalCharacters: characters.length,
         totalMappings: Object.keys(folderMappings).length,
         
-        // Characters missing gallery_id
         missingGalleryId: [],
         
-        // Characters with gallery_id but no folder mapping (when feature enabled)
         missingMapping: [],
         
-        // Mappings for avatars that don't exist (orphaned)
         orphanedMappings: [],
         
-        // Characters with gallery_id that have folder mapping (healthy)
         healthy: [],
         
-        // Summary
         issues: {
             missingIds: 0,
             missingMappings: 0,
@@ -54,10 +50,8 @@ export function auditGalleryIntegrity() {
         }
     };
     
-    // Build avatar set for quick lookup
     const existingAvatars = new Set(characters.map(c => c.avatar));
     
-    // Check each character
     for (const char of characters) {
         const galleryId = CoreAPI.getCharacterGalleryId(char);
         const hasMapping = folderMappings[char.avatar] !== undefined;
@@ -83,28 +77,18 @@ export function auditGalleryIntegrity() {
         }
     }
     
-    // Check for orphaned mappings
     for (const [avatar, folder] of Object.entries(folderMappings)) {
         if (!existingAvatars.has(avatar)) {
             result.orphanedMappings.push({ avatar, folder });
         }
     }
     
-    // Update summary
     result.issues.missingIds = result.missingGalleryId.length;
     result.issues.missingMappings = result.missingMapping.length;
     result.issues.orphaned = result.orphanedMappings.length;
     
     lastAuditResult = result;
     return result;
-}
-
-/**
- * Get the last audit result without re-running
- * @returns {Object|null} Last audit result or null
- */
-export function getLastAuditResult() {
-    return lastAuditResult;
 }
 
 // ========================================
@@ -166,8 +150,9 @@ export async function createMissingMappings(options = {}) {
     const audit = auditGalleryIntegrity();
     const toFix = audit.missingMapping;
     const context = getSTContext();
+    if (!context?.extensionSettings) return { success: 0, failed: toFix.length, errors: ['SillyTavern context unavailable'] };
     
-    if (!context?.extensionSettings?.gallery) {
+    if (!context.extensionSettings.gallery) {
         context.extensionSettings.gallery = { folders: {} };
     }
     if (!context.extensionSettings.gallery.folders) {
@@ -188,7 +173,6 @@ export async function createMissingMappings(options = {}) {
         }
         
         try {
-            // Get the character to build folder name
             const char = CoreAPI.getCharacterByAvatar(avatar);
             if (!char) {
                 result.failed++;
@@ -352,16 +336,14 @@ async function assignGalleryIdToCharacter(avatar) {
     const char = CoreAPI.getCharacterByAvatar(avatar);
     if (!char) return false;
     
-    // Check if already has gallery_id
     if (CoreAPI.getCharacterGalleryId(char)) {
         return true; // Already has one
     }
     
     const galleryId = generateGalleryId();
     
-    // Use the window.applyCardFieldUpdates if available (from library.js)
-    if (typeof window.applyCardFieldUpdates === 'function') {
-        return await window.applyCardFieldUpdates(avatar, {
+    if (CoreAPI.applyCardFieldUpdates) {
+        return await CoreAPI.applyCardFieldUpdates(avatar, {
             'extensions.gallery_id': galleryId
         });
     }
@@ -380,7 +362,6 @@ async function assignGalleryIdToCharacter(avatar) {
         });
         
         if (response.ok) {
-            // Update local cache
             if (char.data) {
                 if (!char.data.extensions) char.data.extensions = {};
                 char.data.extensions.gallery_id = galleryId;
@@ -405,120 +386,6 @@ function sleep(ms) {
 // UI HELPERS
 // ========================================
 
-/**
- * Format audit result as human-readable summary
- * @param {Object} audit - Audit result
- * @returns {string} Formatted summary
- */
-export function formatAuditSummary(audit) {
-    if (!audit) return 'No audit data available';
-    
-    const lines = [
-        `Gallery Integrity Audit`,
-        `═══════════════════════`,
-        `Total Characters: ${audit.totalCharacters}`,
-        `Total Mappings: ${audit.totalMappings}`,
-        `Unique Folders Enabled: ${audit.uniqueFoldersEnabled ? 'Yes' : 'No'}`,
-        ``,
-        `Issues Found:`,
-        `  • Missing gallery_id: ${audit.issues.missingIds}`,
-        `  • Missing mappings: ${audit.issues.missingMappings}`,
-        `  • Orphaned mappings: ${audit.issues.orphaned}`,
-        ``,
-        `Healthy: ${audit.healthy.length} characters properly configured`
-    ];
-    
-    return lines.join('\n');
-}
-
-/**
- * Create a sync status UI element
- * @returns {HTMLElement} Status element
- */
-export function createSyncStatusUI() {
-    const container = document.createElement('div');
-    container.className = 'gallery-sync-status';
-    container.innerHTML = `
-        <div class="sync-status-header">
-            <i class="fa-solid fa-rotate"></i>
-            <span>Gallery Sync Status</span>
-        </div>
-        <div class="sync-status-body">
-            <div class="sync-status-loading">
-                <i class="fa-solid fa-spinner fa-spin"></i> Running audit...
-            </div>
-        </div>
-        <div class="sync-status-actions" style="display: none;">
-            <button class="action-btn secondary" data-action="audit">
-                <i class="fa-solid fa-magnifying-glass"></i> Re-Audit
-            </button>
-            <button class="action-btn primary" data-action="sync">
-                <i class="fa-solid fa-rotate"></i> Full Sync
-            </button>
-            <button class="action-btn secondary" data-action="cleanup">
-                <i class="fa-solid fa-broom"></i> Cleanup Only
-            </button>
-        </div>
-    `;
-    
-    return container;
-}
-
-/**
- * Update sync status UI with audit results
- * @param {HTMLElement} container - Status container
- * @param {Object} audit - Audit results
- */
-export function updateSyncStatusUI(container, audit) {
-    const body = container.querySelector('.sync-status-body');
-    const actions = container.querySelector('.sync-status-actions');
-    
-    const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
-    const statusClass = totalIssues === 0 ? 'healthy' : 'issues';
-    
-    body.innerHTML = `
-        <div class="sync-summary ${statusClass}">
-            <div class="sync-summary-icon">
-                <i class="fa-solid ${totalIssues === 0 ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
-            </div>
-            <div class="sync-summary-text">
-                ${totalIssues === 0 
-                    ? '<strong>All Synced</strong><br>No integrity issues found' 
-                    : `<strong>${totalIssues} Issue${totalIssues !== 1 ? 's' : ''} Found</strong>`}
-            </div>
-        </div>
-        ${totalIssues > 0 ? `
-        <div class="sync-issues-list">
-            ${audit.issues.missingIds > 0 ? `
-                <div class="sync-issue-item">
-                    <i class="fa-solid fa-id-card"></i>
-                    <span>${audit.issues.missingIds} character${audit.issues.missingIds !== 1 ? 's' : ''} missing gallery_id</span>
-                </div>
-            ` : ''}
-            ${audit.issues.missingMappings > 0 ? `
-                <div class="sync-issue-item">
-                    <i class="fa-solid fa-folder-open"></i>
-                    <span>${audit.issues.missingMappings} character${audit.issues.missingMappings !== 1 ? 's' : ''} missing folder mapping</span>
-                </div>
-            ` : ''}
-            ${audit.issues.orphaned > 0 ? `
-                <div class="sync-issue-item">
-                    <i class="fa-solid fa-ghost"></i>
-                    <span>${audit.issues.orphaned} orphaned mapping${audit.issues.orphaned !== 1 ? 's' : ''}</span>
-                </div>
-            ` : ''}
-        </div>
-        ` : ''}
-        <div class="sync-stats">
-            <span><i class="fa-solid fa-users"></i> ${audit.totalCharacters} characters</span>
-            <span><i class="fa-solid fa-folder"></i> ${audit.totalMappings} mappings</span>
-            <span><i class="fa-solid fa-check"></i> ${audit.healthy.length} healthy</span>
-        </div>
-    `;
-    
-    actions.style.display = 'flex';
-}
-
 // ========================================
 // INITIALIZATION
 // ========================================
@@ -535,6 +402,10 @@ export function updateWarningIndicator(audit = null) {
     const syncBtn = document.getElementById('gallerySyncStatusBtn');
     const dropdown = document.getElementById('gallerySyncDropdown');
     if (!syncBtn) return;
+
+    // Reveal the container (hidden by default until first audit completes)
+    const container = syncBtn.closest('.gallery-sync-container');
+    if (container) container.classList.remove('hidden');
     
     const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
     const badge = syncBtn.querySelector('.warning-badge');
@@ -563,7 +434,6 @@ export function updateWarningIndicator(audit = null) {
         }
     }
     
-    // Update dropdown content
     updateDropdownContent(dropdown, audit);
 }
 
@@ -602,6 +472,12 @@ function updateDropdownContent(dropdown, audit) {
                     <i class="fa-solid fa-folder-open"></i>
                     <span>${audit.issues.missingMappings} missing folder mapping</span>
                 </div>
+                ${!audit.stContextAvailable && audit.issues.missingMappings === audit.totalCharacters ? `
+                <div class="sync-dropdown-issue" style="font-size: 0.75rem; opacity: 0.7;">
+                    <i class="fa-solid fa-info-circle"></i>
+                    <span>SillyTavern tab may be closed — folder mappings can't be read</span>
+                </div>
+                ` : ''}
             ` : ''}
             ${audit.issues.orphaned > 0 ? `
                 <div class="sync-dropdown-issue">
@@ -702,7 +578,6 @@ export async function init(dependencies = {}) {
         syncBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             
-            // Toggle dropdown
             const isOpen = !dropdown.classList.contains('hidden');
             
             // Close all other dropdowns first
@@ -713,7 +588,6 @@ export async function init(dependencies = {}) {
             if (isOpen) {
                 dropdown.classList.add('hidden');
             } else {
-                // Show loading state
                 const content = dropdown.querySelector('.sync-dropdown-content');
                 if (content) {
                     content.innerHTML = '<div class="sync-dropdown-loading"><i class="fa-solid fa-spinner fa-spin"></i> Checking...</div>';
@@ -740,25 +614,31 @@ export async function init(dependencies = {}) {
         });
     }
     
-    // Run initial audit (non-blocking, deferred)
-    // processAndRender() now runs its own audit+sync after fetchCharacters completes.
-    // This timer is a safety net only — if processAndRender already ran, skip it.
+    // Safety-net audit — runs if processAndRender missed the audit due to module load race.
+    // Does the full sync+audit+cleanup sequence, same as processAndRender.
     setTimeout(() => {
-        if (window._gallerySyncAuditDone) {
-            console.log('[GallerySync] Initial audit skipped — already done by processAndRender');
-            return;
-        }
+        if (window._gallerySyncAuditDone) return;
         try {
-            const audit = auditGalleryIntegrity();
-            const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
-            if (totalIssues > 0) {
-                console.log(`[GallerySync] Audit found ${totalIssues} issue(s):`, audit.issues);
-            } else {
-                console.log('[GallerySync] Audit complete - all synced');
+            if (CoreAPI.getSetting('uniqueGalleryFolders')) {
+                CoreAPI.syncAllGalleryFolderOverrides();
             }
-            updateWarningIndicator(audit);
+
+            const audit = auditGalleryIntegrity();
+
+            if (audit.issues.orphaned > 0) {
+                const cleanup = cleanupOrphanedMappings();
+                if (cleanup.removed > 0) {
+                    const cleanAudit = auditGalleryIntegrity();
+                    updateWarningIndicator(cleanAudit);
+                } else {
+                    updateWarningIndicator(audit);
+                }
+            } else {
+                updateWarningIndicator(audit);
+            }
+            window._gallerySyncAuditDone = true;
         } catch (err) {
-            console.error('[GallerySync] Initial audit failed:', err);
+            console.error('[GallerySync] Deferred audit failed:', err);
         }
     }, 5000);
     
@@ -773,13 +653,9 @@ export async function init(dependencies = {}) {
 export default {
     init,
     auditGalleryIntegrity,
-    getLastAuditResult,
     assignMissingGalleryIds,
     createMissingMappings,
     cleanupOrphanedMappings,
     fullSync,
-    formatAuditSummary,
-    createSyncStatusUI,
-    updateSyncStatusUI,
     updateWarningIndicator
 };

@@ -1,5 +1,7 @@
 // Core API — proxy layer between modules and the library monolith
 
+import ProviderRegistry from './providers/provider-registry.js';
+
 // ========================================
 // STATE ACCESS
 // ========================================
@@ -7,8 +9,8 @@
 // ---- View Management (proxies to library.js implementation) ----
 
 /**
- * Switch between top-level views (characters, chats, chub).
- * @param {string} view - 'characters' | 'chats' | 'chub'
+ * Switch between top-level views (characters, chats, online).
+ * @param {string} view - 'characters' | 'chats' | 'online'
  */
 export function switchView(view) {
     window.switchView?.(view);
@@ -16,7 +18,7 @@ export function switchView(view) {
 
 /**
  * Get current active view
- * @returns {string} 'characters' | 'chats' | 'chub'
+ * @returns {string} 'characters' | 'chats' | 'online'
  */
 export function getCurrentView() {
     return window.getCurrentView?.() || 'characters';
@@ -25,7 +27,7 @@ export function getCurrentView() {
 /**
  * Register a callback to run each time a specific view becomes active.
  * Modules use this for lazy-loading (e.g. chats loads on first visit).
- * @param {string} view - View name ('characters', 'chats', 'chub')
+ * @param {string} view - View name ('characters', 'chats', 'online')
  * @param {function} callback - Function to call when view is entered
  */
 export function onViewEnter(view, callback) {
@@ -37,7 +39,7 @@ export function onViewEnter(view, callback) {
  * @returns {Array} All character objects
  */
 export function getAllCharacters() {
-    return window.allCharacters || [];
+    return window.getAllCharacters?.() || [];
 }
 
 /**
@@ -45,7 +47,7 @@ export function getAllCharacters() {
  * @returns {Array} Current character objects
  */
 export function getCurrentCharacters() {
-    return window.currentCharacters || [];
+    return window.getCurrentCharacters?.() || [];
 }
 
 /**
@@ -75,6 +77,14 @@ export function setSetting(key, value) {
     window.setSetting?.(key, value);
 }
 
+/**
+ * Batch-set multiple settings at once
+ * @param {Object} settingsObj - Key/value pairs
+ */
+export function setSettings(settingsObj) {
+    window.setSettings?.(settingsObj);
+}
+
 // ========================================
 // UI ACTIONS
 // ========================================
@@ -95,15 +105,15 @@ export function closeCharacterModal() {
 }
 
 /**
- * Open the ChubAI link modal for a character
+ * Open the provider link modal for a character
  * Sets the active character and opens the modal
  * @param {Object} char - Character object
  */
-export function openChubLinkModal(char) {
+export function openProviderLinkModal(char) {
     if (char) {
         window.activeChar = char;
     }
-    window.openChubLinkModal?.();
+    window.openProviderLinkModal?.();
 }
 
 /**
@@ -111,7 +121,7 @@ export function openChubLinkModal(char) {
  * @returns {Object|null} Active character or null
  */
 export function getActiveChar() {
-    return window.activeChar || null;
+    return window.getActiveChar?.() || null;
 }
 
 /**
@@ -119,7 +129,7 @@ export function getActiveChar() {
  * @param {Object} char - Character object
  */
 export function setActiveChar(char) {
-    window.activeChar = char;
+    window.setActiveChar?.(char);
 }
 
 /**
@@ -253,13 +263,6 @@ export function enableMultiSelect() {
 }
 
 /**
- * Disable multi-select mode
- */
-export function disableMultiSelect() {
-    window.MultiSelect?.disable();
-}
-
-/**
  * Get all selected characters
  * @returns {Array} Selected character objects
  */
@@ -300,13 +303,6 @@ export function clearSelection() {
     window.MultiSelect?.clearSelection();
 }
 
-/**
- * Select all filtered characters
- */
-export function selectAllVisible() {
-    window.MultiSelect?.selectAll();
-}
-
 // ========================================
 // MODULE SYSTEM
 // ========================================
@@ -318,15 +314,6 @@ export function selectAllVisible() {
  */
 export function getModule(name) {
     return window.ModuleLoader?.get(name) || null;
-}
-
-/**
- * Check if a module is loaded
- * @param {string} name - Module name
- * @returns {boolean}
- */
-export function hasModule(name) {
-    return getModule(name) !== null;
 }
 
 // ========================================
@@ -345,6 +332,32 @@ export function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * Sanitize a tagline HTML string (strips dangerous elements, keeps safe formatting)
+ * @param {string} html - Raw tagline HTML from external data
+ * @returns {string} Sanitized HTML
+ */
+export function sanitizeTaglineHtml(html) {
+    return window.sanitizeTaglineHtml?.(html) || '';
+}
+
+/**
+ * @returns {boolean} Whether extensions recovery is in progress
+ */
+export function isExtensionsRecoveryInProgress() {
+    return window.isExtensionsRecoveryInProgress?.() ?? false;
+}
+
+/**
+ * Create a debounced version of a function
+ * @param {Function} fn - Function to debounce
+ * @param {number} delay - Delay in ms
+ * @returns {Function} Debounced function
+ */
+export function debounce(fn, delay) {
+    return window.debounce?.(fn, delay) || fn;
 }
 
 /**
@@ -375,14 +388,6 @@ export function getAllTags() {
  */
 export function findCardElement(avatar) {
     return document.querySelector(`.char-card[data-avatar="${avatar}"]`);
-}
-
-/**
- * Find all currently rendered card elements
- * @returns {NodeList}
- */
-export function findAllCardElements() {
-    return document.querySelectorAll('.char-card');
 }
 
 /**
@@ -426,6 +431,14 @@ export function onElement(id, event, handler) {
         return true;
     }
     return false;
+}
+
+/**
+ * Convert a native <select> into the styled custom dropdown.
+ * @param {HTMLSelectElement} selectEl - The <select> element to transform
+ */
+export function initCustomSelect(selectEl) {
+    window.initCustomSelect?.(selectEl);
 }
 
 // ========================================
@@ -497,6 +510,72 @@ export function registerGalleryFolderOverride(char, immediate = false) {
     window.registerGalleryFolderOverride?.(char, immediate);
 }
 
+/**
+ * Delete a character from the local library
+ * @param {Object|string} charOrAvatar - Character object or avatar filename
+ * @param {boolean} [deleteChats=false] - Also delete associated chats
+ * @returns {Promise<boolean>} Success
+ */
+export function deleteCharacter(charOrAvatar, deleteChats) {
+    return window.deleteCharacter?.(charOrAvatar, deleteChats) || Promise.resolve(false);
+}
+
+/**
+ * Fetch character list from the server
+ * @param {boolean} forceRefresh - Bypass cache
+ * @returns {Promise<Array>} Character array
+ */
+export function fetchCharacters(forceRefresh = false) {
+    return window.fetchCharacters?.(forceRefresh) || Promise.resolve([]);
+}
+
+/**
+ * @param {string} avatarFileName
+ * @returns {Promise<boolean>}
+ */
+export function fetchAndAddCharacter(avatarFileName) {
+    return window.fetchAndAddCharacter?.(avatarFileName) || Promise.resolve(false);
+}
+
+/**
+ * @param {string} avatar
+ */
+export function removeCharacterFromList(avatar) {
+    window.removeCharacterFromList?.(avatar);
+}
+
+/**
+ * Fetch heavy fields for a slim character object (no-op if already hydrated).
+ * @param {Object} char - Character object (may be slim)
+ * @returns {Promise<Object>} The same char with heavy fields populated
+ */
+export function hydrateCharacter(char) {
+    return window.hydrateCharacter?.(char) || Promise.resolve(char);
+}
+
+/**
+ * Run the current search/filter/sort pipeline and re-render the grid
+ */
+export function performSearch() {
+    window.performSearch?.();
+}
+
+/**
+ * Sync all gallery folder overrides with the server
+ */
+export function syncAllGalleryFolderOverrides() {
+    window.syncAllGalleryFolderOverrides?.();
+}
+
+/**
+ * Generate a unique gallery ID for a character
+ * @param {Object} char - Character object
+ * @returns {string} Gallery ID
+ */
+export function generateGalleryId(char) {
+    return window.generateGalleryId?.(char) || '';
+}
+
 // ========================================
 // LOGGING
 // ========================================
@@ -510,113 +589,182 @@ export function debugLog(...args) {
 }
 
 // ========================================
-// EVENT SYSTEM (Future expansion)
-// ========================================
-
-const eventListeners = new Map();
-
-/**
- * Subscribe to a core event
- * @param {string} event - Event name
- * @param {Function} callback - Event handler
- * @returns {Function} Unsubscribe function
- */
-export function on(event, callback) {
-    if (!eventListeners.has(event)) {
-        eventListeners.set(event, new Set());
-    }
-    eventListeners.get(event).add(callback);
-    
-    // Return unsubscribe function
-    return () => eventListeners.get(event)?.delete(callback);
-}
-
-/**
- * Emit a core event
- * @param {string} event - Event name
- * @param {*} data - Event data
- */
-export function emit(event, data) {
-    const listeners = eventListeners.get(event);
-    if (listeners) {
-        listeners.forEach(cb => {
-            try {
-                cb(data);
-            } catch (err) {
-                console.error(`[CoreAPI] Event handler error for "${event}":`, err);
-            }
-        });
-    }
-}
-
-// ========================================
-// KNOWN EVENTS (documentation)
-// ========================================
-/**
- * Events that can be emitted:
- * - 'characters:loaded' - Characters fetched from server
- * - 'characters:refreshed' - Character list updated
- * - 'character:selected' - Character selected in multi-select
- * - 'character:deselected' - Character deselected
- * - 'character:updated' - Character data modified
- * - 'character:deleted' - Character removed
- * - 'modal:opened' - Character modal opened
- * - 'modal:closed' - Character modal closed
- * - 'selection:changed' - Multi-select selection changed
- */
-
-// ========================================
-// CHUB INTEGRATION
+// CREATOR NOTES
 // ========================================
 
 /**
- * Get Chub link info for a character
- * @param {Object} char - Character object
- * @returns {Object|null} { id, fullPath, linkedAt } or null if not linked
+ * Render creator notes into a container with safe HTML handling
+ * @param {HTMLElement} container - Target container
+ * @param {string} notes - Raw creator notes content
+ * @param {Object} options - Rendering options
  */
-export function getChubLinkInfo(char) {
-    if (!char) return null;
-    const extensions = char.data?.extensions || char.extensions;
-    const chub = extensions?.chub;
-    if (!chub) return null;
-    
-    // Normalize: native ChubAI cards use full_path (snake_case), we use fullPath (camelCase)
-    const fullPath = chub.fullPath || chub.full_path;
-    if (!fullPath) return null;
-    
-    return {
-        id: chub.id || null,
-        fullPath: fullPath,
-        linkedAt: chub.linkedAt || null
-    };
+export function renderCreatorNotesSecure(container, notes, options) {
+    window.renderCreatorNotesSecure?.(container, notes, options);
 }
 
 /**
- * Get all characters linked to ChubAI
- * @returns {Array} Characters with Chub links
+ * Clean up a creator notes container (remove event listeners, observers, etc.)
+ * @param {HTMLElement} container - Container to clean up
  */
-export function getChubLinkedCharacters() {
-    return getAllCharacters().filter(c => getChubLinkInfo(c)?.fullPath);
+export function cleanupCreatorNotesContainer(container) {
+    window.cleanupCreatorNotesContainer?.(container);
 }
 
 /**
- * Fetch ChubAI metadata for a character
- * @param {string} fullPath - Chub full path (creator/slug)
- * @returns {Promise<Object|null>} Chub metadata or null
+ * Initialize creator notes interaction handlers (copy, links, etc.)
+ * @param {HTMLElement} container - Container element
  */
-export function fetchChubMetadata(fullPath) {
-    return window.fetchChubMetadata?.(fullPath) || Promise.resolve(null);
+export function initCreatorNotesHandlers(container) {
+    window.initCreatorNotesHandlers?.(container);
 }
 
 /**
- * Fetch the lorebook for a Chub character that uses linked (not embedded) lorebooks.
- * Falls back to the V4 Git API's exported card.json which resolves linked lorebooks.
- * @param {number} projectId - Chub project ID
- * @returns {Promise<Object|null>} character_book object or null
+ * Initialize content expand/collapse handlers for long text sections
+ * @param {HTMLElement} container - Container element
  */
-export function fetchChubLinkedLorebook(projectId) {
-    return window.fetchChubLinkedLorebook?.(projectId) || Promise.resolve(null);
+export function initContentExpandHandlers(container) {
+    window.initContentExpandHandlers?.(container);
 }
+
+// ========================================
+// IMPORT / DOWNLOAD PIPELINE
+// ========================================
+
+/**
+ * Check if a character (by name/content) already exists in the local library
+ * @param {Object} card - Character card to check
+ * @returns {Object|null} Duplicate info or null
+ */
+export function checkCharacterForDuplicates(card) {
+    return window.checkCharacterForDuplicates?.(card) || null;
+}
+
+/**
+ * Show a pre-import duplicate warning modal
+ * @param {Object} newCharInfo - Info about the character being imported
+ * @param {Array} matches - Duplicate matches from checkCharacterForDuplicates
+ * @returns {Promise<{choice: string}>} User's choice ('import' | 'replace' | 'skip')
+ */
+export function showPreImportDuplicateWarning(newCharInfo, matches) {
+    return window.showPreImportDuplicateWarning?.(newCharInfo, matches) || Promise.resolve({ choice: 'skip' });
+}
+
+/**
+ * Find all referenced media URLs in a character card's fields
+ * @param {Object} card - Character card
+ * @returns {Array<string>} Media URLs found
+ */
+export function findCharacterMediaUrls(card) {
+    return window.findCharacterMediaUrls?.(card) || [];
+}
+
+/**
+ * Show the import summary modal after downloading a character
+ * @param {Object} summaryData - Import summary details
+ */
+export function showImportSummaryModal(summaryData) {
+    window.showImportSummaryModal?.(summaryData);
+}
+
+/**
+ * Convert an image (any format) to PNG
+ * @param {Blob|ArrayBuffer} imageData - Source image
+ * @returns {Promise<Blob>} PNG blob
+ */
+export function convertImageToPng(imageData) {
+    return window.convertImageToPng?.(imageData) || Promise.resolve(null);
+}
+
+/**
+ * Embed character JSON data into a PNG file's tEXt chunk
+ * @param {Blob|ArrayBuffer} pngData - PNG image data
+ * @param {Object} charData - Character data to embed
+ * @returns {Promise<Blob>} PNG with embedded data
+ */
+export function embedCharacterDataInPng(pngData, charData) {
+    return window.embedCharacterDataInPng?.(pngData, charData) || Promise.resolve(null);
+}
+
+// ========================================
+// GALLERY MEDIA PIPELINE
+// ========================================
+
+/**
+ * Get existing file hashes for a gallery folder (dedup check)
+ * @param {string} folderName - Gallery folder name
+ * @returns {Promise<Map>} Map of hash → filename
+ */
+export function getExistingFileHashes(folderName) {
+    return window.getExistingFileHashes?.(folderName) || Promise.resolve(new Map());
+}
+
+/**
+ * @param {string} folderName
+ * @returns {Promise<Map<string, {fileName: string, localPath: string}>>}
+ */
+export function getExistingFileIndex(folderName) {
+    return window.getExistingFileIndex?.(folderName) || Promise.resolve(new Map());
+}
+
+/**
+ * @param {string} url
+ * @returns {string}
+ */
+export function extractSanitizedUrlName(url) {
+    return window.extractSanitizedUrlName?.(url) || '';
+}
+
+/**
+ * Download a remote media file into memory
+ * @param {string} url - Media URL
+ * @param {number} timeout - Timeout in ms
+ * @param {AbortSignal} [signal] - Optional abort signal
+ * @returns {Promise<Object>} { arrayBuffer, contentType, filename }
+ */
+export function downloadMediaToMemory(url, timeout, signal) {
+    return window.downloadMediaToMemory?.(url, timeout, signal) || Promise.resolve(null);
+}
+
+/**
+ * Calculate a SHA-256 hash of an ArrayBuffer
+ * @param {ArrayBuffer} arrayBuffer - Data to hash
+ * @returns {Promise<string>} Hex hash string
+ */
+export function calculateHash(arrayBuffer) {
+    return window.calculateHash?.(arrayBuffer) || Promise.resolve('');
+}
+
+/**
+ * Convert an ArrayBuffer to a base64 string
+ * @param {ArrayBuffer} buf - ArrayBuffer to convert
+ * @returns {string} Base64-encoded string
+ */
+export function arrayBufferToBase64(buf) {
+    return window.arrayBufferToBase64?.(buf) || '';
+}
+
+/**
+ * Get the API endpoints constant object
+ * @returns {Object} Endpoints map (e.g. { IMAGES_UPLOAD: '/images/upload', ... })
+ */
+export function getEndpoints() {
+    return window.ENDPOINTS || {};
+}
+
+// ========================================
+// PROVIDER LINK UI
+// ========================================
+
+/**
+ * Open the bulk auto-link modal
+ */
+export function openBulkAutoLinkModal() {
+    window.openBulkAutoLinkModal?.();
+}
+
+// ========================================
+// CARD DATA
+// ========================================
 
 /**
  * Extract character data from PNG buffer
@@ -684,12 +832,70 @@ export function mergeRemoteLorebookIntoWorldFile(avatar, remoteBook) {
     return window.mergeRemoteLorebookIntoWorldFile?.(avatar, remoteBook) || Promise.resolve(false);
 }
 
+// ========================================
+// PROVIDER REGISTRY
+// Generic provider-agnostic functions for linking, updates, etc.
+// ========================================
+
 /**
- * Get Chub API headers (with optional auth token)
- * @returns {Object} Headers object
+ * Get the provider registry module.
+ * @returns {Object} ProviderRegistry
  */
-export function getChubHeaders() {
-    return window.getChubHeaders?.() || { 'Accept': 'application/json' };
+export function getProviderRegistry() {
+    return ProviderRegistry;
+}
+
+/**
+ * Get all registered providers.
+ * @returns {import('./providers/provider-interface.js').ProviderBase[]}
+ */
+export function getAllProviders() {
+    return ProviderRegistry.getAllProviders();
+}
+
+/**
+ * Get a specific provider by ID.
+ * @param {string} id
+ * @returns {import('./providers/provider-interface.js').ProviderBase|undefined}
+ */
+export function getProvider(providerId) {
+    return ProviderRegistry.getProvider(providerId);
+}
+
+/**
+ * Find which provider owns a character (checks all registered providers).
+ * @param {Object} char - Character object
+ * @returns {{ provider: Object, linkInfo: Object }|null}
+ */
+export function getCharacterProvider(char) {
+    return ProviderRegistry.getCharacterProvider(char);
+}
+
+/**
+ * Get link info for a character from any provider.
+ * Generic replacement for getChubLinkInfo().
+ * @param {Object} char
+ * @returns {Object|null} ProviderLinkInfo
+ */
+export function getProviderLinkInfo(char) {
+    return ProviderRegistry.getLinkInfo(char);
+}
+
+/**
+ * Get all characters linked to ANY provider.
+ * @returns {Array<{char: Object, provider: Object, linkInfo: Object}>}
+ */
+export function getAllLinkedCharacters() {
+    return ProviderRegistry.getAllLinkedCharacters(getAllCharacters());
+}
+
+/**
+ * Find which provider can handle a URL.
+ * @param {string} url
+ * @returns {Object|null} Provider or null
+ */
+export function getProviderForUrl(url) {
+    return ProviderRegistry.getProviderForUrl(url);
 }
 
 // ========================================
@@ -703,6 +909,7 @@ export default {
     getCharacterByAvatar,
     getSetting,
     setSetting,
+    setSettings,
     
     // View management
     switchView,
@@ -712,7 +919,6 @@ export default {
     // UI
     openCharacterModal,
     closeCharacterModal,
-    openChubLinkModal,
     getActiveChar,
     setActiveChar,
     showToast,
@@ -728,34 +934,36 @@ export default {
     getCharacterGalleryInfo,
     getCharacterGalleryId,
     removeGalleryFolderOverride,
+    generateGalleryId,
+    syncAllGalleryFolderOverrides,
     
     // Multi-select
     isMultiSelectEnabled,
     enableMultiSelect,
-    disableMultiSelect,
     getSelectedCharacters,
     getSelectionCount,
     isCharacterSelected,
     toggleCharacterSelection,
     clearSelection,
-    selectAllVisible,
     
     // Modules
     getModule,
-    hasModule,
     
     // Utils
     escapeHtml,
+    sanitizeTaglineHtml,
+    isExtensionsRecoveryInProgress,
+    debounce,
     getCharacterTags,
     getAllTags,
     findCardElement,
-    findAllCardElements,
     
     // DOM helpers
     showElement,
     hideElement,
     hideModal,
     onElement,
+    initCustomSelect,
     
     // Rendering
     renderLoadingState,
@@ -765,19 +973,44 @@ export default {
     // Character actions
     loadCharInMain,
     registerGalleryFolderOverride,
+    deleteCharacter,
+    fetchCharacters,
+    fetchAndAddCharacter,
+    removeCharacterFromList,
+    hydrateCharacter,
+    performSearch,
+    
+    // Creator Notes
+    renderCreatorNotesSecure,
+    cleanupCreatorNotesContainer,
+    initCreatorNotesHandlers,
+    initContentExpandHandlers,
+    
+    // Import / Download Pipeline
+    checkCharacterForDuplicates,
+    showPreImportDuplicateWarning,
+    findCharacterMediaUrls,
+    showImportSummaryModal,
+    convertImageToPng,
+    embedCharacterDataInPng,
+    
+    // Gallery Media Pipeline
+    getExistingFileHashes,
+    getExistingFileIndex,
+    extractSanitizedUrlName,
+    downloadMediaToMemory,
+    calculateHash,
+    arrayBufferToBase64,
+    getEndpoints,
+    
+    // Provider Link UI
+    openProviderLinkModal,
+    openBulkAutoLinkModal,
     
     // Logging
     debugLog,
     
-    // Events
-    on,
-    emit,
-    
-    // Chub
-    getChubLinkInfo,
-    getChubLinkedCharacters,
-    fetchChubMetadata,
-    fetchChubLinkedLorebook,
+    // Card data
     extractCharacterDataFromPng,
     applyCardFieldUpdates,
     getCharacterWorldName,
@@ -785,5 +1018,13 @@ export default {
     saveWorldInfoData,
     listWorldInfoFiles,
     mergeRemoteLorebookIntoWorldFile,
-    getChubHeaders
+
+    // Provider Registry (generic)
+    getProviderRegistry,
+    getAllProviders,
+    getProvider,
+    getCharacterProvider,
+    getProviderLinkInfo,
+    getAllLinkedCharacters,
+    getProviderForUrl
 };

@@ -1,14 +1,5 @@
-/**
- * Card Updates Module for SillyTavern Character Library
- * Check for updates to Chub-linked characters and show diffs
- * 
- * @module CardUpdates
- * @version 1.0.0
- */
-
 import * as CoreAPI from './core-api.js';
 
-// Module state
 let isInitialized = false;
 let currentUpdateChecks = new Map(); // fullPath -> { local, remote, diffs }
 let abortController = null;
@@ -19,8 +10,8 @@ let batchCheckedCount = 0;
 let batchSelectedAvatars = new Set(); // Characters checked for inclusion in Apply All
 let batchStatusFilter = 'all'; // Active filter: 'all' | 'has-updates' | 'up-to-date' | 'errors' | 'unavailable' | 'applied'
 
-// Fields to compare (key -> display label)
-const COMPARABLE_FIELDS = {
+// Base fields to compare (key -> display label) — provider fields merged at init
+const BASE_COMPARABLE_FIELDS = {
     // Core character fields
     'name': 'Name',
     'description': 'Description',
@@ -32,24 +23,19 @@ const COMPARABLE_FIELDS = {
     'post_history_instructions': 'Post History Instructions',
     'creator_notes': 'Creator Notes',
     'creator': 'Creator',
-    // Note: character_version is NOT provided by the Chub API.
-    // ST's own downloadChubCharacter() hardcodes it to ''. Comparing it
-    // would always show a false diff (local "main" vs remote ""), so we
-    // intentionally exclude it.
     'tags': 'Tags',
     'alternate_greetings': 'Alternate Greetings',
-    'extensions.chub.tagline': 'Chub Tagline',
     // V3 additions
-    'nickname': 'Nickname', // Not mapped from Chub API yet
-    'group_only_greetings': 'Group Only Greetings', // Not mapped from Chub API yet
+    'nickname': 'Nickname',
+    'group_only_greetings': 'Group Only Greetings',
     // Depth prompt
-    'depth_prompt.prompt': 'Depth Prompt Text', // Not mapped from Chub API yet
-    'depth_prompt.depth': 'Depth Prompt Depth', // Not mapped from Chub API yet
-    'depth_prompt.role': 'Depth Prompt Role', // Not mapped from Chub API yet
+    'depth_prompt.prompt': 'Depth Prompt Text',
+    'depth_prompt.depth': 'Depth Prompt Depth',
+    'depth_prompt.role': 'Depth Prompt Role',
     'character_book': 'Embedded Lorebook',
 };
 
-const FIELD_ICONS = {
+const BASE_FIELD_ICONS = {
     'name': 'fa-solid fa-signature',
     'description': 'fa-solid fa-scroll',
     'personality': 'fa-solid fa-brain',
@@ -62,7 +48,6 @@ const FIELD_ICONS = {
     'creator': 'fa-solid fa-pen-nib',
     'tags': 'fa-solid fa-tags',
     'alternate_greetings': 'fa-solid fa-list',
-    'extensions.chub.tagline': 'fa-solid fa-quote-left',
     'nickname': 'fa-solid fa-id-badge',
     'group_only_greetings': 'fa-solid fa-users',
     'depth_prompt.prompt': 'fa-solid fa-layer-group',
@@ -70,6 +55,22 @@ const FIELD_ICONS = {
     'depth_prompt.role': 'fa-solid fa-user-tag',
     'character_book': 'fa-solid fa-book',
 };
+
+// Effective fields — rebuilt after providers register
+let COMPARABLE_FIELDS = { ...BASE_COMPARABLE_FIELDS };
+let FIELD_ICONS = { ...BASE_FIELD_ICONS };
+
+// Maps provider-specific field paths to their provider ID
+// Base fields are NOT in this map — only provider-contributed fields.
+let fieldProviderMap = {};
+
+// Groups of provider fields that share a single filter checkbox.
+// Maps group name → { label, icon, paths: string[] }
+let fieldGroups = {};
+
+// Fields relevant to the current batch (based on represented providers)
+// Null = all fields (single-check mode). Set = filtered for batch.
+let batchRelevantFields = null;
 
 function fieldIcon(field) {
     const icon = FIELD_ICONS[field] || 'fa-solid fa-file-alt';
@@ -82,17 +83,44 @@ let batchFieldSelection = new Set(
 );
 
 // Fields that should use text diff view
-const LONG_TEXT_FIELDS = new Set([
+const BASE_LONG_TEXT_FIELDS = new Set([
     'description', 'personality', 'scenario', 'first_mes', 
     'mes_example', 'system_prompt', 'post_history_instructions',
     'creator_notes', 'depth_prompt.prompt', 'alternate_greetings',
-    'group_only_greetings', 'extensions.chub.tagline'
+    'group_only_greetings'
 ]);
+let LONG_TEXT_FIELDS = new Set(BASE_LONG_TEXT_FIELDS);
 
-/**
- * Initialize the card updates module
- * @param {Object} deps - Dependencies (legacy, now using CoreAPI)
- */
+function rebuildEffectiveFields() {
+    COMPARABLE_FIELDS = { ...BASE_COMPARABLE_FIELDS };
+    FIELD_ICONS = { ...BASE_FIELD_ICONS };
+    LONG_TEXT_FIELDS = new Set(BASE_LONG_TEXT_FIELDS);
+    fieldProviderMap = {};
+    fieldGroups = {};
+
+    const providers = CoreAPI.getAllProviders();
+    for (const p of providers) {
+        const fields = p.getComparableFields?.() || [];
+        for (const f of fields) {
+            COMPARABLE_FIELDS[f.path] = f.label;
+            if (f.icon) FIELD_ICONS[f.path] = f.icon;
+            fieldProviderMap[f.path] = p.id;
+
+            if (f.group) {
+                if (!fieldGroups[f.group]) {
+                    fieldGroups[f.group] = {
+                        label: f.groupLabel || f.group,
+                        icon: f.icon || 'fa-solid fa-file-alt',
+                        paths: []
+                    };
+                }
+                fieldGroups[f.group].paths.push(f.path);
+            }
+        }
+    }
+    batchFieldSelection = new Set(Object.keys(COMPARABLE_FIELDS));
+}
+
 export function init(deps) {
     if (isInitialized) {
         console.warn('[CardUpdates] Already initialized');
@@ -102,24 +130,21 @@ export function init(deps) {
     injectStyles();
     injectModals();
     setupEventListeners();
+    rebuildEffectiveFields();
     
     isInitialized = true;
     console.log('[CardUpdates] Module initialized');
 }
 
-/**
- * Open update check modal for a single character
- * @param {Object} char - Character to check for updates
- */
 export async function checkSingleCharacter(char) {
     if (!isInitialized) {
         console.error('[CardUpdates] Module not initialized');
         return;
     }
     
-    const chubInfo = getChubLinkInfo(char);
-    if (!chubInfo?.fullPath) {
-        CoreAPI.showToast('Character is not linked to ChubAI', 'warning');
+    const linkInfo = getProviderLinkInfo(char);
+    if (!linkInfo?.fullPath) {
+        CoreAPI.showToast('Character is not linked to an online provider', 'warning');
         return;
     }
     
@@ -127,27 +152,21 @@ export async function checkSingleCharacter(char) {
     await performSingleCheck(char);
 }
 
-/**
- * Open batch update check modal for all Chub-linked characters
- */
 export async function checkAllLinkedCharacters() {
     if (!isInitialized) {
         console.error('[CardUpdates] Module not initialized');
         return;
     }
     
-    const linkedChars = getChubLinkedCharacters();
+    const linkedChars = getLinkedCharacters();
     if (linkedChars.length === 0) {
-        CoreAPI.showToast('No characters are linked to ChubAI', 'info');
+        CoreAPI.showToast('No characters are linked to an online provider', 'info');
         return;
     }
     
     showBatchCheckModal(linkedChars);
 }
 
-/**
- * Check selected characters for updates
- */
 export async function checkSelectedCharacters() {
     if (!isInitialized) {
         console.error('[CardUpdates] Module not initialized');
@@ -160,10 +179,10 @@ export async function checkSelectedCharacters() {
         return;
     }
     
-    // Filter to only Chub-linked characters
-    const linkedSelected = selected.filter(c => getChubLinkInfo(c)?.fullPath);
+    // Filter to only provider-linked characters
+    const linkedSelected = selected.filter(c => getProviderLinkInfo(c)?.fullPath);
     if (linkedSelected.length === 0) {
-        CoreAPI.showToast('None of the selected characters are linked to ChubAI', 'warning');
+        CoreAPI.showToast('None of the selected characters are linked to an online provider', 'warning');
         return;
     }
     
@@ -171,264 +190,29 @@ export async function checkSelectedCharacters() {
 }
 
 // ========================================
-// CHUB INTEGRATION
+// PROVIDER INTEGRATION
 // ========================================
 
 /**
- * Get Chub link info from a character
  * @param {Object} char - Character object
- * @returns {Object|null} { id, fullPath, linkedAt } or null
+ * @returns {Object|null} { providerId, id, fullPath, linkedAt } or null
  */
-function getChubLinkInfo(char) {
-    if (!char) return null;
-    const extensions = char.data?.extensions || char.extensions;
-    const chub = extensions?.chub;
-    if (!chub) return null;
-    
-    // Normalize: native ChubAI cards use full_path (snake_case), we use fullPath (camelCase)
-    const fullPath = chub.fullPath || chub.full_path;
-    if (!fullPath) return null;
-    
-    return {
-        id: chub.id || null,
-        fullPath: fullPath,
-        linkedAt: chub.linkedAt || null
-    };
+function getProviderLinkInfo(char) {
+    return CoreAPI.getProviderLinkInfo(char);
 }
 
 /**
- * Get all characters that are linked to ChubAI
- * @returns {Array} Characters with Chub links
+ * @returns {Array} Characters with provider links
  */
-function getChubLinkedCharacters() {
-    const allChars = CoreAPI.getAllCharacters();
-    return allChars.filter(c => getChubLinkInfo(c)?.fullPath);
+function getLinkedCharacters() {
+    const all = CoreAPI.getAllLinkedCharacters();
+    return all.map(item => item.char);
 }
 
-/**
- * Fetch with CORS proxy fallback (same pattern as character-versions.js)
- */
-async function fetchWithProxy(url, opts = {}) {
-    try {
-        const r = await fetch(url, opts);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r;
-    } catch (_) {
-        const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
-        if (!r.ok) throw new Error(`Proxy HTTP ${r.status}`);
-        return r;
-    }
-}
-
-/**
- * Fetch the latest card.json from Chub's V4 Git API.
- * This is the same source that version history uses, and represents
- * the canonical exported state of the card (V2 spec).
- */
-async function fetchCardJsonFromV4(projectId) {
-    if (!projectId) return null;
-    const headers = CoreAPI.getChubHeaders?.() || { Accept: 'application/json' };
-    try {
-        const commitsResp = await fetchWithProxy(
-            `https://api.chub.ai/api/v4/projects/${projectId}/repository/commits`,
-            { headers }
-        );
-        const commits = await commitsResp.json();
-        const ref = Array.isArray(commits) && commits[0]?.id;
-        if (!ref) return null;
-
-        const cardResp = await fetchWithProxy(
-            `https://api.chub.ai/api/v4/projects/${projectId}/repository/files/raw%252Fcard.json/raw?ref=${ref}`,
-            { headers }
-        );
-        const card = await cardResp.json();
-        return card || null;
-    } catch (e) {
-        console.warn('[CardUpdates] V4 Git card.json fetch failed for project', projectId, e.message);
-        return null;
-    }
-}
-
-/**
- * Fetch remote character data from ChubAI.
- *
- * When the V4 Git API setting is enabled, uses the Git card.json (latest
- * commit) as the primary source — same source version history uses, already
- * in V2 spec format.
- *
- * When V4 is disabled (default), the metadata API is the primary source
- * with manual field mapping. Both paths resolve linked lorebooks.
- *
- * Last resort: PNG extraction from the avatar image.
- *
- * @param {string} fullPath - Chub full path (creator/slug)
- * @returns {Promise<Object|null>} Remote character card data (V2 format)
- */
-async function fetchRemoteCard(fullPath) {
-    const useV4 = CoreAPI.getSetting('chubUseV4Api') || false;
-
-    try {
-        // Get metadata (always needed for project ID, fallback definition, etc.)
-        const metadata = await CoreAPI.fetchChubMetadata(fullPath);
-        const projectId = metadata?.id;
-
-        // V4 Git API path — fetches the exported card.json from Git repo
-        if (useV4 && projectId) {
-            const cardJson = await fetchCardJsonFromV4(projectId);
-            if (cardJson) {
-                if (cardJson.data) {
-                    // Supplement with metadata-only fields that card.json may lack
-                    if (metadata.topics && !cardJson.data.tags?.length) {
-                        cardJson.data.tags = metadata.topics;
-                    }
-                    if (metadata.tagline) {
-                        cardJson.data.extensions = cardJson.data.extensions || {};
-                        cardJson.data.extensions.chub = cardJson.data.extensions.chub || {};
-                        if (!cardJson.data.extensions.chub.tagline) {
-                            cardJson.data.extensions.chub.tagline = metadata.tagline;
-                        }
-                    }
-                    console.log('[CardUpdates] Using V4 Git card.json for:', fullPath);
-                    return cardJson;
-                }
-                console.log('[CardUpdates] Normalizing raw card.json for:', fullPath);
-                return normalizeChubDefinition(cardJson, metadata);
-            }
-            // V4 failed — fall through to metadata
-        }
-
-        // Metadata API path (default, or V4 fallback)
-        if (metadata?.definition) {
-            console.log(`[CardUpdates] Using metadata API for: ${fullPath}${useV4 ? ' (V4 fallback)' : ''}`);
-            return await buildCardFromMetadata(metadata);
-        }
-
-        // Last resort: PNG extraction (may have stale data)
-        console.log('[CardUpdates] All APIs failed, trying PNG extraction for:', fullPath);
-        const pngUrl = `https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`;
-        let response;
-        try {
-            response = await fetch(pngUrl);
-        } catch (e) {
-            response = await fetch(`/proxy/${encodeURIComponent(pngUrl)}`);
-        }
-        if (response.ok) {
-            const buffer = await response.arrayBuffer();
-            const cardData = CoreAPI.extractCharacterDataFromPng(buffer);
-            if (cardData) {
-                console.log('[CardUpdates] Extracted card data from PNG for:', fullPath);
-                return cardData;
-            }
-        }
-
-        return null;
-    } catch (error) {
-        console.error('[CardUpdates] Failed to fetch remote card:', fullPath, error);
-        return null;
-    }
-}
-
-/**
- * Normalize a raw Chub definition (non-V2) into V2 card format.
- * Handles both Chub API field names and partial V2 objects.
- */
-function normalizeChubDefinition(def, metadata) {
-    if (!def) return null;
-    return {
-        spec: 'chara_card_v2',
-        spec_version: '2.0',
-        data: {
-            name: def.name || metadata?.name || '',
-            description: def.personality || '',
-            personality: def.tavern_personality || '',
-            scenario: def.scenario || '',
-            first_mes: def.first_message || '',
-            mes_example: def.example_dialogs || '',
-            system_prompt: def.system_prompt || '',
-            post_history_instructions: def.post_history_instructions || '',
-            creator_notes: def.description || '',
-            creator: metadata?.fullPath?.split('/')[0] || '',
-            character_version: def.character_version || '',
-            tags: metadata?.topics || [],
-            alternate_greetings: def.alternate_greetings || [],
-            extensions: {
-                ...(def.extensions || {}),
-                chub: {
-                    ...(def.extensions?.chub || {}),
-                    tagline: metadata?.tagline || ''
-                }
-            },
-            character_book: def.embedded_lorebook || def.character_book || undefined,
-        }
-    };
-}
-
-/**
- * Build a V2 card from metadata API response (Chub field names → V2 spec).
- * Default primary path when V4 Git API is disabled; also used as fallback
- * when V4 is enabled but the request fails.
- */
-async function buildCardFromMetadata(metadata) {
-    const def = metadata.definition;
-
-    // Resolve linked lorebooks: the metadata API may return a partial embedded_lorebook
-    // but the full merged result (embedded + linked project entries) is only in the V4 Git
-    // API's exported card.json. Always prefer V4 when related_lorebooks is present.
-    let characterBook = def.embedded_lorebook || undefined;
-    if (metadata.related_lorebooks?.length > 0 && metadata.id) {
-        try {
-            const linked = await CoreAPI.fetchChubLinkedLorebook(metadata.id);
-            if (linked?.entries?.length > 0) characterBook = linked;
-        } catch (e) {
-            console.warn('[CardUpdates] Failed to fetch linked lorebook for', metadata.fullPath, e);
-        }
-    }
-
-    return {
-        spec: 'chara_card_v2',
-        spec_version: '2.0',
-        data: {
-            name: def.name || metadata.name,
-            description: def.personality || '',
-            personality: def.tavern_personality || '',
-            scenario: def.scenario || '',
-            first_mes: def.first_message || '',
-            mes_example: def.example_dialogs || '',
-            system_prompt: def.system_prompt || '',
-            post_history_instructions: def.post_history_instructions || '',
-            creator_notes: def.description || '',
-            creator: metadata.fullPath?.split('/')[0] || '',
-            character_version: def.character_version || '',
-            tags: metadata.topics || [],
-            alternate_greetings: def.alternate_greetings || [],
-            extensions: {
-                ...(def.extensions || {}),
-                chub: {
-                    ...(def.extensions?.chub || {}),
-                    tagline: metadata.tagline || metadata.definition?.tagline || ''
-                }
-            },
-            character_book: characterBook,
-        }
-    };
-}
-
-/**
- * Get a nested property value from an object using dot notation
- * @param {Object} obj - Object to get value from
- * @param {string} path - Dot-notated path (e.g., 'depth_prompt.prompt')
- * @returns {*} Value at path or undefined
- */
 function getNestedValue(obj, path) {
     return path.split('.').reduce((o, k) => o?.[k], obj);
 }
 
-/**
- * Set a nested property value on an object using dot notation
- * @param {Object} obj - Object to set value on
- * @param {string} path - Dot-notated path
- * @param {*} value - Value to set
- */
 function setNestedValue(obj, path, value) {
     const keys = path.split('.');
     const lastKey = keys.pop();
@@ -439,13 +223,6 @@ function setNestedValue(obj, path, value) {
     target[lastKey] = value;
 }
 
-/**
- * Generate line-by-line diff HTML with added/removed highlighting
- * Uses a simple line-based diff algorithm
- * @param {*} localValue - Local value
- * @param {*} remoteValue - Remote value
- * @returns {string} HTML for diff display
- */
 function generateLineDiff(localValue, remoteValue) {
     const localStr = formatValueForDisplay(localValue);
     const remoteStr = formatValueForDisplay(remoteValue);
@@ -453,7 +230,6 @@ function generateLineDiff(localValue, remoteValue) {
     const localLines = localStr.split('\n');
     const remoteLines = remoteStr.split('\n');
     
-    // Simple LCS-based diff
     const diff = computeLineDiff(localLines, remoteLines);
     
     // Post-process to detect modified lines (removed+added pairs) and highlight word changes
@@ -461,12 +237,10 @@ function generateLineDiff(localValue, remoteValue) {
     for (let i = 0; i < diff.length; i++) {
         const item = diff[i];
         
-        // Check if this is a removed line followed by an added line (modification)
         if (item.type === 'removed' && i + 1 < diff.length && diff[i + 1].type === 'added') {
             const oldLine = item.line;
             const newLine = diff[i + 1].line;
             
-            // Generate word-level diff for this pair
             const { oldHtml, newHtml } = computeWordDiff(oldLine, newLine);
             processedDiff.push({ type: 'removed', html: oldHtml });
             processedDiff.push({ type: 'added', html: newHtml });
@@ -491,24 +265,15 @@ function generateLineDiff(localValue, remoteValue) {
     return html || '<div class="card-update-diff-line context">(no content)</div>';
 }
 
-/**
- * Generate side-by-side diff view with word-level highlighting
- * @param {*} localValue - Local value
- * @param {*} remoteValue - Remote value  
- * @returns {{localHtml: string, remoteHtml: string, stats: string}}
- */
 function generateSideBySideDiff(localValue, remoteValue) {
     const localStr = formatValueForDisplay(localValue);
     const remoteStr = formatValueForDisplay(remoteValue);
     
-    // Split into lines
     const localLines = localStr.split('\n');
     const remoteLines = remoteStr.split('\n');
     
-    // Get line-level diff first
     const lineDiff = computeLineDiff(localLines, remoteLines);
     
-    // Build aligned side-by-side output
     const localOutput = [];
     const remoteOutput = [];
     let changedLines = 0;
@@ -520,25 +285,21 @@ function generateSideBySideDiff(localValue, remoteValue) {
         const item = lineDiff[i];
         
         if (item.type === 'context') {
-            // Unchanged line - show on both sides
             localOutput.push({ type: 'context', html: CoreAPI.escapeHtml(item.line) });
             remoteOutput.push({ type: 'context', html: CoreAPI.escapeHtml(item.line) });
             i++;
         } else if (item.type === 'removed' && i + 1 < lineDiff.length && lineDiff[i + 1].type === 'added') {
-            // Modified line - show word diff on both sides
             const { oldHtml, newHtml } = computeWordDiff(item.line, lineDiff[i + 1].line);
             localOutput.push({ type: 'changed', html: oldHtml });
             remoteOutput.push({ type: 'changed', html: newHtml });
             changedLines++;
             i += 2;
         } else if (item.type === 'removed') {
-            // Line only in local - show on left, empty on right
             localOutput.push({ type: 'removed', html: CoreAPI.escapeHtml(item.line) });
             remoteOutput.push({ type: 'empty', html: '' });
             removedLines++;
             i++;
         } else if (item.type === 'added') {
-            // Line only in remote - empty on left, show on right
             localOutput.push({ type: 'empty', html: '' });
             remoteOutput.push({ type: 'added', html: CoreAPI.escapeHtml(item.line) });
             addedLines++;
@@ -548,7 +309,6 @@ function generateSideBySideDiff(localValue, remoteValue) {
         }
     }
     
-    // Convert to HTML
     const localHtml = localOutput.map(item => {
         if (item.type === 'empty') {
             return '<div class="diff-line empty"></div>';
@@ -569,7 +329,6 @@ function generateSideBySideDiff(localValue, remoteValue) {
         return `<div class="${className}">${item.html || '&nbsp;'}</div>`;
     }).join('');
     
-    // Build stats string
     const statParts = [];
     if (changedLines > 0) statParts.push(`${changedLines} modified`);
     if (addedLines > 0) statParts.push(`${addedLines} added`);
@@ -579,13 +338,6 @@ function generateSideBySideDiff(localValue, remoteValue) {
     return { localHtml, remoteHtml, stats };
 }
 
-/**
- * Compute word-level diff between two lines
- * Returns HTML with highlighted changes
- * @param {string} oldLine - Original line
- * @param {string} newLine - New line
- * @returns {{oldHtml: string, newHtml: string}}
- */
 function computeWordDiff(oldLine, newLine) {
     // Tokenize into words (keeping whitespace attached)
     const oldWords = tokenizeForDiff(oldLine);
@@ -644,23 +396,11 @@ function computeWordDiff(oldLine, newLine) {
     return { oldHtml, newHtml };
 }
 
-/**
- * Tokenize a string into words for diff comparison
- * Keeps punctuation and whitespace as separate tokens
- * @param {string} str - String to tokenize
- * @returns {Array<string>}
- */
 function tokenizeForDiff(str) {
     // Split on word boundaries, keeping the delimiters
     return str.match(/\S+|\s+/g) || [];
 }
 
-/**
- * Compute line diff using LCS (Longest Common Subsequence)
- * @param {Array<string>} oldLines - Original lines
- * @param {Array<string>} newLines - New lines
- * @returns {Array<{type: string, line: string}>} Diff items
- */
 function computeLineDiff(oldLines, newLines) {
     const m = oldLines.length;
     const n = newLines.length;
@@ -699,13 +439,6 @@ function computeLineDiff(oldLines, newLines) {
     return result;
 }
 
-/**
- * Compare two cards and find differences
- * @param {Object} localData - Local character data (char.data)
- * @param {Object} remoteCard - Remote card object
- * @param {Set|null} allowedFields - Optional filter for which fields to compare
- * @returns {Array} Array of { field, label, local, remote, isLongText }
- */
 function compareCards(localData, remoteCard, allowedFields = null) {
     const diffs = [];
     const remoteData = remoteCard?.data || remoteCard;
@@ -748,7 +481,6 @@ function compareCards(localData, remoteCard, allowedFields = null) {
             continue;
         }
         
-        // Normalize for comparison
         const normalizedLocal = normalizeValue(localValue);
         const normalizedRemote = normalizeValue(remoteValue);
         
@@ -766,19 +498,16 @@ function compareCards(localData, remoteCard, allowedFields = null) {
     return diffs;
 }
 
-/**
- * Normalize a value for comparison
- */
 function normalizeValue(value) {
     if (value === null || value === undefined) return '';
     if (Array.isArray(value)) {
         // ST often initializes empty fields as [] where Chub returns null/undefined.
         // Treat empty arrays as empty so [] vs null/undefined doesn't produce a false diff.
         if (value.length === 0) return '';
-        // Normalize each string element: trim whitespace and normalize line endings
-        // to avoid false diffs from insignificant whitespace differences
+        // Normalize each string element: trim whitespace, normalize line endings,
+        // and lowercase to avoid false diffs from case differences (e.g. tags)
         const normalized = [...value].map(v =>
-            typeof v === 'string' ? v.replace(/\r\n/g, '\n').trim() : JSON.stringify(v)
+            typeof v === 'string' ? v.replace(/\r\n/g, '\n').trim().toLowerCase() : JSON.stringify(v)
         );
         // Sort for order-insensitive comparison (e.g. tags)
         normalized.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
@@ -788,9 +517,6 @@ function normalizeValue(value) {
     return String(value).replace(/\r\n/g, '\n').trim();
 }
 
-/**
- * Check if two normalized values are equal
- */
 function valuesEqual(a, b) {
     return a === b;
 }
@@ -843,7 +569,7 @@ function showSingleCheckModal(char) {
     document.getElementById('cardUpdateSingleStatus').innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking for updates...';
     document.getElementById('cardUpdateSingleContent').innerHTML = '';
     document.getElementById('cardUpdateSingleApplyBtn').disabled = true;
-    updateSourceBadge(modal);
+    updateSourceBadge(modal, char);
     
     modal.classList.add('visible');
 }
@@ -857,11 +583,18 @@ async function performSingleCheck(char) {
     const contentEl = document.getElementById('cardUpdateSingleContent');
     const applyBtn = document.getElementById('cardUpdateSingleApplyBtn');
     
-    const chubInfo = getChubLinkInfo(char);
-    const fullPath = chubInfo.fullPath;
+    const match = CoreAPI.getCharacterProvider(char);
+    if (!match) {
+        statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Character has no provider link';
+        return;
+    }
+    const { provider, linkInfo } = match;
     
     try {
-        const remoteCard = await fetchRemoteCard(fullPath);
+        // Ensure heavy fields are loaded before comparing card content
+        await CoreAPI.hydrateCharacter(char);
+        
+        const remoteCard = await provider.fetchRemoteCard(linkInfo);
         
         if (!remoteCard) {
             statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Could not fetch remote card data';
@@ -943,7 +676,7 @@ function renderDiffItem(diff, idx) {
                     </div>
                     <div class="card-update-array-column remote">
                         <div class="card-update-array-header">
-                            <span>Chub</span>
+                            <span>Remote</span>
                             <span class="card-update-array-count">${remoteValues.length}</span>
                         </div>
                         ${renderArrayList(remoteValues, diff.field, localValues)}
@@ -979,7 +712,7 @@ function renderDiffItem(diff, idx) {
                         </div>
                         <div class="card-update-diff-panel remote">
                             <div class="card-update-diff-panel-header">
-                                <i class="fa-solid fa-cloud"></i> Chub Version
+                                <i class="fa-solid fa-cloud"></i> Remote Version
                             </div>
                             <div class="card-update-diff-panel-content">
                                 ${remoteHtml}
@@ -1051,7 +784,7 @@ function renderLorebookDiff(diff, idx) {
     entriesHtml += `<div class="lorebook-diff-info-box">
         <i class="fa-solid fa-circle-info"></i>
         <div>
-            <strong>Embedded lorebook ↔ ChubAI remote</strong>
+            <strong>Embedded lorebook ↔ Remote version</strong>
             <details class="lorebook-diff-help-details">
                 <summary>How lorebook updates work</summary>
                 <div class="lorebook-diff-help-body">
@@ -1060,12 +793,12 @@ function renderLorebookDiff(diff, idx) {
                         <li><strong>Embedded lorebook</strong> (inside the card) — this is the copy that Character Library compares and updates. It was created when you first imported the card and is not changed by SillyTavern's World Info editor.</li>
                         <li><strong>World Info file</strong> (in <code>/worlds/</code>) — the live working copy that SillyTavern actually uses in chats. All edits you make in the World Info panel go here. The update checker <em>never</em> modifies this file.</li>
                     </ul>
-                    <p>The diff below compares your card's embedded lorebook against the creator's latest version on ChubAI. Applying will replace the embedded lorebook with the remote version.</p>
+                    <p>The diff below compares your card's embedded lorebook against the creator's latest remote version. Applying will replace the embedded lorebook with the remote version.</p>
                     <p><strong>What the badges mean:</strong></p>
                     <ul>
-                        <li><span style="color:#81c784;">+</span> <strong>New from remote</strong> — entry exists on ChubAI but not in your card. Will be added.</li>
+                        <li><span style="color:#81c784;">+</span> <strong>New from remote</strong> — entry exists on the remote provider but not in your card. Will be added.</li>
                         <li><span style="color:#ffcc80;">~</span> <strong>Modified</strong> — entry exists in both but some fields differ. Will be updated to match the remote.</li>
-                        <li><span style="color:#bdbdbd;">★</span> <strong>Local-only</strong> — entry is in your card but not on ChubAI. Since applying replaces the full embedded lorebook, this entry will be removed from the card.</li>
+                        <li><span style="color:#bdbdbd;">★</span> <strong>Local-only</strong> — entry is in your card but not on the remote. Since applying replaces the full embedded lorebook, this entry will be removed from the card.</li>
                     </ul>
                     <p>For local-only entries that would be removed, Character Library reads your World Info file to check whether each entry also exists there:</p>
                     <ul>
@@ -1414,9 +1147,9 @@ function normalizeLorebookEntry(entry) {
 // The two copies diverge independently after import.
 //
 // Our approach:
-//   - CHECK: Always compare character_book (embedded) against Chub remote.
+//   - CHECK: Always compare character_book (embedded) against remote.
 //     World files are never read for diff purposes.
-//   - APPLY: Write Chub's lorebook to character_book (clean mirror).
+//   - APPLY: Write the remote lorebook to character_book (clean mirror).
 //     World files are never modified by the update checker.
 //   - If local-only entries would be lost from the embedded lorebook,
 //     the diff UI checks for a linked world file and reassures the user
@@ -1488,11 +1221,6 @@ function renderArrayList(values, field, otherSide = null) {
     return `<div class="card-update-array-list">${items}</div>`;
 }
 
-/**
- * Format a value for display
- * @param {*} value - Value to format
- * @returns {string} Display string
- */
 function formatValueForDisplay(value) {
     if (value === null || value === undefined) return '(empty)';
     if (Array.isArray(value)) {
@@ -1504,12 +1232,6 @@ function formatValueForDisplay(value) {
     return String(value);
 }
 
-/**
- * Truncate a string
- * @param {string} str - String to truncate
- * @param {number} max - Max length
- * @returns {string} Truncated string
- */
 function truncate(str, max) {
     if (str.length <= max) return str;
     return str.slice(0, max - 3) + '...';
@@ -1519,10 +1241,6 @@ function truncate(str, max) {
 // BATCH CHECK
 // ========================================
 
-/**
- * Show batch check modal
- * @param {Array} characters - Characters to check
- */
 function showBatchCheckModal(characters) {
     const modal = document.getElementById('cardUpdateBatchModal');
     const countEl = document.getElementById('cardUpdateBatchCount');
@@ -1551,21 +1269,66 @@ function showBatchCheckModal(characters) {
     const summaryEl = document.getElementById('cardUpdateBatchSummary');
     if (summaryEl) summaryEl.classList.add('hidden');
     
-    // Build field selection
+    // Determine which providers are represented in this batch
+    const representedProviders = new Set();
+    for (const char of characters) {
+        const linkInfo = getProviderLinkInfo(char);
+        if (linkInfo?.providerId) representedProviders.add(linkInfo.providerId);
+    }
+
+    // Build relevant fields — base fields always included, provider fields only if that provider is represented
+    batchRelevantFields = new Set();
+    for (const field of Object.keys(COMPARABLE_FIELDS)) {
+        const ownerProvider = fieldProviderMap[field];
+        if (!ownerProvider || representedProviders.has(ownerProvider)) {
+            batchRelevantFields.add(field);
+        }
+    }
+
+    // Reset selection to all relevant fields so previous-run pruning doesn't carry over
+    batchFieldSelection = new Set(batchRelevantFields);
+
+    // Build field selection grid (only relevant fields)
+    // Grouped fields (e.g. provider taglines) share a single checkbox.
     if (fieldGridEl) {
-        fieldGridEl.innerHTML = Object.entries(COMPARABLE_FIELDS).map(([field, label]) => {
+        const groupedPaths = new Set();
+        for (const g of Object.values(fieldGroups)) {
+            for (const p of g.paths) groupedPaths.add(p);
+        }
+
+        const items = [];
+
+        // Ungrouped fields first
+        for (const field of batchRelevantFields) {
+            if (groupedPaths.has(field)) continue;
+            const label = COMPARABLE_FIELDS[field];
             const isChecked = batchFieldSelection.has(field);
-            return `
+            items.push(`
                 <label class="card-update-field-option">
                     <input type="checkbox" data-field="${field}" ${isChecked ? 'checked' : ''}>
                     <span class="card-update-field-label">${CoreAPI.escapeHtml(label)}</span>
                 </label>
-            `;
-        }).join('');
+            `);
+        }
+
+        // Grouped fields — one checkbox per group (only if any path in the group is relevant)
+        for (const [groupName, group] of Object.entries(fieldGroups)) {
+            const relevantPaths = group.paths.filter(p => batchRelevantFields.has(p));
+            if (relevantPaths.length === 0) continue;
+            const allChecked = relevantPaths.every(p => batchFieldSelection.has(p));
+            items.push(`
+                <label class="card-update-field-option">
+                    <input type="checkbox" data-group="${groupName}" ${allChecked ? 'checked' : ''}>
+                    <span class="card-update-field-label">${CoreAPI.escapeHtml(group.label)}</span>
+                </label>
+            `);
+        }
+
+        fieldGridEl.innerHTML = items.join('');
     }
 
     if (fieldCountEl) {
-        fieldCountEl.textContent = `${batchFieldSelection.size}/${Object.keys(COMPARABLE_FIELDS).length}`;
+        updateBatchFieldCount();
     }
 
     if (fieldSelectEl) fieldSelectEl.classList.remove('hidden');
@@ -1617,8 +1380,14 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
         }
         
         try {
-            const chubInfo = getChubLinkInfo(char);
-            const remoteCard = await fetchRemoteCard(chubInfo.fullPath);
+            const match = CoreAPI.getCharacterProvider(char);
+            if (!match) {
+                if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> No provider';
+                if (itemEl) itemEl.dataset.status = 'errors';
+                errors++;
+                continue;
+            }
+            const remoteCard = await match.provider.fetchRemoteCard(match.linkInfo);
             
             if (!remoteCard) {
                 if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-ghost"></i> Removed / Private';
@@ -1629,6 +1398,8 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 if (cb) { cb.checked = false; cb.disabled = true; }
                 errors++;
             } else {
+                // Ensure heavy fields are loaded before comparing card content
+                await CoreAPI.hydrateCharacter(char);
                 const localData = char.data || char;
 
                 const diffs = compareCards(localData, remoteCard, allowedFields);
@@ -1740,8 +1511,9 @@ async function applySingleUpdates() {
     // Apply via CoreAPI
     try {
         // Auto-snapshot before update
-        if (window.autoSnapshotBeforeChange) {
-            try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
+        const versionsModule = CoreAPI.getModule('character-versions');
+        if (versionsModule?.autoSnapshotBeforeChange) {
+            try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
         }
         const success = await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields);
         
@@ -1941,8 +1713,9 @@ async function applyAllBatchUpdates() {
         
         try {
             // Auto-snapshot before batch update
-            if (window.autoSnapshotBeforeChange) {
-                try { await window.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
+            const versionsModule = CoreAPI.getModule('character-versions');
+            if (versionsModule?.autoSnapshotBeforeChange) {
+                try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
             }
             const success = await CoreAPI.applyCardFieldUpdates(avatar, updatedFields);
             
@@ -2007,9 +1780,10 @@ function closeSingleModal() {
 }
 
 /**
- * Show or refresh the API source badge in a modal header.
+ * Show or refresh the source badge in a modal header.
+ * Shows the provider name for the linked character(s).
  */
-function updateSourceBadge(modal) {
+function updateSourceBadge(modal, char) {
     const header = modal?.querySelector('.cl-modal-header');
     if (!header) return;
     let badge = header.querySelector('.card-update-source-badge');
@@ -2018,11 +1792,21 @@ function updateSourceBadge(modal) {
         badge.className = 'card-update-source-badge';
         header.querySelector('h3')?.appendChild(badge);
     }
-    const useV4 = CoreAPI.getSetting('chubUseV4Api') || false;
-    badge.textContent = useV4 ? 'V4 Git API' : 'Metadata API';
-    badge.title = useV4
-        ? 'Fetching the exported card.json from Chub\u2019s Git repository. Matches version history source. Change in Settings \u2192 ChubAI.'
-        : 'Fetching from Chub\u2019s metadata API \u2014 same source as imports. Change in Settings \u2192 ChubAI.';
+
+    if (char) {
+        const linkInfo = getProviderLinkInfo(char);
+        if (linkInfo?.providerId) {
+            const provider = CoreAPI.getProvider?.(linkInfo.providerId);
+            const providerName = provider?.name || linkInfo.providerId;
+            badge.textContent = providerName;
+            badge.title = `Linked to ${providerName}`;
+            badge.style.display = '';
+            return;
+        }
+    }
+
+    // Batch / no character — hide badge (mixed providers)
+    badge.style.display = 'none';
 }
 
 function closeBatchModal() {
@@ -2032,6 +1816,7 @@ function closeBatchModal() {
     batchCheckedCount = 0;
     batchSelectedAvatars.clear();
     batchStatusFilter = 'all';
+    batchRelevantFields = null;
     document.getElementById('cardUpdateBatchModal')?.classList.remove('visible');
     currentUpdateChecks.clear();
     pendingBatchCharacters = [];
@@ -2132,10 +1917,32 @@ function updateBatchFooter(state) {
 function updateBatchFieldCount() {
     const fieldCountEl = document.getElementById('cardUpdateBatchFieldCount');
     if (!fieldCountEl) return;
-    fieldCountEl.textContent = `${batchFieldSelection.size}/${Object.keys(COMPARABLE_FIELDS).length}`;
+
+    // Count visible items (groups count as 1, ungrouped fields count as 1 each)
+    const grid = document.getElementById('cardUpdateBatchFieldGrid');
+    if (!grid) return;
+    const allCheckboxes = grid.querySelectorAll('input[type="checkbox"]');
+    let checked = 0;
+    allCheckboxes.forEach(cb => { if (cb.checked) checked++; });
+    fieldCountEl.textContent = `${checked}/${allCheckboxes.length}`;
 }
 
 function handleBatchFieldSelectionChange(e) {
+    // Group checkbox — toggles all paths in the group
+    const groupCheckbox = e.target.closest('input[type="checkbox"][data-group]');
+    if (groupCheckbox) {
+        const group = fieldGroups[groupCheckbox.dataset.group];
+        if (group) {
+            for (const path of group.paths) {
+                if (groupCheckbox.checked) batchFieldSelection.add(path);
+                else batchFieldSelection.delete(path);
+            }
+        }
+        updateBatchFieldCount();
+        return;
+    }
+
+    // Individual field checkbox
     const checkbox = e.target.closest('input[type="checkbox"][data-field]');
     if (!checkbox) return;
     const field = checkbox.dataset.field;
@@ -2151,12 +1958,20 @@ function handleBatchFieldSelectionChange(e) {
 function setBatchFieldsChecked(checked) {
     const grid = document.getElementById('cardUpdateBatchFieldGrid');
     if (!grid) return;
-    const checkboxes = grid.querySelectorAll('input[type="checkbox"][data-field]');
+
+    // Individual field checkboxes
+    const fieldCBs = grid.querySelectorAll('input[type="checkbox"][data-field]');
+    fieldCBs.forEach(cb => { cb.checked = checked; });
+
+    // Group checkboxes
+    const groupCBs = grid.querySelectorAll('input[type="checkbox"][data-group]');
+    groupCBs.forEach(cb => { cb.checked = checked; });
+
+    // Rebuild selection from scratch
     batchFieldSelection.clear();
-    checkboxes.forEach(cb => {
-        cb.checked = checked;
-        if (checked) batchFieldSelection.add(cb.dataset.field);
-    });
+    if (checked && batchRelevantFields) {
+        for (const f of batchRelevantFields) batchFieldSelection.add(f);
+    }
     updateBatchFieldCount();
 }
 
@@ -2178,7 +1993,7 @@ function startBatchCheck() {
 
     // Build initial list with checkboxes
     listEl.innerHTML = pendingBatchCharacters.map(char => {
-        const chubInfo = getChubLinkInfo(char);
+        const providerLink = getProviderLinkInfo(char);
         const name = char.data?.name || char.name || 'Unknown';
         batchSelectedAvatars.add(char.avatar);
         return `
@@ -2188,7 +2003,7 @@ function startBatchCheck() {
                 </label>
                 <div class="card-update-batch-item-info">
                     <span class="card-update-batch-item-name card-update-char-link" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">${CoreAPI.escapeHtml(name)}</span>
-                    <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(chubInfo?.fullPath || '')}</span>
+                    <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(providerLink?.fullPath || '')}</span>
                 </div>
                 <div class="card-update-batch-item-status">
                     <i class="fa-solid fa-clock"></i> Pending
