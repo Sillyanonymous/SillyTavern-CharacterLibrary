@@ -462,48 +462,64 @@ function showRefreshIndicator(show) {
     }
 }
 
+let chatsFetchController = null;
+
 async function fetchFreshChats(isBackground = false) {
+    chatsFetchController?.abort();
+    chatsFetchController = new AbortController();
+    const { signal } = chatsFetchController;
+
     const chatsGrid = document.getElementById('chatsGrid');
     const allCharacters = CoreAPI.getAllCharacters();
+    const BATCH_SIZE = 10;
 
     try {
         const newChats = [];
 
-        for (const char of allCharacters) {
-            try {
-                const response = await CoreAPI.apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', {
-                    avatar_url: char.avatar,
-                    metadata: true
-                });
+        for (let i = 0; i < allCharacters.length; i += BATCH_SIZE) {
+            if (signal.aborted) return;
+            const batch = allCharacters.slice(i, i + BATCH_SIZE);
 
-                if (response.ok) {
-                    const chats = await response.json();
-                    if (chats && chats.length && !chats.error) {
-                        chats.forEach(chat => {
-                            const cachedChat = allChats.find(c =>
-                                c.file_name === chat.file_name && c.charAvatar === char.avatar
-                            );
+            await Promise.all(batch.map(async (char) => {
+                try {
+                    const response = await CoreAPI.apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', {
+                        avatar_url: char.avatar,
+                        metadata: true
+                    });
 
-                            const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
-                            const newMsgCount = chat.chat_items || chat.mes_count || 0;
-                            const canReusePreview = cachedChat?.preview && cachedMsgCount === newMsgCount;
+                    if (signal.aborted) return;
 
-                            newChats.push({
-                                ...chat,
-                                character: char,
-                                charName: char.name,
-                                charAvatar: char.avatar,
-                                preview: canReusePreview ? cachedChat.preview : null,
-                                models: canReusePreview ? (cachedChat.models || null) : null
+                    if (response.ok) {
+                        const chats = await response.json();
+                        if (chats && chats.length && !chats.error) {
+                            chats.forEach(chat => {
+                                const cachedChat = allChats.find(c =>
+                                    c.file_name === chat.file_name && c.charAvatar === char.avatar
+                                );
+
+                                const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
+                                const newMsgCount = chat.chat_items || chat.mes_count || 0;
+                                const canReusePreview = cachedChat?.preview && cachedMsgCount === newMsgCount;
+
+                                newChats.push({
+                                    ...chat,
+                                    character: char,
+                                    charName: char.name,
+                                    charAvatar: char.avatar,
+                                    preview: canReusePreview ? cachedChat.preview : null,
+                                    models: canReusePreview ? (cachedChat.models || null) : null
+                                });
                             });
-                        });
+                        }
                     }
+                } catch (e) {
+                    if (e.name === 'AbortError') return;
+                    console.warn(`Failed to load chats for ${char.name}:`, e);
                 }
-            } catch (e) {
-                console.warn(`Failed to load chats for ${char.name}:`, e);
-            }
+            }));
         }
 
+        if (signal.aborted) return;
         if (newChats.length === 0 && !isBackground) {
             chatsGrid.innerHTML = `
                 <div class="chats-empty">

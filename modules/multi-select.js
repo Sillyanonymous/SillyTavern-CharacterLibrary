@@ -515,6 +515,8 @@ function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
         // Ignore if typing in input/textarea
         if (e.target.matches('input, textarea, [contenteditable]')) return;
+        // Only activate in Characters view
+        if (CoreAPI.getCurrentView() !== 'characters') return;
 
         if (e.key === ' ' || e.code === 'Space') {
             e.preventDefault();

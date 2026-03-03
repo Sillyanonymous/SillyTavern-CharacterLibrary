@@ -72,9 +72,13 @@ export function show(event, char, cardElement) {
     const menuItems = buildMenuItems(char, cardElement);
     renderMenu(menuItems);
     
+    // Force layout for measurement
+    menuElement.style.visibility = 'hidden';
+    menuElement.classList.add('visible');
+    
     positionMenu(event.clientX, event.clientY);
     
-    menuElement.classList.add('visible');
+    menuElement.style.visibility = '';
 }
 
 export function hide() {
@@ -314,7 +318,7 @@ function renderMenu(items) {
     }).join('');
     
     menuElement.querySelectorAll('.cl-context-menu-item:not(.disabled)').forEach((el, index) => {
-        const item = items.filter(i => i.type !== 'separator' && i.type !== 'header')[index];
+        const item = items.filter(i => i.type !== 'separator' && i.type !== 'header' && !i.disabled)[index];
         if (item?.action) {
             el.addEventListener('click', () => {
                 hide();
@@ -325,31 +329,31 @@ function renderMenu(items) {
 }
 
 function positionMenu(x, y) {
-    // Reset position for measurement
     menuElement.style.left = '0';
     menuElement.style.top = '0';
     
     const menuRect = menuElement.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const padding = 10;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pad = 10;
     
-    // Adjust X to keep menu on screen
     let finalX = x;
-    if (x + menuRect.width + padding > viewportWidth) {
-        finalX = x - menuRect.width;
-    }
-    if (finalX < padding) {
-        finalX = padding;
-    }
+    if (x + menuRect.width + pad > vw) finalX = x - menuRect.width;
+    if (finalX < pad) finalX = pad;
     
-    // Adjust Y to keep menu on screen
-    let finalY = y;
-    if (y + menuRect.height + padding > viewportHeight) {
-        finalY = y - menuRect.height;
-    }
-    if (finalY < padding) {
-        finalY = padding;
+    const spaceBelow = vh - y;
+    const spaceAbove = y;
+    const openUpward = menuRect.height + pad > spaceBelow && spaceAbove > spaceBelow;
+    
+    let finalY;
+    if (openUpward) {
+        finalY = Math.max(pad, y - menuRect.height);
+        menuElement.style.transformOrigin = 'bottom left';
+    } else {
+        finalY = y;
+        if (finalY + menuRect.height + pad > vh) finalY = vh - menuRect.height - pad;
+        if (finalY < pad) finalY = pad;
+        menuElement.style.transformOrigin = 'top left';
     }
     
     menuElement.style.left = `${finalX}px`;
@@ -731,19 +735,17 @@ async function exportCharacter(char) {
 }
 
 function confirmDelete(char) {
-    // Use existing delete confirmation if available
-    const deleteBtn = document.getElementById('deleteCharBtn');
-    if (deleteBtn) {
-        CoreAPI.openCharacterModal(char);
-        setTimeout(() => {
+    CoreAPI.openCharacterModal(char);
+    setTimeout(() => {
+        const deleteBtn = document.getElementById('deleteCharBtn');
+        if (deleteBtn) {
             deleteBtn.click();
-        }, 100);
-    } else {
-        // Fallback: simple confirm
-        if (confirm(`Are you sure you want to delete "${char.name}"?\n\nThis cannot be undone.`)) {
-            deleteCharacter(char);
+        } else {
+            if (confirm(`Are you sure you want to delete "${char.name}"?\n\nThis cannot be undone.`)) {
+                deleteCharacter(char);
+            }
         }
-    }
+    }, 200);
 }
 
 async function deleteCharacter(char) {

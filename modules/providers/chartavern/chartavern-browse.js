@@ -2,8 +2,8 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
+import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
 import {
-    CT_SITE_BASE,
     searchCards,
     fetchCharacterDetail,
     fetchTopTags,
@@ -11,7 +11,12 @@ import {
     getCharacterPageUrl,
     stripHtml,
     parseTags,
-    formatNumber,
+    checkCtPluginAvailable,
+    checkCtSession,
+    ctSetCookie,
+    ctValidateSession,
+    ctLogout,
+    isCtSessionActive,
 } from './chartavern-api.js';
 
 const {
@@ -20,13 +25,9 @@ const {
     escapeHtml,
     debugLog,
     getSetting,
+    setSetting,
     fetchCharacters,
     fetchAndAddCharacter,
-    convertImageToPng,
-    embedCharacterDataInPng,
-    getCSRFToken,
-    generateGalleryId,
-    findCharacterMediaUrls,
     checkCharacterForDuplicates,
     showPreImportDuplicateWarning,
     deleteCharacter,
@@ -34,14 +35,15 @@ const {
     showImportSummaryModal,
     getAllCharacters,
     formatRichText,
-    debounce
+    debounce,
+    apiRequest,
 } = CoreAPI;
 
 // ========================================
 // CONSTANTS
 // ========================================
 
-const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
+
 
 const BROWSE_PURIFY_CONFIG = {
     ALLOWED_TAGS: [
@@ -70,8 +72,11 @@ let ctCurrentSearch = '';
 let ctNsfwEnabled = true;
 let ctSortMode = 'most_popular';
 let ctSelectedChar = null;
-let ctImageObserver = null;
 let ctGridRenderedCount = 0;
+
+// Auth state
+let ctPluginAvailable = false;
+let ctLoginInProgress = false;
 
 // Filter state
 let ctMinTokens = 0;
@@ -249,88 +254,10 @@ function createCtCard(hit) {
     `;
 }
 
-// ========================================
-// IMAGE OBSERVER
-// ========================================
-
-function initCtImageObserver() {
-    if (ctImageObserver) return;
-    ctImageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const img = entry.target;
-            const realSrc = img.dataset.src;
-            if (realSrc && !img.dataset.failed && img.src !== realSrc) {
-                img.src = realSrc;
-            }
-        }
-    }, { rootMargin: '600px' });
-}
-
-function setupImageObserver() {
-    initCtImageObserver();
-    const grid = document.getElementById('ctGrid');
-    if (grid) observeCtImages(grid);
-}
-
-function observeCtImages(container) {
-    if (!ctImageObserver) initCtImageObserver();
-    requestAnimationFrame(() => {
-        eagerLoadVisibleCtImages(container);
-        const images = Array.from(container.querySelectorAll('.browse-card-image img')).filter(img => !img.dataset.observed);
-        if (images.length === 0) return;
-
-        if (images.length > 120) {
-            const batchSize = 80;
-            let index = 0;
-            const observeBatch = () => {
-                const end = Math.min(index + batchSize, images.length);
-                for (let i = index; i < end; i++) {
-                    images[i].dataset.observed = '1';
-                    ctImageObserver.observe(images[i]);
-                }
-                index = end;
-                if (index < images.length) requestAnimationFrame(observeBatch);
-            };
-            observeBatch();
-            return;
-        }
-
-        for (const img of images) {
-            img.dataset.observed = '1';
-            ctImageObserver.observe(img);
-        }
-    });
-}
-
 function observeNewCards(startIdx) {
     const grid = document.getElementById('ctGrid');
     if (!grid) return;
-    observeCtImages(grid);
-}
-
-function eagerLoadVisibleCtImages(container) {
-    if (!container) return;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const preloadBottom = viewportHeight + 700;
-    const images = container.querySelectorAll('.browse-card-image img[data-src]');
-    for (const img of images) {
-        if (img.dataset.failed) continue;
-        const rect = img.getBoundingClientRect();
-        if (rect.bottom > -160 && rect.top < preloadBottom) {
-            const realSrc = img.dataset.src;
-            if (realSrc && img.src !== realSrc) img.src = realSrc;
-        }
-    }
-}
-
-function reconnectCtObserver() {
-    const grid = document.getElementById('ctGrid');
-    if (!grid) return;
-    eagerLoadVisibleCtImages(grid);
-    const imgs = grid.querySelectorAll('.browse-card-image img[data-observed]');
-    for (const img of imgs) delete img.dataset.observed;
-    observeCtImages(grid);
+    chartavernBrowseView.observeImages(grid);
 }
 
 // ========================================
@@ -403,13 +330,18 @@ async function loadCharacters(append = false) {
         if (ctFilterHasLorebook) opts.hasLorebook = true;
         if (ctFilterIsOC) opts.isOC = true;
 
-        const data = await searchCards(opts);
+        const data = await searchCards(opts, apiRequest);
 
         // Provider was deactivated during the fetch
         if (!delegatesInitialized) return;
 
         let hits = data?.hits || [];
         ctTotalPages = data?.totalPages || 1;
+
+        // Client-side: filter NSFW when toggle is off (exclude_tags alone doesn't catch all isNSFW cards)
+        if (!ctNsfwEnabled) {
+            hits = hits.filter(h => !h.isNSFW);
+        }
 
         // Client-side: hide owned characters
         if (ctFilterHideOwned) {
@@ -548,6 +480,12 @@ function openPreviewModal(hit) {
             } else {
                 greetingsStat.style.display = 'none';
             }
+        }
+
+        // Lorebook stat
+        const lorebookStat = document.getElementById('ctCharLorebookStat');
+        if (lorebookStat) {
+            lorebookStat.style.display = hit.hasLorebook ? 'flex' : 'none';
         }
 
         // Tags
@@ -701,7 +639,7 @@ async function fetchAndPopulateDetails(hit, token) {
     const name = hit.name || 'Unknown';
 
     try {
-        const data = await fetchCharacterDetail(parts[0], parts[1]);
+        const data = await fetchCharacterDetail(parts[0], parts[1], apiRequest);
         if (token !== ctDetailFetchToken) return;
         if (!data?.card) return;
 
@@ -752,6 +690,12 @@ async function fetchAndPopulateDetails(hit, token) {
             examplesSection.style.display = 'block';
             examplesEl.innerHTML = formatRichText(examples, name, false);
         }
+
+        // Lorebook stat (detail API has lorebookId; search hit might not)
+        const lorebookStat = document.getElementById('ctCharLorebookStat');
+        if (lorebookStat && card.lorebookId) {
+            lorebookStat.style.display = 'flex';
+        }
     } catch (err) {
         debugLog('[CTBrowse] Detail fetch error:', err);
     }
@@ -801,7 +745,7 @@ async function importCharacter(charData) {
         if (duplicateMatches && duplicateMatches.length > 0) {
             if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Duplicate found...';
 
-            const avatarUrl = getAvatarUrl(charData);
+            const avatarUrl = getAvatarUrl(charData.path);
             const result = await showPreImportDuplicateWarning({
                 name: charName,
                 creator: charCreator,
@@ -840,17 +784,16 @@ async function importCharacter(charData) {
 
         showToast(`Imported "${result.characterName}"`, 'success');
 
-        // Show import summary before library refresh so modal appears immediately
+        // Show import summary if character has embedded media
         const mediaUrls = result.embeddedMediaUrls || [];
         if (mediaUrls.length > 0 && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 mediaCharacters: [{
-                    characterName: result.characterName,
                     name: result.characterName,
-                    fileName: result.fileName,
                     avatar: result.fileName,
-                    galleryId: result.galleryId,
-                    mediaUrls
+                    avatarUrl: result.avatarUrl,
+                    mediaUrls: mediaUrls,
+                    galleryId: result.galleryId
                 }]
             });
         }
@@ -1020,8 +963,6 @@ function updateCtFiltersButton() {
 
 let delegatesInitialized = false;
 let modalEventsAttached = false;
-let _dropdownCloseHandler = null;
-
 function initCtView() {
     if (delegatesInitialized) return;
     delegatesInitialized = true;
@@ -1070,8 +1011,12 @@ function initCtView() {
         if (clearBtn) clearBtn.classList.add('hidden');
         ctCurrentSearch = '';
         ctCurrentPage = 1;
+        // Also clear author banner if visible
+        const authorBanner = document.getElementById('ctAuthorBanner');
+        if (authorBanner) authorBanner.classList.add('hidden');
         loadCharacters(false);
     });
+    on('ctClearAuthorBtn', 'click', () => clearCtAuthorFilter());
 
     // Load More
     on('ctLoadMoreBtn', 'click', () => {
@@ -1079,9 +1024,15 @@ function initCtView() {
         loadCharacters(true);
     });
 
-    // NSFW toggle
+    // NSFW toggle — requires active session for NSFW
     on('ctNsfwToggle', 'click', () => {
+        if (!isCtSessionActive()) {
+            showToast('Login required for NSFW content. Use the login option in Settings or click here to log in.', 'warning');
+            openCtLoginModal();
+            return;
+        }
         ctNsfwEnabled = !ctNsfwEnabled;
+        setSetting('ctNsfw', ctNsfwEnabled);
         updateNsfwToggle();
         ctCurrentPage = 1;
         loadCharacters(false);
@@ -1188,22 +1139,10 @@ function initCtView() {
     });
 
     // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
-    if (_dropdownCloseHandler) document.removeEventListener('click', _dropdownCloseHandler);
-    _dropdownCloseHandler = (e) => {
-        const tagsBtn = document.getElementById('ctTagsBtn');
-        if (tagsDropdown && !tagsDropdown.classList.contains('hidden')) {
-            if (!tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
-                tagsDropdown.classList.add('hidden');
-            }
-        }
-        const filtersBtn = document.getElementById('ctFiltersBtn');
-        if (filtersDropdown && !filtersDropdown.classList.contains('hidden')) {
-            if (!filtersDropdown.contains(e.target) && e.target !== filtersBtn && !filtersBtn?.contains(e.target)) {
-                filtersDropdown.classList.add('hidden');
-            }
-        }
-    };
-    document.addEventListener('click', _dropdownCloseHandler);
+    chartavernBrowseView._registerDropdownDismiss([
+        { dropdownId: 'ctTagsDropdown', buttonId: 'ctTagsBtn' },
+        { dropdownId: 'ctFiltersDropdown', buttonId: 'ctFiltersBtn' },
+    ]);
 
     // ── Preview modal events (attached once — modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
@@ -1233,6 +1172,38 @@ function initCtView() {
                 if (e.target === modalOverlay) closePreviewModal();
             });
         }
+
+        // ── Login modal events ──
+        on('ctLoginClose', 'click', () => closeCtLoginModal());
+
+        on('ctSaveCookieBtn', 'click', () => {
+            const cookieInput = document.getElementById('ctCookieInput');
+            let cookieStr = cookieInput?.value?.trim();
+            if (!cookieStr) {
+                showToast('Please paste your session cookie value', 'warning');
+                return;
+            }
+            // Accept bare value or session=VALUE format
+            if (!cookieStr.includes('=')) cookieStr = `session=${cookieStr}`;
+            saveCookieAndConnect(cookieStr);
+        });
+
+        on('ctLogoutBtn', 'click', () => ctLogoutAction());
+
+        // Enter key on cookie field
+        on('ctCookieInput', 'keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('ctSaveCookieBtn')?.click();
+            }
+        });
+
+        const loginOverlay = document.getElementById('ctLoginModal');
+        if (loginOverlay) {
+            loginOverlay.addEventListener('click', (e) => {
+                if (e.target === loginOverlay) closeCtLoginModal();
+            });
+        }
     }
 }
 
@@ -1240,6 +1211,10 @@ function doSearch() {
     const input = document.getElementById('ctSearchInput');
     const clearBtn = document.getElementById('ctClearSearchBtn');
     const val = (input?.value || '').trim();
+
+    // Clear author banner if user typed a manual search
+    const authorBanner = document.getElementById('ctAuthorBanner');
+    if (authorBanner) authorBanner.classList.add('hidden');
 
     ctCurrentSearch = val;
     ctCurrentPage = 1;
@@ -1261,6 +1236,13 @@ function filterByAuthor(authorName) {
     const clearBtn = document.getElementById('ctClearSearchBtn');
     if (clearBtn) clearBtn.classList.toggle('hidden', !authorName);
 
+    const banner = document.getElementById('ctAuthorBanner');
+    const bannerName = document.getElementById('ctAuthorBannerName');
+    if (banner && bannerName) {
+        bannerName.textContent = authorName;
+        banner.classList.remove('hidden');
+    }
+
     // Close preview modal if open
     const modal = document.getElementById('ctCharModal');
     if (modal && !modal.classList.contains('hidden')) {
@@ -1271,18 +1253,207 @@ function filterByAuthor(authorName) {
     loadCharacters(false);
 }
 
+function clearCtAuthorFilter() {
+    const banner = document.getElementById('ctAuthorBanner');
+    if (banner) banner.classList.add('hidden');
+
+    ctCurrentSearch = '';
+    ctCurrentPage = 1;
+
+    const input = document.getElementById('ctSearchInput');
+    if (input) input.value = '';
+    const clearBtn = document.getElementById('ctClearSearchBtn');
+    if (clearBtn) clearBtn.classList.add('hidden');
+
+    loadCharacters(false);
+}
+
 function updateNsfwToggle() {
     const btn = document.getElementById('ctNsfwToggle');
     if (!btn) return;
+    const sessionActive = isCtSessionActive();
 
-    if (ctNsfwEnabled) {
+    if (ctNsfwEnabled && sessionActive) {
         btn.classList.add('active');
         btn.innerHTML = '<i class="fa-solid fa-fire"></i> <span>NSFW On</span>';
-        btn.title = 'NSFW content enabled - click to show SFW only';
+        btn.title = 'NSFW content enabled (logged in) - click to show SFW only';
     } else {
         btn.classList.remove('active');
         btn.innerHTML = '<i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>';
-        btn.title = 'Showing SFW only - click to include NSFW';
+        btn.title = 'Showing SFW only - click to include NSFW (requires login)';
+    }
+
+    btn.style.opacity = sessionActive ? '' : '0.5';
+}
+
+// ========================================
+// AUTH — CT COOKIE SESSION VIA CL-HELPER
+// ========================================
+
+async function openCtLoginModal() {
+    ctPluginAvailable = await checkCtPluginAvailable(apiRequest);
+    const sessionActive = await checkCtSession(apiRequest);
+    updateCtLoginUI();
+
+    // Pre-fill cookie field from saved setting
+    const cookieInput = document.getElementById('ctCookieInput');
+    if (cookieInput && !sessionActive) {
+        const saved = getSetting('ctCookie');
+        if (saved) cookieInput.value = saved;
+    }
+
+    const modal = document.getElementById('ctLoginModal');
+    if (modal) modal.classList.remove('hidden');
+}
+
+function closeCtLoginModal() {
+    const modal = document.getElementById('ctLoginModal');
+    if (modal) modal.classList.add('hidden');
+}
+
+function updateCtLoginUI() {
+    const pluginOk = document.getElementById('ctPluginStatusOk');
+    const pluginMissing = document.getElementById('ctPluginStatusMissing');
+    const cookieForm = document.getElementById('ctCookieForm');
+    const saveBtn = document.getElementById('ctSaveCookieBtn');
+    const sessionActive = isCtSessionActive();
+
+    if (pluginOk) pluginOk.style.display = ctPluginAvailable ? '' : 'none';
+    if (pluginMissing) pluginMissing.style.display = ctPluginAvailable ? 'none' : '';
+    if (cookieForm) cookieForm.classList.toggle('ct-login-disabled', !ctPluginAvailable);
+    if (saveBtn) saveBtn.disabled = !ctPluginAvailable || ctLoginInProgress;
+
+    if (saveBtn) {
+        saveBtn.innerHTML = ctLoginInProgress
+            ? '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...'
+            : '<i class="fa-solid fa-plug"></i> Save & Connect';
+    }
+
+    // Session status
+    const statusArea = document.getElementById('ctSessionStatus');
+    if (statusArea) {
+        if (sessionActive) {
+            statusArea.innerHTML = '<i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i> <strong>Connected</strong> — NSFW content available';
+            statusArea.style.display = '';
+        } else {
+            statusArea.style.display = 'none';
+        }
+    }
+
+    // Show/hide cookie input vs logout
+    const logoutBtn = document.getElementById('ctLogoutBtn');
+    const cookieFields = document.getElementById('ctCookieFields');
+    if (logoutBtn) logoutBtn.style.display = sessionActive ? '' : 'none';
+    if (saveBtn) saveBtn.style.display = sessionActive ? 'none' : '';
+    if (cookieFields) cookieFields.style.display = sessionActive ? 'none' : '';
+}
+
+async function saveCookieAndConnect(cookieStr) {
+    if (ctLoginInProgress) return;
+
+    ctLoginInProgress = true;
+    updateCtLoginUI();
+
+    try {
+        const result = await ctSetCookie(apiRequest, cookieStr);
+        if (!result.ok) {
+            showToast(result.error || 'Failed to store cookies', 'error');
+            return;
+        }
+
+        // Validate the cookies work
+        const validation = await ctValidateSession(apiRequest);
+        if (!validation.valid) {
+            showToast(`Cookie validation failed: ${validation.reason || 'unknown'}`, 'error');
+            await ctLogout(apiRequest);
+            return;
+        }
+
+        // Save cookie string to settings
+        setSetting('ctCookie', cookieStr);
+
+        if (!ctNsfwEnabled) {
+            ctNsfwEnabled = true;
+            setSetting('ctNsfw', true);
+            updateNsfwToggle();
+        }
+
+        if (validation.hasNsfw) {
+            showToast('Connected to CharacterTavern — NSFW content available!', 'success');
+        } else {
+            showToast('Connected, but NSFW content not detected. Check that your content preferences are enabled on character-tavern.com, or your session may be expired.', 'warning', 6000);
+        }
+        closeCtLoginModal();
+
+        ctCurrentPage = 1;
+        loadCharacters(false);
+    } catch (err) {
+        console.error('[CTAuth] Cookie save error:', err);
+        showToast(`Connection error: ${err.message}`, 'error');
+    } finally {
+        ctLoginInProgress = false;
+        updateCtLoginUI();
+    }
+}
+
+async function ctLogoutAction() {
+    await ctLogout(apiRequest);
+
+    ctNsfwEnabled = false;
+    setSetting('ctNsfw', false);
+    setSetting('ctCookie', null);
+    updateNsfwToggle();
+
+    const cookieInput = document.getElementById('ctCookieInput');
+    if (cookieInput) cookieInput.value = '';
+
+    showToast('Disconnected from CharacterTavern', 'info');
+    closeCtLoginModal();
+
+    ctCurrentPage = 1;
+    loadCharacters(false);
+}
+
+async function tryCheckSession() {
+    const sessionActive = await checkCtSession(apiRequest);
+    if (sessionActive) {
+        // Validate the cookies still work
+        const validation = await ctValidateSession(apiRequest);
+        if (!validation.valid || !validation.hasNsfw) {
+            debugLog('[CTAuth] Session cookies expired or NSFW unavailable:', validation.reason);
+            await ctLogout(apiRequest);
+            ctNsfwEnabled = false;
+            setSetting('ctNsfw', false);
+            setSetting('ctCookie', null);
+            updateNsfwToggle();
+            showToast('CharacterTavern session expired — please re-authenticate.', 'warning', 5000);
+            openCtLoginModal();
+            return;
+        }
+
+        // Restore NSFW setting if session is still active
+        const savedNsfw = getSetting('ctNsfw');
+        if (savedNsfw) ctNsfwEnabled = true;
+        updateNsfwToggle();
+    } else {
+        // No active session in cl-helper — try to restore from saved cookie
+        const savedCookie = getSetting('ctCookie');
+        if (savedCookie) {
+            const result = await ctSetCookie(apiRequest, savedCookie);
+            if (result.ok) {
+                const validation = await ctValidateSession(apiRequest);
+                if (validation.valid) {
+                    const savedNsfw = getSetting('ctNsfw');
+                    if (savedNsfw) ctNsfwEnabled = true;
+                    updateNsfwToggle();
+                    return;
+                }
+                // Cookies expired
+                await ctLogout(apiRequest);
+                setSetting('ctCookie', null);
+                debugLog('[CTAuth] Saved cookies expired, cleared');
+            }
+        }
     }
 }
 
@@ -1354,7 +1525,7 @@ class ChartavernBrowseView extends BrowseView {
             <!-- Feature Filters -->
             <div class="browse-more-filters" style="position: relative;">
                 <button id="ctFiltersBtn" class="glass-btn" title="Additional filters">
-                    <i class="fa-solid fa-sliders"></i> Features
+                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
                 </button>
                 <div id="ctFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
                     <div class="dropdown-section-title">Character must have:</div>
@@ -1367,7 +1538,7 @@ class ChartavernBrowseView extends BrowseView {
             </div>
 
             <!-- NSFW toggle -->
-            <button id="ctNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
+            <button id="ctNsfwToggle" class="glass-btn nsfw-toggle" title="Showing SFW only - click to include NSFW (requires login)" style="opacity: 0.5;">
                 <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
             </button>
 
@@ -1396,6 +1567,18 @@ class ChartavernBrowseView extends BrowseView {
                     </div>
                 </div>
 
+                <div id="ctAuthorBanner" class="browse-author-banner hidden">
+                    <div class="browse-author-banner-content">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span>Searching for <strong id="ctAuthorBannerName">Author</strong> <span class="browse-author-banner-hint">(keyword search — may include unrelated results)</span></span>
+                    </div>
+                    <div class="browse-author-banner-actions">
+                        <button id="ctClearAuthorBtn" class="glass-btn icon-only" title="Clear author filter">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Results Grid -->
                 <div id="ctGrid" class="browse-grid"></div>
 
@@ -1412,6 +1595,81 @@ class ChartavernBrowseView extends BrowseView {
     // ── Modals ──────────────────────────────────────────────
 
     renderModals() {
+        return this._renderLoginModal() + this._renderPreviewModal();
+    }
+
+    _renderLoginModal() {
+        return `
+    <div id="ctLoginModal" class="modal-overlay hidden">
+        <div class="modal-glass chub-login-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-cookie-bite"></i> CharacterTavern Session</h2>
+                <button class="close-btn" id="ctLoginClose">&times;</button>
+            </div>
+            <div class="chub-login-body">
+                <p class="chub-login-info">
+                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <strong>Browsing and downloading public characters works without logging in!</strong>
+                </p>
+                <p class="chub-login-info">
+                    <i class="fa-solid fa-cookie-bite" style="color: var(--accent);"></i>
+                    <strong>Optional:</strong> Paste your session cookies to see NSFW-tagged content.
+                </p>
+
+                <!-- Session status -->
+                <div id="ctSessionStatus" class="pyg-auth-status" style="display:none;"></div>
+
+                <!-- Cookie form (requires cl-helper plugin) -->
+                <div class="pyg-login-section">
+                    <div class="pyg-plugin-status">
+                        <span id="ctPluginStatusOk" style="display:none;">
+                            <i class="fa-solid fa-plug-circle-check" style="color: #2ecc71;"></i> cl-helper plugin detected
+                        </span>
+                        <span id="ctPluginStatusMissing" style="display:none;">
+                            <i class="fa-solid fa-plug-circle-xmark" style="color: #e67e22;"></i>
+                            cl-helper plugin not found — see <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">setup instructions</a>
+                        </span>
+                    </div>
+
+                    <div id="ctCookieForm" class="chub-login-form">
+                        <div id="ctCookieFields">
+                            <div class="form-group">
+                                <label for="ctCookieInput">Cookie String</label>
+                                <textarea id="ctCookieInput" class="glass-input" rows="2" placeholder="Paste your session cookie value here" style="font-family: monospace; font-size: 12px; resize: vertical;"></textarea>
+                            </div>
+                            <div class="ct-cookie-instructions">
+                                <details>
+                                    <summary><i class="fa-solid fa-circle-question"></i> How to get your session cookie</summary>
+                                    <ol>
+                                        <li>Log in to <a href="https://character-tavern.com" target="_blank">character-tavern.com</a> in your browser</li>
+                                        <li>Open DevTools (<code>F12</code>) → <strong>Application</strong> tab → <strong>Cookies</strong></li>
+                                        <li>Find the <code>session</code> cookie for <code>character-tavern.com</code></li>
+                                        <li>Copy and paste the value here</li>
+                                    </ol>
+                                    <p class="ct-cookie-note"><i class="fa-solid fa-clock"></i> The session cookie expires after ~10 days. You'll need to re-paste when it expires.</p>
+                                </details>
+                            </div>
+                        </div>
+
+                        <div class="chub-login-actions" style="margin-top: 12px;">
+                            <button id="ctSaveCookieBtn" class="action-btn primary">
+                                <i class="fa-solid fa-plug"></i> Save &amp; Connect
+                            </button>
+                            <button id="ctLogoutBtn" class="action-btn danger" style="display:none;">
+                                <i class="fa-solid fa-plug-circle-xmark"></i> Disconnect
+                            </button>
+                            <a href="https://character-tavern.com" target="_blank" class="action-btn secondary">
+                                <i class="fa-solid fa-external-link"></i> CharacterTavern
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>`;
+    }
+
+    _renderPreviewModal() {
         return `
     <div id="ctCharModal" class="modal-overlay hidden">
         <div class="modal-glass browse-char-modal">
@@ -1462,6 +1720,10 @@ class ChartavernBrowseView extends BrowseView {
                         <div class="browse-stat" id="ctCharGreetingsStat" style="display: none;">
                             <i class="fa-solid fa-comment-dots"></i>
                             <span id="ctCharGreetingsCount">0</span> greetings
+                        </div>
+                        <div class="browse-stat" id="ctCharLorebookStat" style="display: none;">
+                            <i class="fa-solid fa-book"></i>
+                            Lorebook
                         </div>
                     </div>
                     <div class="browse-char-tags" id="ctCharTags"></div>
@@ -1523,12 +1785,18 @@ class ChartavernBrowseView extends BrowseView {
 
     // ── Lifecycle ───────────────────────────────────────────
 
+    _getImageGridIds() {
+        return ['ctGrid'];
+    }
+
     init() {
         super.init();
         buildLocalLibraryLookup();
         initCtView();
-        setupImageObserver();
-        loadCharacters(false);
+        const grid = document.getElementById('ctGrid');
+        if (grid) this.observeImages(grid);
+        // Check session silently — if logged in, update toggle and reload with NSFW
+        tryCheckSession().then(() => loadCharacters(false));
     }
 
     activate(container, options = {}) {
@@ -1545,7 +1813,8 @@ class ChartavernBrowseView extends BrowseView {
         if (wasInitialized && this._initialized) {
             delegatesInitialized = true;
             buildLocalLibraryLookup();
-            setupImageObserver();
+            const grid = document.getElementById('ctGrid');
+            if (grid) this.observeImages(grid);
         }
     }
 
@@ -1569,21 +1838,8 @@ class ChartavernBrowseView extends BrowseView {
 
     deactivate() {
         delegatesInitialized = false;
-        if (_dropdownCloseHandler) {
-            document.removeEventListener('click', _dropdownCloseHandler);
-            _dropdownCloseHandler = null;
-        }
-        if (ctImageObserver) ctImageObserver.disconnect();
-    }
-
-    // ── Image Observer (BrowseView contract) ────────────────
-
-    disconnectImageObserver() {
-        if (ctImageObserver) ctImageObserver.disconnect();
-    }
-
-    reconnectImageObserver() {
-        reconnectCtObserver();
+        super.deactivate();
+        this.disconnectImageObserver();
     }
 }
 
@@ -1592,6 +1848,10 @@ const chartavernBrowseView = new ChartavernBrowseView(null);
 // Expose for library.js to call from viewOnProvider (linked character preview)
 window.openCtCharPreview = function(hit) {
     openPreviewModal(hit);
+};
+
+window.openCtLoginModal = function() {
+    openCtLoginModal();
 };
 
 export default chartavernBrowseView;

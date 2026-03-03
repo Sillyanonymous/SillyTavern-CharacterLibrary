@@ -213,16 +213,6 @@ function getNestedValue(obj, path) {
     return path.split('.').reduce((o, k) => o?.[k], obj);
 }
 
-function setNestedValue(obj, path, value) {
-    const keys = path.split('.');
-    const lastKey = keys.pop();
-    const target = keys.reduce((o, k) => {
-        if (o[k] === undefined) o[k] = {};
-        return o[k];
-    }, obj);
-    target[lastKey] = value;
-}
-
 function generateLineDiff(localValue, remoteValue) {
     const localStr = formatValueForDisplay(localValue);
     const remoteStr = formatValueForDisplay(remoteValue);
@@ -481,8 +471,8 @@ function compareCards(localData, remoteCard, allowedFields = null) {
             continue;
         }
         
-        const normalizedLocal = normalizeValue(localValue);
-        const normalizedRemote = normalizeValue(remoteValue);
+        const normalizedLocal = normalizeValue(localValue, field);
+        const normalizedRemote = normalizeValue(remoteValue, field);
         
         if (!valuesEqual(normalizedLocal, normalizedRemote)) {
             diffs.push({
@@ -498,19 +488,21 @@ function compareCards(localData, remoteCard, allowedFields = null) {
     return diffs;
 }
 
-function normalizeValue(value) {
+const ORDER_INSENSITIVE_FIELDS = new Set(['tags']);
+
+function normalizeValue(value, field = '') {
     if (value === null || value === undefined) return '';
     if (Array.isArray(value)) {
-        // ST often initializes empty fields as [] where Chub returns null/undefined.
-        // Treat empty arrays as empty so [] vs null/undefined doesn't produce a false diff.
         if (value.length === 0) return '';
-        // Normalize each string element: trim whitespace, normalize line endings,
-        // and lowercase to avoid false diffs from case differences (e.g. tags)
+        const caseInsensitive = ORDER_INSENSITIVE_FIELDS.has(field);
         const normalized = [...value].map(v =>
-            typeof v === 'string' ? v.replace(/\r\n/g, '\n').trim().toLowerCase() : JSON.stringify(v)
+            typeof v === 'string'
+                ? (caseInsensitive ? v.replace(/\r\n/g, '\n').trim().toLowerCase() : v.replace(/\r\n/g, '\n').trim())
+                : JSON.stringify(v)
         );
-        // Sort for order-insensitive comparison (e.g. tags)
-        normalized.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        if (caseInsensitive) {
+            normalized.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+        }
         return JSON.stringify(normalized);
     }
     if (typeof value === 'object') return JSON.stringify(value);

@@ -91,58 +91,12 @@ export async function getSearchToken() {
 }
 
 // ========================================
-// NETWORK
+// NETWORK & TEXT UTILITIES (shared)
 // ========================================
 
-const _proxyOrigins = new Set();
-
-export async function fetchWithProxy(url, opts = {}) {
-    const origin = new URL(url).origin;
-    if (!_proxyOrigins.has(origin)) {
-        try {
-            const r = await fetch(url, opts);
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r;
-        } catch (_) {
-            _proxyOrigins.add(origin);
-        }
-    }
-    const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
-    if (!r.ok) {
-        if (r.status === 404) {
-            const t = await r.text();
-            if (t.includes('CORS proxy is disabled'))
-                throw new Error('CORS proxy is disabled in SillyTavern settings');
-        }
-        throw new Error(`HTTP ${r.status}`);
-    }
-    return r;
-}
-
-// ========================================
-// TEXT UTILITIES
-// ========================================
-
-export function slugify(name) {
-    return (name || 'character')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 60);
-}
-
-export function stripHtml(html) {
-    if (!html) return '';
-    return html
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .trim();
-}
+import { fetchWithProxy } from '../provider-utils.js';
+export { fetchWithProxy };
+export { slugify, stripHtml } from '../provider-utils.js';
 
 export function resolveTagNames(tagIds) {
     return (tagIds || []).map(id => TAG_MAP[id] || `Tag ${id}`);

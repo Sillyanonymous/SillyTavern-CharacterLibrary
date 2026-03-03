@@ -5,6 +5,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
+import { assignGalleryId, importFromPng } from '../provider-utils.js';
 import jannyBrowseView from './janny-browse.js';
 import {
     JANNY_SEARCH_URL,
@@ -22,9 +23,6 @@ let api = null;
 // ========================================
 // CONSTANTS
 // ========================================
-
-const PUTER_CDN_URL = 'https://js.puter.com/v2/';
-const PUTER_LOAD_TIMEOUT = 12000;
 
 // ========================================
 // PRIVATE UTILITIES
@@ -255,11 +253,10 @@ function decodeAstroValue(value) {
  * @param {string} [opts.search='']
  * @param {number} [opts.page=1]
  * @param {number} [opts.limit=40]
- * @param {boolean} [opts.nsfw=true]
  * @returns {Promise<Object>} MeiliSearch multi-search response
  */
 async function searchJanny(opts = {}) {
-    const { search = '', page = 1, limit = 40, nsfw = true } = opts;
+    const { search = '', page = 1, limit = 40 } = opts;
 
     const filters = ['totalToken <= 4101 AND totalToken >= 29'];
     const body = {
@@ -417,6 +414,7 @@ class JannyProvider extends ProviderBase {
     // ── Lifecycle ───────────────────────────────────────────
 
     async init(coreAPI) {
+        super.init(coreAPI);
         api = coreAPI;
     }
 
@@ -809,11 +807,7 @@ class JannyProvider extends ProviderBase {
             };
 
             // Gallery ID: inherit from replaced character, or generate new
-            if (options.inheritedGalleryId) {
-                characterCard.data.extensions.gallery_id = options.inheritedGalleryId;
-            } else if (api.getSetting?.('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
-                characterCard.data.extensions.gallery_id = api.generateGalleryId?.();
-            }
+            assignGalleryId(characterCard, options, api);
 
             // Download avatar
             const avatarUrl = data.imageUrl || (char.avatar ? `${JANNY_IMAGE_BASE}${char.avatar}` : null);
@@ -828,93 +822,15 @@ class JannyProvider extends ProviderBase {
                 }
             }
 
-            // Convert to PNG — skip round-trip if already PNG (89 50 4E 47 magic bytes)
-            let pngBuffer = null;
-            if (imageBuffer) {
-                const header = new Uint8Array(imageBuffer, 0, 4);
-                const isPng = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47;
-                if (isPng) {
-                    pngBuffer = imageBuffer;
-                } else {
-                    try {
-                        const blob = new Blob([imageBuffer]);
-                        const bitmap = await createImageBitmap(blob);
-                        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(bitmap, 0, 0);
-                        bitmap.close();
-                        const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-                        pngBuffer = await pngBlob.arrayBuffer();
-                    } catch (e1) {
-                        console.warn('[JannyProvider] createImageBitmap conversion failed:', e1.message);
-                        try {
-                            pngBuffer = await api.convertImageToPng(imageBuffer);
-                        } catch (e2) {
-                            console.warn('[JannyProvider] convertImageToPng also failed:', e2.message);
-                        }
-                    }
-                }
-                imageBuffer = null;
-            }
-
-            // Placeholder if all image methods failed
-            if (!pngBuffer) {
-                const canvas = new OffscreenCanvas(256, 256);
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#333';
-                ctx.fillRect(0, 0, 256, 256);
-                ctx.fillStyle = '#666';
-                ctx.font = '100px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('?', 128, 128);
-                const blob = await canvas.convertToBlob({ type: 'image/png' });
-                pngBuffer = await blob.arrayBuffer();
-            }
-
-            let embeddedPng = api.embedCharacterDataInPng(pngBuffer, characterCard);
-            pngBuffer = null;
-
-            const safeSlug = slugify(characterName);
-            const fileName = `janny_${safeSlug}.png`;
-            let file = new File([embeddedPng], fileName, { type: 'image/png' });
-            embeddedPng = null;
-
-            let formData = new FormData();
-            formData.append('avatar', file);
-            formData.append('file_type', 'png');
-            file = null;
-
-            const csrfToken = api.getCSRFToken?.();
-            const importResponse = await fetch('/api/characters/import', {
-                method: 'POST',
-                headers: { 'X-CSRF-Token': csrfToken },
-                body: formData
-            });
-            formData = null;
-
-            const responseText = await importResponse.text();
-            if (!importResponse.ok) throw new Error(`Import error: ${responseText}`);
-
-            let result;
-            try { result = JSON.parse(responseText); }
-            catch { throw new Error(`Invalid JSON response: ${responseText}`); }
-            if (result.error) throw new Error('Import failed: Server returned error');
-
-            const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
-            const galleryId = characterCard.data.extensions?.gallery_id || null;
-
-            return {
-                success: true,
-                fileName: result.file_name || fileName,
-                characterName,
-                hasGallery: false,
+            return await importFromPng({
+                characterCard, imageBuffer,
+                fileName: `janny_${slugify(characterName)}.png`,
+                characterName, hasGallery: false,
                 providerCharId: charId,
                 fullPath: identifier,
                 avatarUrl: avatarUrl || null,
-                embeddedMediaUrls: mediaUrls,
-                galleryId
-            };
+                api
+            });
         } catch (error) {
             console.error(`[JannyProvider] importCharacter failed for ${identifier}:`, error);
             return { success: false, error: error.message };

@@ -340,7 +340,8 @@ async function ensureVersionUid(char) {
 // CARD DATA EXTRACTION
 // ========================================
 
-function extractCardData(char) {
+async function extractCardData(char) {
+    if (char._slim) await CoreAPI.hydrateCharacter(char);
     const src = char.data || char;
     const out = {};
     for (const f of CARD_FIELDS) {
@@ -423,7 +424,7 @@ export function cleanupVersionsPane() {
 
 export async function saveCurrentSnapshot(char, label = '') {
     const uid = await ensureVersionUid(char);
-    const data = extractCardData(char);
+    const data = await extractCardData(char);
     const charName = char.data?.name || char.name || 'Unknown';
     const finalLabel = label || `Snapshot ${new Date().toLocaleString()}`;
     await storageSaveSnapshot(char.avatar, charName, finalLabel, 'local', data, uid);
@@ -436,7 +437,7 @@ export async function autoSnapshotBeforeChange(char, source = 'edit') {
     if (!enabled) return;
     try {
         const uid = await ensureVersionUid(char);
-        const data = extractCardData(char);
+        const data = await extractCardData(char);
         const charName = char.data?.name || char.name || 'Unknown';
         const timestamp = new Date().toLocaleString();
         const label = `${source.charAt(0).toUpperCase() + source.slice(1)} - ${timestamp}`;
@@ -1175,7 +1176,7 @@ async function restoreVersion() {
     status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Restoring...';
 
     try {
-        const curData = extractCardData(currentChar);
+        const curData = await extractCardData(currentChar);
         const uid = await ensureVersionUid(currentChar);
         await storageSaveBackup(currentChar.avatar, uid, curData);
 
@@ -1334,7 +1335,7 @@ async function handleSaveSnapshot() {
 
     try {
         const uid = await ensureVersionUid(currentChar);
-        const data = extractCardData(currentChar);
+        const data = await extractCardData(currentChar);
         const name = currentChar.data?.name || currentChar.name || 'Unknown';
         await storageSaveSnapshot(currentChar.avatar, name, label, 'local', data, uid);
         CoreAPI.showToast(`Snapshot saved: "${label}"`, 'success');
@@ -1388,37 +1389,6 @@ async function handleRenameSnapshot() {
 // ========================================
 // NORMALIZATION & HELPERS
 // ========================================
-
-function flattenCard(def) {
-    if (!def) return {};
-    if (def.spec === 'chara_card_v2' && def.data) {
-        const out = { ...def.data };
-        if (def.data.avatar) out._avatarUrl = def.data.avatar;
-        return out;
-    }
-    if (def.data && (def.data.description !== undefined || def.data.first_mes !== undefined)) {
-        const out = { ...def.data };
-        if (def.data.avatar) out._avatarUrl = def.data.avatar;
-        return out;
-    }
-    return {
-        name: def.name || '',
-        description: def.personality || '',
-        personality: def.tavern_personality || '',
-        scenario: def.scenario || '',
-        first_mes: def.first_message || '',
-        mes_example: def.example_dialogs || '',
-        system_prompt: def.system_prompt || '',
-        post_history_instructions: def.post_history_instructions || '',
-        creator_notes: def.description || '',
-        creator: def.creator || '',
-        character_version: def.character_version || '',
-        tags: def.tags || def.topics || [],
-        alternate_greetings: def.alternate_greetings || [],
-        character_book: def.embedded_lorebook || def.character_book || undefined,
-        extensions: def.extensions || {},
-    };
-}
 
 function nested(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
 
@@ -1764,41 +1734,6 @@ function normalizeLbEntry(entry) {
         if (entry[f] !== undefined) out[f] = entry[f];
     }
     return out;
-}
-
-function hasRemoteLbMeta(book) {
-    if (!book) return false;
-    return Object.keys(LB_META_FIELDS).some(k => book[k] != null);
-}
-
-/**
- * Merge remote lorebook into local.
- * - Matched entries: replaced with remote version
- * - Remote-only entries: added
- * - Local-only entries: kept only if keepLocalOnly is true
- * - Meta fields: taken from remote when available
- */
-function mergeLorebookForRestore(localBook, remoteBook, keepLocalOnly = true) {
-    const localEntries = localBook?.entries || [];
-    const remoteEntries = remoteBook?.entries || [];
-
-    if (remoteEntries.length === 0 && localEntries.length === 0) {
-        return remoteBook || localBook;
-    }
-
-    const { matched, added, removed } = matchLbEntries(localEntries, remoteEntries);
-
-    const base = remoteBook ? { ...remoteBook } : { ...(localBook || {}) };
-    const merged = { ...base };
-    const mergedEntries = [];
-    for (const m of matched) mergedEntries.push(m.remote);
-    for (const entry of added) mergedEntries.push(entry);
-    if (keepLocalOnly) {
-        for (const entry of removed) mergedEntries.push(entry);
-    }
-
-    merged.entries = mergedEntries;
-    return merged;
 }
 
 function lorebooksEqual(a, b) {

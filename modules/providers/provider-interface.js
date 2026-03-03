@@ -1,5 +1,7 @@
 // Provider Interface — contract for external character sources
 
+import { saveGalleryImage } from './provider-utils.js';
+
 /**
  * @typedef {Object} ProviderLinkInfo
  * @property {string} providerId   — which provider owns this link (e.g. 'chub')
@@ -73,7 +75,9 @@ export class ProviderBase {
      * object so the provider can call back into the library.
      * @param {Object} coreAPI
      */
-    async init(coreAPI) { /* optional */ }
+    async init(coreAPI) {
+        this._coreAPI = coreAPI;
+    }
 
     /**
      * Called when the Online tab switches TO this provider.
@@ -499,7 +503,111 @@ export class ProviderBase {
      * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
      */
     async downloadGallery(linkInfo, folderName, options = {}) {
-        return { success: 0, skipped: 0, errors: 0, aborted: false };
+        const api = this._coreAPI;
+        if (!api) return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
+
+        const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
+        let successCount = 0, errorCount = 0, skippedCount = 0;
+        let filenameSkippedCount = 0;
+
+        const logEntry = onLog?.('Fetching gallery list...', 'pending') ?? null;
+        const galleryImages = await this.fetchGalleryImages(linkInfo);
+
+        if (galleryImages.length === 0) {
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, 'No gallery images found', 'success');
+            return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
+        }
+        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
+
+        const useFastSkip = api.getSetting?.('fastFilenameSkip') || false;
+        const validateHeaders = useFastSkip && (api.getSetting?.('fastSkipValidateHeaders') || false);
+        let fileNameIndex = null;
+        let existingHashMap = null;
+
+        if (useFastSkip) {
+            fileNameIndex = await api.getExistingFileIndex?.(folderName) || new Map();
+        } else {
+            existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
+        }
+
+        async function ensureHashMap() {
+            if (!existingHashMap) {
+                existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
+            }
+            return existingHashMap;
+        }
+
+        for (let i = 0; i < galleryImages.length; i++) {
+            if ((shouldAbort?.()) || abortSignal?.aborted) {
+                return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: true };
+            }
+
+            const image = galleryImages[i];
+            const displayUrl = image.url.length > 60 ? image.url.substring(0, 60) + '...' : image.url;
+            const imgLog = onLog?.(`Checking ${displayUrl}`, 'pending') ?? null;
+
+            if (useFastSkip && fileNameIndex) {
+                const sanitizedName = api.extractSanitizedUrlName?.(image.url) || '';
+                if (sanitizedName.length >= 4) {
+                    const match = fileNameIndex.get(sanitizedName.toLowerCase());
+                    if (match) {
+                        let valid = true;
+                        if (validateHeaders) {
+                            try {
+                                const resp = await fetch(match.localPath, { method: 'HEAD' });
+                                const size = parseInt(resp.headers.get('Content-Length') || '0', 10);
+                                valid = resp.ok && size >= 1024;
+                            } catch { valid = false; }
+                            if (!valid) api.debugLog?.('[Gallery] Fast skip rejected (HEAD validation):', match.fileName);
+                        }
+                        if (valid) {
+                            skippedCount++;
+                            filenameSkippedCount++;
+                            if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (filename match): ${match.fileName}`, 'success');
+                            onProgress?.(i + 1, galleryImages.length);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            let dl = await api.downloadMediaToMemory?.(image.url, 30000, abortSignal);
+            if (!dl?.success) {
+                errorCount++;
+                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${dl?.error || 'unknown'}`, 'error');
+                dl = null;
+                onProgress?.(i + 1, galleryImages.length);
+                continue;
+            }
+
+            const hashMap = await ensureHashMap();
+            const contentHash = await api.calculateHash?.(dl.arrayBuffer);
+            if (hashMap.has(contentHash)) {
+                skippedCount++;
+                dl = null;
+                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (duplicate): ${displayUrl}`, 'success');
+                onProgress?.(i + 1, galleryImages.length);
+                continue;
+            }
+
+            if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saving ${displayUrl}...`, 'pending');
+            const saveResult = await saveGalleryImage(dl, image, folderName, contentHash, this.galleryFilePrefix, api);
+            dl = null;
+
+            if (saveResult.success) {
+                successCount++;
+                hashMap.set(contentHash, { fileName: saveResult.filename });
+                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saved: ${saveResult.filename}`, 'success');
+            } else {
+                errorCount++;
+                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${saveResult.error}`, 'error');
+            }
+
+            onProgress?.(i + 1, galleryImages.length);
+            await new Promise(r => setTimeout(r, 50));
+        }
+
+        return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: false };
     }
 
     /**

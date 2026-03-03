@@ -51,36 +51,7 @@ export function getChubHeaders(includeAuth = true) {
     return headers;
 }
 
-/**
- * Fetch with automatic CORS proxy fallback.
- * @param {string} url
- * @param {Object} opts - fetch options
- * @returns {Promise<Response>}
- */
-const _proxyOrigins = new Set();
-
-export async function fetchWithProxy(url, opts = {}) {
-    const origin = new URL(url).origin;
-    if (!_proxyOrigins.has(origin)) {
-        try {
-            const r = await fetch(url, opts);
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r;
-        } catch (_) {
-            _proxyOrigins.add(origin);
-        }
-    }
-    const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
-    if (!r.ok) {
-        if (r.status === 404) {
-            const t = await r.text();
-            if (t.includes('CORS proxy is disabled'))
-                throw new Error('CORS proxy is disabled in SillyTavern settings');
-        }
-        throw new Error(`HTTP ${r.status}`);
-    }
-    return r;
-}
+export { fetchWithProxy } from '../provider-utils.js';
 
 // ========================================
 // RESPONSE HELPERS

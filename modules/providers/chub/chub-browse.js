@@ -2,16 +2,13 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
+import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
 import {
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
     CHUB_AVATAR_BASE,
     getChubHeaders,
-    fetchWithProxy,
     extractNodes,
-    chubMetadataCache,
-    fetchChubMetadata,
-    buildCharacterCardFromChub,
 } from './chub-api.js';
 
 // ========================================
@@ -35,10 +32,7 @@ const {
     setSettings,
     getCurrentView,
     debounce,
-    getCSRFToken,
     getCharacterGalleryId,
-    generateGalleryId,
-    syncAllGalleryFolderOverrides,
     fetchCharacters,
     fetchAndAddCharacter,
     deleteCharacter,
@@ -46,10 +40,7 @@ const {
     cleanupCreatorNotesContainer,
     checkCharacterForDuplicates,
     showPreImportDuplicateWarning,
-    findCharacterMediaUrls,
     showImportSummaryModal,
-    convertImageToPng,
-    embedCharacterDataInPng,
     getAllCharacters
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
@@ -123,9 +114,7 @@ let chubTimelineHasMore = true;
 let chubTimelineAuthorPage = 1;      // Per-author supplemental page (increments on Load More)
 let chubTimelineAuthorHasMore = false; // True if any author returned a full page of results
 let chubTimelineSort = 'newest'; // Sort for timeline view (client-side)
-let chubFollowedAuthors = []; // Cache of followed author usernames
 let chubUserFavoriteIds = new Set(); // Cache of user's favorited character IDs
-let chubCurrentUsername = null; // Current logged-in username
 let chubTimelineRenderToken = 0; // Cancels in-flight chunked timeline renders
 let chubTimelineLoadInFlight = false;
 let chubCardLookup = new Map();
@@ -142,7 +131,6 @@ let chubGridRenderedCount = 0;
 
 // IntersectionObserver for lazy-loading chub card images
 let chubImageObserver = null;
-const CHUB_IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
 
 // Local library lookup for marking characters as "In Library"
 let localLibraryLookup = {
@@ -263,7 +251,10 @@ class ChubBrowseView extends BrowseView {
             filters: 'chubFiltersBtn',
             nsfw: 'chubNsfwToggle',
             refresh: 'refreshChubBtn',
-            timelineSort: 'chubTimelineSortHeader'
+            timelineSort: 'chubTimelineSortHeader',
+            modeBrowseSelector: '.chub-view-btn[data-chub-view="browse"]',
+            modeFollowSelector: '.chub-view-btn[data-chub-view="timeline"]',
+            modeBtnClass: 'chub-view-btn',
         };
     }
 
@@ -276,10 +267,10 @@ class ChubBrowseView extends BrowseView {
             <!-- Discovery Mode Toggle -->
             <div class="chub-view-toggle">
                 <button class="chub-view-btn active" data-chub-view="browse" title="Browse all characters">
-                    <i class="fa-solid fa-compass"></i> Browse
+                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
                 </button>
                 <button class="chub-view-btn" data-chub-view="timeline" title="New from followed authors (requires token)">
-                    <i class="fa-solid fa-users"></i> Following
+                    <i class="fa-solid fa-users"></i> <span>Following</span>
                 </button>
             </div>
 
@@ -357,7 +348,7 @@ class ChubBrowseView extends BrowseView {
             <!-- Feature Filters -->
             <div class="browse-more-filters" style="position: relative;">
                 <button id="chubFiltersBtn" class="glass-btn" title="Filter by character features">
-                    <i class="fa-solid fa-sliders"></i> Features
+                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
                 </button>
                 <div id="chubFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
                     <div class="dropdown-section-title">Character must have:</div>
@@ -665,6 +656,11 @@ class ChubBrowseView extends BrowseView {
         super.activate(container, options);
         chubDelegatesInitialized = true;
 
+        // Re-register dropdown close handler after deactivate removed it
+        if (!_chubDropdownCloseHandler) {
+            initChubDropdownDismiss();
+        }
+
         // Ensure grid is populated — covers fresh init, provider switch, and tab re-entry
         buildLocalLibraryLookup();
         const browseGrid = document.getElementById('chubGrid');
@@ -716,6 +712,7 @@ class ChubBrowseView extends BrowseView {
     }
 
     deactivate() {
+        super.deactivate();
         chubDelegatesInitialized = false;
         // Increment render token to cancel in-flight chunked renders
         chubTimelineRenderToken++;
@@ -745,6 +742,23 @@ class ChubBrowseView extends BrowseView {
 // ========================================
 // CHUB BROWSE LOGIC (moved from library.js)
 // ========================================
+
+function initChubDropdownDismiss() {
+    if (_chubDropdownCloseHandler) document.removeEventListener('click', _chubDropdownCloseHandler);
+    _chubDropdownCloseHandler = (e) => {
+        const filtersDropdown = document.getElementById('chubFiltersDropdown');
+        const filtersBtn = document.getElementById('chubFiltersBtn');
+        if (filtersDropdown && !filtersDropdown.contains(e.target) && e.target !== filtersBtn) {
+            filtersDropdown.classList.add('hidden');
+        }
+        const tagsDropdown = document.getElementById('chubTagsDropdown');
+        const tagsBtn = document.getElementById('chubTagsBtn');
+        if (tagsDropdown && !tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
+            tagsDropdown.classList.add('hidden');
+        }
+    };
+    document.addEventListener('click', _chubDropdownCloseHandler);
+}
 
 function initChubView() {
     // Sync dropdown values with JS state (browser may cache old form values)
@@ -1046,27 +1060,18 @@ function initChubView() {
         on('chubClearKeyBtn', 'click', clearChubToken);
     }
 
-    // Close dropdowns when clicking outside (named handler for cleanup in deactivate)
-    if (_chubDropdownCloseHandler) document.removeEventListener('click', _chubDropdownCloseHandler);
-    _chubDropdownCloseHandler = (e) => {
-        const filtersDropdown = document.getElementById('chubFiltersDropdown');
-        const filtersBtn = document.getElementById('chubFiltersBtn');
-        if (filtersDropdown && !filtersDropdown.contains(e.target) && e.target !== filtersBtn) {
-            filtersDropdown.classList.add('hidden');
-        }
-        const tagsDropdown = document.getElementById('chubTagsDropdown');
-        const tagsBtn = document.getElementById('chubTagsBtn');
-        if (tagsDropdown && !tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
-            tagsDropdown.classList.add('hidden');
-        }
-    };
-    document.addEventListener('click', _chubDropdownCloseHandler);
+    initChubDropdownDismiss();
     
     // Load saved token on init
     loadChubToken();
     
     // Initialize NSFW toggle state (defaults to enabled)
     updateNsfwToggleState();
+    
+    // Start fetching popular tags in the background
+    if (!chubTagsLoaded && !chubTagsLoading) {
+        fetchChubPopularTags();
+    }
     
     debugLog('ChubAI view initialized');
 }
@@ -1213,57 +1218,61 @@ async function fetchChubPopularTags() {
     
     try {
         const headers = getChubHeaders(true);
-        const tagCounts = new Map();
+        const PAGES_PER_SORT = 2;
         
-        // Fetch from multiple sort orders to get diverse tags
+        // Fetch all sort orders in parallel; pages within each are sequential
         const sortOrders = ['download_count', 'id', 'rating', 'default'];
+        const results = await Promise.all(sortOrders.map(async (sortOrder) => {
+            const chars = [];
+            for (let page = 1; page <= PAGES_PER_SORT; page++) {
+                try {
+                    const params = new URLSearchParams({
+                        search: '',
+                        first: '200',
+                        page: page.toString(),
+                        sort: sortOrder,
+                        nsfw: 'true',
+                        nsfl: 'true',
+                        include_forks: 'false',
+                        min_tokens: '50'
+                    });
+                    
+                    const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                        method: 'GET',
+                        headers
+                    });
+                    
+                    if (!response.ok) break;
+                    
+                    const data = await response.json();
+                    const characters = extractNodes(data);
+                    if (characters.length === 0) break;
+                    chars.push(...characters);
+                } catch (err) {
+                    console.warn(`[ChubTags] Failed to fetch sort=${sortOrder} page=${page}:`, err);
+                    break;
+                }
+            }
+            return chars;
+        }));
         
-        for (const sortOrder of sortOrders) {
-            try {
-                const params = new URLSearchParams({
-                    search: '',
-                    first: '500',
-                    sort: sortOrder,
-                    nsfw: 'true',
-                    nsfl: 'true',
-                    include_forks: 'false',
-                    min_tokens: '50'
-                });
-                
-                const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
-                    method: 'GET',
-                    headers
-                });
-                
-                if (!response.ok) continue;
-                
-                const data = await response.json();
-                const characters = extractNodes(data);
-                
-                // Aggregate tags from these characters
-                for (const char of characters) {
-                    const topics = char.topics || [];
-                    for (const tag of topics) {
-                        const normalizedTag = tag.toLowerCase().trim();
-                        if (normalizedTag && normalizedTag.length > 1 && normalizedTag.length < 40) {
-                            tagCounts.set(normalizedTag, (tagCounts.get(normalizedTag) || 0) + 1);
-                        }
+        const tagCounts = new Map();
+        let totalChars = 0;
+        for (const chars of results) {
+            totalChars += chars.length;
+            for (const char of chars) {
+                for (const tag of (char.topics || [])) {
+                    const normalized = tag.toLowerCase().trim();
+                    if (normalized && normalized.length > 1 && normalized.length < 40) {
+                        tagCounts.set(normalized, (tagCounts.get(normalized) || 0) + 1);
                     }
                 }
-                
-                debugLog(`[ChubTags] Fetched tags from ${characters.length} characters (sort: ${sortOrder})`);
-                
-                // Small delay between requests
-                await new Promise(resolve => setTimeout(resolve, 200));
-            } catch (err) {
-                console.warn(`[ChubTags] Failed to fetch with sort ${sortOrder}:`, err);
             }
         }
         
-        // Sort by frequency and take top 500 tags
         const sortedTags = [...tagCounts.entries()]
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 500)
+            .slice(0, 1000)
             .map(([tag]) => tag);
         
         if (sortedTags.length > 0) {
@@ -1271,12 +1280,19 @@ async function fetchChubPopularTags() {
             chubTagsLoaded = true;
         }
         
-        debugLog(`[ChubTags] Loaded ${chubPopularTags.length} unique tags total`);
+        debugLog(`[ChubTags] Loaded ${chubPopularTags.length} unique tags from ${totalChars} characters`);
         
     } catch (error) {
         console.error('[ChubTags] Error fetching popular tags:', error);
     } finally {
         chubTagsLoading = false;
+        
+        // If the tags dropdown is already open, refresh it live
+        const dropdown = document.getElementById('chubTagsDropdown');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
+            const searchInput = document.getElementById('chubTagsSearchInput');
+            renderChubTagsDropdownList(searchInput?.value || '');
+        }
     }
 }
 
@@ -1305,10 +1321,10 @@ function extractChubTagsFromResults(characters) {
         }
     }
     
-    // Sort by frequency and take top 300 tags
+    // Sort by frequency and take top 600 tags
     const sortedTags = [...tagCounts.entries()]
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 300)
+        .slice(0, 600)
         .map(([tag]) => tag);
     
     if (sortedTags.length > chubPopularTags.length) {
@@ -1356,6 +1372,25 @@ function updateNsfwToggleState() {
 // ============================================================================
 
 /**
+ * Add a custom tag as an include filter (typed by the user, not from the pre-fetched list)
+ */
+function addCustomChubTagFilter(tagText) {
+    const normalized = tagText.toLowerCase().trim();
+    if (!normalized || normalized.length < 2) return;
+
+    if (!chubPopularTags.includes(normalized)) {
+        chubPopularTags.unshift(normalized);
+    }
+    chubTagFilters.set(normalized, 'include');
+
+    const searchInput = document.getElementById('chubTagsSearchInput');
+    if (searchInput) searchInput.value = '';
+    renderChubTagsDropdownList();
+    updateChubTagsButtonState();
+    triggerChubReloadDebounced();
+}
+
+/**
  * Initialize the Tags dropdown with event handlers
  */
 function initChubTagsDropdown() {
@@ -1395,6 +1430,15 @@ function initChubTagsDropdown() {
     searchInput?.addEventListener('input', debounce(() => {
         renderChubTagsDropdownList(searchInput.value);
     }, 150));
+
+    // Enter key adds typed tag directly as a filter
+    searchInput?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const value = searchInput.value.trim();
+            if (value) addCustomChubTagFilter(value);
+        }
+    });
     
     clearBtn?.addEventListener('click', () => {
         chubTagFilters.clear();
@@ -1484,7 +1528,11 @@ function renderChubTagsDropdownList(filter = '') {
         ? chubPopularTags.filter(tag => tag.toLowerCase().includes(filterLower))
         : chubPopularTags;
     
-    if (filteredTags.length === 0) {
+    // Check if the typed text exactly matches any known tag
+    const hasExactMatch = filter && filteredTags.some(t => t.toLowerCase() === filterLower);
+    const showCustomAdd = filter && filterLower.length >= 2 && !hasExactMatch;
+    
+    if (filteredTags.length === 0 && !showCustomAdd) {
         container.innerHTML = '<div class="browse-tags-empty">No matching tags</div>';
         return;
     }
@@ -1500,7 +1548,15 @@ function renderChubTagsDropdownList(filter = '') {
         return a.localeCompare(b);
     });
     
-    container.innerHTML = sortedTags.map(tag => {
+    // "Add as filter" row when typed text isn't in the list
+    const customAddHtml = showCustomAdd ? `
+        <div class="browse-tag-filter-item browse-tag-custom-add" data-custom-tag="${escapeHtml(filterLower)}">
+            <button class="browse-tag-state-btn state-include"><i class="fa-solid fa-plus"></i></button>
+            <span class="tag-label">Add <strong>${escapeHtml(filterLower)}</strong> as filter</span>
+        </div>
+    ` : '';
+
+    container.innerHTML = customAddHtml + sortedTags.map(tag => {
         const state = chubTagFilters.get(tag) || 'neutral';
         const stateClass = `state-${state}`;
         const stateIcon = state === 'include' ? '<i class="fa-solid fa-check"></i>' 
@@ -1518,6 +1574,11 @@ function renderChubTagsDropdownList(filter = '') {
         `;
     }).join('');
     
+    // Custom-add row click handler
+    container.querySelector('.browse-tag-custom-add')?.addEventListener('click', () => {
+        addCustomChubTagFilter(filterLower);
+    });
+
     // Attach click handlers
     container.querySelectorAll('.browse-tag-filter-item').forEach(item => {
         const tag = item.dataset.tag;
@@ -2292,18 +2353,26 @@ function performChubCreatorSearch() {
 }
 
 function filterByAuthor(authorName) {
-    // Switch to browse mode
-    if (chubViewMode !== 'browse') {
-        switchChubViewMode('browse');
-    }
-    
+    // Set filter state BEFORE mode switch — switchChubViewMode('browse')
+    // triggers loadChubCharacters() internally, which must see the author filter
     chubAuthorFilter = authorName;
-    
+    chubCurrentSearch = '';
+    chubCharacters = [];
+    chubCurrentPage = 1;
+
     // Reset author sort to newest (most useful default when viewing an author)
-    chubAuthorSort = 'id'; // 'id' gives newest/most recently updated
+    chubAuthorSort = 'id';
     const sortSelect = document.getElementById('chubAuthorSortSelect');
     if (sortSelect) sortSelect.value = 'id';
-    
+
+    // Switch to browse mode (will trigger loadChubCharacters with author filter)
+    if (chubViewMode !== 'browse') {
+        switchChubViewMode('browse');
+    } else {
+        // Already in browse mode — trigger load directly
+        loadChubCharacters();
+    }
+
     const banner = document.getElementById('chubAuthorBanner');
     const bannerName = document.getElementById('chubAuthorBannerName');
     if (banner && bannerName) {
@@ -2314,11 +2383,6 @@ function filterByAuthor(authorName) {
     updateFollowAuthorButton(authorName);
     
     document.getElementById('chubSearchInput').value = '';
-    chubCurrentSearch = '';
-    chubCharacters = [];
-    chubCurrentPage = 1;
-    
-    loadChubCharacters();
 }
 
 // Track if we're following the current author
@@ -3065,7 +3129,7 @@ function createChubCard(char, isTimeline = false) {
     return `
         <div class="${cardClass}" data-full-path="${escapeHtml(fullPath)}" ${taglineTooltip ? `title="${taglineTooltip}"` : ''}>
             <div class="browse-card-image">
-                <img data-src="${escapeHtml(avatarUrl)}" src="${CHUB_IMG_PLACEHOLDER}" alt="${escapeHtml(name)}" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
+                <img data-src="${escapeHtml(avatarUrl)}" src="${IMG_PLACEHOLDER}" alt="${escapeHtml(name)}" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
                 ${char.nsfw ? '<span class="browse-nsfw-badge">NSFW</span>' : ''}
                 ${badges.length > 0 ? `<div class="browse-feature-badges">${badges.join('')}</div>` : ''}
             </div>
@@ -3086,14 +3150,6 @@ function createChubCard(char, isTimeline = false) {
     `;
 }
 
-function formatNumber(num) {
-    if (num >= 1000000) {
-        return (num / 1000000).toFixed(1) + 'M';
-    } else if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-}
 
 function applyChubTagsClamp(tagsEl) {
     if (!tagsEl) return;
@@ -3191,7 +3247,6 @@ async function openChubCharPreview(char) {
     const descSection = document.getElementById('chubCharDescriptionSection');
     // descEl already defined above
     const personalitySection = document.getElementById('chubCharPersonalitySection');
-    const personalityEl = document.getElementById('chubCharPersonality');
     const scenarioSection = document.getElementById('chubCharScenarioSection');
     const scenarioEl = document.getElementById('chubCharScenario');
     const firstMsgSection = document.getElementById('chubCharFirstMsgSection');
@@ -3668,7 +3723,6 @@ function cleanupChubCharModal() {
 async function downloadChubCharacter() {
     if (!chubSelectedChar) return;
     
-    // Abort any in-flight detail fetch — we're downloading now, no need for preview data
     abortChubDetailFetch();
     
     const downloadBtn = document.getElementById('chubDownloadBtn');
@@ -3676,42 +3730,36 @@ async function downloadChubCharacter() {
     downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking...';
     downloadBtn.disabled = true;
     
-    // Will be set if we're replacing an existing character, to inherit their gallery folder
     let inheritedGalleryId = null;
     
     try {
-        chubDetailCache.clear();
-        chubMetadataCache.clear();
-        
         const fullPath = chubSelectedChar.fullPath;
-        
-        // Fetch complete character data from the API
-        let metadata = await fetchChubMetadata(fullPath);
-        
-        if (!metadata || !metadata.definition) {
-            throw new Error('Could not fetch character data from API');
-        }
-        
-        const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
-        const characterCreator = metadata.definition?.creator || metadata.creator || fullPath.split('/')[0] || '';
-        
+        const characterName = chubSelectedChar.name || fullPath.split('/').pop();
+        const characterCreator = fullPath.split('/')[0] || '';
+
+        // Use cached detail data from the preview panel for richer comparison
+        const cachedDetail = chubDetailCache.get(fullPath);
+        const definition = cachedDetail?.definition;
+
         // === PRE-IMPORT DUPLICATE CHECK ===
         const duplicateMatches = checkCharacterForDuplicates({
             name: characterName,
             creator: characterCreator,
             fullPath: fullPath,
-            definition: metadata.definition
+            description: cachedDetail?.description || chubSelectedChar.description || '',
+            first_mes: definition?.first_message || definition?.first_mes || '',
+            personality: definition?.personality || '',
+            scenario: definition?.scenario || ''
         });
         
         if (duplicateMatches.length > 0) {
-            // Show duplicate warning and wait for user choice
             downloadBtn.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Duplicate found...';
             
             const result = await showPreImportDuplicateWarning({
                 name: characterName,
                 creator: characterCreator,
                 fullPath: fullPath,
-                avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`
+                avatarUrl: chubSelectedChar.avatar_url || `${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`
             }, duplicateMatches);
             
             if (result.choice === 'skip') {
@@ -3720,19 +3768,12 @@ async function downloadChubCharacter() {
             }
             
             if (result.choice === 'replace') {
-                // Delete the first (highest confidence) match before importing
                 const toReplace = duplicateMatches[0].char;
-                
-                // IMPORTANT: Capture the existing character's gallery_id BEFORE deleting
-                // so we can inherit it and keep using the same gallery folder
                 inheritedGalleryId = getCharacterGalleryId(toReplace);
                 if (inheritedGalleryId) {
                     debugLog('[ChubDownload] Inheriting gallery_id from replaced character:', inheritedGalleryId);
                 }
-                
                 downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Replacing...';
-                
-                // Use the proper delete function that syncs with ST
                 const deleteSuccess = await deleteCharacter(toReplace, false);
                 if (deleteSuccess) {
                     debugLog('[ChubDownload] Deleted existing character:', toReplace.avatar);
@@ -3740,212 +3781,55 @@ async function downloadChubCharacter() {
                     console.warn('[ChubDownload] Could not delete existing character, proceeding with import anyway');
                 }
             }
-            // If choice is 'import', continue with import normally
         }
         // === END DUPLICATE CHECK ===
         
         downloadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
-        
-        // Build the character card from API metadata (uses ST's exact field mapping)
-        // This always has the LATEST version data, unlike chara_card_v2.png which may be stale
-        const characterCard = await buildCharacterCardFromChub(metadata);
-        // Capture fields we need after the card is built, then release the full metadata
-        const metadataHasGallery = metadata.hasGallery || false;
-        const metadataId = metadata.id || null;
-        const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
-        const metadataMaxResUrl = metadata.max_res_url || null;
-        const metadataAvatarUrl = metadata.avatar_url || null;
-        metadata = null;
-        
-        if (!characterCard.data.extensions) {
-            characterCard.data.extensions = {};
-        }
-        
-        const existingChub = characterCard.data.extensions.chub || {};
-        characterCard.data.extensions.chub = {
-            ...existingChub,
-            id: metadataId || existingChub.id || null,
-            full_path: fullPath,
-            tagline: metadataTagline || existingChub.tagline || '',
-            linkedAt: new Date().toISOString()
-        };
-        
-        // Add unique gallery_id if enabled (inherit from replaced character if available)
-        if (getSetting('uniqueGalleryFolders')) {
-            if (inheritedGalleryId) {
-                characterCard.data.extensions.gallery_id = inheritedGalleryId;
-                debugLog('[ChubDownload] Using inherited gallery_id:', inheritedGalleryId);
-            } else if (!characterCard.data.extensions.gallery_id) {
-                characterCard.data.extensions.gallery_id = generateGalleryId();
-                debugLog('[ChubDownload] Assigned new gallery_id:', characterCard.data.extensions.gallery_id);
-            }
-        }
-        
-        // Download avatar IMAGE (not the card PNG — that may have stale data)
-        // Priority: max_res_url > avatar URLs > chara_card_v2.png (last resort)
-        const imageUrls = [];
-        
-        // ST uses metadata.node.max_res_url for highest quality avatar
-        if (metadataMaxResUrl) {
-            imageUrls.push(metadataMaxResUrl);
-        }
-        
-        // Add avatar URL from selected character if available
-        if (chubSelectedChar.avatar_url) {
-            imageUrls.push(chubSelectedChar.avatar_url);
-        }
-        
-        // Add avatar URL from metadata if available
-        if (metadataAvatarUrl) {
-            imageUrls.push(metadataAvatarUrl);
-        }
-        
-        // Add standard avatar URLs as fallback
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`);
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/avatar.png`);
-        
-        // Last resort: chara_card_v2.png (works as an image)
-        imageUrls.push(`https://avatars.charhub.io/avatars/${fullPath}/chara_card_v2.png`);
-        
-        // De-duplicate URLs
-        const uniqueUrls = [...new Set(imageUrls)];
-        
-        debugLog('[ChubDownload] Will try these image URLs:', uniqueUrls);
-        
-        let imageBuffer = null;
-        let needsConversion = false;
-        
-        for (const url of uniqueUrls) {
-            debugLog('[ChubDownload] Trying image URL:', url);
-            try {
-                let response = await fetch(url);
-                if (!response.ok) {
-                    const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
-                    response = await fetch(proxyUrl);
-                }
-                
-                if (response.ok) {
-                    imageBuffer = await response.arrayBuffer();
-                    needsConversion = url.endsWith('.webp') || response.headers.get('content-type')?.includes('webp');
-                    debugLog('[ChubDownload] Avatar fetched from:', url.split('/').pop(), 'size:', imageBuffer.byteLength, 'needsConversion:', needsConversion);
-                    break;
-                }
-            } catch (e) {
-                debugLog('[ChubDownload] Failed to fetch', url, ':', e.message);
-            }
-        }
-        
-        if (!imageBuffer) {
-            throw new Error('Could not download character avatar from any available URL');
-        }
-        
-        // Convert to PNG if needed (WebP can't hold text chunks)
-        let pngBuffer = imageBuffer;
-        if (needsConversion) {
-            debugLog('[ChubDownload] Converting WebP avatar to PNG...');
-            pngBuffer = await convertImageToPng(imageBuffer);
-            imageBuffer = null; // Release original buffer — pngBuffer is now the source
-        }
-        
-        debugLog('[ChubDownload] Character card built from API:', {
-            name: characterCard.data.name,
-            first_mes_length: characterCard.data.first_mes?.length,
-            alternate_greetings_count: characterCard.data.alternate_greetings?.length,
-            has_character_book: !!characterCard.data.character_book,
-            gallery_id: characterCard.data.extensions?.gallery_id
-        });
-        
-        // Embed character card into avatar PNG
-        let embeddedPng = embedCharacterDataInPng(pngBuffer, characterCard);
-        pngBuffer = null; // Release source buffer after embedding
-        
-        // Create file for ST import
-        const fileName = fullPath.split('/').pop() + '.png';
-        // Create File directly from Uint8Array (skip intermediate Blob to avoid double copy)
-        let file = new File([embeddedPng], fileName, { type: 'image/png' });
-        embeddedPng = null; // Release — data now lives in file
-        
-        let formData = new FormData();
-        formData.append('avatar', file);
-        formData.append('file_type', 'png');
-        file = null; // FormData now holds the reference
-        
-        const csrfToken = getCSRFToken();
-        
-        const importResponse = await fetch('/api/characters/import', {
-            method: 'POST',
-            headers: { 'X-CSRF-Token': csrfToken },
-            body: formData
-        });
-        formData = null; // Release — fetch has consumed the body
-        
-        const responseText = await importResponse.text();
-        debugLog('[ChubDownload] Import response:', importResponse.status, responseText);
-        
-        if (!importResponse.ok) {
-            throw new Error(`Import error: ${responseText}`);
-        }
-        
-        let result;
-        try {
-            result = JSON.parse(responseText);
-        } catch (e) {
-            throw new Error(`Invalid JSON response: ${responseText}`);
-        }
-        
-        if (result.error) {
-            throw new Error('Import failed: Server returned error');
-        }
-        
-        // Close the character modal and free download metadata
+
+        const provider = CoreAPI.getProvider('chub');
+        if (!provider?.importCharacter) throw new Error('Chub provider not available');
+
+        const result = await provider.importCharacter(fullPath, chubSelectedChar, { inheritedGalleryId });
+        if (!result.success) throw new Error(result.error || 'Import failed');
+
+        // Close the character modal and free preview data
         cleanupChubCharModal();
         document.getElementById('chubCharModal').classList.add('hidden');
-        // Remove the just-imported entry — it's no longer needed and frees memory
-        chubMetadataCache.delete(fullPath);
-        
-        // Yield one frame so modal hidden state is applied before summary opens
+
         await new Promise(r => requestAnimationFrame(r));
         
-        showToast(`Downloaded "${characterName}" successfully!`, 'success');
+        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
         
-        // Get the local avatar filename from the import result
-        const localAvatarFileName = result.file_name || fileName;
-        const assignedGalleryId = characterCard.data.extensions?.gallery_id || null;
+        // Show import summary if character has gallery or embedded media
+        const localAvatarFileName = result.fileName;
+        const hasGallery = result.hasGallery;
+        const mediaUrls = result.embeddedMediaUrls || [];
         
-        const mediaUrls = findCharacterMediaUrls(characterCard);
-        const hasGallery = metadataHasGallery;
-        const hasMedia = mediaUrls.length > 0;
-        
-        if ((hasGallery || hasMedia) && getSetting('notifyAdditionalContent') !== false) {
+        if ((hasGallery || mediaUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 galleryCharacters: hasGallery ? [{
-                    name: characterName,
-                    fullPath: fullPath,
-                    provider: CoreAPI.getProvider('chub'),
-                    linkInfo: { id: metadataId, fullPath: fullPath },
-                    url: `https://chub.ai/characters/${fullPath}`,
+                    name: result.characterName,
+                    fullPath: result.fullPath,
+                    provider: provider,
+                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                    url: `https://chub.ai/characters/${result.fullPath}`,
                     avatar: localAvatarFileName,
-                    galleryId: assignedGalleryId
+                    galleryId: result.galleryId
                 }] : [],
-                mediaCharacters: hasMedia ? [{
-                    name: characterName,
+                mediaCharacters: mediaUrls.length > 0 ? [{
+                    name: result.characterName,
                     avatar: localAvatarFileName,
-                    avatarUrl: `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp`,
+                    avatarUrl: result.avatarUrl,
                     mediaUrls: mediaUrls,
-                    galleryId: assignedGalleryId
+                    galleryId: result.galleryId
                 }] : []
             });
         }
         
         // === REFRESH + SYNC ===
-        // Use lightweight single-character fetch instead of reloading all characters.
-        // On mobile with large libraries (2000+ chars), the full fetchCharacters(true)
-        // can OOM the tab during JSON parse of the entire character list.
-        // The full refresh is deferred to when the user switches to characters view.
         await new Promise(r => setTimeout(r, 200));
         const added = await fetchAndAddCharacter(localAvatarFileName);
         if (!added) {
-            // Fallback: yield longer for GC, then try full refresh
             await new Promise(r => setTimeout(r, 500));
             await fetchCharacters(true);
         }

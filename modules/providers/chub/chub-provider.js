@@ -5,13 +5,13 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
+import { assignGalleryId, importFromPng } from '../provider-utils.js';
 import chubBrowseView, { openChubTokenModal } from './chub-browse.js';
 import {
     initChubApi,
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
     CHUB_AVATAR_BASE,
-    getChubHeaders,
     fetchWithProxy,
     extractNodes,
     chubMetadataCache,
@@ -111,6 +111,7 @@ class ChubProvider extends ProviderBase {
     // ── Lifecycle ───────────────────────────────────────────
 
     async init(coreAPI) {
+        super.init(coreAPI);
         api = coreAPI;
         initChubApi({ getSetting: coreAPI.getSetting, debugLog: coreAPI.debugLog });
     }
@@ -630,7 +631,7 @@ class ChubProvider extends ProviderBase {
                 const data = await resp.json();
                 for (const node of this._extractNodes(data)) {
                     if (!allResults.some(r => r.fullPath === node.fullPath)) {
-                        allResults.push(this._normalizeSearchResult(node, AVATAR_BASE));
+                        allResults.push(this._normalizeSearchResult(node, CHUB_AVATAR_BASE));
                     }
                 }
             }
@@ -663,16 +664,7 @@ class ChubProvider extends ProviderBase {
 
     get supportsImport() { return true; }
 
-    /**
-     * Import a character from ChubAI by its full path (e.g. "creator/slug").
-     * Mirrors SillyTavern's own downloadChubCharacter() approach:
-     * 1. Fetch character definition from API
-     * 2. Download avatar IMAGE separately
-     * 3. Build V2 card from API metadata with correct field mapping
-     * 4. Embed card data into avatar PNG
-     * 5. Send to ST's import endpoint
-     */
-    async importCharacter(fullPath) {
+    async importCharacter(fullPath, hitData, options = {}) {
         try {
             let metadata = await this.fetchMetadata(fullPath);
             if (!metadata || !metadata.definition) {
@@ -681,7 +673,6 @@ class ChubProvider extends ProviderBase {
 
             const hasGallery = metadata.hasGallery || false;
             const characterName = metadata.definition?.name || metadata.name || fullPath.split('/').pop();
-
             const characterCard = await this._buildCardFromMetadata(metadata);
 
             const metadataId = metadata.id || null;
@@ -700,13 +691,12 @@ class ChubProvider extends ProviderBase {
                 linkedAt: new Date().toISOString()
             };
 
-            if (api.getSetting?.('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
-                characterCard.data.extensions.gallery_id = api.generateGalleryId?.();
-            }
+            assignGalleryId(characterCard, options, api);
 
             // Avatar download — priority chain
             const imageUrls = [];
             if (metadataMaxResUrl) imageUrls.push(metadataMaxResUrl);
+            if (hitData?.avatar_url) imageUrls.push(hitData.avatar_url);
             if (metadataAvatarUrl) imageUrls.push(metadataAvatarUrl);
             imageUrls.push(`${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`);
             imageUrls.push(`${CHUB_AVATAR_BASE}${fullPath}/avatar.png`);
@@ -714,73 +704,25 @@ class ChubProvider extends ProviderBase {
             const uniqueUrls = [...new Set(imageUrls)];
 
             let imageBuffer = null;
-            let needsConversion = false;
             for (const url of uniqueUrls) {
                 try {
-                    let response = await fetch(url);
-                    if (!response.ok) response = await fetch(`/proxy/${encodeURIComponent(url)}`);
-                    if (response.ok) {
-                        imageBuffer = await response.arrayBuffer();
-                        const ct = response.headers.get('content-type') || '';
-                        needsConversion = url.endsWith('.webp') || ct.includes('webp');
-                        break;
-                    }
+                    const resp = await fetchWithProxy(url);
+                    imageBuffer = await resp.arrayBuffer();
+                    break;
                 } catch { /* try next */ }
             }
 
-            if (!imageBuffer) throw new Error('Could not download character avatar from any available URL');
-
-            let pngBuffer = imageBuffer;
-            if (needsConversion) {
-                pngBuffer = await api.convertImageToPng(imageBuffer);
-                imageBuffer = null;
-            }
-
-            let embeddedPng = api.embedCharacterDataInPng(pngBuffer, characterCard);
-            pngBuffer = null;
-
-            const fileName = fullPath.split('/').pop() + '.png';
-            let file = new File([embeddedPng], fileName, { type: 'image/png' });
-            embeddedPng = null;
-
-            let formData = new FormData();
-            formData.append('avatar', file);
-            formData.append('file_type', 'png');
-            file = null;
-
-            const csrfToken = api.getCSRFToken?.();
-            const importResponse = await fetch('/api/characters/import', {
-                method: 'POST',
-                headers: { 'X-CSRF-Token': csrfToken },
-                body: formData
-            });
-            formData = null;
-
-            const responseText = await importResponse.text();
-            if (!importResponse.ok) throw new Error(`Import error: ${responseText}`);
-
-            let result;
-            try { result = JSON.parse(responseText); }
-            catch { throw new Error(`Invalid JSON response: ${responseText}`); }
-            if (result.error) throw new Error('Import failed: Server returned error');
-
-            const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
-            const galleryId = characterCard.data.extensions?.gallery_id || null;
-
-            // Release cached metadata
             chubMetadataCache.delete(fullPath);
 
-            return {
-                success: true,
-                fileName: result.file_name || fileName,
-                characterName,
-                hasGallery,
+            return await importFromPng({
+                characterCard, imageBuffer,
+                fileName: fullPath.split('/').pop() + '.png',
+                characterName, hasGallery,
                 providerCharId: metadataId,
                 fullPath,
                 avatarUrl: `${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`,
-                embeddedMediaUrls: mediaUrls,
-                galleryId
-            };
+                api
+            });
         } catch (error) {
             console.error(`[ChubProvider] importCharacter failed for ${fullPath}:`, error);
             return { success: false, error: error.message };
@@ -808,112 +750,6 @@ class ChubProvider extends ProviderBase {
             console.error('[ChubProvider] fetchGalleryImages failed:', e);
             return [];
         }
-    }
-
-    async downloadGallery(linkInfo, folderName, options = {}) {
-        const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
-        let successCount = 0, errorCount = 0, skippedCount = 0;
-        let filenameSkippedCount = 0;
-
-        const logEntry = onLog?.('Fetching gallery list...', 'pending') ?? null;
-        const galleryImages = await this.fetchGalleryImages(linkInfo);
-
-        if (galleryImages.length === 0) {
-            if (onLogUpdate && logEntry) onLogUpdate(logEntry, 'No gallery images found', 'success');
-            return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
-        }
-        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
-
-        const useFastSkip = api.getSetting?.('fastFilenameSkip') || false;
-        const validateHeaders = useFastSkip && (api.getSetting?.('fastSkipValidateHeaders') || false);
-        let fileNameIndex = null;
-        let existingHashMap = null;
-
-        if (useFastSkip) {
-            fileNameIndex = await api.getExistingFileIndex?.(folderName) || new Map();
-        } else {
-            existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
-        }
-
-        async function ensureHashMap() {
-            if (!existingHashMap) {
-                existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
-            }
-            return existingHashMap;
-        }
-
-        for (let i = 0; i < galleryImages.length; i++) {
-            if ((shouldAbort?.()) || abortSignal?.aborted) {
-                return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: true };
-            }
-
-            const image = galleryImages[i];
-            const displayUrl = image.url.length > 60 ? image.url.substring(0, 60) + '...' : image.url;
-            const imgLog = onLog?.(`Checking ${displayUrl}`, 'pending') ?? null;
-
-            // Fast filename skip
-            if (useFastSkip && fileNameIndex) {
-                const sanitizedName = api.extractSanitizedUrlName?.(image.url) || '';
-                if (sanitizedName.length >= 4) {
-                    const match = fileNameIndex.get(sanitizedName.toLowerCase());
-                    if (match) {
-                        let valid = true;
-                        if (validateHeaders) {
-                            try {
-                                const resp = await fetch(match.localPath, { method: 'HEAD' });
-                                const size = parseInt(resp.headers.get('Content-Length') || '0', 10);
-                                valid = resp.ok && size >= 1024;
-                            } catch { valid = false; }
-                            if (!valid) api.debugLog?.('[ChubGallery] Fast skip rejected (HEAD validation):', match.fileName);
-                        }
-                        if (valid) {
-                            skippedCount++;
-                            filenameSkippedCount++;
-                            if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (filename match): ${match.fileName}`, 'success');
-                            onProgress?.(i + 1, galleryImages.length);
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            let dl = await api.downloadMediaToMemory?.(image.url, 30000, abortSignal);
-            if (!dl?.success) {
-                errorCount++;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${dl?.error || 'unknown'}`, 'error');
-                dl = null;
-                onProgress?.(i + 1, galleryImages.length);
-                continue;
-            }
-
-            const hashMap = await ensureHashMap();
-            const contentHash = await api.calculateHash?.(dl.arrayBuffer);
-            if (hashMap.has(contentHash)) {
-                skippedCount++;
-                dl = null;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Skipped (duplicate): ${displayUrl}`, 'success');
-                onProgress?.(i + 1, galleryImages.length);
-                continue;
-            }
-
-            if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saving ${displayUrl}...`, 'pending');
-            const saveResult = await this._saveGalleryImage(dl, image, folderName, contentHash);
-            dl = null;
-
-            if (saveResult.success) {
-                successCount++;
-                hashMap.set(contentHash, { fileName: saveResult.filename });
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saved: ${saveResult.filename}`, 'success');
-            } else {
-                errorCount++;
-                if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Failed: ${displayUrl} - ${saveResult.error}`, 'error');
-            }
-
-            onProgress?.(i + 1, galleryImages.length);
-            await new Promise(r => setTimeout(r, 50));
-        }
-
-        return { success: successCount, skipped: skippedCount, errors: errorCount, filenameSkipped: filenameSkippedCount, aborted: false };
     }
 
     // ── Import Duplicate Detection ──────────────────────────
@@ -1017,69 +853,6 @@ class ChubProvider extends ProviderBase {
      */
     async _buildCardFromMetadata(metadata) {
         return buildCharacterCardFromChub(metadata);
-    }
-
-    /**
-     * Save a gallery image with the {prefix}_{hash}_{name} naming convention.
-     */
-    async _saveGalleryImage(downloadResult, imageInfo, folderName, contentHash) {
-        try {
-            const { arrayBuffer, contentType } = downloadResult;
-            let extension = 'webp';
-            if (contentType) {
-                const mimeMap = {
-                    'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp',
-                    'image/gif': 'gif', 'image/bmp': 'bmp', 'image/svg+xml': 'svg',
-                    'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav',
-                    'audio/ogg': 'ogg', 'audio/flac': 'flac'
-                };
-                if (mimeMap[contentType]) extension = mimeMap[contentType];
-                else if (contentType.startsWith('audio/')) extension = contentType.split('/')[1].split(';')[0].replace('x-', '') || 'audio';
-            } else {
-                const urlMatch = imageInfo.url.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
-                if (urlMatch) extension = urlMatch[1].toLowerCase();
-            }
-
-            const urlObj = new URL(imageInfo.url);
-            const pathParts = urlObj.pathname.split('/');
-            const originalFilename = pathParts[pathParts.length - 1] || 'gallery_image';
-            const originalNameNoExt = originalFilename.includes('.')
-                ? originalFilename.substring(0, originalFilename.lastIndexOf('.'))
-                : originalFilename;
-            const sanitizedName = originalNameNoExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
-            const shortHash = (contentHash?.length >= 8) ? contentHash.substring(0, 8) : 'nohash00';
-            const filenameBase = `${this.galleryFilePrefix}_${shortHash}_${sanitizedName}`;
-
-            let base64Data = api.arrayBufferToBase64?.(arrayBuffer);
-            downloadResult.arrayBuffer = null;
-
-            const bodyStr = JSON.stringify({
-                image: base64Data,
-                filename: filenameBase,
-                format: extension,
-                ch_name: folderName
-            });
-            base64Data = null;
-
-            const csrfToken = api.getCSRFToken?.();
-            const resp = await fetch(`/api${api.getEndpoints?.()?.IMAGES_UPLOAD || '/images/upload'}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-                body: bodyStr
-            });
-
-            if (!resp.ok) {
-                const errText = await resp.text();
-                throw new Error(`Upload failed: ${errText}`);
-            }
-
-            const saveResult = await resp.json();
-            if (!saveResult?.path) throw new Error('No path returned from upload');
-
-            return { success: true, localPath: saveResult.path, filename: `${filenameBase}.${extension}` };
-        } catch (e) {
-            return { success: false, error: e.message || String(e) };
-        }
     }
 }
 

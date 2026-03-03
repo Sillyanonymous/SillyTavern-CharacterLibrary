@@ -12,7 +12,6 @@ import * as CoreAPI from './core-api.js';
 // ========================================
 
 let isInitialized = false;
-let lastAuditResult = null;
 
 // ========================================
 // AUDIT FUNCTIONS
@@ -87,7 +86,6 @@ export function auditGalleryIntegrity() {
     result.issues.missingMappings = result.missingMapping.length;
     result.issues.orphaned = result.orphanedMappings.length;
     
-    lastAuditResult = result;
     return result;
 }
 

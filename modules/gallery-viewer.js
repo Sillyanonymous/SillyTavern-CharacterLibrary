@@ -349,21 +349,20 @@ function renderThumbnails() {
     const strip = document.getElementById('galleryViewerThumbnails');
     if (!strip) return;
     
+    const esc = CoreAPI.escapeHtml;
     strip.innerHTML = currentImages.map((media, idx) => {
         const mediaIsVideo = isVideo(media);
         if (mediaIsVideo) {
-            // Video thumbnail with small play icon
             return `
                 <div class="gv-thumb ${idx === currentIndex ? 'active' : ''}" data-index="${idx}">
-                    <video src="${media.url}" preload="metadata" muted></video>
+                    <video src="${esc(media.url)}" preload="metadata" muted></video>
                     <div class="gv-thumb-video-icon"><i class="fa-solid fa-play"></i></div>
                 </div>
             `;
         } else {
-            // Image thumbnail
             return `
                 <div class="gv-thumb ${idx === currentIndex ? 'active' : ''}" data-index="${idx}">
-                    <img src="${media.url}" alt="${media.name}" loading="lazy">
+                    <img src="${esc(media.url)}" alt="${esc(media.name)}" loading="lazy">
                 </div>
             `;
         }
@@ -434,7 +433,7 @@ function setupEventListeners() {
         // Don't close if we just finished a drag
         if (didDrag) return;
         // Close if clicking on the content area but not on the image, nav buttons, or their children
-        const clickedOnImage = e.target.id === 'galleryViewerImage';
+        const clickedOnImage = e.target.id === 'galleryViewerImage' || e.target.id === 'galleryViewerVideo';
         const clickedOnNav = e.target.closest('.gv-nav');
         if (!clickedOnImage && !clickedOnNav) {
             closeViewer();

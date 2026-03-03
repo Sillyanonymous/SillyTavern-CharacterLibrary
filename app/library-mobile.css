@@ -1799,10 +1799,12 @@
         max-height: 100% !important;
         border-radius: 0 !important;
     }
-    .chub-login-body { padding: 14px; }
+    .chub-login-body { padding: 14px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
     .chub-login-info { font-size: 0.85rem; padding: 12px; }
     .chub-login-actions { flex-wrap: wrap; }
     .chub-login-form .glass-input { font-size: 16px; }
+    .pyg-plugin-status { font-size: 0.8rem; }
+    .pyg-manual-token-body .glass-input { font-size: 16px; }
 
     /* ---------------------------------------------------
        GALLERY SYNC DROPDOWN (moved to body via JS)
@@ -2898,7 +2900,8 @@
         padding: 1px;
         gap: 2px;
     }
-    .filter-area.online-filters .chub-view-btn {
+    .filter-area.online-filters .chub-view-btn,
+    .filter-area.online-filters .pyg-view-btn {
         font-size: 0.72rem;
         padding: 4px 7px;
     }

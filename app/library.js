@@ -395,6 +395,12 @@ const SETTINGS_KEY = 'SillyTavernCharacterGallery';
 const DEFAULT_SETTINGS = {
     chubToken: null,
     chubRememberToken: false,
+    pygmalionEmail: null,
+    pygmalionPassword: null,
+    pygmalionRememberCredentials: false,
+    ctCookie: null,
+    pygmalionNsfw: false,
+    ctNsfw: false,
     defaultSort: 'name_asc',
     // Include provider gallery images in character galleries
     includeProviderGallery: true,
@@ -676,6 +682,35 @@ function applyHighlightColor(color) {
 }
 
 /**
+ * Check cl-helper plugin availability and update settings UI accordingly.
+ */
+async function checkClHelperPlugin(pygBanner, pygFields, ctBanner, ctFields) {
+    let available = false;
+    try {
+        const resp = await apiRequest('/plugins/cl-helper/health');
+        if (resp.ok) {
+            const data = await resp.json();
+            available = data?.ok === true;
+        }
+    } catch { /* plugin not reachable */ }
+
+    const banners = [pygBanner, ctBanner];
+    const fields = [pygFields, ctFields];
+    for (let i = 0; i < banners.length; i++) {
+        const banner = banners[i];
+        const field = fields[i];
+        if (!banner || !field) continue;
+        if (available) {
+            banner.classList.add('cl-hidden');
+            field.classList.remove('cl-helper-fields-disabled');
+        } else {
+            banner.classList.remove('cl-hidden');
+            field.classList.add('cl-helper-fields-disabled');
+        }
+    }
+}
+
+/**
  * Setup the Gallery Settings Modal
  */
 function setupSettingsModal() {
@@ -689,6 +724,15 @@ function setupSettingsModal() {
     const chubTokenInput = document.getElementById('settingsChubToken');
     const rememberTokenCheckbox = document.getElementById('settingsRememberToken');
     const toggleTokenVisibility = document.getElementById('toggleChubTokenVisibility');
+    const pygmalionEmailInput = document.getElementById('settingsPygmalionEmail');
+    const pygmalionPasswordInput = document.getElementById('settingsPygmalionPassword');
+    const pygmalionRememberCredsCheckbox = document.getElementById('settingsPygmalionRememberCredentials');
+    const togglePygmalionPasswordVisibility = document.getElementById('togglePygmalionPasswordVisibility');
+    const pygmalionPluginBanner = document.getElementById('pygmalionPluginBanner');
+    const pygmalionSettingsFields = document.getElementById('pygmalionSettingsFields');
+    const ctCookieInput = document.getElementById('settingsCtCookie');
+    const ctPluginBanner = document.getElementById('ctPluginBanner');
+    const ctSettingsFields = document.getElementById('ctSettingsFields');
     const minScoreSlider = document.getElementById('settingsMinScore');
     const minScoreValue = document.getElementById('minScoreValue');
     
@@ -747,6 +791,13 @@ function setupSettingsModal() {
     settingsBtn.onclick = () => {
         chubTokenInput.value = getSetting('chubToken') || '';
         rememberTokenCheckbox.checked = getSetting('chubRememberToken') || false;
+        if (pygmalionEmailInput) pygmalionEmailInput.value = getSetting('pygmalionEmail') || '';
+        if (pygmalionPasswordInput) pygmalionPasswordInput.value = getSetting('pygmalionPassword') || '';
+        if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = getSetting('pygmalionRememberCredentials') || false;
+        if (ctCookieInput) ctCookieInput.value = getSetting('ctCookie') || '';
+        
+        // Check cl-helper plugin availability for provider sections
+        checkClHelperPlugin(pygmalionPluginBanner, pygmalionSettingsFields, ctPluginBanner, ctSettingsFields);
         
         const minScore = getSetting('duplicateMinScore') || 35;
         minScoreSlider.value = minScore;
@@ -868,6 +919,14 @@ function setupSettingsModal() {
         toggleTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
     };
     
+    if (togglePygmalionPasswordVisibility && pygmalionPasswordInput) {
+        togglePygmalionPasswordVisibility.onclick = () => {
+            const isPassword = pygmalionPasswordInput.type === 'password';
+            pygmalionPasswordInput.type = isPassword ? 'text' : 'password';
+            togglePygmalionPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+    
     // Slider value display
     minScoreSlider.oninput = () => {
         minScoreValue.textContent = minScoreSlider.value;
@@ -893,6 +952,10 @@ function setupSettingsModal() {
         setSettings({
             chubToken: chubTokenInput.value || null,
             chubRememberToken: rememberTokenCheckbox.checked,
+            pygmalionEmail: pygmalionEmailInput ? (pygmalionEmailInput.value || null) : null,
+            pygmalionPassword: pygmalionPasswordInput ? (pygmalionPasswordInput.value || null) : null,
+            pygmalionRememberCredentials: pygmalionRememberCredsCheckbox ? pygmalionRememberCredsCheckbox.checked : false,
+            ctCookie: ctCookieInput ? (ctCookieInput.value?.trim() || null) : null,
             duplicateMinScore: parseInt(minScoreSlider.value),
             searchInName: searchNameCheckbox.checked,
             searchInTags: searchTagsCheckbox.checked,
@@ -993,6 +1056,10 @@ function setupSettingsModal() {
         // Reset form UI to defaults
         chubTokenInput.value = '';
         rememberTokenCheckbox.checked = false;
+        if (pygmalionEmailInput) pygmalionEmailInput.value = '';
+        if (pygmalionPasswordInput) pygmalionPasswordInput.value = '';
+        if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = false;
+        if (ctCookieInput) ctCookieInput.value = '';
         minScoreSlider.value = DEFAULT_SETTINGS.duplicateMinScore;
         minScoreValue.textContent = String(DEFAULT_SETTINGS.duplicateMinScore);
         searchNameCheckbox.checked = DEFAULT_SETTINGS.searchInName;
@@ -1031,9 +1098,11 @@ function setupSettingsModal() {
         
         // Save defaults to storage (preserving token if "remember" was checked)
         const preserveToken = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
+        const preservePygToken = getSetting('pygmalionRememberToken') ? getSetting('pygmalionToken') : null;
         setSettings({
             ...DEFAULT_SETTINGS,
             chubToken: preserveToken,
+            pygmalionToken: preservePygToken,
         });
         
         const searchName = document.getElementById('searchName');
@@ -6416,6 +6485,25 @@ async function openModal(char) {
     // Fetch heavy fields on demand (slim index keeps only grid/search data in memory)
     await hydrateCharacter(char);
 
+    // processAndRender may have replaced activeChar with a new slim object during
+    // the await (non-awaited fetchCharacters(true) from _needsCharacterRefresh).
+    // Transfer hydrated data to the array-linked object so Edit tab etc. stay in sync.
+    if (activeChar !== char && activeChar?.avatar === char.avatar && activeChar._slim) {
+        for (const field of HEAVY_FIELDS) {
+            if (char[field] !== undefined) activeChar[field] = char[field];
+            if (char.data?.[field] !== undefined) {
+                if (!activeChar.data) activeChar.data = {};
+                activeChar.data[field] = char.data[field];
+            }
+        }
+        if (char.data?.extensions) {
+            if (!activeChar.data) activeChar.data = {};
+            activeChar.data.extensions = char.data.extensions;
+        }
+        activeChar._slim = false;
+        char = activeChar;
+    }
+
     // ... existing ... 
     const imgPath = getCharacterAvatarUrl(char.avatar);
     
@@ -10288,6 +10376,12 @@ function initBrowseExpandButtons() {
             openAltGreetingsFullscreen(greetings, charName);
             return;
         }
+        if (sectionId === 'pygCharAltGreetings') {
+            const greetings = window.currentPygAltGreetings || [];
+            const charName = document.getElementById('pygCharName')?.textContent || 'Character';
+            openAltGreetingsFullscreen(greetings, charName);
+            return;
+        }
         openBrowseExpandedView(sectionId, label, iconClass);
     });
 }
@@ -12945,11 +13039,15 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
 
     // Show gallery row if there are gallery characters (disabled when setting off)
     if (galleryCharacters.length > 0 && galleryRow) {
+        const galleryTitle = document.getElementById('importSummaryGalleryTitle');
+        const providerName = galleryCharacters[0]?.provider?.name || 'Provider';
+        if (galleryTitle) galleryTitle.textContent = `${providerName} Gallery Images`;
+
         if (galleryCharacters.length === 1) {
             if (galleryDesc) {
                 galleryDesc.textContent = includeProviderGallery
-                    ? 'Additional artwork available from provider'
-                    : 'Additional artwork available from provider (disabled in settings)';
+                    ? `Additional artwork available from ${providerName}`
+                    : `Additional artwork available from ${providerName} (disabled in settings)`;
             }
         } else {
             if (galleryDesc) {
@@ -18780,7 +18878,10 @@ let preImportResolveCallback = null; // Promise resolver
  * Show the pre-import duplicate warning modal
  * Returns a promise that resolves with the user's choice
  */
-function showPreImportDuplicateWarning(newCharInfo, matches) {
+async function showPreImportDuplicateWarning(newCharInfo, matches) {
+    // Hydrate slim characters so estimateTokens can read heavy fields
+    await Promise.all(matches.map(m => hydrateCharacter(m.char)));
+
     return new Promise((resolve) => {
         preImportPendingChar = newCharInfo;
         preImportMatches = matches;

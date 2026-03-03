@@ -12,6 +12,8 @@ export class BrowseView {
         this.provider = provider;
         this._initialized = false;
         this._modalsInjected = false;
+        this._imageObserver = null;
+        this._dropdownCloseHandler = null;
     }
 
     // ── HTML Rendering ──────────────────────────────────────
@@ -63,13 +65,20 @@ export class BrowseView {
             this.injectModals();
             this.init();
         }
+        // Re-register dropdown dismiss after deactivate removed it
+        if (this._dropdownDismissPairs && !this._dropdownCloseHandler) {
+            this._registerDropdownDismiss(this._dropdownDismissPairs);
+        }
     }
 
     /**
      * Called when leaving this provider's view.
      * Disconnect observers, abort fetches, etc.
+     * Subclasses should call super.deactivate().
      */
-    deactivate() {}
+    deactivate() {
+        this._removeDropdownDismiss();
+    }
 
     // ── Library Lookup ───────────────────────────────────────
 
@@ -85,18 +94,147 @@ export class BrowseView {
      */
     refreshInLibraryBadges() {}
 
-    // ── Image Observer Management ───────────────────────────
+    // ── Image Observer ──────────────────────────────────────
+
+    /**
+     * Grid element IDs this view uses for card rendering.
+     * Used by reconnectImageObserver() to find and re-observe images.
+     * @returns {string[]}
+     */
+    _getImageGridIds() { return []; }
+
+    /**
+     * Create the shared IntersectionObserver (once). Subclasses normally
+     * don't need to call this directly — observeImages() auto-initializes.
+     */
+    _initImageObserver() {
+        if (this._imageObserver) return;
+        this._imageObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const img = entry.target;
+                const realSrc = img.dataset.src;
+                if (realSrc && !img.dataset.failed && img.src !== realSrc) {
+                    img.src = realSrc;
+                }
+            }
+        }, { rootMargin: '600px' });
+    }
+
+    /**
+     * Observe card images in a container for lazy loading.
+     * Calls eagerLoadVisibleImages() first, then batches the rest
+     * through IntersectionObserver.
+     * @param {HTMLElement} container
+     */
+    observeImages(container) {
+        if (!container) return;
+        if (!this._imageObserver) this._initImageObserver();
+        requestAnimationFrame(() => {
+            this.eagerLoadVisibleImages(container);
+            const images = Array.from(
+                container.querySelectorAll('.browse-card-image img')
+            ).filter(img => !img.dataset.observed);
+            if (images.length === 0) return;
+
+            if (images.length > 120) {
+                const batchSize = 80;
+                let index = 0;
+                const observeBatch = () => {
+                    const end = Math.min(index + batchSize, images.length);
+                    for (let i = index; i < end; i++) {
+                        images[i].dataset.observed = '1';
+                        this._imageObserver.observe(images[i]);
+                    }
+                    index = end;
+                    if (index < images.length) requestAnimationFrame(observeBatch);
+                };
+                observeBatch();
+                return;
+            }
+
+            for (const img of images) {
+                img.dataset.observed = '1';
+                this._imageObserver.observe(img);
+            }
+        });
+    }
+
+    /**
+     * Synchronously load images that are already in/near the viewport.
+     * Called at the start of observeImages() for instant display.
+     * @param {HTMLElement} container
+     */
+    eagerLoadVisibleImages(container) {
+        if (!container) return;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+        const preloadBottom = viewportHeight + 700;
+        const images = container.querySelectorAll('.browse-card-image img[data-src]');
+        for (const img of images) {
+            if (img.dataset.failed) continue;
+            const rect = img.getBoundingClientRect();
+            if (rect.bottom > -160 && rect.top < preloadBottom) {
+                const realSrc = img.dataset.src;
+                if (realSrc && img.src !== realSrc) img.src = realSrc;
+            }
+        }
+    }
 
     /**
      * Disconnect the image lazy-load observer.
      */
-    disconnectImageObserver() {}
+    disconnectImageObserver() {
+        this._imageObserver?.disconnect();
+    }
 
     /**
      * Reconnect the image observer after disconnect.
-     * Should re-observe images in the currently visible grid.
+     * Clears data-observed flags and re-observes images in all grid containers.
      */
-    reconnectImageObserver() {}
+    reconnectImageObserver() {
+        for (const gridId of this._getImageGridIds()) {
+            const grid = document.getElementById(gridId);
+            if (!grid) continue;
+            this.eagerLoadVisibleImages(grid);
+            const imgs = grid.querySelectorAll('.browse-card-image img[data-observed]');
+            for (const img of imgs) delete img.dataset.observed;
+            this.observeImages(grid);
+        }
+    }
+
+    // ── Dropdown Dismiss ────────────────────────────────────
+
+    /**
+     * Register a document-level click handler that closes dropdowns when
+     * clicking outside. Replaces per-provider boilerplate.
+     * @param {Array<{dropdownId: string, buttonId: string}>} pairs
+     */
+    _registerDropdownDismiss(pairs) {
+        this._removeDropdownDismiss();
+        this._dropdownDismissPairs = pairs;
+        this._dropdownCloseHandler = (e) => {
+            for (const { dropdownId, buttonId } of pairs) {
+                const dropdown = document.getElementById(dropdownId);
+                const btn = document.getElementById(buttonId);
+                if (dropdown && !dropdown.classList.contains('hidden')) {
+                    if (!dropdown.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) {
+                        dropdown.classList.add('hidden');
+                    }
+                }
+            }
+        };
+        document.addEventListener('click', this._dropdownCloseHandler);
+    }
+
+    /**
+     * Remove the dropdown dismiss handler. Called automatically from deactivate().
+     */
+    _removeDropdownDismiss() {
+        if (this._dropdownCloseHandler) {
+            document.removeEventListener('click', this._dropdownCloseHandler);
+            this._dropdownCloseHandler = null;
+        }
+    }
 
     // ── Mobile Integration ──────────────────────────────────
 

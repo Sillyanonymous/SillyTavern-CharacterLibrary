@@ -220,15 +220,17 @@ async function initModuleSystem() {
     // Providers — must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     try {
-        const [chubMod, jannyMod, chartavernMod] = await Promise.all([
+        const [chubMod, jannyMod, chartavernMod, pygmalionMod] = await Promise.all([
             import('./providers/chub/chub-provider.js'),
             import('./providers/janny/janny-provider.js'),
             import('./providers/chartavern/chartavern-provider.js'),
+            import('./providers/pygmalion/pygmalion-provider.js'),
         ]);
 
         ProviderRegistry.registerProvider(chubMod.default);
         ProviderRegistry.registerProvider(jannyMod.default);
         ProviderRegistry.registerProvider(chartavernMod.default);
+        ProviderRegistry.registerProvider(pygmalionMod.default);
 
         await ProviderRegistry.initProviders(CoreAPI);
         window.ProviderRegistry = ProviderRegistry;

@@ -5,10 +5,10 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
+import { assignGalleryId, importFromPng } from '../provider-utils.js';
 import chartavernBrowseView from './chartavern-browse.js';
 import {
     CT_SITE_BASE,
-    CT_CARDS_CDN,
     fetchWithProxy,
     searchCards,
     fetchCharacterDetail,
@@ -19,6 +19,8 @@ import {
     slugify,
     stripHtml,
     parseTags,
+    checkCtSession,
+    isCtSessionActive,
 } from './chartavern-api.js';
 
 let api = null;
@@ -103,15 +105,6 @@ function buildV2FromSearchHit(hit) {
     };
 }
 
-/**
- * Flatten a V2-wrapped card into a flat field object for diff display.
- */
-function flattenCard(def) {
-    if (!def) return {};
-    if (def.spec === 'chara_card_v2' && def.data) return { ...def.data };
-    return def;
-}
-
 // ========================================
 // PROVIDER CLASS
 // ========================================
@@ -128,6 +121,7 @@ class ChartavernProvider extends ProviderBase {
     // ── Lifecycle ───────────────────────────────────────────
 
     async init(coreAPI) {
+        super.init(coreAPI);
         api = coreAPI;
     }
 
@@ -202,7 +196,7 @@ class ChartavernProvider extends ProviderBase {
         // Find this character via the search API to get the same hit shape the browse view uses
         const slug = path.split('/')[1] || '';
         try {
-            const data = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 });
+            const data = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 }, api?.apiRequest);
             const hits = data?.hits || [];
             const match = hits.find(h => h.path === path);
             if (match) return match;
@@ -273,7 +267,7 @@ class ChartavernProvider extends ProviderBase {
             let detailData = null;
             if (parts.length >= 2) {
                 try {
-                    const detail = await fetchCharacterDetail(parts[0], parts[1]);
+                    const detail = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
                     detailData = detail?.card || null;
                 } catch (_) { /* best-effort */ }
             }
@@ -319,7 +313,7 @@ class ChartavernProvider extends ProviderBase {
 
             // Detail API uses different field names than search: analytics_downloads, tokenTotal.
             // It has no likes/favorites field, so fall back to a search query for that.
-            const data = await fetchCharacterDetail(parts[0], parts[1]);
+            const data = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
             const card = data?.card;
             if (!card) return null;
 
@@ -327,7 +321,7 @@ class ChartavernProvider extends ProviderBase {
             let likes = null;
             try {
                 const slug = parts[1];
-                const searchData = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 });
+                const searchData = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 }, api?.apiRequest);
                 const match = (searchData?.hits || []).find(h => h.path === path);
                 if (match) likes = match.likes ?? null;
             } catch (_) { /* search is best-effort */ }
@@ -350,7 +344,7 @@ class ChartavernProvider extends ProviderBase {
         try {
             const parts = fullPath.split('/');
             if (parts.length < 2) return null;
-            const data = await fetchCharacterDetail(parts[0], parts[1]);
+            const data = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
             return data?.card || null;
         } catch (e) {
             console.error('[ChartavernProvider] fetchMetadata failed:', fullPath, e);
@@ -374,7 +368,7 @@ class ChartavernProvider extends ProviderBase {
                 if (cardData?.data) {
                     // Enrich with detail-API-only fields (tagline, system_prompt, etc.)
                     try {
-                        const detail = await fetchCharacterDetail(parts[0], parts[1]);
+                        const detail = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
                         if (detail?.card) {
                             if (!cardData.data.system_prompt && detail.card.definition_system_prompt)
                                 cardData.data.system_prompt = detail.card.definition_system_prompt;
@@ -390,7 +384,7 @@ class ChartavernProvider extends ProviderBase {
             }
 
             // Fallback: detail API only (alternate_greetings will be empty)
-            const data = await fetchCharacterDetail(parts[0], parts[1]);
+            const data = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
             if (!data?.card) return null;
             return buildV2FromDetail(data.card, parts[0]);
         } catch (e) {
@@ -425,8 +419,16 @@ class ChartavernProvider extends ProviderBase {
 
     // ── Authentication ──────────────────────────────────────
 
-    // Public API, no auth required
-    get hasAuth() { return false; }
+    get hasAuth() { return true; }
+
+    get isAuthenticated() {
+        return isCtSessionActive();
+    }
+
+    openAuthUI() {
+        window.openCtLoginModal?.();
+    }
+
     getAuthHeaders() { return {}; }
 
     // ── URL Handling ────────────────────────────────────────
@@ -448,7 +450,16 @@ class ChartavernProvider extends ProviderBase {
     // ── Settings ────────────────────────────────────────────
 
     getSettings() {
-        return [];
+        return [
+            {
+                key: 'ctCookie',
+                label: 'Session Cookies',
+                type: 'textarea',
+                defaultValue: null,
+                hint: 'Paste your CharacterTavern cookie string from browser DevTools (requires cl-helper plugin)',
+                section: 'Authentication'
+            },
+        ];
     }
 
     // ── Bulk Linking ────────────────────────────────────────
@@ -462,7 +473,7 @@ class ChartavernProvider extends ProviderBase {
     async searchForBulkLink(name, _creator) {
         try {
             // CT search indexes card names/descriptions, not creator usernames
-            const data = await searchCards({ query: name, sort: 'most_popular', page: 1, limit: 15 });
+            const data = await searchCards({ query: name, sort: 'most_popular', page: 1, limit: 15 }, api?.apiRequest);
             return (data?.hits || []).map(hit => this._normalizeSearchResult(hit));
         } catch (e) {
             console.error('[ChartavernProvider] searchForBulkLink error:', e);
@@ -498,7 +509,7 @@ class ChartavernProvider extends ProviderBase {
             // Fetch full details for richer V2 card
             let cardData = null;
             try {
-                const detail = await fetchCharacterDetail(author, slug);
+                const detail = await fetchCharacterDetail(author, slug, api?.apiRequest);
                 if (detail?.card) cardData = detail.card;
             } catch (e) {
                 console.warn('[ChartavernProvider] Detail fetch failed, falling back to hit data:', e.message);
@@ -517,7 +528,7 @@ class ChartavernProvider extends ProviderBase {
                         characterCard.data.tags = parseTags(hitData.tags);
                     } else {
                         try {
-                            const searchData = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 });
+                            const searchData = await searchCards({ query: slug, sort: 'most_popular', page: 1, limit: 10 }, api?.apiRequest);
                             const match = (searchData?.hits || []).find(h => h.path === path);
                             if (match?.tags) characterCard.data.tags = parseTags(match.tags);
                         } catch (_) { /* search fallback is best-effort */ }
@@ -539,15 +550,9 @@ class ChartavernProvider extends ProviderBase {
                 tagline: cardData?.tagline || hitData?.tagline || ''
             };
 
-            // Gallery ID: inherit from replaced character, or generate new
-            if (options.inheritedGalleryId) {
-                characterCard.data.extensions.gallery_id = options.inheritedGalleryId;
-            } else if (api.getSetting?.('uniqueGalleryFolders') && !characterCard.data.extensions.gallery_id) {
-                characterCard.data.extensions.gallery_id = api.generateGalleryId?.();
-            }
+            assignGalleryId(characterCard, options, api);
 
             // Download the PNG card from CDN (already has card data embedded)
-            // We'll re-embed our enriched V2 data into it for the link metadata
             const pngUrl = getCardPngUrl(path);
             let imageBuffer = null;
             try {
@@ -557,8 +562,8 @@ class ChartavernProvider extends ProviderBase {
                 console.warn('[ChartavernProvider] PNG download failed:', e.message);
             }
 
-            // Extract alt greetings + tags from PNG card data (detail API omits alt greetings;
-            // URL imports lack hitData so both fields can be empty)
+            // Extract fields from PNG card data that the detail API omits
+            // (alt greetings, tags, character_book/lorebook)
             if (imageBuffer) {
                 try {
                     const pngCard = api.extractCharacterDataFromPng?.(imageBuffer);
@@ -569,98 +574,22 @@ class ChartavernProvider extends ProviderBase {
                         if (!characterCard.data.tags?.length && pngCard.data.tags?.length) {
                             characterCard.data.tags = pngCard.data.tags;
                         }
+                        if (pngCard.data.character_book && !characterCard.data.character_book) {
+                            characterCard.data.character_book = pngCard.data.character_book;
+                        }
                     }
                 } catch (_) { /* PNG extraction is best-effort */ }
             }
 
-            // Use buffer directly if already PNG (89 50 4E 47 magic), otherwise convert
-            let pngBuffer = null;
-            if (imageBuffer) {
-                const header = new Uint8Array(imageBuffer, 0, 4);
-                const isPng = header[0] === 0x89 && header[1] === 0x50 && header[2] === 0x4E && header[3] === 0x47;
-                if (isPng) {
-                    pngBuffer = imageBuffer;
-                } else {
-                    try {
-                        const blob = new Blob([imageBuffer]);
-                        const bitmap = await createImageBitmap(blob);
-                        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(bitmap, 0, 0);
-                        bitmap.close();
-                        const pngBlob = await canvas.convertToBlob({ type: 'image/png' });
-                        pngBuffer = await pngBlob.arrayBuffer();
-                    } catch (e1) {
-                        try {
-                            pngBuffer = await api.convertImageToPng(imageBuffer);
-                        } catch (e2) {
-                            console.warn('[ChartavernProvider] PNG conversion failed:', e2.message);
-                            pngBuffer = imageBuffer;
-                        }
-                    }
-                }
-                imageBuffer = null;
-            }
-
-            if (!pngBuffer) {
-                // Placeholder
-                const canvas = new OffscreenCanvas(256, 256);
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#333';
-                ctx.fillRect(0, 0, 256, 256);
-                ctx.fillStyle = '#666';
-                ctx.font = '100px sans-serif';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText('?', 128, 128);
-                const blob = await canvas.convertToBlob({ type: 'image/png' });
-                pngBuffer = await blob.arrayBuffer();
-            }
-
-            // Embed our enriched V2 card data into the PNG
-            let embeddedPng = api.embedCharacterDataInPng(pngBuffer, characterCard);
-            pngBuffer = null;
-
-            const safeSlug = slugify(characterName);
-            const fileName = `ct_${safeSlug}.png`;
-            let file = new File([embeddedPng], fileName, { type: 'image/png' });
-            embeddedPng = null;
-
-            let formData = new FormData();
-            formData.append('avatar', file);
-            formData.append('file_type', 'png');
-            file = null;
-
-            const csrfToken = api.getCSRFToken?.();
-            const importResponse = await fetch('/api/characters/import', {
-                method: 'POST',
-                headers: { 'X-CSRF-Token': csrfToken },
-                body: formData
-            });
-            formData = null;
-
-            const responseText = await importResponse.text();
-            if (!importResponse.ok) throw new Error(`Import error: ${responseText}`);
-
-            let result;
-            try { result = JSON.parse(responseText); }
-            catch { throw new Error(`Invalid JSON response: ${responseText}`); }
-            if (result.error) throw new Error('Import failed: Server returned error');
-
-            const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
-            const galleryId = characterCard.data.extensions?.gallery_id || null;
-
-            return {
-                success: true,
-                fileName: result.file_name || fileName,
-                characterName,
-                hasGallery: false,
+            return await importFromPng({
+                characterCard, imageBuffer,
+                fileName: `ct_${slugify(characterName)}.png`,
+                characterName, hasGallery: false,
                 providerCharId: cardData?.id || hitData?.id || null,
                 fullPath: path,
                 avatarUrl: getAvatarUrl(path),
-                embeddedMediaUrls: mediaUrls,
-                galleryId
-            };
+                api
+            });
         } catch (error) {
             console.error(`[ChartavernProvider] importCharacter failed for ${path}:`, error);
             return { success: false, error: error.message };

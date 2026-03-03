@@ -2,11 +2,11 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
+import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
 import {
     JANNY_SEARCH_URL,
     JANNY_IMAGE_BASE,
     JANNY_SITE_BASE,
-    JANNY_FALLBACK_TOKEN,
     TAG_MAP,
     getSearchToken,
     fetchWithProxy,
@@ -23,11 +23,6 @@ const {
     getSetting,
     fetchCharacters,
     fetchAndAddCharacter,
-    convertImageToPng,
-    embedCharacterDataInPng,
-    getCSRFToken,
-    generateGalleryId,
-    findCharacterMediaUrls,
     checkCharacterForDuplicates,
     showPreImportDuplicateWarning,
     deleteCharacter,
@@ -44,7 +39,7 @@ const {
 // CONSTANTS
 // ========================================
 
-const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
+
 
 // ========================================
 // STATE
@@ -58,7 +53,6 @@ let jannyCurrentSearch = '';
 let jannyNsfwEnabled = true;
 let jannySortMode = 'newest';
 let jannySelectedChar = null;
-let jannyImageObserver = null;
 let jannyGridRenderedCount = 0;
 
 // Filter state — mirrors Chub's filter model for parity
@@ -182,16 +176,6 @@ function isCharInLocalLibrary(jannyChar) {
 }
 
 // ========================================
-// HELPERS
-// ========================================
-
-function formatNumber(num) {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toString();
-}
-
-// ========================================
 // CARD RENDERING
 // ========================================
 
@@ -243,84 +227,9 @@ function createJannyCard(hit) {
 // IMAGE OBSERVER
 // ========================================
 
-function initJannyImageObserver() {
-    if (jannyImageObserver) return;
-    jannyImageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const img = entry.target;
-            const realSrc = img.dataset.src;
-            if (realSrc && !img.dataset.failed && img.src !== realSrc) {
-                img.src = realSrc;
-            }
-        }
-    }, { rootMargin: '600px' });
-}
-
-function setupImageObserver() {
-    initJannyImageObserver();
+function observeNewCards() {
     const grid = document.getElementById('jannyGrid');
-    if (grid) observeJannyImages(grid);
-}
-
-function observeJannyImages(container) {
-    if (!jannyImageObserver) initJannyImageObserver();
-    requestAnimationFrame(() => {
-        eagerLoadVisibleJannyImages(container);
-        const images = Array.from(container.querySelectorAll('.browse-card-image img')).filter(img => !img.dataset.observed);
-        if (images.length === 0) return;
-
-        if (images.length > 120) {
-            const batchSize = 80;
-            let index = 0;
-            const observeBatch = () => {
-                const end = Math.min(index + batchSize, images.length);
-                for (let i = index; i < end; i++) {
-                    images[i].dataset.observed = '1';
-                    jannyImageObserver.observe(images[i]);
-                }
-                index = end;
-                if (index < images.length) requestAnimationFrame(observeBatch);
-            };
-            observeBatch();
-            return;
-        }
-
-        for (const img of images) {
-            img.dataset.observed = '1';
-            jannyImageObserver.observe(img);
-        }
-    });
-}
-
-function observeNewCards(startIdx) {
-    const grid = document.getElementById('jannyGrid');
-    if (!grid) return;
-    observeJannyImages(grid);
-}
-
-function eagerLoadVisibleJannyImages(container) {
-    if (!container) return;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const preloadBottom = viewportHeight + 700;
-    const images = container.querySelectorAll('.browse-card-image img[data-src]');
-    for (const img of images) {
-        if (img.dataset.failed) continue;
-        const rect = img.getBoundingClientRect();
-        if (rect.bottom > -160 && rect.top < preloadBottom) {
-            const realSrc = img.dataset.src;
-            if (realSrc && img.src !== realSrc) img.src = realSrc;
-        }
-    }
-}
-
-function reconnectJannyObserver() {
-    const grid = document.getElementById('jannyGrid');
-    if (!grid) return;
-    eagerLoadVisibleJannyImages(grid);
-    const imgs = grid.querySelectorAll('.browse-card-image img[data-observed]');
-    for (const img of imgs) delete img.dataset.observed;
-    observeJannyImages(grid);
+    if (grid) jannyBrowseView.observeImages(grid);
 }
 
 // ========================================
@@ -859,7 +768,6 @@ function updateJannyFiltersButton() {
 
 let delegatesInitialized = false;
 let modalEventsAttached = false;
-let _dropdownCloseHandler = null;
 
 function initJannyView() {
     if (delegatesInitialized) return;
@@ -908,7 +816,10 @@ function initJannyView() {
         if (input) input.value = '';
         if (clearBtn) clearBtn.classList.add('hidden');
         jannyCurrentSearch = '';
+        jannyAuthorFilter = null;
         jannyCurrentPage = 1;
+        const authorBanner = document.getElementById('jannyAuthorBanner');
+        if (authorBanner) authorBanner.classList.add('hidden');
         loadCharacters(false);
     });
 
@@ -1015,23 +926,11 @@ function initJannyView() {
         loadCharacters(false);
     });
 
-    // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
-    if (_dropdownCloseHandler) document.removeEventListener('click', _dropdownCloseHandler);
-    _dropdownCloseHandler = (e) => {
-        const tagsBtn = document.getElementById('jannyTagsBtn');
-        if (tagsDropdown && !tagsDropdown.classList.contains('hidden')) {
-            if (!tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
-                tagsDropdown.classList.add('hidden');
-            }
-        }
-        const filtersBtn = document.getElementById('jannyFiltersBtn');
-        if (filtersDropdown && !filtersDropdown.classList.contains('hidden')) {
-            if (!filtersDropdown.contains(e.target) && e.target !== filtersBtn && !filtersBtn?.contains(e.target)) {
-                filtersDropdown.classList.add('hidden');
-            }
-        }
-    };
-    document.addEventListener('click', _dropdownCloseHandler);
+    // Close dropdowns when clicking outside
+    jannyBrowseView._registerDropdownDismiss([
+        { dropdownId: 'jannyTagsDropdown', buttonId: 'jannyTagsBtn' },
+        { dropdownId: 'jannyFiltersDropdown', buttonId: 'jannyFiltersBtn' }
+    ]);
 
     // ── Preview modal events (only attach once — modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
@@ -1224,7 +1123,7 @@ class JannyBrowseView extends BrowseView {
             <!-- Feature Filters -->
             <div class="browse-more-filters" style="position: relative;">
                 <button id="jannyFiltersBtn" class="glass-btn" title="Additional filters">
-                    <i class="fa-solid fa-sliders"></i> Features
+                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
                 </button>
                 <div id="jannyFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
                     <div class="dropdown-section-title">Content:</div>
@@ -1268,8 +1167,8 @@ class JannyBrowseView extends BrowseView {
                 <!-- Author Filter Banner -->
                 <div id="jannyAuthorBanner" class="browse-author-banner hidden">
                     <div class="browse-author-banner-content">
-                        <i class="fa-solid fa-user"></i>
-                        <span>Showing results for <strong id="jannyAuthorBannerName">Author</strong></span>
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <span>Searching for <strong id="jannyAuthorBannerName">Author</strong> <span class="browse-author-banner-hint">(keyword search — may include unrelated results)</span></span>
                     </div>
                     <div class="browse-author-banner-actions">
                         <button id="jannyClearAuthorBtn" class="glass-btn icon-only" title="Clear author filter">
@@ -1378,11 +1277,14 @@ class JannyBrowseView extends BrowseView {
 
     // ── Lifecycle ───────────────────────────────────────────
 
+    _getImageGridIds() { return ['jannyGrid']; }
+
     init() {
         super.init();
         buildLocalLibraryLookup();
         initJannyView();
-        setupImageObserver();
+        const grid = document.getElementById('jannyGrid');
+        if (grid) this.observeImages(grid);
         loadCharacters(false);
     }
 
@@ -1399,10 +1301,10 @@ class JannyBrowseView extends BrowseView {
         super.activate(container, options);
 
         if (wasInitialized && this._initialized) {
-            // Tab re-entry (no DOM recreation) — restore delegate flag and refresh
             delegatesInitialized = true;
             buildLocalLibraryLookup();
-            setupImageObserver();
+            const grid = document.getElementById('jannyGrid');
+            if (grid) this.observeImages(grid);
         }
     }
 
@@ -1426,21 +1328,8 @@ class JannyBrowseView extends BrowseView {
 
     deactivate() {
         delegatesInitialized = false;
-        if (_dropdownCloseHandler) {
-            document.removeEventListener('click', _dropdownCloseHandler);
-            _dropdownCloseHandler = null;
-        }
-        if (jannyImageObserver) jannyImageObserver.disconnect();
-    }
-
-    // ── Image Observer (BrowseView contract) ────────────────
-
-    disconnectImageObserver() {
-        if (jannyImageObserver) jannyImageObserver.disconnect();
-    }
-
-    reconnectImageObserver() {
-        reconnectJannyObserver();
+        super.deactivate();
+        this.disconnectImageObserver();
     }
 }
 

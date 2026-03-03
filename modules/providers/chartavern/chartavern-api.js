@@ -7,6 +7,9 @@
 // CONSTANTS
 // ========================================
 
+import { CL_HELPER_PLUGIN_BASE as CL_HELPER_CT_BASE } from '../provider-utils.js';
+export { CL_HELPER_CT_BASE };
+
 export const CT_API_BASE = 'https://character-tavern.com/api';
 export const CT_SITE_BASE = 'https://character-tavern.com';
 export const CT_CARDS_CDN = 'https://cards.character-tavern.com';
@@ -21,32 +24,129 @@ export const CT_SORT_OPTIONS = {
 };
 
 // ========================================
-// NETWORK
+// NETWORK (shared)
 // ========================================
 
-const _proxyOrigins = new Set();
+import { fetchWithProxy } from '../provider-utils.js';
+export { fetchWithProxy };
 
-export async function fetchWithProxy(url, opts = {}) {
-    const origin = new URL(url).origin;
-    if (!_proxyOrigins.has(origin)) {
-        try {
-            const r = await fetch(url, opts);
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r;
-        } catch (_) {
-            _proxyOrigins.add(origin);
-        }
+// ========================================
+// AUTH — cl-helper cookie session
+// ========================================
+
+let ctSessionActive = false;
+
+/**
+ * Check if the cl-helper plugin is reachable.
+ * @param {Function} apiRequest - CoreAPI.apiRequest
+ * @returns {Promise<boolean>}
+ */
+export async function checkCtPluginAvailable(apiRequest) {
+    try {
+        const resp = await apiRequest(`${CL_HELPER_CT_BASE}/health`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return data?.ok === true;
+    } catch {
+        return false;
     }
-    const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);
-    if (!r.ok) {
-        if (r.status === 404) {
-            const t = await r.text();
-            if (t.includes('CORS proxy is disabled'))
-                throw new Error('CORS proxy is disabled in SillyTavern settings');
-        }
-        throw new Error(`HTTP ${r.status}`);
+}
+
+/**
+ * Check if a CT session is active in cl-helper.
+ * @param {Function} apiRequest - CoreAPI.apiRequest
+ * @returns {Promise<boolean>}
+ */
+export async function checkCtSession(apiRequest) {
+    try {
+        const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-session`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        ctSessionActive = data?.active === true;
+        return ctSessionActive;
+    } catch {
+        ctSessionActive = false;
+        return false;
     }
-    return r;
+}
+
+/**
+ * Store cookies in cl-helper for proxied CT requests.
+ * @param {Function} apiRequest
+ * @param {string} cookieString - Raw cookie header value (e.g. "session=abc123")
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+export async function ctSetCookie(apiRequest, cookieString) {
+    try {
+        const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-set-cookie`, 'POST', {
+            cookie: cookieString,
+        });
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            return { ok: false, error: `Server returned ${resp.status}: ${text.substring(0, 100)}` };
+        }
+        const data = await resp.json();
+        if (data?.ok) {
+            ctSessionActive = true;
+            return { ok: true };
+        }
+        return { ok: false, error: data?.error || 'Failed to store cookies' };
+    } catch (err) {
+        return { ok: false, error: err.message || 'Network error' };
+    }
+}
+
+/**
+ * Validate stored CT cookies by making a test request through cl-helper.
+ * Clears session state if cookies are expired/invalid.
+ * @param {Function} apiRequest
+ * @returns {Promise<{valid: boolean, reason?: string}>}
+ */
+export async function ctValidateSession(apiRequest) {
+    try {
+        const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-validate`);
+        if (!resp.ok) return { valid: false, reason: 'validation request failed' };
+        const data = await resp.json();
+        if (!data?.valid) {
+            ctSessionActive = false;
+        }
+        return data;
+    } catch {
+        ctSessionActive = false;
+        return { valid: false, reason: 'network error' };
+    }
+}
+
+/**
+ * Log out from CharacterTavern via cl-helper.
+ * @param {Function} apiRequest
+ */
+export async function ctLogout(apiRequest) {
+    try {
+        await apiRequest(`${CL_HELPER_CT_BASE}/ct-logout`, 'POST');
+    } catch { /* ignore */ }
+    ctSessionActive = false;
+}
+
+/** @returns {boolean} */
+export function isCtSessionActive() {
+    return ctSessionActive;
+}
+
+/**
+ * Fetch a CT API URL, routing through cl-helper proxy when authenticated.
+ * @param {string} url - Full CT API URL (e.g. https://character-tavern.com/api/search/cards?...)
+ * @param {Function} [apiRequest] - CoreAPI.apiRequest (required for proxied requests)
+ * @returns {Promise<Response>}
+ */
+async function ctFetch(url, apiRequest) {
+    if (ctSessionActive && apiRequest) {
+        // Route through cl-helper proxy: strip the CT origin, prepend proxy path
+        const path = url.replace(CT_SITE_BASE, '');
+        const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-proxy${path}`);
+        return resp;
+    }
+    return fetchWithProxy(url);
 }
 
 // ========================================
@@ -56,9 +156,10 @@ export async function fetchWithProxy(url, opts = {}) {
 /**
  * Search characters via /api/search/cards
  * @param {Object} opts
+ * @param {Function} [apiRequest] - CoreAPI.apiRequest for authenticated proxy
  * @returns {Promise<{hits: Array, totalHits: number, totalPages: number, page: number}>}
  */
-export async function searchCards(opts = {}) {
+export async function searchCards(opts = {}, apiRequest) {
     const {
         query = '',
         sort = 'most_popular',
@@ -93,7 +194,10 @@ export async function searchCards(opts = {}) {
     }
 
     const url = `${CT_API_BASE}/search/cards?${params}`;
-    const resp = await fetchWithProxy(url);
+    const resp = await ctFetch(url, apiRequest);
+    if (!resp.ok) {
+        throw new Error(`CT search returned HTTP ${resp.status}`);
+    }
     return resp.json();
 }
 
@@ -101,11 +205,15 @@ export async function searchCards(opts = {}) {
  * Fetch full character details via /api/character/{author}/{slug}
  * @param {string} author
  * @param {string} slug
+ * @param {Function} [apiRequest] - CoreAPI.apiRequest for authenticated proxy
  * @returns {Promise<Object>} { card: {...}, ownerCTId: ... }
  */
-export async function fetchCharacterDetail(author, slug) {
+export async function fetchCharacterDetail(author, slug, apiRequest) {
     const url = `${CT_API_BASE}/character/${encodeURIComponent(author)}/${encodeURIComponent(slug)}`;
-    const resp = await fetchWithProxy(url);
+    const resp = await ctFetch(url, apiRequest);
+    if (!resp.ok) {
+        throw new Error(`CT detail returned HTTP ${resp.status}`);
+    }
     return resp.json();
 }
 
@@ -169,29 +277,10 @@ export function parseCharacterUrl(url) {
 }
 
 // ========================================
-// TEXT UTILITIES
+// TEXT UTILITIES (shared + local)
 // ========================================
 
-export function slugify(name) {
-    return (name || 'character')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .substring(0, 60);
-}
-
-export function stripHtml(html) {
-    if (!html) return '';
-    return html
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .trim();
-}
+export { slugify, stripHtml, formatNumber } from '../provider-utils.js';
 
 /**
  * Normalize tags into an array of strings.
@@ -202,10 +291,4 @@ export function parseTags(tags) {
     if (Array.isArray(tags)) return tags.filter(Boolean);
     if (typeof tags === 'string') return tags.split(/\s+/).filter(Boolean);
     return [];
-}
-
-export function formatNumber(num) {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return String(num);
 }

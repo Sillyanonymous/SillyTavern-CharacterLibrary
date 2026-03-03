@@ -339,11 +339,15 @@ jQuery(async () => {
     
     // Slash command fallback
     if (window.SlashCommandParser) {
-        window.SlashCommandParser.addCommandObject(Interact.SlashCommand.fromProps({
-            name: 'gallery',
-            helpString: 'Open the Character Library',
-            callback: openGallery
-        }));
+        try {
+            window.SlashCommandParser.addCommandObject(window.SlashCommandParser.SlashCommand?.fromProps?.({
+                name: 'gallery',
+                helpString: 'Open the Character Library',
+                callback: openGallery
+            }) ?? { name: 'gallery', callback: openGallery, helpString: 'Open the Character Library' });
+        } catch (e) {
+            console.warn('[CharLibrary] Could not register /gallery slash command:', e.message);
+        }
     }
     
     // ==============================================

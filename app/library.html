@@ -7,9 +7,9 @@
     <link rel="stylesheet" href="library.css?v=48">
     <link rel="stylesheet" href="library-mobile.css?v=1" media="screen and (max-width: 768px)">
     <!-- Font Awesome for Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <!-- DOMPurify for HTML sanitization -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" integrity="sha384-cwS6YdhLI7XS60eoDiC+egV0qHp8zI+Cms46R0nbn8JrmoAzV9uFL60etMZhAnSu" crossorigin="anonymous"></script>
 </head>
 <body>
     <div class="app-container">
@@ -697,14 +697,14 @@
                         </div>
                     </div>
                     
-                    <!-- Row for ChubAI Gallery (second) -->
+                    <!-- Row for Provider Gallery (second) -->
                     <div id="importSummaryGalleryRow" class="import-summary-row hidden">
                         <div class="import-summary-row-icon">
                             <i class="fa-solid fa-images"></i>
                         </div>
                         <div class="import-summary-row-info">
-                            <span class="import-summary-row-title">ChubAI Gallery Images</span>
-                            <span id="importSummaryGalleryDesc" class="import-summary-row-desc">Additional artwork available on ChubAI</span>
+                            <span id="importSummaryGalleryTitle" class="import-summary-row-title">Gallery Images</span>
+                            <span id="importSummaryGalleryDesc" class="import-summary-row-desc">Additional artwork available from provider</span>
                         </div>
                     </div>
                 </div>
@@ -1418,7 +1418,7 @@ https://jannyai.com/characters/uuid_slug
                         </div>
 
                         <!-- ChubAI provider settings -->
-                        <details class="settings-provider-section" open>
+                        <details class="settings-provider-section">
                             <summary>
                                 <i class="fa-solid fa-cloud-arrow-down provider-icon"></i> ChubAI
                                 <i class="fa-solid fa-chevron-right provider-chevron"></i>
@@ -1449,6 +1449,74 @@ https://jannyai.com/characters/uuid_slug
                                             <input type="checkbox" id="settingsChubUseV4Api"> Use V4 Git API for update checks (debug)
                                         </label>
                                         <span class="settings-hint">Uses the Git repository's card.json instead of the metadata API. Slower and may fail for some characters. Lorebooks from linked projects always use V4 regardless.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- Pygmalion provider settings -->
+                        <details class="settings-provider-section" id="settingsPygmalionSection">
+                            <summary>
+                                <i class="fa-solid fa-fire provider-icon"></i> Pygmalion
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="cl-helper-banner cl-hidden" id="pygmalionPluginBanner">
+                                    <i class="fa-solid fa-puzzle-piece"></i>
+                                    <div>
+                                        <strong>cl-helper plugin required</strong>
+                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group" id="pygmalionSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-sign-in-alt"></i> Login</div>
+                                    <div class="settings-row">
+                                        <label for="settingsPygmalionEmail">Email:</label>
+                                        <div class="settings-input-group">
+                                            <input type="email" id="settingsPygmalionEmail" placeholder="your-email@example.com" autocomplete="email">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsPygmalionPassword">Password:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsPygmalionPassword" placeholder="Your Pygmalion password" autocomplete="current-password" data-sensitive="true">
+                                            <button id="togglePygmalionPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>
+                                            <input type="checkbox" id="settingsPygmalionRememberCredentials"> Remember credentials (auto-refresh token)
+                                        </label>
+                                        <span class="settings-hint">Credentials are stored locally and used to log in via the cl-helper server plugin. Never sent to third parties.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- CharacterTavern provider settings -->
+                        <details class="settings-provider-section" id="settingsCtSection">
+                            <summary>
+                                <i class="fa-solid fa-mug-hot provider-icon"></i> CharacterTavern
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="cl-helper-banner cl-hidden" id="ctPluginBanner">
+                                    <i class="fa-solid fa-puzzle-piece"></i>
+                                    <div>
+                                        <strong>cl-helper plugin required</strong>
+                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group" id="ctSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-cookie-bite"></i> Session Cookies</div>
+                                    <div class="settings-row">
+                                        <label for="settingsCtCookie">Cookie String:</label>
+                                        <div class="settings-input-group">
+                                            <textarea id="settingsCtCookie" class="glass-input" rows="2" placeholder="session=YOUR_VALUE_HERE" style="font-family: monospace; font-size: 12px; resize: vertical;" data-sensitive="true"></textarea>
+                                        </div>
+                                        <span class="settings-hint">Paste your session cookie from DevTools → Application → Cookies. Expires after ~10 days. Required for NSFW content visibility.</span>
                                     </div>
                                 </div>
                             </div>
@@ -1680,7 +1748,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.5.1</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.5.3</span>
                             </div>
                         </div>
                     </div>

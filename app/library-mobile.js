@@ -725,11 +725,13 @@
         charRefresh.appendChild(charRefreshBtn);
         charSection.appendChild(charRefresh);
 
-        // ===== CHUBAI SECTION =====
-        const chubSection = document.createElement('div');
-        chubSection.className = 'mobile-settings-view-section';
-        chubSection.dataset.view = 'online';
-        body.appendChild(chubSection);
+        // ===== MODE-TOGGLE PROVIDER SECTION (Chub, Pyg, any provider with hasModeToggle) =====
+        const modeToggleSection = document.createElement('div');
+        modeToggleSection.className = 'mobile-settings-view-section';
+        modeToggleSection.dataset.view = 'online';
+        body.appendChild(modeToggleSection);
+
+        let _lastModeToggleProviderId = null;
 
         // Mode toggle (Browse / Following)
         const modeSection = createSection('Mode');
@@ -740,123 +742,134 @@
         const followChip = createChip('<i class="fa-solid fa-users"></i> Following');
         browseChip.classList.add('active');
 
-        function syncChubMode() {
-            const realBtns = document.querySelectorAll('.chub-view-btn');
-            realBtns.forEach(b => {
-                if (b.dataset.chubView === 'browse') {
-                    browseChip.classList.toggle('active', b.classList.contains('active'));
-                } else if (b.dataset.chubView === 'timeline') {
-                    followChip.classList.toggle('active', b.classList.contains('active'));
-                }
-            });
+        function getIds() {
+            return window.ProviderRegistry?.getActiveMobileFilterIds?.();
         }
 
-        function syncChubSort() {
+        function syncMode() {
+            const ids = getIds();
+            if (!ids?.modeBrowseSelector) return;
+            const browseBtn = document.querySelector(ids.modeBrowseSelector);
+            const followBtn = document.querySelector(ids.modeFollowSelector);
+            if (browseBtn) browseChip.classList.toggle('active', browseBtn.classList.contains('active'));
+            if (followBtn) followChip.classList.toggle('active', followBtn.classList.contains('active'));
+        }
+
+        function syncSort() {
             const isFollowing = followChip.classList.contains('active');
-            chubBrowseSortSelect.style.display = isFollowing ? 'none' : '';
-            chubFollowSortSelect.style.display = isFollowing ? '' : 'none';
+            mtBrowseSortSelect.style.display = isFollowing ? 'none' : '';
+            mtFollowSortSelect.style.display = isFollowing ? '' : 'none';
         }
 
         browseChip.addEventListener('click', () => {
-            const realBtn = document.querySelector('.chub-view-btn[data-chub-view="browse"]');
-            if (realBtn) { realBtn.click(); setTimeout(() => { syncChubMode(); syncChubSort(); }, 100); }
+            const ids = getIds();
+            const realBtn = ids?.modeBrowseSelector ? document.querySelector(ids.modeBrowseSelector) : null;
+            if (realBtn) { realBtn.click(); setTimeout(() => { syncMode(); syncSort(); }, 100); }
         });
         followChip.addEventListener('click', () => {
-            const realBtn = document.querySelector('.chub-view-btn[data-chub-view="timeline"]');
-            if (realBtn) { realBtn.click(); setTimeout(() => { syncChubMode(); syncChubSort(); }, 100); }
+            const ids = getIds();
+            const realBtn = ids?.modeFollowSelector ? document.querySelector(ids.modeFollowSelector) : null;
+            if (realBtn) { realBtn.click(); setTimeout(() => { syncMode(); syncSort(); }, 100); }
         });
 
         modeRow.appendChild(browseChip);
         modeRow.appendChild(followChip);
         modeSection.appendChild(modeRow);
-        chubSection.appendChild(modeSection);
+        modeToggleSection.appendChild(modeSection);
 
-        // Sort — two selects: Browse preset + Following sort, toggled by mode
-        // Options are populated lazily when the sheet opens (filter bar may not exist at setup time)
-        const chubSortSection = createSection('Sort By');
+        // Sort — two selects: Browse sort + Following sort, toggled by mode
+        const mtSortSection = createSection('Sort By');
 
-        const chubBrowseSortSelect = document.createElement('select');
-        chubBrowseSortSelect.className = 'mobile-settings-select';
-        chubBrowseSortSelect.addEventListener('change', () => {
-            const real = document.getElementById('chubDiscoveryPreset');
+        const mtBrowseSortSelect = document.createElement('select');
+        mtBrowseSortSelect.className = 'mobile-settings-select';
+        mtBrowseSortSelect.addEventListener('change', () => {
+            const ids = getIds();
+            const real = ids?.sort ? document.getElementById(ids.sort) : null;
             if (real) {
-                real.value = chubBrowseSortSelect.value;
+                real.value = mtBrowseSortSelect.value;
                 real.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
-        chubSortSection.appendChild(chubBrowseSortSelect);
+        mtSortSection.appendChild(mtBrowseSortSelect);
 
-        const chubFollowSortSelect = document.createElement('select');
-        chubFollowSortSelect.className = 'mobile-settings-select';
-        chubFollowSortSelect.style.display = 'none';
-        chubFollowSortSelect.addEventListener('change', () => {
-            const real = document.getElementById('chubTimelineSortHeader');
+        const mtFollowSortSelect = document.createElement('select');
+        mtFollowSortSelect.className = 'mobile-settings-select';
+        mtFollowSortSelect.style.display = 'none';
+        mtFollowSortSelect.addEventListener('change', () => {
+            const ids = getIds();
+            const real = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
             if (real) {
-                real.value = chubFollowSortSelect.value;
+                real.value = mtFollowSortSelect.value;
                 real.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
-        chubSortSection.appendChild(chubFollowSortSelect);
-        chubSection.appendChild(chubSortSection);
+        mtSortSection.appendChild(mtFollowSortSelect);
+        modeToggleSection.appendChild(mtSortSection);
 
         // Filters row (Tags, Features, NSFW)
-        const chubFilterSection = createSection('Filters');
-        const chubFilterRow = document.createElement('div');
-        chubFilterRow.className = 'mobile-settings-row';
-        chubFilterRow.style.flexWrap = 'wrap';
+        const mtFilterSection = createSection('Filters');
+        const mtFilterRow = document.createElement('div');
+        mtFilterRow.className = 'mobile-settings-row';
+        mtFilterRow.style.flexWrap = 'wrap';
 
-        const chubTagsChip = createChip('<i class="fa-solid fa-tags"></i> Tags');
-        chubTagsChip.addEventListener('click', () => {
-            const realBtn = document.getElementById('chubTagsBtn');
+        const mtTagsChip = createChip('<i class="fa-solid fa-tags"></i> Tags');
+        mtTagsChip.addEventListener('click', () => {
+            const ids = getIds();
+            const realBtn = ids?.tags ? document.getElementById(ids.tags) : null;
             if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
         });
 
-        const chubFeaturesChip = createChip('<i class="fa-solid fa-sliders"></i> Features');
-        chubFeaturesChip.addEventListener('click', () => {
-            const realBtn = document.getElementById('chubFiltersBtn');
+        const mtFeaturesChip = createChip('<i class="fa-solid fa-sliders"></i> Features');
+        mtFeaturesChip.addEventListener('click', () => {
+            const ids = getIds();
+            const realBtn = ids?.filters ? document.getElementById(ids.filters) : null;
             if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
         });
 
-        const chubNsfwChip = createChip('<i class="fa-solid fa-shield-halved"></i> SFW Only');
-        function syncNsfwState() {
-            const realBtn = document.getElementById('chubNsfwToggle');
+        const mtNsfwChip = createChip('<i class="fa-solid fa-shield-halved"></i> SFW Only');
+        function syncMtNsfwState() {
+            const ids = getIds();
+            const realBtn = ids?.nsfw ? document.getElementById(ids.nsfw) : null;
             if (realBtn) {
                 const span = realBtn.querySelector('span');
                 const label = span ? span.textContent.trim() : 'SFW Only';
-                chubNsfwChip.innerHTML = '<i class="fa-solid fa-shield-halved"></i> ' + label;
-                chubNsfwChip.classList.toggle('active', realBtn.classList.contains('active'));
+                mtNsfwChip.innerHTML = '<i class="fa-solid fa-shield-halved"></i> ' + label;
+                mtNsfwChip.classList.toggle('active', realBtn.classList.contains('active'));
             }
         }
-        chubNsfwChip.addEventListener('click', () => {
-            const realBtn = document.getElementById('chubNsfwToggle');
-            if (realBtn) { realBtn.click(); setTimeout(syncNsfwState, 100); }
+        mtNsfwChip.addEventListener('click', () => {
+            const ids = getIds();
+            const realBtn = ids?.nsfw ? document.getElementById(ids.nsfw) : null;
+            if (realBtn) { realBtn.click(); setTimeout(syncMtNsfwState, 100); }
         });
 
-        chubFilterRow.appendChild(chubTagsChip);
-        chubFilterRow.appendChild(chubFeaturesChip);
-        chubFilterRow.appendChild(chubNsfwChip);
-        chubFilterSection.appendChild(chubFilterRow);
-        chubSection.appendChild(chubFilterSection);
+        mtFilterRow.appendChild(mtTagsChip);
+        mtFilterRow.appendChild(mtFeaturesChip);
+        mtFilterRow.appendChild(mtNsfwChip);
+        mtFilterSection.appendChild(mtFilterRow);
+        modeToggleSection.appendChild(mtFilterSection);
 
-        // Account + Refresh row
-        const chubActionsSection = createSection('');
-        const chubActionsRow = document.createElement('div');
-        chubActionsRow.className = 'mobile-settings-row';
+        // Refresh
+        const mtActionsSection = createSection('');
+        const mtActionsRow = document.createElement('div');
+        mtActionsRow.className = 'mobile-settings-row';
 
-        const chubRefreshChip = createChip('<i class="fa-solid fa-sync"></i> Refresh');
-        chubRefreshChip.style.width = '100%';
-        chubRefreshChip.addEventListener('click', () => {
-            const realBtn = document.getElementById('refreshChubBtn');
+        const mtRefreshChip = createChip('<i class="fa-solid fa-sync"></i> Refresh');
+        mtRefreshChip.style.width = '100%';
+        mtRefreshChip.addEventListener('click', () => {
+            const ids = getIds();
+            const realBtn = ids?.refresh ? document.getElementById(ids.refresh) : null;
             if (realBtn) { realBtn.click(); close(); }
         });
 
-        chubActionsRow.appendChild(chubRefreshChip);
-        chubActionsSection.appendChild(chubActionsRow);
-        chubSection.appendChild(chubActionsSection);
+        mtActionsRow.appendChild(mtRefreshChip);
+        mtActionsSection.appendChild(mtActionsRow);
+        modeToggleSection.appendChild(mtActionsSection);
 
-        // ===== GENERIC PROVIDER SECTION (Janny, CT, future providers) =====
+        // ===== GENERIC PROVIDER SECTION (no mode toggle — Janny, CT, future providers) =====
         const genericSection = document.createElement('div');
         genericSection.className = 'mobile-settings-view-section';
+        genericSection.dataset.view = 'online';
         genericSection.style.display = 'none';
 
         const genericProviderLabel = document.createElement('div');
@@ -934,7 +947,7 @@
         });
         genericActionsSection.appendChild(genericRefreshChip);
         genericSection.appendChild(genericActionsSection);
-        chubSection.appendChild(genericSection);
+        body.appendChild(genericSection);
 
         // ===== CHATS SECTION =====
         const chatsSection = document.createElement('div');
@@ -1024,11 +1037,8 @@
                 const hasModeToggle = reg?.activeProviderHasModeToggle?.() || false;
                 const ids = reg?.getActiveMobileFilterIds?.();
 
-                // Toggle mode-toggle provider section vs generic controls
-                modeSection.style.display = hasModeToggle ? '' : 'none';
-                chubSortSection.style.display = hasModeToggle ? '' : 'none';
-                chubFilterSection.style.display = hasModeToggle ? '' : 'none';
-                chubActionsSection.style.display = hasModeToggle ? '' : 'none';
+                // Toggle mode-toggle section vs generic section
+                modeToggleSection.style.display = hasModeToggle ? '' : 'none';
                 genericSection.style.display = hasModeToggle ? 'none' : '';
 
                 if (!hasModeToggle) {
@@ -1044,30 +1054,35 @@
                 }
 
                 if (hasModeToggle) {
-                    const realChubSort = ids?.sort ? document.getElementById(ids.sort) : null;
-                    if (realChubSort) {
-                        if (chubBrowseSortSelect.options.length === 0) {
-                            chubBrowseSortSelect.innerHTML = realChubSort.innerHTML;
+                    const realBrowseSort = ids?.sort ? document.getElementById(ids.sort) : null;
+                    if (realBrowseSort) {
+                        const curProviderId = reg?.getActiveProvider?.()?.id;
+                        if (curProviderId !== _lastModeToggleProviderId) {
+                            mtBrowseSortSelect.innerHTML = realBrowseSort.innerHTML;
+                            _lastModeToggleProviderId = curProviderId;
                         }
-                        chubBrowseSortSelect.value = realChubSort.value;
+                        mtBrowseSortSelect.value = realBrowseSort.value;
                     }
 
                     const realTimelineSort = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
                     if (realTimelineSort) {
-                        if (chubFollowSortSelect.options.length === 0) {
+                        const curProviderId = reg?.getActiveProvider?.()?.id;
+                        if (mtFollowSortSelect.options.length === 0 || mtFollowSortSelect.dataset.providerId !== curProviderId) {
+                            mtFollowSortSelect.innerHTML = '';
                             Array.from(realTimelineSort.options).forEach(opt => {
                                 const o = document.createElement('option');
                                 o.value = opt.value;
                                 o.textContent = opt.textContent;
-                                chubFollowSortSelect.appendChild(o);
+                                mtFollowSortSelect.appendChild(o);
                             });
+                            mtFollowSortSelect.dataset.providerId = curProviderId;
                         }
-                        chubFollowSortSelect.value = realTimelineSort.value;
+                        mtFollowSortSelect.value = realTimelineSort.value;
                     }
 
-                    syncChubMode();
-                    syncNsfwState();
-                    syncChubSort();
+                    syncMode();
+                    syncMtNsfwState();
+                    syncSort();
                 }
             } else if (activeView === 'chats') {
                 syncGrouping();
