@@ -97,7 +97,6 @@ async function searchJanny(opts = {}) {
         relevant: []
     };
     let sortArr = sortMap[sort] || sortMap.newest;
-    if (sort === 'relevant' && !search) sortArr = sortMap.newest;
 
     const body = {
         queries: [{
@@ -111,10 +110,13 @@ async function searchJanny(opts = {}) {
             highlightPreTag: '__ais-highlight__',
             highlightPostTag: '__/ais-highlight__',
             hitsPerPage: limit,
-            page,
-            sort: sortArr
+            page
         }]
     };
+
+    if (sortArr.length > 0) {
+        body.queries[0].sort = sortArr;
+    }
 
     const token = await getSearchToken();
     const headers = {
@@ -842,6 +844,11 @@ function initJannyView() {
     on('jannySortSelect', 'change', () => {
         const el = document.getElementById('jannySortSelect');
         if (el) jannySortMode = el.value;
+
+        // Sync search input if user typed without pressing Enter
+        const input = document.getElementById('jannySearchInput');
+        if (input) jannyCurrentSearch = input.value.trim();
+
         jannyCurrentPage = 1;
         loadCharacters(false);
     });
@@ -1081,15 +1088,15 @@ class JannyBrowseView extends BrowseView {
             <div class="browse-sort-container">
                 <select id="jannySortSelect" class="glass-select" title="Sort order">
                     <optgroup label="Date">
-                        <option value="newest" selected>🆕 Newest</option>
-                        <option value="oldest">🕐 Oldest</option>
+                        <option value="newest" ${jannySortMode === 'newest' ? 'selected' : ''}>🆕 Newest</option>
+                        <option value="oldest" ${jannySortMode === 'oldest' ? 'selected' : ''}>🕐 Oldest</option>
                     </optgroup>
                     <optgroup label="Tokens">
-                        <option value="tokens_desc">📊 Most Tokens</option>
-                        <option value="tokens_asc">📊 Least Tokens</option>
+                        <option value="tokens_desc" ${jannySortMode === 'tokens_desc' ? 'selected' : ''}>📊 Most Tokens</option>
+                        <option value="tokens_asc" ${jannySortMode === 'tokens_asc' ? 'selected' : ''}>📊 Least Tokens</option>
                     </optgroup>
                     <optgroup label="Search">
-                        <option value="relevant">🔍 Relevance</option>
+                        <option value="relevant" ${jannySortMode === 'relevant' ? 'selected' : ''}>🔍 Relevance</option>
                     </optgroup>
                 </select>
             </div>

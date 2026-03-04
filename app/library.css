@@ -6318,7 +6318,8 @@ details.settings-provider-section > .settings-provider-body {
 }
 
 .settings-input-group input[type="password"],
-.settings-input-group input[type="text"] {
+.settings-input-group input[type="text"],
+.settings-input-group input[type="email"] {
     flex: 1;
     padding: 8px 12px;
     background: rgba(0, 0, 0, 0.3);
@@ -6331,6 +6332,49 @@ details.settings-provider-section > .settings-provider-body {
 .settings-input-group input:focus {
     outline: none;
     border-color: var(--accent);
+}
+
+/* @canonical settings-verify-btn */
+.settings-verify-btn {
+    width: 38px;
+    height: 38px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.85rem;
+    padding: 0;
+    align-self: flex-start;
+    margin-top: 1px;
+}
+.settings-verify-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+.settings-verify-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+.settings-verify-btn.success {
+    background: rgba(76, 175, 80, 0.15) !important;
+    border-color: rgba(76, 175, 80, 0.5) !important;
+    color: #4CAF50 !important;
+}
+.settings-verify-btn.error {
+    background: rgba(244, 67, 54, 0.15) !important;
+    border-color: rgba(244, 67, 54, 0.5) !important;
+    color: #F44336 !important;
+}
+.settings-input-group input + .settings-verify-btn {
+    align-self: center;
+    margin-top: 0;
 }
 
 /* Color picker input group */

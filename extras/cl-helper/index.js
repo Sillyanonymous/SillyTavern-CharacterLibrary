@@ -124,6 +124,18 @@ export async function init(router) {
                 const hits = data?.hits || [];
                 // Authenticated sessions return NSFW results (isNSFW=true, contentWarnings populated)
                 const hasNsfw = hits.some(h => h.isNSFW === true);
+                
+                // Check if server rejected the cookie (by setting it to empty/expired)
+                const setCookie = response.headers.get('set-cookie');
+                const isRejected = setCookie && (setCookie.includes('session=;') || setCookie.includes('Max-Age=0'));
+                
+                if (isRejected) {
+                    console.warn('[cl-helper] CT session rejected (Set-Cookie deletion detected)');
+                    ctSessionCookies = null; // Clear our invalid cookie
+                    res.json({ valid: false, reason: 'Session rejected/expired by server' });
+                    return;
+                }
+
                 console.log(`[cl-helper] CT validate: ${hits.length} hits, totalHits=${data?.totalHits}, hasNSFW=${hasNsfw}`);
                 res.json({ valid: true, hasNsfw });
             } else if (response.status === 403) {

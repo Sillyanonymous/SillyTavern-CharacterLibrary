@@ -21,6 +21,8 @@ import {
     parseTags,
     checkCtSession,
     isCtSessionActive,
+    ctSetCookie,
+    ctValidateSession,
 } from './chartavern-api.js';
 
 let api = null;
@@ -641,4 +643,15 @@ class ChartavernProvider extends ProviderBase {
 }
 
 const chartavernProvider = new ChartavernProvider();
+
+window.ctValidateSession = async (cookieString) => {
+    if (cookieString) {
+        const setResp = await ctSetCookie(CoreAPI.apiRequest, cookieString);
+        if (!setResp.ok) {
+            return { valid: false, reason: setResp.error || 'Failed to set cookie' };
+        }
+    }
+    return ctValidateSession(CoreAPI.apiRequest);
+};
+
 export default chartavernProvider;

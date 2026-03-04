@@ -1118,6 +1118,110 @@ function setupSettingsModal() {
         
         showToast('Settings restored to defaults', 'success');
     };
+
+    // Session Validation - CharacterTavern
+    const validateCtCookieBtn = document.getElementById('validateCtCookieBtn');
+    if (validateCtCookieBtn && ctCookieInput) {
+        validateCtCookieBtn.onclick = async (e) => {
+            e.preventDefault();
+            validateCtCookieBtn.classList.remove('success', 'error');
+            const originalHtml = '<i class="fa-solid fa-check"></i>';
+            validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateCtCookieBtn.disabled = true;
+
+            try {
+                if (!window.ctValidateSession) {
+                    showToast('Validation module not ready', 'error');
+                    throw new Error('Module not ready');
+                }
+                const result = await window.ctValidateSession(ctCookieInput.value || null);
+                validateCtCookieBtn.classList.remove('success', 'error');
+
+                if (result.valid) {
+                    if (result.hasNsfw) {
+                        showToast('Session Valid! NSFW Access Confirmed.', 'success');
+                        validateCtCookieBtn.classList.add('success');
+                        validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-check-double"></i>';
+                    } else {
+                        showToast('Warning: Session accepted, but NO NSFW access detected.', 'warning');
+                        validateCtCookieBtn.classList.add('error');
+                        validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i>';
+                    }
+                } else {
+                    showToast(`Session invalid: ${result.reason || 'Unknown error'}`, 'error');
+                    validateCtCookieBtn.classList.add('error');
+                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                }
+            } catch (err) {
+                if (!validateCtCookieBtn.classList.contains('error')) {
+                    showToast(`Validation error: ${err.message}`, 'error');
+                    validateCtCookieBtn.classList.add('error');
+                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                }
+            } finally {
+                validateCtCookieBtn.disabled = false;
+                if (validateCtCookieBtn.classList.contains('success')) {
+                    validateCtCookieBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                }
+                setTimeout(() => {
+                    validateCtCookieBtn.classList.remove('success', 'error');
+                    validateCtCookieBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
+    // Session Validation - Pygmalion
+    const validatePygmalionBtn = document.getElementById('validatePygmalionBtn');
+    if (validatePygmalionBtn && pygmalionEmailInput && pygmalionPasswordInput) {
+        validatePygmalionBtn.onclick = async (e) => {
+            e.preventDefault();
+            validatePygmalionBtn.classList.remove('success', 'error');
+            const originalHtml = '<i class="fa-solid fa-check"></i>';
+            validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validatePygmalionBtn.disabled = true;
+
+            try {
+                if (!window.pygmalionLoginCheck) {
+                    showToast('Login module not ready', 'error');
+                    throw new Error('Module not ready');
+                }
+                
+                const email = pygmalionEmailInput.value;
+                const password = pygmalionPasswordInput.value;
+                if (!email || !password) {
+                    showToast('Email and password required', 'warning');
+                    validatePygmalionBtn.classList.add('error');
+                    return;
+                }
+
+                const result = await window.pygmalionLoginCheck(email, password);
+                if (result.ok) {
+                    showToast('Pygmalion login successful!', 'success');
+                    validatePygmalionBtn.classList.add('success');
+                } else {
+                    showToast(`Login failed: ${result.error}`, 'error');
+                    validatePygmalionBtn.classList.add('error');
+                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                }
+            } catch (err) {
+                if (!validatePygmalionBtn.classList.contains('error')) {
+                    showToast(`Login error: ${err.message}`, 'error');
+                    validatePygmalionBtn.classList.add('error');
+                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                }
+            } finally {
+                validatePygmalionBtn.disabled = false;
+                if (validatePygmalionBtn.classList.contains('success')) {
+                    validatePygmalionBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                }
+                setTimeout(() => {
+                    validatePygmalionBtn.classList.remove('success', 'error');
+                    validatePygmalionBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
     
     // Update gallery migration status display
     function updateGalleryMigrationStatus() {

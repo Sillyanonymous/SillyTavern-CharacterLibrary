@@ -271,7 +271,8 @@ function renderGrid(characters, append = false) {
 function updateLoadMore() {
     const loadMore = document.getElementById('pygLoadMore');
     if (loadMore) {
-        loadMore.style.display = pygHasMore && pygCharacters.length > 0 ? 'block' : 'none';
+        // Allow loading more even if current list is empty (can happen if client-side filters hide all results on a page)
+        loadMore.style.display = pygHasMore ? 'block' : 'none';
     }
 }
 
@@ -326,6 +327,18 @@ async function loadCharacters(append = false) {
         pygTotalItems = parseInt(data?.totalItems || '0', 10);
         const totalPages = Math.ceil(pygTotalItems / PAGE_SIZE);
 
+        // Client-side: strict tag filtering (API does substring matching, so "Male" matches "Female")
+        // Only apply in search mode (author mode API doesn't support tags anyway)
+        if (pygIncludeTags.size > 0 && !pygAuthorOwnerId) {
+            const requiredTags = Array.from(pygIncludeTags).map(t => t.toLowerCase());
+            hits = hits.filter(h => {
+                if (!h.tags || !Array.isArray(h.tags)) return false;
+                const charTags = h.tags.map(t => t.toLowerCase());
+                return requiredTags.every(rt => charTags.includes(rt));
+            });
+            debugLog('[PygBrowse] Client-side filtered hits:', hits.length);
+        }
+
         // Collect tags from results
         collectTagsFromResults(hits);
 
@@ -345,10 +358,11 @@ async function loadCharacters(append = false) {
         renderGrid(pygCharacters, append);
 
         if (!append && pygCharacters.length === 0) {
+            const msg = pygHasMore ? 'No valid characters found on this page (API fuzzy match filtered out) — try loading more' : 'No characters found';
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
                     <i class="fa-solid fa-search" style="font-size: 2rem; opacity: 0.5;"></i>
-                    <p style="margin-top: 12px;">No characters found</p>
+                    <p style="margin-top: 12px;">${msg}</p>
                 </div>
             `;
         }
@@ -1348,17 +1362,9 @@ async function openPygTokenModal() {
 
     // Populate stored credentials if any
     const emailInput = document.getElementById('pygLoginEmail');
-    const rememberCreds = document.getElementById('pygRememberCreds');
     if (emailInput && getSetting('pygmalionRememberCredentials')) {
         emailInput.value = getSetting('pygmalionEmail') || '';
-        if (rememberCreds) rememberCreds.checked = true;
     }
-
-    // Populate manual token if in use
-    const tokenInput = document.getElementById('pygApiKeyInput');
-    const rememberToken = document.getElementById('pygRememberKey');
-    if (tokenInput && pygToken) tokenInput.value = pygToken;
-    if (rememberToken) rememberToken.checked = getSetting('pygmalionRememberToken') || false;
 
     const modal = document.getElementById('pygLoginModal');
     if (modal) modal.classList.remove('hidden');
@@ -1416,13 +1422,6 @@ function updateLoginUI() {
         }
     }
 
-    // Logout button
-    const logoutBtn = document.getElementById('pygLogoutBtn');
-    if (logoutBtn) logoutBtn.style.display = pygToken ? '' : 'none';
-
-    // Manual token section — update clear btn
-    const clearBtn = document.getElementById('pygClearKeyBtn');
-    if (clearBtn) clearBtn.style.display = pygToken ? '' : 'none';
 }
 
 // ========================================
@@ -1447,16 +1446,10 @@ async function loginWithCredentials(email, password) {
 
             savePygToken(token);
 
-            const rememberCreds = document.getElementById('pygRememberCreds');
-            if (rememberCreds?.checked) {
-                setSetting('pygmalionEmail', email);
-                setSetting('pygmalionPassword', password);
-                setSetting('pygmalionRememberCredentials', true);
-            } else {
-                setSetting('pygmalionEmail', null);
-                setSetting('pygmalionPassword', null);
-                setSetting('pygmalionRememberCredentials', false);
-            }
+            // Always remember credentials when logging in via this modal
+            setSetting('pygmalionEmail', email);
+            setSetting('pygmalionPassword', password);
+            setSetting('pygmalionRememberCredentials', true);
 
             scheduleTokenRefresh(token, email, password);
 
@@ -1498,12 +1491,8 @@ function logout() {
 
     const emailInput = document.getElementById('pygLoginEmail');
     const passInput = document.getElementById('pygLoginPassword');
-    const tokenInput = document.getElementById('pygApiKeyInput');
-    const rememberCreds = document.getElementById('pygRememberCreds');
     if (emailInput) emailInput.value = '';
     if (passInput) passInput.value = '';
-    if (tokenInput) tokenInput.value = '';
-    if (rememberCreds) rememberCreds.checked = false;
 
     pygNsfwEnabled = false;
     setSetting('pygmalionNsfw', false);
@@ -2117,46 +2106,6 @@ function initPygView() {
             }
         }
 
-        // Logout
-        on('pygLogoutBtn', 'click', logout);
-
-        // Manual token save
-        on('pygSaveKeyBtn', 'click', () => {
-            const input = document.getElementById('pygApiKeyInput');
-            const token = input?.value.trim() || '';
-            if (!token) {
-                showToast('Please enter a token', 'warning');
-                return;
-            }
-            savePygToken(token);
-
-            const rememberCb = document.getElementById('pygRememberKey');
-            if (rememberCb) setSetting('pygmalionRememberToken', rememberCb.checked);
-
-            showToast('Pygmalion token saved!', 'success');
-            closePygTokenModal();
-
-            pygFollowedUserIds = null;
-            pygFollowedUsers = [];
-            pygFollowingCharacters = [];
-        });
-
-        // Manual token clear
-        on('pygClearKeyBtn', 'click', () => {
-            savePygToken(null);
-            clearTokenRefresh();
-            const input = document.getElementById('pygApiKeyInput');
-            if (input) input.value = '';
-            showToast('Pygmalion token cleared', 'info');
-
-            pygFollowedUserIds = null;
-            pygFollowedUsers = [];
-            pygFollowingCharacters = [];
-
-            if (pygViewMode === 'following') {
-                switchPygViewMode('browse');
-            }
-        });
     }
 }
 
@@ -2382,51 +2331,17 @@ class PygmalionBrowseView extends BrowseView {
                             <label for="pygLoginPassword">Password</label>
                             <input type="password" id="pygLoginPassword" class="glass-input" placeholder="Your Pygmalion password" autocomplete="current-password">
                         </div>
-                        <label class="checkbox-label" style="margin-top: 10px;">
-                            <input type="checkbox" id="pygRememberCreds"> Remember credentials (auto-refreshes token)
-                        </label>
 
-                        <div class="chub-login-actions" style="margin-top: 12px;">
-                            <button id="pygLoginBtn" class="action-btn primary" disabled>
+                        <div class="chub-login-actions" style="margin-top: 15px; display: flex; gap: 8px; justify-content: flex-start;">
+                            <button id="pygLoginBtn" class="glass-btn" disabled style="color: #2ecc71; border-color: rgba(46, 204, 113, 0.4);">
                                 <i class="fa-solid fa-sign-in-alt"></i> Log In
                             </button>
-                            <button id="pygLogoutBtn" class="action-btn danger" style="display:none;">
-                                <i class="fa-solid fa-sign-out-alt"></i> Log Out
-                            </button>
-                            <a href="https://pygmalion.chat" target="_blank" class="action-btn secondary">
-                                <i class="fa-solid fa-external-link"></i> Pygmalion Website
+                            <a href="https://pygmalion.chat" target="_blank" class="glass-btn" title="Go to Pygmalion Website">
+                                <i class="fa-solid fa-external-link"></i> Website
                             </a>
                         </div>
                     </div>
                 </div>
-
-                <!-- Manual token (collapsible fallback) -->
-                <details class="pyg-manual-token-section">
-                    <summary>
-                        <i class="fa-solid fa-terminal"></i> Manual token paste (advanced)
-                    </summary>
-                    <div class="pyg-manual-token-body">
-                        <p style="font-size: 0.85rem; color: var(--text-secondary); margin: 0 0 10px 0;">
-                            Paste a session token directly if you can't use email login. Get it from your browser's
-                            DevTools → Application → Local Storage → <code>pygmalion.chat</code> → look for a key named <code>authn</code>.
-                        </p>
-                        <div class="form-group">
-                            <label for="pygApiKeyInput">Session Token</label>
-                            <input type="password" id="pygApiKeyInput" class="glass-input" placeholder="Paste JWT token..." autocomplete="off">
-                        </div>
-                        <label class="checkbox-label" style="margin-top: 8px;">
-                            <input type="checkbox" id="pygRememberKey"> Remember token
-                        </label>
-                        <div class="chub-login-actions" style="margin-top: 10px;">
-                            <button id="pygSaveKeyBtn" class="action-btn primary">
-                                <i class="fa-solid fa-save"></i> Save Token
-                            </button>
-                            <button id="pygClearKeyBtn" class="action-btn secondary" style="display:none;">
-                                <i class="fa-solid fa-trash"></i> Clear Token
-                            </button>
-                        </div>
-                    </div>
-                </details>
             </div>
         </div>
     </div>`;

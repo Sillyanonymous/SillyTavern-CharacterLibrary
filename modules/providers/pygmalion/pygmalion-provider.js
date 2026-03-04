@@ -621,4 +621,45 @@ class PygmalionProvider extends ProviderBase {
 }
 
 const pygmalionProvider = new PygmalionProvider();
+
+// Helper for Settings UI
+window.pygmalionLoginCheck = async (email, password) => {
+    try {
+        if (!email || !password) return { ok: false, error: 'Email and password required' };
+        
+        const CL_HELPER_BASE = '/plugins/cl-helper';
+        
+        const resp = await CoreAPI.apiRequest(`${CL_HELPER_BASE}/pyg-login`, 'POST', {
+            username: email,
+            password: password,
+        });
+
+        if (resp.ok) {
+            const data = await resp.json();
+            const token = data?.result?.id_token || data.token;
+            if (token) return { ok: true, token };
+            return { ok: false, error: 'No token returned' };
+        } 
+        
+        if (resp.status === 404) {
+             return { ok: false, error: 'cl-helper plugin not installed or outdated' };
+        }
+
+        let errorMessage = `HTTP ${resp.status}`;
+        try {
+            const text = await resp.text();
+            try {
+                const errorJson = JSON.parse(text);
+                if (errorJson.error) errorMessage = errorJson.error;
+            } catch {
+                if (text) errorMessage = `${resp.status} ${text}`;
+            }
+        } catch { /* body unreadable */ }
+        
+        return { ok: false, error: errorMessage };
+    } catch (err) {
+        return { ok: false, error: err.message || 'Unknown network error' };
+    }
+}
+
 export default pygmalionProvider;

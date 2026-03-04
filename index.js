@@ -39,10 +39,15 @@ async function getCsrfToken() {
 
 async function openGallery() {
     const baseUrl = getExtensionUrl();
+    // Open window synchronously to satisfy mobile popup-blocker gesture requirements
+    const tab = window.open('about:blank', '_blank');
     const token = await getCsrfToken();
-    // Pass token in URL to be safe, though cookies should work cross-tab on same origin
     const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}`;
-    window.open(url, '_blank');
+    if (tab) {
+        tab.location.href = url;
+    } else {
+        window.open(url, '_blank');
+    }
 }
 
 // ==============================================

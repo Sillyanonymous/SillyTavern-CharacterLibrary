@@ -73,6 +73,7 @@ let ctNsfwEnabled = true;
 let ctSortMode = 'most_popular';
 let ctSelectedChar = null;
 let ctGridRenderedCount = 0;
+let ctLoadToken = 0; // Generation counter for search requests
 
 // Auth state
 let ctPluginAvailable = false;
@@ -294,7 +295,10 @@ function updateLoadMore() {
 // ========================================
 
 async function loadCharacters(append = false) {
-    if (ctIsLoading) return;
+    if (append && ctIsLoading) return;
+
+    // Concurrency control: prevent stale responses from overwriting newer ones
+    const thisToken = ++ctLoadToken;
     ctIsLoading = true;
 
     const grid = document.getElementById('ctGrid');
@@ -331,6 +335,9 @@ async function loadCharacters(append = false) {
         if (ctFilterIsOC) opts.isOC = true;
 
         const data = await searchCards(opts, apiRequest);
+
+        // Stale response check
+        if (thisToken !== ctLoadToken) return;
 
         // Provider was deactivated during the fetch
         if (!delegatesInitialized) return;
@@ -370,6 +377,8 @@ async function loadCharacters(append = false) {
         debugLog('[CTBrowse] Loaded', hits.length, 'characters, page', ctCurrentPage, '/', ctTotalPages);
 
     } catch (err) {
+        if (thisToken !== ctLoadToken) return;
+
         console.error('[CTBrowse] Search error:', err);
         showToast(`CharacterTavern search failed: ${err.message}`, 'error');
         if (!append && grid) {
@@ -386,10 +395,12 @@ async function loadCharacters(append = false) {
             if (retryBtn) retryBtn.addEventListener('click', () => loadCharacters(false));
         }
     } finally {
-        ctIsLoading = false;
-        if (loadMoreBtn) {
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+        if (thisToken === ctLoadToken) {
+            ctIsLoading = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     }
 }
