@@ -5267,6 +5267,8 @@ async function recoverShallowExtensions() {
     window.ProviderRegistry?.refreshActiveBrowseBadges?.();
     window.ProviderRegistry?.hideRecoveryBanner?.();
 
+    document.dispatchEvent(new CustomEvent('cl-extensions-recovered'));
+
     // Re-run gallery sync + audit now that gallery_ids are available.
     // processAndRender() skipped this when it detected shallow data.
     if (recovered > 0 && getSetting('uniqueGalleryFolders')) {
@@ -6004,6 +6006,7 @@ function createCharacterCard(char) {
 // Modal Logic
 const modal = document.getElementById('charModal');
 let activeChar = null;
+let _modalOpenGen = 0;
 
 // Cached tab element references — these are static DOM nodes, queried once
 let _cachedTabButtons = null;
@@ -6584,10 +6587,22 @@ async function openModal(char) {
             });
         }
     }
+
+    // Invalidate any in-flight versions pane operations from a previous character
+    if (window.cleanupVersionsPane) window.cleanupVersionsPane();
+    const vtContent = document.getElementById('versionsTabContent');
+    if (vtContent) vtContent.innerHTML = '';
+
+    const gen = ++_modalOpenGen;
     activeChar = char;
+
+    // Show loading state for avatar while new image loads
+    const modalImg = document.getElementById('modalImage');
+    modalImg.classList.add('loading');
 
     // Fetch heavy fields on demand (slim index keeps only grid/search data in memory)
     await hydrateCharacter(char);
+    if (gen !== _modalOpenGen) return;
 
     // processAndRender may have replaced activeChar with a new slim object during
     // the await (non-awaited fetchCharacters(true) from _needsCharacterRefresh).
@@ -6608,10 +6623,11 @@ async function openModal(char) {
         char = activeChar;
     }
 
-    // ... existing ... 
     const imgPath = getCharacterAvatarUrl(char.avatar);
-    
-    document.getElementById('modalImage').src = imgPath;
+
+    // Load avatar with transition: keep spinner until the correct image is ready
+    modalImg.onload = modalImg.onerror = () => { modalImg.classList.remove('loading'); };
+    modalImg.src = imgPath;
     document.getElementById('modalTitle').innerText = char.name;
     
     // Reset/hide legacy folder button (will be updated when Gallery tab is clicked)
@@ -6770,7 +6786,7 @@ async function openModal(char) {
     
     // Apply media localization asynchronously (if enabled)
     // This updates the already-rendered content with localized URLs
-    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes);
+    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
     
     // Embedded Lorebook
     const characterBook = char.character_book || (char.data ? char.data.character_book : null);
@@ -6994,7 +7010,14 @@ function populateEditPane() {
 
 function closeModal() {
     modal.classList.add('hidden');
+    _modalOpenGen++;
     activeChar = null;
+
+    // Clear avatar so stale image doesn't flash on next open
+    const modalImg = document.getElementById('modalImage');
+    modalImg.removeAttribute('src');
+    modalImg.classList.remove('loading');
+
     // Reset edit lock state
     isEditLocked = true;
     originalValues = {};
@@ -15577,25 +15600,22 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
             // Try direct fetch first
             try {
                 response = await fetch(url, { signal: controller.signal });
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}`);
-                }
             } catch (directError) {
                 if (directError.name === 'AbortError') throw directError;
-                // Direct fetch failed (likely CORS), try proxy
+                // fetch() rejected (CORS/network) — try proxy
                 usedProxy = true;
                 const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
                 response = await fetch(proxyUrl, { signal: controller.signal });
-                
-                if (!response.ok) {
-                    if (response.status === 404) {
-                        const text = await response.text();
-                        if (text.includes('CORS proxy is disabled')) {
-                            throw new Error('CORS blocked and proxy is disabled');
-                        }
+            }
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    const text = await response.text();
+                    if (text.includes('CORS proxy is disabled')) {
+                        throw new Error('CORS blocked and proxy is disabled');
                     }
-                    throw new Error(`Proxy HTTP ${response.status}`);
                 }
+                throw new Error(`${usedProxy ? 'Proxy ' : ''}HTTP ${response.status}`);
             }
         } finally {
             clearTimeout(timeoutId);
@@ -16993,7 +17013,7 @@ function replaceMediaUrlsInText(text, urlMap) {
  * @param {Array} altGreetings - Original alternate greetings
  * @param {string} creatorNotes - Original creator notes
  */
-async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes) {
+async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen) {
     const avatar = char?.avatar;
     const charName = char?.name || char?.data?.name || '';
     // Use proper gallery folder name (may include _uuid suffix)
@@ -17004,6 +17024,7 @@ async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings,
     }
     
     const urlMap = await buildMediaLocalizationMap(folderName, avatar);
+    if (gen !== undefined && gen !== _modalOpenGen) return;
     
     if (Object.keys(urlMap).length === 0) {
         return; // No localized files, nothing to replace

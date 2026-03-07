@@ -101,22 +101,21 @@ export async function fetchChubMetadata(fullPath) {
         let response;
         try {
             response = await fetch(url, { headers: getChubHeaders(true) });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
         } catch (directError) {
             debugLog('[Chub] Direct fetch failed, trying proxy:', directError.message);
             const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
             response = await fetch(proxyUrl, { headers: getChubHeaders(true) });
+        }
 
-            if (!response.ok) {
-                if (response.status === 404) {
-                    const text = await response.text();
-                    if (text.includes('CORS proxy is disabled')) {
-                        console.error('[Chub] CORS blocked and proxy is disabled');
-                        return null;
-                    }
+        if (!response.ok) {
+            if (response.status === 404) {
+                const text = await response.text();
+                if (text.includes('CORS proxy is disabled')) {
+                    console.error('[Chub] CORS blocked and proxy is disabled');
+                    return null;
                 }
-                return null;
             }
+            return null;
         }
 
         const data = await response.json();

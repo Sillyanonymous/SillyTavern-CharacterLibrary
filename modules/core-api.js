@@ -94,7 +94,7 @@ export function setSettings(settingsObj) {
  * @param {Object} char - Character object
  */
 export function openCharacterModal(char) {
-    window.openModal?.(char);
+    return window.openModal?.(char);
 }
 
 /**

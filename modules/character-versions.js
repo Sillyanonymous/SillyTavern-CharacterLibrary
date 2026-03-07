@@ -26,6 +26,7 @@ let currentLocalSnapshots = [];
 let selectedSnapshotId = null;
 let paneDelegationHandler = null;
 let _dialogOpen = false; // re-entry guard for dialogs
+let _renderGen = 0;
 
 // ========================================
 // FILESYSTEM STORAGE VIA ST FILES API
@@ -343,10 +344,7 @@ async function ensureVersionUid(char) {
 async function extractCardData(char) {
     if (char._slim) await CoreAPI.hydrateCharacter(char);
     const src = char.data || char;
-    const out = {};
-    for (const f of CARD_FIELDS) {
-        if (src[f] !== undefined) out[f] = JSON.parse(JSON.stringify(src[f]));
-    }
+    const out = JSON.parse(JSON.stringify(src));
     // Preserve avatar URL for snapshot comparisons
     if (char.avatar) {
         out._avatarUrl = `/characters/${encodeURIComponent(char.avatar)}`;
@@ -372,18 +370,17 @@ export function init(deps) {
 // PUBLIC API
 // ========================================
 
-export function openVersionHistory(char) {
+export async function openVersionHistory(char) {
     if (!char) return;
-    CoreAPI.openCharacterModal(char);
-    setTimeout(() => {
-        const btn = document.querySelector('.tab-btn[data-tab="versions"]');
-        if (btn) btn.click();
-    }, 100);
+    await CoreAPI.openCharacterModal(char);
+    const btn = document.querySelector('.tab-btn[data-tab="versions"]');
+    if (btn) btn.click();
 }
 
 export function renderVersionsPane(container, char) {
     if (!container || !char) return;
 
+    _renderGen++;
     paneContainer = container;
     currentChar = char;
 
@@ -408,6 +405,7 @@ export function renderVersionsPane(container, char) {
 }
 
 export function cleanupVersionsPane() {
+    _renderGen++;
     if (paneContainer && paneDelegationHandler) {
         paneContainer.removeEventListener('click', paneDelegationHandler);
     }
@@ -611,6 +609,7 @@ function handleRefresh() {
 // ========================================
 
 async function loadRemoteVersions() {
+    const gen = _renderGen;
     const status = el('.vt-status');
     const list = el('.vt-list');
     if (!status || !list || !currentProvider || !currentLinkInfo) return;
@@ -629,6 +628,7 @@ async function loadRemoteVersions() {
         list.innerHTML = '';
 
         const versions = await currentProvider.fetchVersionList(currentLinkInfo);
+        if (gen !== _renderGen) return;
 
         if (!versions.length) {
             status.innerHTML = '<i class="fa-solid fa-info-circle"></i> No version history found';
@@ -639,6 +639,7 @@ async function loadRemoteVersions() {
         versionListCache.set(cacheKey, { versions, fetchedAt: Date.now() });
         renderRemoteList(versions);
     } catch (e) {
+        if (gen !== _renderGen) return;
         console.error('[CharVersions] loadRemoteVersions:', e);
         status.innerHTML = `<i class="fa-solid fa-xmark"></i> Error: ${esc(e.message)}`;
     }
@@ -721,6 +722,7 @@ function renderRemoteList(versions) {
 // ========================================
 
 async function loadLocalSnapshots() {
+    const gen = _renderGen;
     const status = el('.vt-status');
     const list = el('.vt-list');
     const preview = el('.vt-preview');
@@ -735,6 +737,7 @@ async function loadLocalSnapshots() {
     try {
         const uid = getVersionUid(currentChar);
         const snaps = await storageGetSnapshots(currentChar.avatar, uid);
+        if (gen !== _renderGen) return;
         currentLocalSnapshots = snaps;
         selectedSnapshotId = null;
 
@@ -745,6 +748,7 @@ async function loadLocalSnapshots() {
         status.innerHTML = `<i class="fa-solid fa-bookmark"></i> ${snaps.length} snapshot${snaps.length !== 1 ? 's' : ''}`;
         renderSnapshotList(snaps);
     } catch (e) {
+        if (gen !== _renderGen) return;
         console.error('[CharVersions] loadLocalSnapshots:', e);
         status.innerHTML = '<i class="fa-solid fa-xmark"></i> Error loading snapshots';
     }
@@ -781,6 +785,7 @@ function renderSnapshotList(snaps) {
 
 async function selectVersion(shortId, fullId) {
     if (!currentProvider) return;
+    const gen = _renderGen;
     selectedVersionRef = shortId;
     selectedSnapshotId = null;
 
@@ -804,6 +809,7 @@ async function selectVersion(shortId, fullId) {
             card = versionDataCache.get(cacheKey);
         } else {
             card = await currentProvider.fetchVersionData(currentLinkInfo, ref);
+            if (gen !== _renderGen) return;
             if (card) {
                 if (versionDataCache.size >= VERSION_DATA_CACHE_MAX)
                     versionDataCache.delete(versionDataCache.keys().next().value);
@@ -825,6 +831,7 @@ async function selectVersion(shortId, fullId) {
  */
 async function selectProviderPageVersion() {
     if (!currentProvider?.supportsRemotePageVersion) return;
+    const gen = _renderGen;
     selectedVersionRef = '__provider_page__';
     selectedSnapshotId = null;
 
@@ -842,6 +849,7 @@ async function selectProviderPageVersion() {
 
     try {
         const card = await currentProvider.fetchRemotePageCard(currentLinkInfo);
+        if (gen !== _renderGen) return;
         if (!card) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Could not load page data</div>'; return; }
         renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
 
@@ -866,6 +874,7 @@ async function selectProviderPageVersion() {
 }
 
 async function selectSnapshot(id) {
+    const gen = _renderGen;
     selectedSnapshotId = id;
     selectedVersionRef = null;
 
@@ -882,7 +891,9 @@ async function selectSnapshot(id) {
 
     try {
         const uid = getVersionUid(currentChar) || await lookupUidByAvatar(currentChar.avatar);
+        if (gen !== _renderGen) return;
         const snap = uid ? await storageGetSnapshot(uid, id) : null;
+        if (gen !== _renderGen) return;
         if (!snap) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Snapshot not found</div>'; return; }
         renderDiffPreview(preview, currentChar?.data || currentChar, snap.data, null);
         resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
@@ -926,6 +937,16 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
         { key: 'character_book', label: 'Embedded Lorebook', icon: 'fa-book' },
     ];
 
+    // Append provider-specific fields (e.g. tagline)
+    // These are optional — only shown when the compare source carries them
+    // (e.g. Provider Page has tagline, but Git card.json does not)
+    if (currentProvider?.getComparableFields) {
+        for (const f of currentProvider.getComparableFields()) {
+            const icon = f.icon ? f.icon.replace(/^fa-solid\s+/, '') : 'fa-file-alt';
+            fields.push({ key: f.path, label: f.label, icon, optional: !!f.optional });
+        }
+    }
+
     let diffCount = 0;
     let html = '';
 
@@ -939,7 +960,10 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
 
     for (const f of fields) {
         const lv = nested(localData, f.key);
-        const rv = compareData[f.key];
+        const rv = nested(compareData, f.key);
+
+        // Optional fields (provider extensions): skip when compare side is empty
+        if (f.optional && (rv == null || rv === '')) continue;
 
         // Lorebook needs semantic comparison (ST adds internal fields like uid, display_index)
         if (f.key === 'character_book') {
@@ -1205,6 +1229,16 @@ async function restoreVersion() {
             }
         }
 
+        // Apply provider-specific fields (e.g. tagline) if present in the source data
+        if (currentProvider?.getComparableFields) {
+            for (const f of currentProvider.getComparableFields()) {
+                const val = nested(cardData, f.path);
+                if (val != null && val !== '') {
+                    updates[f.path] = val;
+                }
+            }
+        }
+
         const success = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, updates);
 
         // Merge remote lorebook entries into linked /worlds file
@@ -1391,6 +1425,16 @@ async function handleRenameSnapshot() {
 // ========================================
 
 function nested(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
+
+function setNested(obj, path, val) {
+    const keys = path.split('.');
+    let cur = obj;
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (cur[keys[i]] == null) cur[keys[i]] = {};
+        cur = cur[keys[i]];
+    }
+    cur[keys[keys.length - 1]] = val;
+}
 
 // ========================================
 // LOREBOOK DIFF

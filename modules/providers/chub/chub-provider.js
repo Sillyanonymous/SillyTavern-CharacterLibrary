@@ -25,6 +25,7 @@ let api = null; // CoreAPI reference
 // Cached state for version history session
 let _metadata = null;
 let _projectId = null;
+let _metadataPath = null;
 
 // Cached raw API node from fetchLinkStats — reused by "View on" button
 let _cachedLinkNode = null;
@@ -410,6 +411,13 @@ class ChubProvider extends ProviderBase {
      * Returns flat card fields for diff display (unwrapped from V2 if needed).
      */
     async fetchVersionData(linkInfo, ref) {
+        const fullPath = linkInfo?.fullPath;
+        if (!fullPath) return null;
+
+        // Ensure cached projectId belongs to the requested character
+        if (!_projectId || _metadataPath !== fullPath) {
+            await this._getProjectId(fullPath);
+        }
         if (!_projectId) return null;
         const url = `${CHUB_API_BASE}/api/v4/projects/${_projectId}/repository/files/raw%252Fcard.json/raw?ref=${ref}`;
         try {
@@ -428,6 +436,13 @@ class ChubProvider extends ProviderBase {
      * which may differ from Git-exported versions.
      */
     async fetchRemotePageCard(linkInfo) {
+        const fullPath = linkInfo?.fullPath;
+        if (!fullPath) return null;
+
+        // Ensure cached metadata belongs to the requested character
+        if (!_metadata?.definition || _metadataPath !== fullPath) {
+            await this._getProjectId(fullPath);
+        }
         if (!_metadata?.definition) return null;
 
         const def = _metadata.definition;
@@ -813,10 +828,12 @@ class ChubProvider extends ProviderBase {
             const m = await this.fetchMetadata(fullPath);
             _metadata = m || null;
             _projectId = m?.id || null;
+            _metadataPath = fullPath;
             return _projectId;
         } catch {
             _metadata = null;
             _projectId = null;
+            _metadataPath = null;
             return null;
         }
     }

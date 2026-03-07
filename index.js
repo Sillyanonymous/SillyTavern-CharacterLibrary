@@ -23,6 +23,8 @@ function getCookie(name) {
     return '';
 }
 
+let _csrfToken = null;
+
 async function getCsrfToken() {
     try {
         const response = await fetch('/csrf-token');
@@ -33,21 +35,48 @@ async function getCsrfToken() {
     } catch (e) {
         console.error('Failed to fetch CSRF token', e);
     }
-    // Fallback to cookie if fetch fails, though likely undefined if fetch failed
     return getCookie('X-CSRF-Token');
 }
 
-async function openGallery() {
+// Pre-fetch at load time — token is stable for the session
+getCsrfToken().then(t => { _csrfToken = t; });
+
+function openGallery() {
     const baseUrl = getExtensionUrl();
-    // Open window synchronously to satisfy mobile popup-blocker gesture requirements
-    const tab = window.open('about:blank', '_blank');
-    const token = await getCsrfToken();
-    const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}`;
-    if (tab) {
-        tab.location.href = url;
-    } else {
+    if (_csrfToken) {
+        // Token ready — open directly, no blank page flash
+        const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(_csrfToken)}`;
         window.open(url, '_blank');
+        return;
     }
+    // Token not yet available (rare) — fall back to sync open + async navigate
+    const tab = window.open('about:blank', '_blank');
+    if (tab) {
+        try {
+            tab.document.open();
+            tab.document.write(
+                '<html><head><title>Character Library</title>' +
+                '<style>body{margin:0;background:#1a1a2e;display:flex;align-items:center;' +
+                'justify-content:center;height:100vh;font-family:system-ui,sans-serif}' +
+                '.s{color:rgba(255,255,255,.45);font-size:14px;display:flex;align-items:center;gap:10px}' +
+                '.s::before{content:"";width:18px;height:18px;border:2px solid rgba(255,255,255,.15);' +
+                'border-top-color:rgba(255,255,255,.5);border-radius:50%;' +
+                'animation:r .7s linear infinite}' +
+                '@keyframes r{to{transform:rotate(360deg)}}</style></head>' +
+                '<body><div class="s">Loading…</div></body></html>'
+            );
+            tab.document.close();
+        } catch { /* cross-origin write blocked */ }
+    }
+    getCsrfToken().then(token => {
+        _csrfToken = token;
+        const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}`;
+        if (tab) {
+            tab.location.href = url;
+        } else {
+            window.open(url, '_blank');
+        }
+    });
 }
 
 // ==============================================

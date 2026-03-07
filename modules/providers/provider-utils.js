@@ -27,12 +27,16 @@ const _proxyOrigins = new Set();
 export async function fetchWithProxy(url, opts = {}) {
     const origin = new URL(url).origin;
     if (!_proxyOrigins.has(origin)) {
+        let directResponse;
         try {
-            const r = await fetch(url, opts);
-            if (!r.ok) throw new Error(`HTTP ${r.status}`);
-            return r;
+            directResponse = await fetch(url, opts);
         } catch (_) {
+            // fetch() rejects on CORS/network errors — fall through to proxy
             _proxyOrigins.add(origin);
+        }
+        if (directResponse) {
+            if (!directResponse.ok) throw new Error(`HTTP ${directResponse.status}`);
+            return directResponse;
         }
     }
     const r = await fetch(`/proxy/${encodeURIComponent(url)}`, opts);

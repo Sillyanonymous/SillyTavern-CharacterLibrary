@@ -45,6 +45,13 @@ function setupGlobalListeners() {
     });
     
     document.addEventListener('scroll', () => hide(), true);
+
+    document.addEventListener('cl-extensions-recovered', () => {
+        if (menuElement?.classList.contains('visible') && currentCharacter) {
+            const menuItems = buildMenuItems(currentCharacter, currentCard);
+            renderMenu(menuItems);
+        }
+    });
     
     // Use event delegation for context menu on character cards
     // This works even for cards created before module loaded
@@ -242,6 +249,13 @@ function buildSingleMenuItems(char, cardElement) {
                     cardUpdates.checkSingleCharacter(char);
                 }
             }
+        });
+    } else if (CoreAPI.isExtensionsRecoveryInProgress()) {
+        // Extensions not yet recovered — provider link status unknown
+        items.push({
+            icon: 'fa-solid fa-spinner fa-spin',
+            label: 'Loading provider data…',
+            disabled: true
         });
     } else {
         // Unlinked — single entry that opens the global link modal (searches all providers)

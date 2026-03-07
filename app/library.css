@@ -1229,6 +1229,35 @@ body.char-modal-above .gv-modal.visible {
     display: block;
     max-height: 450px;
     object-fit: contain;
+    transition: opacity 0.15s ease;
+}
+
+.char-portrait-container img.loading {
+    opacity: 0;
+}
+
+.char-portrait-container::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary, rgba(0,0,0,0.3));
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+}
+
+.char-portrait-container:has(img.loading)::after {
+    opacity: 1;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 24 24'%3E%3Cstyle%3E@keyframes s{to{transform:rotate(1turn)}}%3C/style%3E%3Cg style='transform-origin:center;animation:s .75s linear infinite'%3E%3Ccircle cx='12' cy='12' r='10' fill='none' stroke='rgba(255,255,255,0.3)' stroke-width='3'/%3E%3Cpath d='M12 2a10 10 0 0 1 10 10' fill='none' stroke='rgba(255,255,255,0.8)' stroke-width='3' stroke-linecap='round'/%3E%3C/g%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.char-portrait-container:has(img.loading) {
+    min-height: 200px;
 }
 
 .gallery-nav {
