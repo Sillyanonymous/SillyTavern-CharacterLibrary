@@ -3,13 +3,13 @@ export function openConverterModal() {
         const style = document.createElement('style');
         style.id = 'st-converter-styles';
         style.textContent = `
-            .converter-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--menu-background, rgba(20,22,28,0.95)); border: 1px solid var(--border-color, rgba(255,255,255,0.1)); padding: 25px; z-index: 40000; border-radius: 12px; width: 450px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(10px); color: var(--text-color, #fff); font-family: inherit; }
-            .converter-modal h3 { margin: 0 0 15px 0; color: var(--text-color, #fff); border-bottom: 1px solid var(--border-color, rgba(255,255,255,0.1)); padding-bottom: 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-            .converter-zone { border: 2px dashed var(--border-color, rgba(255,255,255,0.2)); padding: 25px; text-align: center; margin: 15px 0; border-radius: 8px; cursor: pointer; transition: 0.2s; font-size: 14px; color: var(--text-color-light, rgba(255,255,255,0.7)); }
-            .converter-zone:hover, .converter-zone.dragover { border-color: var(--button-primary, #4a90e2); background: rgba(255,255,255,0.05); color: var(--text-color, #fff); }
+            .converter-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--SmartThemeBlurTintColor, rgba(30, 30, 35, 0.95)); border: 1px solid rgba(255,255,255,0.1); padding: 25px; z-index: 40000; border-radius: 12px; width: 450px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); backdrop-filter: blur(10px); color: var(--cl-text-primary, var(--SmartThemeBodyColor, #e0e0e0)); font-family: inherit; }
+            .converter-modal h3 { margin: 0 0 15px 0; color: var(--cl-text-primary, var(--SmartThemeBodyColor, #e0e0e0)); border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+            .converter-zone { border: 2px dashed var(--border-color, rgba(255,255,255,0.2)); padding: 25px; text-align: center; margin: 15px 0; border-radius: 8px; cursor: pointer; transition: 0.2s; font-size: 14px; color: var(--cl-text-secondary, rgba(255,255,255,0.6)); }
+            .converter-zone:hover, .converter-zone.dragover { border-color: var(--SmartThemeQuoteColor, #4a90e2); background: rgba(255,255,255,0.05); color: var(--cl-text-primary, var(--SmartThemeBodyColor, #e0e0e0)); }
             .converter-zone.ready { border-color: #4caf50; border-style: solid; background: rgba(76,175,80,0.05); color: #4caf50; font-weight: 500; }
             .converter-zone i { font-size: 24px; margin-bottom: 8px; display: block; opacity: 0.8; }
-            .converter-btn { background: var(--button-primary, #4a90e2); color: #fff; border: none; padding: 12px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; margin-top: 10px; transition: 0.2s; }
+            .converter-btn { background: var(--SmartThemeQuoteColor, #4a90e2); color: #fff; border: none; padding: 12px; width: 100%; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; margin-top: 10px; transition: 0.2s; }
             .converter-btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
             .converter-btn:disabled { background: var(--button-disabled, rgba(255,255,255,0.1)); color: var(--text-color-light, rgba(255,255,255,0.5)); cursor: not-allowed; }
             .converter-close { position: absolute; right: 20px; top: 20px; cursor: pointer; opacity: 0.6; font-size: 16px; transition: 0.2s; }
