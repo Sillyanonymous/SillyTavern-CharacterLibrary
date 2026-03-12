@@ -1,3 +1,4 @@
+import { openConverterModal } from './json-png-converter.js';
 const EXTENSION_NAME = "Character Library";
 const EXTENSION_DIR = "SillyTavern-CharacterLibrary";
 
@@ -193,6 +194,11 @@ function setupLauncherDropdown() {
             <span>Character Management</span>
         </div>
         <div class="charlib-launcher-divider"></div>
+        
+        <div class="charlib-launcher-item" data-action="converter">
+            <i class="fa-solid fa-file-export"></i>
+            <span>JSON to PNG Converter</span>
+        </div>
         <div class="charlib-launcher-item" data-action="library">
             <i class="fa-solid fa-photo-film"></i>
             <span>Character Library</span>
@@ -282,6 +288,8 @@ function setupLauncherDropdown() {
         if (item.dataset.action === 'native') {
             bypassIntercept = true;
             drawerToggle.click();               // Replay click to ST's handler
+        } else if (item.dataset.action === 'converter') {
+            openConverterModal();
         } else if (item.dataset.action === 'library') {
             openGallery();
         }
