@@ -69,11 +69,19 @@
                     <button id="tagFilterBtn" class="glass-btn tag-filter-btn" title="Filter by tags">
                         <i class="fa-solid fa-tags"></i> <span id="tagFilterLabel">Tags</span>
                     </button>
-                    <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 250px; max-height: 400px;">
+                    <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 270px; max-height: 420px;">
                         <div class="tag-search-row">
                             <input type="text" id="tagSearchInput" placeholder="Find tags...">
                             <button id="clearAllTagsBtn" class="glass-btn icon-only clear-tags-btn" title="Clear all tag filters">
                                 <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                        <div id="tagLogicRow" class="tag-logic-row hidden">
+                            <button id="includeLogicBtn" class="tag-logic-toggle include-logic" data-mode="any" title="Toggle between Any (OR) and All (AND) for included tags">
+                                <i class="fa-solid fa-check"></i> <span>Match Any</span>
+                            </button>
+                            <button id="excludeLogicBtn" class="tag-logic-toggle exclude-logic" data-mode="all" title="Toggle between Any and All for excluded tags">
+                                <i class="fa-solid fa-minus"></i> <span>Hide All</span>
                             </button>
                         </div>
                         <div id="tagFilterContent" style="overflow-y: auto; flex: 1;">
@@ -2023,7 +2031,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.6.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.6.1</span>
                             </div>
                         </div>
                     </div>

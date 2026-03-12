@@ -430,7 +430,7 @@ class WyvernBrowseView extends BrowseView {
                     <div>
                         <h2 id="wyvernCharName">Character Name</h2>
                         <p class="browse-char-meta">
-                            by <span id="wyvernCharCreator">Creator</span> •
+                            by <a id="wyvernCharCreator" href="#" title="Click to see all characters by this author">Creator</a> •
                             <span id="wyvernCharMessages" title="Messages"><i class="fa-solid fa-message"></i> 0</span> •
                             <span id="wyvernCharLikes" title="Likes"><i class="fa-solid fa-heart"></i> 0</span>
                         </p>
@@ -2233,6 +2233,20 @@ async function openWyvernCharPreview(char) {
     BrowseView.adjustPortraitPosition(avatarImg);
     nameEl.textContent = char.name || 'Unknown';
     creatorEl.textContent = creatorName;
+    creatorEl.href = '#';
+    if (char.creator?.uid) {
+        creatorEl.title = `Click to see all characters by ${creatorName}`;
+        creatorEl.onclick = (e) => {
+            e.preventDefault();
+            abortWyvernDetailFetch();
+            cleanupWyvernCharModal();
+            hideModal('wyvernCharModal');
+            loadWyvernCreatorCharacters(char.creator.uid, creatorName, char.creator?.vanityUrl || '');
+        };
+    } else {
+        creatorEl.title = creatorName;
+        creatorEl.onclick = (e) => e.preventDefault();
+    }
     openInBrowserBtn.href = getCharacterPageUrl(charId);
     const stats = getCharStats(char);
     messagesEl.innerHTML = `<i class="fa-solid fa-message"></i> ${formatNumber(stats.messages)}`;

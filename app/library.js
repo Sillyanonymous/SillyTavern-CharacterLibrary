@@ -5740,11 +5740,11 @@ function processAndRender(data) {
     }
     
     // Populate Tags set for the filter dropdown
-    const allTags = new Set();
+    const allTags = new Map();
     allCharacters.forEach(c => {
          const tags = getTags(c);
          if (Array.isArray(tags)) {
-             tags.forEach(t => allTags.add(t));
+             tags.forEach(t => allTags.set(t, (allTags.get(t) || 0) + 1));
          }
     });
 
@@ -5833,8 +5833,61 @@ function runGallerySyncAudit(retries = 10) {
 // undefined/not in map = neutral (unchecked)
 let activeTagFilters = new Map();
 
-function populateTagFilter(tagSet) {
-    const sortedTags = Array.from(tagSet).sort((a,b) => a.localeCompare(b));
+// Tag filter logic modes: 'any' (OR) or 'all' (AND)
+// Initialized from settings in initTagLogicToggles() after settings are loaded
+let tagIncludeMode = 'any';
+let tagExcludeMode = 'all';
+
+function initTagLogicToggles() {
+    const includeBtn = document.getElementById('includeLogicBtn');
+    const excludeBtn = document.getElementById('excludeLogicBtn');
+    if (!includeBtn || !excludeBtn) return;
+
+    tagIncludeMode = getSetting('tagIncludeMode') || 'any';
+    tagExcludeMode = getSetting('tagExcludeMode') || 'all';
+
+    applyTagLogicButtonState(includeBtn, tagIncludeMode, 'Match');
+    applyTagLogicButtonState(excludeBtn, tagExcludeMode, 'Hide');
+
+    includeBtn.onclick = () => {
+        tagIncludeMode = tagIncludeMode === 'any' ? 'all' : 'any';
+        setSetting('tagIncludeMode', tagIncludeMode);
+        applyTagLogicButtonState(includeBtn, tagIncludeMode, 'Match');
+        updateTagFilterButtonIndicator();
+        document.getElementById('searchInput').dispatchEvent(new Event('input'));
+    };
+
+    excludeBtn.onclick = () => {
+        tagExcludeMode = tagExcludeMode === 'any' ? 'all' : 'any';
+        setSetting('tagExcludeMode', tagExcludeMode);
+        applyTagLogicButtonState(excludeBtn, tagExcludeMode, 'Hide');
+        updateTagFilterButtonIndicator();
+        document.getElementById('searchInput').dispatchEvent(new Event('input'));
+    };
+}
+
+function applyTagLogicButtonState(btn, mode, label) {
+    btn.dataset.mode = mode;
+    const modeLabel = mode === 'any' ? 'Any' : 'All';
+    btn.querySelector('span').textContent = `${label} ${modeLabel}`;
+    btn.title = mode === 'any'
+        ? `${label} Any (OR): click to switch to All (AND)`
+        : `${label} All (AND): click to switch to Any (OR)`;
+}
+
+function updateTagLogicRowVisibility() {
+    const row = document.getElementById('tagLogicRow');
+    if (!row) return;
+    row.classList.toggle('hidden', activeTagFilters.size === 0);
+}
+
+function populateTagFilter(tagMap) {
+    const sortedTags = Array.from(tagMap.keys()).sort((a, b) => {
+        const aActive = activeTagFilters.has(a) ? 0 : 1;
+        const bActive = activeTagFilters.has(b) ? 0 : 1;
+        if (aActive !== bActive) return aActive - bActive;
+        return a.localeCompare(b);
+    });
     const content = document.getElementById('tagFilterContent');
     const searchInput = document.getElementById('tagSearchInput');
 
@@ -5857,9 +5910,13 @@ function populateTagFilter(tagSet) {
             const label = document.createElement('span');
             label.className = 'tag-label';
             label.textContent = tag;
+
+            const count = document.createElement('span');
+            count.className = 'tag-count';
+            count.textContent = tagMap.get(tag) || '';
             
             // Tri-state cycling: neutral -> include -> exclude -> neutral
-            stateBtn.onclick = (e) => {
+            const cycleState = (e) => {
                 e.stopPropagation();
                 const current = stateBtn.dataset.state;
                 let newState;
@@ -5876,20 +5933,20 @@ function populateTagFilter(tagSet) {
                 stateBtn.dataset.state = newState;
                 updateTagStateButton(stateBtn, newState === 'neutral' ? undefined : newState);
                 
-                // Update tag button indicator
+                // Update tag button indicator and logic row visibility
                 updateTagFilterButtonIndicator();
+                updateTagLogicRowVisibility();
                 
                 // Trigger Search/Filter update
                 document.getElementById('searchInput').dispatchEvent(new Event('input'));
             };
-            
-            // Clicking the label also cycles
-            label.onclick = (e) => {
-                stateBtn.click();
-            };
+
+            stateBtn.onclick = cycleState;
+            label.onclick = cycleState;
             
             item.appendChild(stateBtn);
             item.appendChild(label);
+            item.appendChild(count);
             content.appendChild(item);
         });
 
@@ -5913,6 +5970,8 @@ function populateTagFilter(tagSet) {
         
         // Update indicator on initial load
         updateTagFilterButtonIndicator();
+        initTagLogicToggles();
+        updateTagLogicRowVisibility();
     }
 }
 
@@ -5943,8 +6002,12 @@ function updateTagFilterButtonIndicator() {
     let indicator = '';
     if (includeCount > 0 || excludeCount > 0) {
         const parts = [];
-        if (includeCount > 0) parts.push(`+${includeCount}`);
-        if (excludeCount > 0) parts.push(`-${excludeCount}`);
+        if (includeCount > 0) {
+            parts.push(tagIncludeMode === 'all' ? `+${includeCount} all` : `+${includeCount}`);
+        }
+        if (excludeCount > 0) {
+            parts.push(tagExcludeMode === 'all' ? `-${excludeCount} all` : `-${excludeCount}`);
+        }
         indicator = ` (${parts.join('/')})`;
     }
     
@@ -5963,6 +6026,7 @@ function clearAllTagFilters() {
     });
     
     updateTagFilterButtonIndicator();
+    updateTagLogicRowVisibility();
     
     // Trigger search update
     document.getElementById('searchInput').dispatchEvent(new Event('input'));
@@ -11164,6 +11228,8 @@ function performSearch() {
         }
 
         // 2. Tag Filter Logic - Tri-state: include, exclude, neutral
+        //    Include mode: 'any' = OR (has at least one), 'all' = AND (has every one)
+        //    Exclude mode: 'any' = reject if has any, 'all' = reject only if has all
         if (activeTagFilters.size > 0) {
              const charTags = getTags(c);
              
@@ -11174,12 +11240,18 @@ function performSearch() {
                  else if (state === 'exclude') excludedTags.push(tag);
              });
              
-             if (excludedTags.length > 0 && charTags.some(t => excludedTags.includes(t))) {
-                 return false;
+             if (excludedTags.length > 0) {
+                 const hasExcluded = tagExcludeMode === 'all'
+                     ? excludedTags.every(t => charTags.includes(t))
+                     : charTags.some(t => excludedTags.includes(t));
+                 if (hasExcluded) return false;
              }
              
-             if (includedTags.length > 0 && !charTags.some(t => includedTags.includes(t))) {
-                 return false;
+             if (includedTags.length > 0) {
+                 const hasIncluded = tagIncludeMode === 'all'
+                     ? includedTags.every(t => charTags.includes(t))
+                     : charTags.some(t => includedTags.includes(t));
+                 if (!hasIncluded) return false;
              }
         }
 

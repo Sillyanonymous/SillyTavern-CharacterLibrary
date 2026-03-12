@@ -175,13 +175,14 @@
         background: var(--bg-secondary) !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
-        backdrop-filter: blur(10px) !important;
+        backdrop-filter: blur(12px) !important;
         box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
         flex-direction: column !important;
+        padding: 0 !important;
         padding-bottom: env(safe-area-inset-bottom, 0px) !important;
     }
     #tagFilterPopup .tag-search-row {
-        padding: 12px;
+        padding: 14px 14px 10px;
         gap: 8px;
         border-bottom: 1px solid var(--glass-border);
         position: sticky;
@@ -189,10 +190,22 @@
         background: var(--bg-secondary);
         z-index: 1;
     }
-    #tagFilterPopup .tag-search-row input { font-size: 16px; padding: 10px 12px; }
+    #tagFilterPopup .tag-logic-row {
+        padding: 4px 14px 8px;
+        gap: 6px;
+    }
+    #tagFilterPopup .tag-logic-toggle {
+        padding: 5px 8px;
+        font-size: 0.78rem;
+        min-height: 32px;
+        touch-action: manipulation;
+    }
+    #tagFilterPopup .tag-search-row input { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
     #tagFilterPopup .tag-item,
-    #tagFilterPopup .tag-filter-item { padding: 10px 14px; min-height: 40px; }
-    #tagFilterContent { padding-bottom: 20px; }
+    #tagFilterPopup .tag-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
+    #tagFilterPopup .tag-state-btn { width: 24px; height: 24px; min-width: 24px; touch-action: manipulation; }
+    #tagFilterPopup .tag-count { font-size: 0.78rem; }
+    #tagFilterContent { padding: 4px 0 20px; }
 
     /* Scrim behind tag popup */
     .mobile-tag-scrim {
