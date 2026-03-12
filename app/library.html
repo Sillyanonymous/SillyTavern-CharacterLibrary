@@ -119,6 +119,9 @@
                         <button id="bulkAutoLinkBtn" class="dropdown-item">
                             <i class="fa-solid fa-link"></i> Auto-Link Characters
                         </button>
+                        <button id="jsonConverterBtn" class="dropdown-item">
+                            <i class="fa-solid fa-file-export"></i> JSON to PNG Converter
+                        </button>
                         <button id="recommenderBtn" class="dropdown-item">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Card Recommender
                         </button>
@@ -2049,6 +2052,10 @@ https://jannyai.com/characters/uuid_slug
 
     <!-- Scripts -->
     <script src="library.js?v=77"></script>
+    <script type="module">
+        import { openConverterModal } from "./json-png-converter.js";
+        document.getElementById("jsonConverterBtn")?.addEventListener("click", openConverterModal);
+    </script>
     <script type="module" src="../modules/module-loader.js?v=2"></script>
     <script src="library-mobile.js?v=1"></script>
 </body>
