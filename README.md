@@ -6,25 +6,35 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 
 ## Screenshots
 
-![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Main.jpg)
+![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.png)
+![Character Details](https://github.com/Sillyanonymous/assets/blob/main/v2_Details.png)
 *View and edit character details, chats, media, and related characters*
 
-![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/Gallery.jpg)
+![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/v2_Gallery.jpg)
 *Download embedded character media*
 
-![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/Expanded%20fields.png)
+![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/v2_creatorsNotes.png)
 *Expand separate views such as Creator's notes*
 
-![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Related.png)
+![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Similar.png)
 *Find potentially related characters*
 
-![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/ChubAI.jpg)
+![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_online_tab.jpg)
 *Browse and download characters from online providers*
 
+![Batch Operations](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchOperations.jpg)
+*Apply changes to any number of selected characters*
 
+![Batch Tagging](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchTagging.jpg)
+*...Such as Batch tagging*
+
+![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchUpdates.jpg)
+*...Batch updates*
+
+![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchPlaylists.jpg)
+*...and much more*
 
 ## Installation
 
