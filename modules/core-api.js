@@ -907,6 +907,34 @@ export function getProviderForUrl(url) {
 }
 
 // ========================================
+// PLAYLISTS
+// ========================================
+
+export function playlistsLoadPlaylists() { return window.playlistsLoadPlaylists?.(); }
+export function playlistsCreatePlaylist(...args) { return window.playlistsCreatePlaylist?.(...args); }
+export function playlistsDeletePlaylist(...args) { return window.playlistsDeletePlaylist?.(...args); }
+export function playlistsUpdatePlaylist(...args) { return window.playlistsUpdatePlaylist?.(...args); }
+export function playlistsAddToPlaylist(...args) { return window.playlistsAddToPlaylist?.(...args); }
+export function playlistsRemoveFromPlaylist(...args) { return window.playlistsRemoveFromPlaylist?.(...args); }
+export function playlistsReorderPlaylists(...args) { return window.playlistsReorderPlaylists?.(...args); }
+export function playlistsGetAll() { return window.playlistsGetAll?.(); }
+export function playlistsGetPlaylist(...args) { return window.playlistsGetPlaylist?.(...args); }
+export function playlistsGetCharacters(...args) { return window.playlistsGetCharacters?.(...args); }
+export function playlistsGetAvatarSet(...args) { return window.playlistsGetAvatarSet?.(...args); }
+export function playlistsGetForChar(...args) { return window.playlistsGetForChar?.(...args); }
+export function playlistsIsCharInPlaylist(...args) { return window.playlistsIsCharInPlaylist?.(...args); }
+export function playlistsIsCharInAny(...args) { return window.playlistsIsCharInAny?.(...args); }
+export function playlistsOnCharDeleted(...args) { return window.playlistsOnCharDeleted?.(...args); }
+export function openPlaylistPicker(...args) { return window.openPlaylistPicker?.(...args); }
+export function closePlaylistPicker() { return window.closePlaylistPicker?.(); }
+export function setPlaylistFilter(...args) { return window.setPlaylistFilter?.(...args); }
+export function clearPlaylistFilter() { return window.clearPlaylistFilter?.(); }
+export function openPlaylistManager() { return window.openPlaylistManager?.(); }
+export function closePlaylistManager() { return window.closePlaylistManager?.(); }
+export function refreshPlaylistBadges() { return window.refreshPlaylistBadges?.(); }
+export function closeAllTopbarDropdowns(...args) { return window.closeAllTopbarDropdowns?.(...args); }
+
+// ========================================
 // DEFAULT EXPORT - Convenience object
 // ========================================
 
@@ -1035,5 +1063,29 @@ export default {
     getCharacterProvider,
     getProviderLinkInfo,
     getAllLinkedCharacters,
-    getProviderForUrl
+    getProviderForUrl,
+    // Playlists
+    playlistsLoadPlaylists,
+    playlistsCreatePlaylist,
+    playlistsDeletePlaylist,
+    playlistsUpdatePlaylist,
+    playlistsAddToPlaylist,
+    playlistsRemoveFromPlaylist,
+    playlistsReorderPlaylists,
+    playlistsGetAll,
+    playlistsGetPlaylist,
+    playlistsGetCharacters,
+    playlistsGetAvatarSet,
+    playlistsGetForChar,
+    playlistsIsCharInPlaylist,
+    playlistsIsCharInAny,
+    playlistsOnCharDeleted,
+    openPlaylistPicker,
+    closePlaylistPicker,
+    setPlaylistFilter,
+    clearPlaylistFilter,
+    openPlaylistManager,
+    closePlaylistManager,
+    refreshPlaylistBadges,
+    closeAllTopbarDropdowns,
 };

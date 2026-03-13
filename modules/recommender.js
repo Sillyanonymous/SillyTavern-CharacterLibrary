@@ -632,6 +632,16 @@ function attachEvents() {
 
     // Result card clicks — name link opens modal, card click is passive
     document.getElementById('recommenderResults')?.addEventListener('click', (e) => {
+        const plBtn = e.target.closest('.recommender-playlist-btn');
+        if (plBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const card = plBtn.closest('.recommender-result-card');
+            const avatar = card?.dataset.avatar;
+            if (avatar) CoreAPI.openPlaylistPicker([avatar]);
+            return;
+        }
+
         const nameLink = e.target.closest('.recommender-result-name-link');
         if (nameLink) {
             e.preventDefault();
@@ -1648,6 +1658,7 @@ function renderResults(recommendations) {
                     <div class="recommender-result-header">
                         <a class="recommender-result-name-link" href="#" title="Open character details">${CoreAPI.escapeHtml(char.name || 'Unknown')}</a>
                         ${creator ? `<span class="recommender-result-creator">by ${CoreAPI.escapeHtml(creator)}</span>` : ''}
+                        <button class="recommender-playlist-btn" title="Add to playlist"><i class="fa-solid fa-list-ul"></i></button>
                     </div>
                     ${rec.reason ? `<div class="recommender-result-reason">${CoreAPI.escapeHtml(rec.reason)}</div>` : ''}
                     ${tagsHtml ? `<div class="recommender-result-tags">${tagsHtml}</div>` : ''}

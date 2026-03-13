@@ -6,6 +6,8 @@
     <title>SillyTavern Character Library</title>
     <link rel="stylesheet" href="library.css?v=48">
     <link rel="stylesheet" href="library-mobile.css?v=1" media="screen and (max-width: 768px)">
+    <!-- Noto Sans from SillyTavern's bundled webfonts -->
+    <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <!-- DOMPurify for HTML sanitization -->
@@ -45,10 +47,13 @@
                         <i class="fa-solid fa-sliders"></i>
                     </button>
                     <div id="searchSettingsMenu" class="dropdown-menu hidden">
+                        <div class="dropdown-section-title">Search in</div>
                         <label><input type="checkbox" id="searchName" checked> Character Name</label>
                         <label><input type="checkbox" id="searchTags" checked> Tags</label>
                         <label><input type="checkbox" id="searchAuthor" checked> Author</label>
                         <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
+                        <div class="dropdown-divider"></div>
+                        <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: #ffd700; margin-right: 2px;"></i> Favorites only</label>
                     </div>
                 </div>
             </div>
@@ -62,9 +67,7 @@
                     <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
                     <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
                 </select>
-                <button id="favoritesFilterBtn" class="glass-btn favorites-filter-btn" title="Show favorites only">
-                    <i class="fa-solid fa-star"></i>
-                </button>
+
                 <div class="filter-group" style="position: relative;">
                     <button id="tagFilterBtn" class="glass-btn tag-filter-btn" title="Filter by tags">
                         <i class="fa-solid fa-tags"></i> <span id="tagFilterLabel">Tags</span>
@@ -89,9 +92,21 @@
                         </div>
                     </div>
                 </div>
-                <button id="refreshBtn" class="glass-btn icon-only" title="Refresh">
-                    <i class="fa-solid fa-sync"></i>
-                </button>
+                <div class="filter-group" style="position: relative;">
+                    <button id="playlistFilterBtn" class="glass-btn playlist-filter-btn" title="Filter by playlist">
+                        <i class="fa-solid fa-list-ul"></i> <span id="playlistFilterLabel">Playlists</span>
+                    </button>
+                    <div id="playlistFilterPopup" class="dropdown-menu playlist-filter-popup hidden">
+                        <div class="pl-filter-search-wrap">
+                            <i class="fa-solid fa-magnifying-glass pl-filter-search-icon"></i>
+                            <input type="text" id="playlistFilterSearch" class="cl-input pl-filter-search" placeholder="Search playlists...">
+                        </div>
+                        <div id="playlistFilterContent"></div>
+                        <div class="pl-filter-footer">
+                            <button id="playlistFilterManageBtn" class="pl-filter-manage-btn"><i class="fa-solid fa-gear"></i> Manage Playlists</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="gallery-sync-container hidden">
                     <button id="gallerySyncStatusBtn" class="glass-btn icon-only gallery-sync-btn" title="Gallery sync status">
                         <i class="fa-solid fa-circle-info"></i>
@@ -123,7 +138,7 @@
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Card Recommender
                         </button>
                         <div class="dropdown-divider"></div>
-                        <button id="menuRefreshBtn" class="dropdown-item topbar-overflow-item">
+                        <button id="menuRefreshBtn" class="dropdown-item">
                             <i class="fa-solid fa-sync"></i> Refresh
                         </button>
                         <button id="menuGallerySyncBtn" class="dropdown-item topbar-overflow-item">
@@ -295,6 +310,12 @@
                             <input type="text" id="tagInput" class="glass-input tag-input" placeholder="Add tag..." autocomplete="off">
                             <div id="tagAutocomplete" class="tag-autocomplete hidden"></div>
                         </div>
+                    </div>
+                    <div class="sidebar-section" id="modalPlaylistSection">
+                        <div class="sidebar-label">
+                            <i class="fa-solid fa-list-ul"></i> Playlists
+                        </div>
+                        <div class="playlists-container" id="modalPlaylists"></div>
                     </div>
                 </div>
                 
@@ -1134,6 +1155,10 @@ https://jannyai.com/characters/uuid_slug
                                     <code>uid:id</code>
                                     <span>Filter by version_uid (<code>uid:none</code> for characters without one)</span>
                                 </div>
+                                <div class="info-code-item">
+                                    <code>playlist:name</code>
+                                    <span>Filter by playlist name (<code>playlist:none</code> for unassigned, <code>playlist:any</code> for in any playlist)</span>
+                                </div>
                             </div>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Combine prefixes with each other and with regular text: <code>creator:john linked:yes dark elf</code> finds linked characters by "john" matching "dark elf".</p>
                         </div>
@@ -1199,8 +1224,9 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Switch between providers using the dropdown selector</li>
                                 <li>Search, sort, and filter by tags/categories. Each provider has its own options</li>
                                 <li>Toggle NSFW content visibility per provider</li>
+                                <li><strong>Infinite scroll</strong> automatically loads more results as you scroll down (toggleable per provider in Settings)</li>
                                 <li>Cards already in your library are marked with an <strong>"In Library"</strong> badge</li>
-                                <li>Click a card to preview the full character details, then import with one click</li>
+                                <li>Click a card to preview the full character details and gallery images, then import with one click</li>
                                 <li>Some providers support login for additional features (favorites, following lists)</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure provider order and NSFW defaults in Settings → Online.</p>
@@ -1647,6 +1673,15 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </div>
 
+                        <!-- Infinite Scroll -->
+                        <div class="settings-group" id="infiniteScrollGroup">
+                            <div class="settings-group-title"><i class="fa-solid fa-arrow-down-wide-short"></i> Infinite Scroll</div>
+                            <p class="settings-hint" style="margin-bottom: 12px;">Automatically load more characters as you scroll. When disabled, a manual "Load More" button is shown instead.</p>
+                            <div id="infiniteScrollToggles">
+                                <!-- Populated dynamically by JS -->
+                            </div>
+                        </div>
+
                         <!-- ChubAI provider settings -->
                         <details class="settings-provider-section">
                             <summary>
@@ -2031,7 +2066,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.6.1</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.7.0</span>
                             </div>
                         </div>
                     </div>

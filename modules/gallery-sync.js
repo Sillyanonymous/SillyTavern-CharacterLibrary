@@ -618,10 +618,8 @@ export async function init(dependencies = {}) {
             
             const isOpen = !dropdown.classList.contains('hidden');
             
-            // Close all other dropdowns first
-            document.querySelectorAll('.dropdown-menu:not(.hidden)').forEach(menu => {
-                if (menu !== dropdown) menu.classList.add('hidden');
-            });
+            // Close all other topbar dropdowns + custom selects
+            CoreAPI.closeAllTopbarDropdowns('gallerySyncDropdown');
             
             if (isOpen) {
                 dropdown.classList.add('hidden');

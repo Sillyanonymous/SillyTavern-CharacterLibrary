@@ -208,6 +208,8 @@ export async function importFromPng({
         characterCard.data.name = characterCard.data.name.substring(0, 128).trimEnd();
     }
 
+    const safeName = fileName.replace(/[^a-zA-Z0-9_.-]/g, '_');
+
     let pngBuffer = await ensurePng(imageBuffer, api);
     imageBuffer = null;
 
@@ -218,7 +220,7 @@ export async function importFromPng({
     let embeddedPng = api.embedCharacterDataInPng(pngBuffer, characterCard);
     pngBuffer = null;
 
-    let file = new File([embeddedPng], fileName, { type: 'image/png' });
+    let file = new File([embeddedPng], safeName, { type: 'image/png' });
     embeddedPng = null;
 
     let formData = new FormData();

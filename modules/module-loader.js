@@ -226,6 +226,33 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load recommender module:', err);
     }
 
+    try {
+        const playlistsModule = await import('./playlists.js');
+        ModuleLoader.register('playlists', playlistsModule.default);
+
+        window.playlistsLoadPlaylists = playlistsModule.loadPlaylists;
+        window.playlistsCreatePlaylist = playlistsModule.createPlaylist;
+        window.playlistsDeletePlaylist = playlistsModule.deletePlaylist;
+        window.playlistsUpdatePlaylist = playlistsModule.updatePlaylist;
+        window.playlistsAddToPlaylist = playlistsModule.addToPlaylist;
+        window.playlistsRemoveFromPlaylist = playlistsModule.removeFromPlaylist;
+        window.playlistsReorderPlaylists = playlistsModule.reorderPlaylists;
+        window.playlistsGetAll = playlistsModule.getAllPlaylists;
+        window.playlistsGetPlaylist = playlistsModule.getPlaylist;
+        window.playlistsGetCharacters = playlistsModule.getPlaylistCharacters;
+        window.playlistsGetAvatarSet = playlistsModule.getPlaylistAvatarSet;
+        window.playlistsGetForChar = playlistsModule.getPlaylistsForChar;
+        window.playlistsIsCharInPlaylist = playlistsModule.isCharInPlaylist;
+        window.playlistsIsCharInAny = playlistsModule.isCharInAnyPlaylist;
+        window.playlistsOnCharDeleted = playlistsModule.onCharacterDeleted;
+        window.openPlaylistPicker = playlistsModule.openPlaylistPicker;
+        window.closePlaylistPicker = playlistsModule.closePlaylistPicker;
+        window.openPlaylistManager = playlistsModule.openPlaylistManager;
+        window.closePlaylistManager = playlistsModule.closePlaylistManager;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load playlists module:', err);
+    }
+
     // Providers — must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     try {
@@ -245,6 +272,7 @@ async function initModuleSystem() {
 
         await ProviderRegistry.initProviders(CoreAPI);
         window.ProviderRegistry = ProviderRegistry;
+        window.closeActiveBrowseDropdowns = ProviderRegistry.closeActiveBrowseDropdowns;
         console.log('[ModuleLoader] Providers registered and initialized');
     } catch (err) {
         console.warn('[ModuleLoader] Could not load providers:', err);

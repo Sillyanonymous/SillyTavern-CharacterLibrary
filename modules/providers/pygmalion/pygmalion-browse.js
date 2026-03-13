@@ -28,7 +28,7 @@ const {
     checkCharacterForDuplicates, showPreImportDuplicateWarning,
     deleteCharacter, getCharacterGalleryId, showImportSummaryModal,
     getAllCharacters, formatRichText, debounce,
-    apiRequest,
+    apiRequest, cleanupCreatorNotesContainer,
 } = CoreAPI;
 
 // ========================================
@@ -67,7 +67,7 @@ let pygPluginAvailable = false;
 let pygAutoRefreshTimer = null;
 let pygLoginInProgress = false;
 
-const PAGE_SIZE = 24;
+const PAGE_SIZE = 48;
 
 // Well-known tags seeded from popular characters
 const SEED_TAGS = [
@@ -269,11 +269,8 @@ function renderGrid(characters, append = false) {
 }
 
 function updateLoadMore() {
-    const loadMore = document.getElementById('pygLoadMore');
-    if (loadMore) {
-        // Allow loading more even if current list is empty (can happen if client-side filters hide all results on a page)
-        loadMore.style.display = pygHasMore ? 'flex' : 'none';
-    }
+    // Pyg allows loading more even when current list is empty (client-side filters may hide all results on a page)
+    pygmalionBrowseView.updateLoadMoreVisibility('pygLoadMore', pygHasMore, true);
 }
 
 // ========================================
@@ -663,6 +660,7 @@ function openPreviewModal(hit) {
                 galleryStat.style.display = 'none';
             }
         }
+        renderPygGalleryGrid(galleryImages);
 
         // Greetings stat
         const greetingsStat = document.getElementById('pygCharGreetingsStat');
@@ -714,6 +712,23 @@ function openPreviewModal(hit) {
     if (!hit.personality) {
         const fetchToken = ++pygDetailFetchToken;
         fetchAndPopulateDetails(hit, fetchToken);
+    }
+}
+
+function renderPygGalleryGrid(galleryImages) {
+    const section = document.getElementById('pygCharGallerySection');
+    const grid = document.getElementById('pygCharGalleryGrid');
+    const label = document.getElementById('pygCharGalleryLabel');
+    if (!section || !grid) return;
+    if (galleryImages.length > 0) {
+        section.style.display = 'block';
+        if (label) label.textContent = `(${galleryImages.length})`;
+        grid.innerHTML = galleryImages.map(img =>
+            `<img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onerror="this.style.display='none'">`
+        ).join('');
+    } else {
+        section.style.display = 'none';
+        grid.innerHTML = '';
     }
 }
 
@@ -846,6 +861,7 @@ async function fetchAndPopulateDetails(hit, stalenessToken) {
             galleryStat.style.display = 'flex';
             if (galleryCountEl) galleryCountEl.textContent = String(galleryImages.length);
         }
+        renderPygGalleryGrid(galleryImages);
 
         // Update greetings stat
         const greetingsStat = document.getElementById('pygCharGreetingsStat');
@@ -873,19 +889,22 @@ async function fetchAndPopulateDetails(hit, stalenessToken) {
 }
 
 function cleanupPygCharModal() {
+    BrowseView.closeAvatarViewer();
     window.currentBrowseAltGreetings = null;
     const sectionIds = [
         'pygCharDescription',
         'pygCharFirstMsg',
         'pygCharAltGreetings',
         'pygCharExamples',
-        'pygCharCreatorNotes',
         'pygCharTags',
+        'pygCharGalleryGrid',
     ];
     for (const id of sectionIds) {
         const el = document.getElementById(id);
         if (el) el.innerHTML = '';
     }
+    const notesEl = document.getElementById('pygCharCreatorNotes');
+    if (notesEl) cleanupCreatorNotesContainer(notesEl);
 }
 
 function closePreviewModal() {
@@ -1292,7 +1311,7 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
         }
     } finally {
         pygFollowingLoading = false;
-        if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+        pygmalionBrowseView.updateLoadMoreVisibility('pygFollowingLoadMore', false, true);
     }
 }
 
@@ -1988,6 +2007,7 @@ function initPygView() {
 
     on('pygTagsBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (filtersDropdown) filtersDropdown.classList.add('hidden');
         if (tagsDropdown) tagsDropdown.classList.toggle('hidden');
     });
@@ -2014,6 +2034,7 @@ function initPygView() {
     // ── Features dropdown ──
     on('pygFiltersBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (tagsDropdown) tagsDropdown.classList.add('hidden');
         if (filtersDropdown) filtersDropdown.classList.toggle('hidden');
     });
@@ -2137,6 +2158,18 @@ function initPygView() {
         if (modalOverlay) {
             modalOverlay.addEventListener('click', (e) => {
                 if (e.target === modalOverlay) closePreviewModal();
+            });
+        }
+
+        const pygGalleryGrid = document.getElementById('pygCharGalleryGrid');
+        if (pygGalleryGrid) {
+            pygGalleryGrid.addEventListener('click', (e) => {
+                if (e.target.classList.contains('browse-gallery-thumb')) {
+                    const thumbs = [...pygGalleryGrid.querySelectorAll('.browse-gallery-thumb')];
+                    const urls = thumbs.map(t => t.src);
+                    const idx = thumbs.indexOf(e.target);
+                    BrowseView.openAvatarViewer(e.target.src, null, urls, idx);
+                }
             });
         }
 
@@ -2551,6 +2584,14 @@ class PygmalionBrowseView extends BrowseView {
                     </h3>
                     <div id="pygCharAltGreetings" class="browse-alt-greetings-list"></div>
                 </div>
+
+                <!-- Gallery -->
+                <div class="browse-char-section" id="pygCharGallerySection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="pygCharGalleryGrid" data-label="Gallery" data-icon="fa-solid fa-images" title="Click to expand">
+                        <i class="fa-solid fa-images"></i> Gallery <span class="browse-section-count" id="pygCharGalleryLabel"></span>
+                    </h3>
+                    <div id="pygCharGalleryGrid" class="browse-gallery-grid"></div>
+                </div>
             </div>
         </div>
     </div>`;
@@ -2560,6 +2601,13 @@ class PygmalionBrowseView extends BrowseView {
 
     _getImageGridIds() {
         return ['pygGrid', 'pygFollowingGrid'];
+    }
+
+    canLoadMore() { return pygHasMore && !pygIsLoading && pygViewMode === 'browse'; }
+
+    loadMore() {
+        pygCurrentPage++;
+        loadCharacters(true);
     }
 
     init() {
@@ -2681,6 +2729,7 @@ class PygmalionBrowseView extends BrowseView {
     }
 
     deactivate() {
+        pygDetailFetchToken++;
         delegatesInitialized = false;
         super.deactivate();
         this.disconnectImageObserver();

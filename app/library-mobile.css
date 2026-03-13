@@ -215,6 +215,48 @@
         z-index: 1099;
     }
 
+    /* Playlist filter popup – fixed overlay (moved to body via JS) */
+    #playlistFilterPopup {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        top: auto !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        max-height: 70vh !important;
+        border-radius: 16px 16px 0 0 !important;
+        z-index: 1100 !important;
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-bottom: none !important;
+        backdrop-filter: blur(12px) !important;
+        box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
+        flex-direction: column !important;
+        padding: 0 !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    }
+    #playlistFilterPopup .pl-filter-search-wrap {
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--glass-border);
+        position: sticky;
+        top: 0;
+        background: var(--bg-secondary);
+        z-index: 1;
+    }
+    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
+    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
+    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: 0.9rem; }
+    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    #playlistFilterContent { padding: 4px 0; }
+
+    /* Scrim behind playlist popup */
+    .mobile-playlist-scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 1099;
+    }
+
     /* Search area: only holds the mobile search btn */
     .search-area {
         flex: 0 0 auto;
@@ -462,6 +504,20 @@
         border-radius: 8px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
     }
+
+    /* Browse gallery viewer — mobile overrides */
+    .browse-avatar-viewer .browse-av-nav {
+        display: none;
+    }
+    .browse-avatar-viewer .browse-av-image {
+        max-width: 95vw;
+        max-height: 85vh;
+        touch-action: pan-y;
+    }
+    .browse-avatar-viewer .browse-av-counter {
+        bottom: max(16px, env(safe-area-inset-bottom));
+    }
+
     .mobile-header-avatar {
         cursor: pointer;
     }
@@ -1799,6 +1855,7 @@
         height: 100% !important;
         max-height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
     }
     .cl-modal-header h3 { font-size: 0.95rem; }
     .cl-modal-body { padding: 14px; }
@@ -1853,6 +1910,7 @@
         max-height: 100% !important;
         height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
     }
     .chub-link-modal-body {
         flex-direction: column;
@@ -2099,6 +2157,7 @@
     .pre-import-duplicate-content {
         height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
         animation: none !important;
     }
 
@@ -2342,6 +2401,7 @@
         height: 100% !important;
         max-height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
         animation: none !important;
         display: flex;
         flex-direction: column;
@@ -2468,6 +2528,7 @@
         height: 100% !important;
         max-height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
     }
     .char-duplicates-modal-content .confirm-modal-body {
         max-height: none;
@@ -2617,6 +2678,7 @@
         height: 100% !important;
         max-height: 100% !important;
         border-radius: 0 !important;
+        border: none !important;
         animation: none !important;
     }
     .settings-layout {

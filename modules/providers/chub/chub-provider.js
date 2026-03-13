@@ -5,7 +5,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng } from '../provider-utils.js';
+import { assignGalleryId, importFromPng, slugify } from '../provider-utils.js';
 import chubBrowseView, { openChubTokenModal } from './chub-browse.js';
 import {
     initChubApi,
@@ -731,7 +731,7 @@ class ChubProvider extends ProviderBase {
 
             return await importFromPng({
                 characterCard, imageBuffer,
-                fileName: fullPath.split('/').pop() + '.png',
+                fileName: `chub_${slugify(characterName)}.png`,
                 characterName, hasGallery,
                 providerCharId: metadataId,
                 fullPath,

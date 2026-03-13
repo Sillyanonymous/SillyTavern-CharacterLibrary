@@ -226,6 +226,15 @@ class WyvernBrowseView extends BrowseView {
         };
     }
 
+    canLoadMore() {
+        return wyvernHasMore && !wyvernIsLoading && wyvernViewMode === 'browse';
+    }
+
+    loadMore() {
+        wyvernCurrentPage++;
+        loadWyvernCharacters();
+    }
+
     // ── Filter Bar ──────────────────────────────────────────
 
     renderFilterBar() {
@@ -645,6 +654,11 @@ class WyvernBrowseView extends BrowseView {
         }
     }
 
+    closeDropdowns() {
+        document.getElementById('wyvernTagsDropdown')?.classList.add('hidden');
+        document.getElementById('wyvernFiltersDropdown')?.classList.add('hidden');
+    }
+
     // ── Image Observer (BrowseView contract) ────────────────
 
     disconnectImageObserver() {
@@ -713,6 +727,7 @@ function initWyvernView() {
     // Filters dropdown toggle
     on('wyvernFiltersBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         document.getElementById('wyvernTagsDropdown')?.classList.add('hidden');
         document.getElementById('wyvernFiltersDropdown')?.classList.toggle('hidden');
     });
@@ -805,7 +820,10 @@ function initWyvernView() {
         if (wyvernGalleryGrid) {
             wyvernGalleryGrid.addEventListener('click', (e) => {
                 if (e.target.classList.contains('browse-gallery-thumb')) {
-                    BrowseView.openAvatarViewer(e.target.src);
+                    const thumbs = [...wyvernGalleryGrid.querySelectorAll('.browse-gallery-thumb')];
+                    const urls = thumbs.map(t => t.src);
+                    const idx = thumbs.indexOf(e.target);
+                    BrowseView.openAvatarViewer(e.target.src, null, urls, idx);
                 }
             });
         }
@@ -1142,6 +1160,7 @@ function initWyvernTagsDropdown() {
 
     btn.addEventListener('click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         document.getElementById('wyvernFiltersDropdown')?.classList.add('hidden');
         const wasHidden = dropdown.classList.contains('hidden');
         dropdown.classList.toggle('hidden');
@@ -1459,13 +1478,13 @@ async function loadWyvernCharacters(forceRefresh = false) {
             extractWyvernTagsFromResults(wyvernCharacters);
             wyvernHasMore = false;
             renderWyvernGrid(false);
-            if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+            wyvernBrowseView.updateLoadMoreVisibility('wyvernLoadMore', false, true);
             wyvernIsLoading = false;
             return;
         }
 
         const params = new URLSearchParams();
-        params.set('limit', '24');
+        params.set('limit', '48');
         params.set('page', wyvernCurrentPage.toString());
 
         // Include tags → API parameter (comma-separated)
@@ -1547,7 +1566,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
             let visibleNew = nodes.filter(isVisible).length;
             let autoFetches = 0;
 
-            while (visibleNew < 24 && wyvernHasMore && autoFetches < 3 && wyvernDelegatesInitialized) {
+            while (visibleNew < 48 && wyvernHasMore && autoFetches < 3 && wyvernDelegatesInitialized) {
                 autoFetches++;
                 wyvernCurrentPage++;
                 params.set('page', wyvernCurrentPage.toString());
@@ -1567,9 +1586,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
 
         renderWyvernGrid(wasAppend);
 
-        if (loadMoreContainer) {
-            loadMoreContainer.style.display = wyvernHasMore ? 'flex' : 'none';
-        }
+        wyvernBrowseView.updateLoadMoreVisibility('wyvernLoadMore', wyvernHasMore, wyvernCharacters.length > 0);
 
     } catch (e) {
         console.error('[Wyvern] Load error:', e);
@@ -1824,8 +1841,7 @@ async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     updateWyvernFollowCreatorButton(uid);
 
     const grid = document.getElementById('wyvernGrid');
-    const loadMoreContainer = document.getElementById('wyvernLoadMore');
-    if (loadMoreContainer) loadMoreContainer.style.display = 'none';
+    wyvernBrowseView.updateLoadMoreVisibility('wyvernLoadMore', false, true);
 
     renderLoadingState(grid, `Loading characters by ${escapeHtml(displayName)}...`, 'browse-loading');
 
@@ -2512,6 +2528,7 @@ async function openWyvernCharPreview(char) {
 }
 
 function cleanupWyvernCharModal() {
+    BrowseView.closeAvatarViewer();
     window.currentBrowseAltGreetings = null;
 
     const defLoading = document.getElementById('wyvernCharDefinitionLoading');
@@ -2540,6 +2557,7 @@ function cleanupWyvernCharModal() {
         const creatorNotesEl = document.getElementById('wyvernCharCreatorNotes');
         cleanupCreatorNotesContainer(creatorNotesEl);
     }
+    wyvernSelectedChar = null;
 }
 
 // ========================================

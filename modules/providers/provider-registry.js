@@ -39,6 +39,7 @@ export async function initProviders(api) {
     for (const [id, provider] of providers) {
         try {
             await provider.init(api);
+            if (provider.browseView) provider.browseView.provider = provider;
             console.log(`[ProviderRegistry] Initialized provider: ${id}`);
         } catch (err) {
             console.error(`[ProviderRegistry] Failed to init provider "${id}":`, err);
@@ -365,6 +366,10 @@ export function closeActivePreviewModal() {
     getActiveProvider()?.browseView?.closePreview();
 }
 
+export function closeActiveBrowseDropdowns() {
+    getActiveProvider()?.browseView?.closeDropdowns();
+}
+
 export function getActiveMobileFilterIds() {
     return getActiveProvider()?.browseView?.mobileFilterIds ?? null;
 }
@@ -400,6 +405,7 @@ export default {
     reconnectActiveBrowseImageObserver,
     getPreviewModalIds,
     closeActivePreviewModal,
+    closeActiveBrowseDropdowns,
     getActiveMobileFilterIds,
     activeProviderHasModeToggle
 };

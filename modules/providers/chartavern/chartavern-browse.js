@@ -37,6 +37,7 @@ const {
     formatRichText,
     debounce,
     apiRequest,
+    cleanupCreatorNotesContainer,
 } = CoreAPI;
 
 // ========================================
@@ -284,10 +285,7 @@ function renderGrid(characters, append = false) {
 }
 
 function updateLoadMore() {
-    const loadMore = document.getElementById('ctLoadMore');
-    if (loadMore) {
-        loadMore.style.display = ctHasMore && ctCharacters.length > 0 ? 'flex' : 'none';
-    }
+    chartavernBrowseView.updateLoadMoreVisibility('ctLoadMore', ctHasMore, ctCharacters.length > 0);
 }
 
 // ========================================
@@ -323,7 +321,7 @@ async function loadCharacters(append = false) {
             query: ctCurrentSearch,
             sort: ctSortMode,
             page: ctCurrentPage,
-            limit: 30,
+            limit: 60,
             nsfw: ctNsfwEnabled
         };
 
@@ -359,7 +357,7 @@ async function loadCharacters(append = false) {
         const hasClientFilters = ctFilterHideOwned || !ctNsfwEnabled;
         if (hasClientFilters && ctCurrentPage < ctTotalPages) {
             let autoFetches = 0;
-            while (hits.length < 30 && ctCurrentPage < ctTotalPages && autoFetches < 3 && delegatesInitialized) {
+            while (hits.length < 60 && ctCurrentPage < ctTotalPages && autoFetches < 3 && delegatesInitialized) {
                 autoFetches++;
                 ctCurrentPage++;
                 opts.page = ctCurrentPage;
@@ -747,6 +745,7 @@ async function fetchAndPopulateDetails(hit, token) {
 }
 
 function cleanupCtCharModal() {
+    BrowseView.closeAvatarViewer();
     window.currentBrowseAltGreetings = null;
     const sectionIds = [
         'ctCharDescription',
@@ -754,13 +753,14 @@ function cleanupCtCharModal() {
         'ctCharFirstMsg',
         'ctCharExamples',
         'ctCharAltGreetings',
-        'ctCharCreatorNotes',
         'ctCharTags',
     ];
     for (const id of sectionIds) {
         const el = document.getElementById(id);
         if (el) el.innerHTML = '';
     }
+    const notesEl = document.getElementById('ctCharCreatorNotes');
+    if (notesEl) cleanupCreatorNotesContainer(notesEl);
 }
 
 function closePreviewModal() {
@@ -1120,6 +1120,7 @@ function initCtView() {
 
     on('ctTagsBtn', 'click', async (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (filtersDropdown) filtersDropdown.classList.add('hidden');
         if (tagsDropdown) tagsDropdown.classList.toggle('hidden');
         // Lazy-load tags on first open
@@ -1170,6 +1171,7 @@ function initCtView() {
 
     on('ctFiltersBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (tagsDropdown) tagsDropdown.classList.add('hidden');
         if (filtersDropdown) filtersDropdown.classList.toggle('hidden');
     });
@@ -1866,6 +1868,13 @@ class ChartavernBrowseView extends BrowseView {
         return ['ctGrid'];
     }
 
+    canLoadMore() { return ctHasMore && !ctIsLoading; }
+
+    loadMore() {
+        ctCurrentPage++;
+        loadCharacters(true);
+    }
+
     init() {
         super.init();
         buildLocalLibraryLookup();
@@ -1922,6 +1931,7 @@ class ChartavernBrowseView extends BrowseView {
     }
 
     deactivate() {
+        ctDetailFetchToken++;
         delegatesInitialized = false;
         super.deactivate();
         this.disconnectImageObserver();

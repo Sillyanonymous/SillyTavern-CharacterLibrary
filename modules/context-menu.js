@@ -155,6 +155,16 @@ function buildBulkMenuItems(count) {
             }
         }
     });
+
+    // Bulk add to playlist
+    items.push({
+        icon: 'fa-solid fa-list-ul',
+        label: 'Add to Playlist',
+        action: () => {
+            const avatars = CoreAPI.getSelectedCharacters().map(c => c.avatar);
+            if (avatars.length) CoreAPI.openPlaylistPicker(avatars);
+        }
+    });
     
     items.push({ type: 'separator' });
     
@@ -312,6 +322,12 @@ function buildSingleMenuItems(char, cardElement) {
     items.push({ type: 'separator' });
     
     // Utility actions
+    items.push({
+        icon: 'fa-solid fa-list-ul',
+        label: 'Add to Playlist',
+        action: () => CoreAPI.openPlaylistPicker([char.avatar])
+    });
+
     items.push({
         icon: 'fa-solid fa-download',
         label: 'Export Character',

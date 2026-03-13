@@ -264,12 +264,14 @@
         createMenuButton(topbar);
         setupModalAvatar();
         setupGallerySwipe();
+        setupBrowseGallerySwipe();
         setupGreetingsSwipe();
         setupTabSwipe();
         setupViewSwipe();
         setupContextMenu();
         setupViewportFix();
         relocateTagPopup();
+        relocatePlaylistPopup();
         fixInitialGridRender();
         setDefaultExpandZoom();
         setupLorebookModalToolbar();
@@ -309,7 +311,11 @@
         };
 
         const stack = [
-            // Tier 0 — avatar quick-view (highest z-index)
+            // Tier 0 — avatar/gallery quick-view (highest z-index)
+            ['.browse-avatar-viewer', el => {
+                if (el._onKey) document.removeEventListener('keydown', el._onKey);
+                el.remove();
+            }],
             ['.mobile-avatar-viewer', () => closeAvatarViewer()],
 
             // Tier 1 — top z-index overlays
@@ -365,6 +371,8 @@
             ['#legacyFolderModal',                    el => el.remove()],
             ['#folderMappingModal',                   el => el.remove()],
             ['#orphanedFoldersModal',                 el => el.remove()],
+            ['#playlistPickerModal.visible',          el => window.closePlaylistPicker?.()],
+            ['#playlistManageModal.visible',          el => window.closePlaylistManager?.()],
 
             // Tier 2.5 — mobile sheets & overlays
             ['.mobile-search-overlay:not(.hidden)', () => {
@@ -379,6 +387,7 @@
                 setTimeout(() => el.classList.add('hidden'), 300);
             }],
             ['#tagFilterPopup:not(.hidden)', el => el.classList.add('hidden')],
+            ['#playlistFilterPopup:not(.hidden)', el => el.classList.add('hidden')],
 
             // Tier 3 — tag editor sheet
             ['.tag-editor-sheet:not(.hidden)', el => { el.classList.add('hidden'); document.getElementById('tagEditorSheetAutocomplete')?.classList.add('hidden'); }],
@@ -508,7 +517,8 @@
                     if (node.nodeType !== 1) continue;
                     if (node.classList.contains('modal-overlay') ||
                         node.classList.contains('confirm-modal') ||
-                        node.classList.contains('mobile-avatar-viewer')) {
+                        node.classList.contains('mobile-avatar-viewer') ||
+                        node.classList.contains('browse-avatar-viewer')) {
                         pushGuard();
                         classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
                     }
@@ -670,13 +680,18 @@
         filterRow.className = 'mobile-settings-row';
 
         const favChip = createChip('<i class="fa-solid fa-star"></i> Favorites');
-        const realFavBtn = document.getElementById('favoritesFilterBtn');
-        if (realFavBtn && realFavBtn.classList.contains('active')) favChip.classList.add('active');
+        const favCheckbox = document.getElementById('searchFavoritesOnly');
+        if (favCheckbox && favCheckbox.checked) favChip.classList.add('active');
         favChip.addEventListener('click', () => {
-            if (realFavBtn) {
-                realFavBtn.click();
-                setTimeout(() => favChip.classList.toggle('active', realFavBtn.classList.contains('active')), 50);
+            const cb = document.getElementById('searchFavoritesOnly');
+            const newState = cb ? !cb.checked : true;
+            if (typeof window.toggleFavoritesFilter === 'function') {
+                window.toggleFavoritesFilter(newState);
             }
+            setTimeout(() => {
+                const cbNow = document.getElementById('searchFavoritesOnly');
+                favChip.classList.toggle('active', cbNow ? cbNow.checked : false);
+            }, 50);
         });
 
         const tagChip = createChip('<i class="fa-solid fa-tags"></i> Tags');
@@ -685,8 +700,15 @@
             if (tagBtn) { close(); setTimeout(() => tagBtn.click(), 300); }
         });
 
+        const playlistChip = createChip('<i class="fa-solid fa-list-ul"></i> Playlists');
+        playlistChip.addEventListener('click', () => {
+            const plBtn = document.getElementById('playlistFilterBtn');
+            if (plBtn) { close(); setTimeout(() => plBtn.click(), 300); }
+        });
+
         filterRow.appendChild(favChip);
         filterRow.appendChild(tagChip);
+        filterRow.appendChild(playlistChip);
         filterSection.appendChild(filterRow);
         charSection.appendChild(filterSection);
 
@@ -720,7 +742,7 @@
         const charRefreshBtn = createChip('<i class="fa-solid fa-sync"></i> Refresh Characters');
         charRefreshBtn.style.width = '100%';
         charRefreshBtn.addEventListener('click', () => {
-            const r = document.getElementById('refreshBtn');
+            const r = document.getElementById('menuRefreshBtn');
             if (r) r.click();
             close();
         });
@@ -1751,6 +1773,110 @@
     }
 
     /* ========================================
+       BROWSE GALLERY SWIPE NAVIGATION
+       Swipe left/right on browse-avatar-viewer to navigate gallery images
+       ======================================== */
+    function setupBrowseGallerySwipe() {
+        const observer = new MutationObserver(() => {
+            const viewer = document.querySelector('.browse-avatar-viewer.has-gallery');
+            if (viewer && !viewer.dataset.swipeInit) {
+                viewer.dataset.swipeInit = 'true';
+                attachBrowseGallerySwipe(viewer);
+            }
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+    }
+
+    function attachBrowseGallerySwipe(overlay) {
+        let startX = 0, startY = 0, currentX = 0;
+        let tracking = false, swiping = false;
+        const SWIPE_THRESHOLD = 40, LOCK_THRESHOLD = 8;
+
+        const getImg = () => overlay.querySelector('.browse-av-image');
+        const getPrev = () => overlay.querySelector('.browse-av-prev');
+        const getNext = () => overlay.querySelector('.browse-av-next');
+
+        overlay.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            currentX = 0;
+            tracking = true;
+            swiping = false;
+            const img = getImg();
+            if (img) img.style.transition = '';
+        }, { passive: true });
+
+        overlay.addEventListener('touchmove', (e) => {
+            if (!tracking) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+            if (!swiping && absDx < LOCK_THRESHOLD && absDy < LOCK_THRESHOLD) return;
+            if (!swiping) {
+                swiping = absDx > absDy;
+                if (!swiping) { tracking = false; return; }
+            }
+            e.preventDefault();
+            currentX = dx;
+
+            const img = getImg();
+            if (img) {
+                const offset = dx;
+                const opacity = 1 - Math.min(Math.abs(offset) / 300, 0.4);
+                img.style.transform = `translateX(${offset}px)`;
+                img.style.opacity = opacity;
+            }
+        }, { passive: false });
+
+        overlay.addEventListener('touchend', () => {
+            if (!tracking) return;
+            tracking = false;
+            const img = getImg();
+
+            if (swiping && Math.abs(currentX) >= SWIPE_THRESHOLD) {
+                const goNext = currentX < 0;
+                const goPrev = currentX > 0;
+
+                if (img) {
+                    const dir = currentX < 0 ? -1 : 1;
+                    img.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+                    img.style.transform = `translateX(${dir * window.innerWidth}px)`;
+                    img.style.opacity = '0';
+                }
+                setTimeout(() => {
+                    const btn = goNext ? getNext() : getPrev();
+                    if (btn) btn.click();
+                    if (img) { img.style.transition = 'none'; img.style.transform = ''; img.style.opacity = ''; }
+                    requestAnimationFrame(() => {
+                        const newImg = getImg();
+                        if (newImg) {
+                            newImg.style.transition = 'none';
+                            const fromDir = currentX < 0 ? 1 : -1;
+                            newImg.style.transform = `translateX(${fromDir * 60}px)`;
+                            newImg.style.opacity = '0.5';
+                            requestAnimationFrame(() => {
+                                newImg.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
+                                newImg.style.transform = 'translateX(0)';
+                                newImg.style.opacity = '1';
+                            });
+                        }
+                    });
+                }, 180);
+            } else {
+                // Below threshold, snap back
+                if (img) {
+                    img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
+                    img.style.transform = 'translateX(0)';
+                    img.style.opacity = '1';
+                }
+            }
+            swiping = false;
+        }, { passive: true });
+    }
+
+    /* ========================================
        VIEW SWIPE NAVIGATION
        Swipe left/right on main content to switch
        between Characters ↔ Chats ↔ Online views
@@ -1894,7 +2020,8 @@
        ======================================== */
     function relocateTagPopup() {
         const popup = document.getElementById('tagFilterPopup');
-        if (!popup) return;
+        if (!popup || popup.dataset.relocated) return;
+        popup.dataset.relocated = 'true';
 
         // Move out of hidden .filter-area
         if (popup.closest('.filter-area')) {
@@ -1926,6 +2053,46 @@
         handle.addEventListener('click', closeTagPopup);
 
         // Watch for popup visibility changes to sync scrim
+        const obs = new MutationObserver(() => {
+            scrim.style.display = popup.classList.contains('hidden') ? 'none' : 'block';
+        });
+        obs.observe(popup, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    /* ========================================
+       RELOCATE PLAYLIST POPUP
+       Same pattern as tag popup — move to body,
+       add scrim + handle
+       ======================================== */
+    function relocatePlaylistPopup() {
+        const popup = document.getElementById('playlistFilterPopup');
+        if (!popup || popup.dataset.relocated) return;
+        popup.dataset.relocated = 'true';
+
+        if (popup.closest('.filter-area')) {
+            document.body.appendChild(popup);
+        }
+
+        const scrim = document.createElement('div');
+        scrim.className = 'mobile-playlist-scrim';
+        scrim.style.display = 'none';
+        document.body.appendChild(scrim);
+
+        const handle = document.createElement('div');
+        handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);';
+        handle.appendChild(bar);
+        popup.insertBefore(handle, popup.firstChild);
+
+        function closePlaylistPopup() {
+            popup.classList.add('hidden');
+            scrim.style.display = 'none';
+        }
+
+        scrim.addEventListener('click', closePlaylistPopup);
+        handle.addEventListener('click', closePlaylistPopup);
+
         const obs = new MutationObserver(() => {
             scrim.style.display = popup.classList.contains('hidden') ? 'none' : 'block';
         });

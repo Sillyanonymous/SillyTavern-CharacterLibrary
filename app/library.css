@@ -163,7 +163,7 @@
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Noto Sans', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: var(--bg-primary);
     background-image: 
         radial-gradient(circle at 10% 20%, rgba(74, 158, 255, 0.05) 0%, transparent 20%),
@@ -404,6 +404,24 @@ body {
     animation: favoriteGlow 2s ease-in-out infinite alternate;
 }
 
+.char-card .playlist-indicator {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    background: rgba(0, 0, 0, 0.6);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--accent, #00bcd4);
+    font-size: 11px;
+    z-index: 10;
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(0, 188, 212, 0.3);
+}
+
 @keyframes favoriteGlow {
     from { box-shadow: 0 0 5px rgba(255, 215, 0, 0.3); }
     to { box-shadow: 0 0 10px rgba(255, 215, 0, 0.6); }
@@ -634,6 +652,7 @@ body {
 
 /* Tags Container with editable state */
 .tags-container.editable {
+    max-height: 350px;
     margin-bottom: 5px;
 }
 
@@ -740,6 +759,7 @@ body.char-modal-above .gv-modal.visible {
     gap: 10px;
     transition: all 0.2s ease;
     font-size: 0.95rem;
+    text-decoration: none;
 }
 
 .action-btn.primary {
@@ -1175,7 +1195,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .sidebar-section {
-    margin-top: auto;
+    flex-shrink: 0;
 }
 
 .sidebar-label {
@@ -1202,13 +1222,12 @@ body.char-modal-above .gv-modal.visible {
     display: flex;
     flex-direction: column;
     gap: 20px;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     background: rgba(0,0,0,0.15);
 }
 
 .modal-sidebar .sidebar-section {
-    min-height: 0;
-    flex: 1;
     display: flex;
     flex-direction: column;
 }
@@ -2863,6 +2882,7 @@ textarea.glass-input {
     background: rgba(0,0,0,0.2);
     border-radius: 10px;
     border: 1px solid var(--glass-border);
+    max-height: 200px;
     overflow-y: auto;
 }
 
@@ -9601,6 +9621,32 @@ details.settings-provider-section > .settings-provider-body {
     padding: 12px 30px;
 }
 
+/* Infinite Scroll Indicator */
+.browse-scroll-indicator {
+    width: 100%;
+    height: 3px;
+    border-radius: 2px;
+    margin: 12px 0 4px;
+    transition: opacity 0.3s ease;
+}
+
+.browse-scroll-indicator.loading {
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent), 0 0 20px color-mix(in srgb, var(--accent) 50%, transparent);
+    animation: scroll-indicator-pulse 1.4s ease-in-out infinite;
+}
+
+.browse-scroll-indicator.end {
+    background: var(--glass-border);
+    height: 2px;
+    opacity: 0.4;
+}
+
+@keyframes scroll-indicator-pulse {
+    0%, 100% { opacity: 0.3; box-shadow: 0 0 4px var(--accent); }
+    50% { opacity: 1; box-shadow: 0 0 12px var(--accent), 0 0 28px color-mix(in srgb, var(--accent) 40%, transparent); }
+}
+
 /* ChubAI Loading/Error/Empty States */
 .browse-loading, .browse-error, .browse-empty {
     display: flex;
@@ -9824,16 +9870,71 @@ details.settings-provider-section > .settings-provider-body {
     align-items: center;
     justify-content: center;
     background: rgba(0, 0, 0, 0.88);
-    cursor: pointer;
+    cursor: default;
     animation: avatarViewerFadeIn 0.15s ease;
 }
-.browse-avatar-viewer img {
+.browse-avatar-viewer .browse-av-image {
     max-width: 90vw;
     max-height: 90vh;
     object-fit: contain;
     border-radius: 10px;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+    user-select: none;
+    -webkit-user-drag: none;
 }
+.browse-avatar-viewer:not(.has-gallery) {
+    cursor: pointer;
+}
+.browse-avatar-viewer:not(.has-gallery) .browse-av-image {
+    cursor: pointer;
+}
+
+/* Navigation buttons */
+.browse-av-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: white;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s, background 0.15s;
+    z-index: 2;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.browse-av-nav:hover {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.2);
+}
+.browse-av-prev { left: 16px; }
+.browse-av-next { right: 16px; }
+
+/* Counter */
+.browse-av-counter {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.6);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 6px 16px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    user-select: none;
+    z-index: 2;
+}
+
 @keyframes avatarViewerFadeIn {
     from { opacity: 0; }
     to   { opacity: 1; }
@@ -13052,6 +13153,27 @@ details.settings-provider-section > .settings-provider-body {
     white-space: nowrap;
 }
 
+.recommender-playlist-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 0.72rem;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    margin-left: auto;
+}
+
+.recommender-result-card:hover .recommender-playlist-btn {
+    opacity: 0.7;
+}
+
+.recommender-playlist-btn:hover {
+    opacity: 1 !important;
+    color: var(--accent);
+}
+
 .recommender-result-reason {
     font-size: 0.72rem;
     color: var(--text-secondary);
@@ -13319,6 +13441,459 @@ details.settings-provider-section > .settings-provider-body {
     gap: 10px;
     padding: 16px 20px;
     border-top: 1px solid var(--cl-border);
+}
+
+/* --- Playlist Picker Modal --- */
+
+.pl-picker-count {
+    font-size: 0.85em;
+    color: var(--cl-text-secondary);
+    margin-left: auto;
+    margin-right: 8px;
+    white-space: nowrap;
+}
+
+.pl-picker-search-wrap {
+    position: relative;
+    padding: 8px 12px 0;
+}
+
+.pl-picker-search-icon {
+    position: absolute;
+    left: 28px;
+    top: 50%;
+    transform: translateY(-25%);
+    color: var(--cl-text-secondary);
+    font-size: 0.85em;
+    pointer-events: none;
+}
+
+.pl-picker-search {
+    padding-left: 32px !important;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.pl-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.pl-picker-create-footer {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px 10px;
+    border-top: 1px solid var(--cl-border);
+}
+
+.pl-picker-create-footer .cl-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.pl-picker-create-footer .cl-btn {
+    padding: 7px 12px;
+    flex-shrink: 0;
+}
+
+.pl-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.pl-picker-row:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pl-picker-check {
+    font-size: 1.15em;
+    color: var(--cl-text-secondary);
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.pl-picker-row.checked .pl-picker-check,
+.pl-picker-row.partial .pl-picker-check {
+    color: var(--cl-accent);
+}
+
+.pl-picker-name {
+    flex: 1;
+    color: var(--cl-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.pl-picker-badge {
+    font-size: 0.8em;
+    color: var(--cl-text-secondary);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.pl-picker-empty {
+    text-align: center;
+    color: var(--cl-text-secondary);
+    padding: 18px 0;
+    font-size: 0.85em;
+}
+
+/* --- Playlist Filter Dropdown --- */
+
+.playlist-filter-btn.active {
+    background: rgba(74, 158, 255, 0.15);
+    border-color: var(--cl-accent);
+    color: var(--cl-accent);
+}
+
+.playlist-filter-popup {
+    width: 240px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 420px;
+}
+
+.pl-filter-search-wrap {
+    position: relative;
+    padding: 8px 8px 0;
+    flex-shrink: 0;
+}
+
+.pl-filter-search-icon {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-25%);
+    color: var(--cl-text-secondary);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
+
+.pl-filter-search {
+    padding-left: 30px !important;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.85rem;
+}
+
+#playlistFilterContent {
+    overflow-y: auto;
+    padding: 6px;
+    flex: 1;
+    min-height: 0;
+}
+
+.pl-filter-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--cl-border);
+    padding: 6px;
+}
+
+.pl-filter-manage-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--cl-text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.pl-filter-manage-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--cl-text-primary);
+}
+
+.pl-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.15s;
+    color: var(--cl-text-primary);
+}
+
+.pl-filter-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pl-filter-item.active {
+    background: rgba(74, 158, 255, 0.12);
+    color: var(--cl-accent);
+}
+
+.pl-filter-item i {
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.pl-filter-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.pl-filter-count {
+    font-size: 0.8rem;
+    color: var(--cl-text-secondary);
+    flex-shrink: 0;
+}
+
+.pl-filter-separator {
+    height: 1px;
+    background: var(--cl-border);
+    margin: 4px 8px;
+}
+
+/* --- Playlist Sidebar Chips --- */
+
+.playlists-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--cl-text-primary);
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+}
+
+.pl-chip:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.pl-chip-add {
+    background: none;
+    border: 1px dashed var(--cl-border);
+    color: var(--cl-text-secondary);
+    font-size: 0.8em;
+    padding: 4px 8px;
+}
+
+.pl-chip-add:hover {
+    border-color: var(--cl-accent);
+    color: var(--cl-accent);
+}
+
+/* --- Playlist Management Modal --- */
+
+.pl-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pl-manage-create {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.pl-manage-create .cl-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.pl-manage-create .cl-btn {
+    padding: 7px 12px;
+    flex-shrink: 0;
+}
+
+.pl-manage-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    position: relative;
+}
+
+.pl-manage-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.pl-manage-icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.15s;
+    padding: 0;
+    color: var(--cl-text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pl-manage-icon-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.pl-color-swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.1s;
+    padding: 0;
+}
+
+.pl-color-swatch:hover {
+    transform: scale(1.2);
+}
+
+.pl-manage-icon-picker {
+    position: fixed;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--cl-glass-bg);
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+    box-shadow: var(--cl-shadow-xl);
+    backdrop-filter: blur(12px);
+    max-width: 260px;
+}
+
+.pl-icon-picker-icons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.pl-icon-picker-colors {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--cl-border);
+}
+
+.pl-icon-picker-label {
+    font-size: 0.75em;
+    color: var(--cl-text-secondary);
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+.pl-manage-icon-picker.hidden {
+    display: none;
+}
+
+.pl-icon-option {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--cl-text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+    padding: 0;
+}
+
+.pl-icon-option:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.pl-picker-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.pl-filter-icon {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.pl-chip-icon {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.pl-manage-name {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    font-size: 0.85em;
+}
+
+.pl-manage-count {
+    font-size: 0.8em;
+    color: var(--cl-text-secondary);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.pl-manage-delete {
+    background: none;
+    border: none;
+    color: var(--cl-text-secondary);
+    cursor: pointer;
+    padding: 6px;
+    font-size: 0.85em;
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.pl-manage-delete:hover {
+    opacity: 1;
+    color: #ff6b7a;
 }
 
 /* @canonical button-module */

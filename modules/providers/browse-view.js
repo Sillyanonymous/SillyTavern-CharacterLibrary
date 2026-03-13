@@ -14,6 +14,9 @@ export class BrowseView {
         this._modalsInjected = false;
         this._imageObserver = null;
         this._dropdownCloseHandler = null;
+        this._scrollHandler = null;
+        this._scrollIndicator = null;
+        this._prefetching = false;
     }
 
     // ── HTML Rendering ──────────────────────────────────────
@@ -73,6 +76,8 @@ export class BrowseView {
         if (this._dropdownDismissPairs && !this._dropdownCloseHandler) {
             this._registerDropdownDismiss(this._dropdownDismissPairs);
         }
+        // Attach infinite scroll listener
+        this._attachScrollListener();
     }
 
     /**
@@ -95,6 +100,7 @@ export class BrowseView {
      */
     deactivate() {
         this._removeDropdownDismiss();
+        this._detachScrollListener();
     }
 
     // ── Library Lookup ───────────────────────────────────────
@@ -244,7 +250,135 @@ export class BrowseView {
         }
     }
 
+    // ── Infinite Scroll ───────────────────────────────────
+
+    /**
+     * Whether this view can load more results right now.
+     * Subclasses override to check their hasMore + !isLoading state.
+     * @returns {boolean}
+     */
+    canLoadMore() { return false; }
+
+    /**
+     * Trigger the next page load (append mode).
+     * Subclasses override to increment page and call their load function.
+     */
+    loadMore() {}
+
+    /**
+     * Whether infinite scroll is active for this provider.
+     * Reads from the per-provider setting with global fallback.
+     * @returns {boolean}
+     */
+    isInfiniteScrollEnabled() {
+        const perProvider = window.getSetting?.('infiniteScroll');
+        const id = this.provider?.id;
+        if (id && perProvider && typeof perProvider === 'object' && id in perProvider) {
+            return perProvider[id];
+        }
+        return true;
+    }
+
+    /**
+     * Attach the scroll listener for infinite loading + prefetch.
+     * Listens on .gallery-content (the scrollable parent of #onlineView).
+     */
+    _attachScrollListener() {
+        this._detachScrollListener();
+        const scrollContainer = document.querySelector('.gallery-content');
+        if (!scrollContainer) return;
+
+        this._scrollHandler = () => {
+            if (!this.isInfiniteScrollEnabled()) return;
+            if (this._prefetching || !this.canLoadMore()) return;
+
+            const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+            const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+            if (distanceFromBottom < 1500) {
+                this._prefetching = true;
+                this._setScrollIndicator('loading');
+                this.loadMore();
+                setTimeout(() => { this._prefetching = false; }, 300);
+            }
+        };
+
+        scrollContainer.addEventListener('scroll', this._scrollHandler, { passive: true });
+    }
+
+    /**
+     * Remove the scroll listener.
+     */
+    _detachScrollListener() {
+        if (this._scrollHandler) {
+            document.querySelector('.gallery-content')?.removeEventListener('scroll', this._scrollHandler);
+            this._scrollHandler = null;
+        }
+        this._prefetching = false;
+        this._removeScrollIndicator();
+    }
+
+    /**
+     * Update the visibility of the load-more button container.
+     * When infinite scroll is enabled, hides the button.
+     * Subclasses call this from their updateLoadMore() or renderGrid().
+     * @param {string} loadMoreContainerId - DOM ID of the load-more container div
+     * @param {boolean} hasMore - whether more results are available
+     * @param {boolean} hasResults - whether any results exist
+     */
+    updateLoadMoreVisibility(loadMoreContainerId, hasMore, hasResults) {
+        const el = document.getElementById(loadMoreContainerId);
+        if (!el) return;
+        if (this.isInfiniteScrollEnabled()) {
+            el.style.display = 'none';
+            this._setScrollIndicator(hasMore ? 'hidden' : 'end');
+        } else {
+            el.style.display = hasMore && hasResults ? 'flex' : 'none';
+        }
+    }
+
+    _ensureScrollIndicator() {
+        if (this._scrollIndicator?.isConnected) return this._scrollIndicator;
+        const container = document.getElementById('onlineView');
+        if (!container) return null;
+        const el = document.createElement('div');
+        el.className = 'browse-scroll-indicator';
+        container.appendChild(el);
+        this._scrollIndicator = el;
+        return el;
+    }
+
+    _setScrollIndicator(state) {
+        if (!this.isInfiniteScrollEnabled()) return;
+        const el = this._ensureScrollIndicator();
+        if (!el) return;
+        el.classList.remove('loading', 'end');
+        if (state === 'hidden') {
+            el.style.display = 'none';
+        } else {
+            el.style.display = '';
+            el.classList.add(state);
+        }
+    }
+
+    _removeScrollIndicator() {
+        this._scrollIndicator?.remove();
+        this._scrollIndicator = null;
+    }
+
     // ── Dropdown Dismiss ────────────────────────────────────
+
+    /**
+     * Close all registered dropdowns for this browse view.
+     * Called by the registry when topbar dropdowns open or on provider switch.
+     */
+    closeDropdowns() {
+        if (this._dropdownDismissPairs) {
+            for (const { dropdownId } of this._dropdownDismissPairs) {
+                document.getElementById(dropdownId)?.classList.add('hidden');
+            }
+        }
+    }
 
     /**
      * Register a document-level click handler that closes dropdowns when
@@ -350,26 +484,81 @@ export class BrowseView {
     /**
      * Open a full-screen overlay displaying the given image.
      * Falls back to fallbackSrc on load error.
+     * If `gallery` array is provided, enables prev/next navigation.
+     * @param {string} src
+     * @param {string} [fallbackSrc]
+     * @param {string[]} [gallery] - Array of image URLs
+     * @param {number} [startIndex] - Starting index in gallery
      */
-    static openAvatarViewer(src, fallbackSrc) {
+    static openAvatarViewer(src, fallbackSrc, gallery, startIndex) {
         if (!src) return;
         BrowseView.closeAvatarViewer();
 
+        const images = gallery && gallery.length > 1 ? gallery : null;
+        let currentIndex = images ? (startIndex ?? 0) : 0;
+
         const overlay = document.createElement('div');
         overlay.className = 'browse-avatar-viewer';
+        if (images) overlay.classList.add('has-gallery');
 
         const img = document.createElement('img');
-        img.alt = 'Avatar';
-        if (fallbackSrc) {
-            img.onerror = () => { img.onerror = null; img.src = fallbackSrc; };
-        }
+        img.className = 'browse-av-image';
+        img.alt = 'Image';
+        img.onerror = () => { img.onerror = null; if (fallbackSrc) img.src = fallbackSrc; else img.style.display = 'none'; };
         img.src = src;
-
         overlay.appendChild(img);
-        overlay.addEventListener('click', () => BrowseView.closeAvatarViewer());
+
+        // Navigation UI (only for multi-image galleries)
+        let prevBtn, nextBtn, counter;
+        if (images) {
+            prevBtn = document.createElement('button');
+            prevBtn.className = 'browse-av-nav browse-av-prev';
+            prevBtn.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+            prevBtn.title = 'Previous';
+
+            nextBtn = document.createElement('button');
+            nextBtn.className = 'browse-av-nav browse-av-next';
+            nextBtn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+            nextBtn.title = 'Next';
+
+            counter = document.createElement('div');
+            counter.className = 'browse-av-counter';
+
+            overlay.appendChild(prevBtn);
+            overlay.appendChild(nextBtn);
+            overlay.appendChild(counter);
+        }
+
+        function showImage(index) {
+            if (!images) return;
+            currentIndex = ((index % images.length) + images.length) % images.length;
+            img.onerror = () => { img.onerror = null; img.style.display = 'none'; };
+            img.style.display = '';
+            img.src = images[currentIndex];
+            if (counter) counter.textContent = `${currentIndex + 1} / ${images.length}`;
+        }
+
+        if (images) {
+            showImage(currentIndex);
+
+            prevBtn.addEventListener('click', (e) => { e.stopPropagation(); showImage(currentIndex - 1); });
+            nextBtn.addEventListener('click', (e) => { e.stopPropagation(); showImage(currentIndex + 1); });
+        }
+
+        // Close on backdrop click (not on image or nav buttons)
+        overlay.addEventListener('click', (e) => {
+            if (e.target === overlay) BrowseView.closeAvatarViewer();
+        });
+        // Close on image click only if no gallery navigation
+        if (!images) {
+            img.addEventListener('click', () => BrowseView.closeAvatarViewer());
+        }
 
         const onKey = (e) => {
-            if (e.key === 'Escape') { BrowseView.closeAvatarViewer(); }
+            if (e.key === 'Escape') { BrowseView.closeAvatarViewer(); return; }
+            if (!images) return;
+            if (e.key === 'ArrowLeft') { e.preventDefault(); showImage(currentIndex - 1); }
+            if (e.key === 'ArrowRight') { e.preventDefault(); showImage(currentIndex + 1); }
         };
         document.addEventListener('keydown', onKey);
         overlay._onKey = onKey;

@@ -191,6 +191,10 @@ function injectMultiSelectToolbar() {
                 <i class="fa-solid fa-arrows-rotate"></i>
                 <span>Updates</span>
             </button>
+            <button id="multiSelectPlaylistBtn" class="ms-btn" title="Add selected characters to a playlist">
+                <i class="fa-solid fa-list-ul"></i>
+                <span>Playlist</span>
+            </button>
 
             <div class="ms-divider"></div>
 
@@ -254,14 +258,19 @@ function injectMultiSelectToolbar() {
             cardUpdates.checkSelectedCharacters();
         }
     });
+
+    document.getElementById('multiSelectPlaylistBtn')?.addEventListener('click', () => {
+        const avatars = Array.from(MultiSelect.selectedCharacters.keys());
+        if (avatars.length) CoreAPI.openPlaylistPicker(avatars);
+    });
 }
 
 function injectMultiSelectToggle() {
     const filterArea = document.getElementById('filterArea');
-    const refreshBtn = document.getElementById('refreshBtn');
+    const gallerySyncContainer = filterArea?.querySelector('.gallery-sync-container');
 
-    if (!filterArea || !refreshBtn) {
-        console.warn('[MultiSelect] Could not find filter area or refresh button');
+    if (!filterArea || !gallerySyncContainer) {
+        console.warn('[MultiSelect] Could not find filter area or gallery sync container');
         return;
     }
 
@@ -272,7 +281,7 @@ function injectMultiSelectToggle() {
         <i class="fa-solid fa-object-group"></i>
     </button>`;
 
-    refreshBtn.insertAdjacentHTML('afterend', toggleHtml);
+    gallerySyncContainer.insertAdjacentHTML('afterend', toggleHtml);
 
     document.getElementById('multiSelectToggleBtn')?.addEventListener('click', () => {
         const btn = document.getElementById('multiSelectToggleBtn');

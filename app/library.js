@@ -248,6 +248,9 @@ function initCustomSelect(select) {
         document.querySelectorAll('.custom-select-menu:not(.hidden)').forEach(m => {
             if (m !== menu) m.classList.add('hidden');
         });
+        // Close topbar dropdown menus
+        TOPBAR_DROPDOWN_IDS.forEach(id => document.getElementById(id)?.classList.add('hidden'));
+        window.closeActiveBrowseDropdowns?.();
         menu.classList.remove('hidden');
         trigger.setAttribute('aria-expanded', 'true');
         openedAt = Date.now();
@@ -445,6 +448,8 @@ const DEFAULT_SETTINGS = {
     providerOrder: null,
     // Per-provider default view/sort (providerId → { view?, sort? })
     providerDefaults: {},
+    // Per-provider infinite scroll toggle (providerId → boolean, default true)
+    infiniteScroll: {},
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -1069,6 +1074,45 @@ function setupSettingsModal() {
         });
     }
 
+    // ── Infinite Scroll Toggles UI ─────────────────────────
+
+    function buildInfiniteScrollUI() {
+        const container = document.getElementById('infiniteScrollToggles');
+        if (!container) return;
+
+        const registry = window.ProviderRegistry;
+        if (!registry) return;
+
+        const viewProviders = registry.getViewProviders();
+        if (viewProviders.length === 0) {
+            container.innerHTML = '<p class="settings-hint" style="text-align:center; padding:8px;">No providers available</p>';
+            return;
+        }
+
+        const saved = getSetting('infiniteScroll') || {};
+
+        container.innerHTML = viewProviders.map(p => {
+            const checked = (p.id in saved) ? saved[p.id] : true;
+            return `<div class="settings-row">
+                <label>
+                    <input type="checkbox" class="infinite-scroll-toggle" data-provider="${escapeHtml(p.id)}" ${checked ? 'checked' : ''}>
+                    ${escapeHtml(p.name)}
+                </label>
+            </div>`;
+        }).join('');
+    }
+
+    function readInfiniteScrollFromUI() {
+        const container = document.getElementById('infiniteScrollToggles');
+        if (!container) return {};
+        const result = {};
+        container.querySelectorAll('.infinite-scroll-toggle').forEach(cb => {
+            const pid = cb.dataset.provider;
+            if (pid) result[pid] = cb.checked;
+        });
+        return result;
+    }
+
     // Open modal
     settingsBtn.onclick = () => {
         chubTokenInput.value = getSetting('chubToken') || '';
@@ -1171,6 +1215,7 @@ function setupSettingsModal() {
 
         // Provider Order & Defaults
         buildProviderOrderUI();
+        buildInfiniteScrollUI();
         
         // Reset to first section
         switchSettingsSection('general');
@@ -1283,6 +1328,7 @@ function setupSettingsModal() {
             autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
             maxAutoBackups: maxAutoBackupsInput ? parseInt(maxAutoBackupsInput.value) || 10 : 10,
             ...readProviderOrderFromUI(),
+            infiniteScroll: readInfiniteScrollFromUI(),
         });
         
         // If unique gallery folders was just enabled, register overrides for all characters with gallery_ids
@@ -1420,6 +1466,12 @@ function setupSettingsModal() {
 
         // Provider Order & Defaults — reset to registration order
         resetProviderOrderUI();
+
+        // Infinite Scroll — reset all to enabled
+        const isContainer = document.getElementById('infiniteScrollToggles');
+        if (isContainer) {
+            isContainer.querySelectorAll('.infinite-scroll-toggle').forEach(cb => { cb.checked = true; });
+        }
         
         // Apply default highlight color immediately
         applyHighlightColor(DEFAULT_SETTINGS.highlightColor);
@@ -5838,6 +5890,10 @@ let activeTagFilters = new Map();
 let tagIncludeMode = 'any';
 let tagExcludeMode = 'all';
 
+// Playlist filter state
+let activePlaylistFilter = null;
+let activePlaylistAvatarSet = null;
+
 function initTagLogicToggles() {
     const includeBtn = document.getElementById('includeLogicBtn');
     const excludeBtn = document.getElementById('excludeLogicBtn');
@@ -6036,6 +6092,103 @@ function getTags(char) {
     if (Array.isArray(char.tags)) return char.tags;
     if (char.data && Array.isArray(char.data.tags)) return char.data.tags;
     return [];
+}
+
+// ========================================
+// PLAYLIST FILTER
+// ========================================
+
+function setPlaylistFilter(uid) {
+    activePlaylistFilter = uid || null;
+    if (uid) {
+        activePlaylistAvatarSet = window.playlistsGetAvatarSet?.(uid) || new Set();
+    } else {
+        activePlaylistAvatarSet = null;
+    }
+    updatePlaylistFilterLabel();
+    performSearch();
+}
+
+function clearPlaylistFilter() {
+    setPlaylistFilter(null);
+}
+
+function updatePlaylistFilterLabel() {
+    const label = document.getElementById('playlistFilterLabel');
+    if (!label) return;
+    if (activePlaylistFilter) {
+        const pl = window.playlistsGetPlaylist?.(activePlaylistFilter);
+        label.textContent = pl ? pl.name : 'Playlists';
+        label.closest('.playlist-filter-btn')?.classList.add('active');
+    } else {
+        label.textContent = 'Playlists';
+        label.closest('.playlist-filter-btn')?.classList.remove('active');
+    }
+}
+
+function populatePlaylistDropdown() {
+    const content = document.getElementById('playlistFilterContent');
+    if (!content) return;
+
+    const playlists = window.playlistsGetAll?.() || [];
+
+    const searchWrap = document.querySelector('.pl-filter-search-wrap');
+    if (searchWrap) searchWrap.style.display = playlists.length ? '' : 'none';
+    const searchInput = document.getElementById('playlistFilterSearch');
+    if (searchInput) searchInput.value = '';
+
+    let html = `<div class="pl-filter-item ${!activePlaylistFilter ? 'active' : ''}" data-uid="">
+        <i class="fa-solid fa-users"></i>
+        <span class="pl-filter-name">All Characters</span>
+    </div>`;
+
+    if (playlists.length) {
+        html += '<div class="pl-filter-separator"></div>';
+        html += playlists.map(pl => {
+            const isActive = activePlaylistFilter === pl.uid;
+            const iconColor = pl.color ? ` style="color:${escapeHtml(pl.color)}"` : '';
+            const icon = pl.icon
+                ? `<i class="pl-filter-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
+                : '';
+            return `<div class="pl-filter-item ${isActive ? 'active' : ''}" data-uid="${escapeHtml(pl.uid)}">
+                ${icon}
+                <span class="pl-filter-name">${escapeHtml(pl.name)}</span>
+                <span class="pl-filter-count">${pl.characters.length}</span>
+            </div>`;
+        }).join('');
+    }
+
+    content.innerHTML = html;
+}
+
+function renderSidebarPlaylists(avatar) {
+    const section = document.getElementById('modalPlaylistSection');
+    const container = document.getElementById('modalPlaylists');
+    if (!section || !container) return;
+
+    const playlists = window.playlistsGetForChar?.(avatar) || [];
+
+    section.style.display = '';
+    container.innerHTML = playlists.map(pl => {
+        const iconColor = pl.color ? ` style="color:${escapeHtml(pl.color)}"` : '';
+        const icon = pl.icon
+            ? `<i class="pl-chip-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
+            : '';
+        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}</span>`;
+    }).join('') + '<button class="pl-chip pl-chip-add" title="Add to playlist"><i class="fa-solid fa-plus"></i></button>';
+
+    container.onclick = (e) => {
+        const addBtn = e.target.closest('.pl-chip-add');
+        if (addBtn) {
+            window.openPlaylistPicker?.([avatar]);
+            return;
+        }
+        const chip = e.target.closest('.pl-chip[data-uid]');
+        if (chip) {
+            setPlaylistFilter(chip.dataset.uid);
+            document.getElementById('modalClose')?.click();
+        }
+    };
 }
 
 // ==============================================
@@ -6472,6 +6625,19 @@ function createCharacterCard(char) {
         favDiv.appendChild(favIcon);
         card.appendChild(favDiv);
     }
+
+    // Playlist indicator
+    if (window.playlistsIsCharInAny?.(char.avatar)) {
+        const pls = window.playlistsGetForChar?.(char.avatar) || [];
+        const plDiv = document.createElement('div');
+        plDiv.className = 'playlist-indicator';
+        plDiv.title = pls.map(p => p.name).join(', ');
+        const plIcon = document.createElement('i');
+        const firstIcon = pls.length === 1 && pls[0].icon ? pls[0].icon : 'fa-solid fa-list';
+        plIcon.className = firstIcon;
+        plDiv.appendChild(plIcon);
+        card.appendChild(plDiv);
+    }
     
     // Avatar image
     const img = document.createElement('img');
@@ -6511,6 +6677,34 @@ function createCharacterCard(char) {
     // No per-card attachment needed
     
     return card;
+}
+
+function refreshPlaylistBadges() {
+    for (const [, card] of activeCards) {
+        const avatar = card.dataset.avatar;
+        const existing = card.querySelector('.playlist-indicator');
+        const inPlaylist = window.playlistsIsCharInAny?.(avatar);
+        if (inPlaylist) {
+            const pls = window.playlistsGetForChar?.(avatar) || [];
+            const firstIcon = pls.length === 1 && pls[0].icon ? pls[0].icon : 'fa-solid fa-list';
+            const tooltip = pls.map(p => p.name).join(', ');
+            if (existing) {
+                existing.title = tooltip;
+                const icon = existing.querySelector('i');
+                if (icon) icon.className = firstIcon;
+            } else {
+                const plDiv = document.createElement('div');
+                plDiv.className = 'playlist-indicator';
+                plDiv.title = tooltip;
+                const plIcon = document.createElement('i');
+                plIcon.className = firstIcon;
+                plDiv.appendChild(plIcon);
+                card.appendChild(plDiv);
+            }
+        } else if (existing) {
+            existing.remove();
+        }
+    }
 }
 
 // Modal Logic
@@ -7386,8 +7580,10 @@ async function openModal(char) {
     
     // Render tags in sidebar (will be made editable when edit is unlocked)
     renderSidebarTags(getTags(char));
-    
-    // Reset Tabs
+
+    // Render playlist chips in sidebar
+    renderSidebarPlaylists(char.avatar);
+
     deactivateAllTabs();
     document.querySelector('.tab-btn[data-tab="details"]').classList.add('active');
     document.getElementById('pane-details').classList.add('active');
@@ -7596,8 +7792,8 @@ function closeModal() {
     modalImg.removeAttribute('src');
     modalImg.classList.remove('loading');
 
-    // Reset edit lock state
-    isEditLocked = true;
+    // Reset all edit-mode DOM state (tag input, lock header, buttons, etc.)
+    setEditLock(true);
     originalValues = {};
     originalRawData = {};
     _editTagsArray = [];
@@ -8757,6 +8953,11 @@ async function deleteCharacter(char, deleteChats = false) {
             removeGalleryFolderOverride(avatar);
             debugLog('[Delete] Removed gallery folder override for:', avatar);
         }
+
+        // Clean up playlist membership
+        if (avatar && window.playlistsOnCharDeleted) {
+            window.playlistsOnCharDeleted(avatar);
+        }
         
         // CRITICAL: Trigger character refresh in main SillyTavern window
         // This updates ST's in-memory character array and cleans up related data.
@@ -9494,7 +9695,7 @@ function setEditLock(locked) {
         // Hide tag input and show non-editable tags
         if (tagInputWrapper) tagInputWrapper.classList.add('hidden');
         if (tagsContainer) tagsContainer.classList.remove('editable');
-        renderSidebarTags(getCurrentTagsArray(), false);
+        if (activeChar) renderSidebarTags(getCurrentTagsArray(), false);
     } else {
         lockHeader?.classList.add('unlocked');
         if (lockStatus) {
@@ -9852,20 +10053,18 @@ function updateCharacterCardFavoriteStatus(avatar, isFavorite) {
 /**
  * Toggle the favorites-only filter
  */
-function toggleFavoritesFilter() {
-    showFavoritesOnly = !showFavoritesOnly;
-    
-    const btn = document.getElementById('favoritesFilterBtn');
-    if (btn) {
-        if (showFavoritesOnly) {
-            btn.classList.add('active');
-            btn.title = 'Showing favorites only (click to show all)';
-        } else {
-            btn.classList.remove('active');
-            btn.title = 'Show favorites only';
-        }
+function toggleFavoritesFilter(forceState) {
+    const checkbox = document.getElementById('searchFavoritesOnly');
+    if (typeof forceState === 'boolean') {
+        showFavoritesOnly = forceState;
+        if (checkbox) checkbox.checked = forceState;
+    } else {
+        showFavoritesOnly = checkbox ? checkbox.checked : !showFavoritesOnly;
     }
-    
+    const settingsBtn = document.getElementById('searchSettingsBtn');
+    if (settingsBtn) {
+        settingsBtn.classList.toggle('active', showFavoritesOnly);
+    }
     performSearch();
 }
 
@@ -11105,7 +11304,7 @@ function performSearch() {
     //   "creator:john linked:yes dark elf"
     // ========================================================================
     
-    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern):(?:[^\s]+))/gi;
+    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern|playlist):(?:[^\s]+))/gi;
     
     let creatorFilter = null;
     let versionFilter = null;
@@ -11116,6 +11315,7 @@ function performSearch() {
     let filterFavoriteNo = false;
     let linkFilterPrefix = null;
     let linkFilterWantLinked = false;
+    let playlistSearchFilter = null;
     
     let query = rawQuery;
     let match;
@@ -11144,6 +11344,8 @@ function performSearch() {
         } else if (['linked', 'chub', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern'].includes(prefix)) {
             linkFilterPrefix = prefix;
             linkFilterWantLinked = value === 'yes' || value === 'true' || value === 'linked';
+        } else if (prefix === 'playlist') {
+            playlistSearchFilter = value;
         }
     }
     
@@ -11208,6 +11410,23 @@ function performSearch() {
             if (!linkFilterWantLinked && isLinked) return false;
         }
         
+        // playlist: search prefix
+        if (playlistSearchFilter) {
+            const charPls = window.playlistsGetForChar?.(c.avatar) || [];
+            if (playlistSearchFilter === 'none' || playlistSearchFilter === 'empty') {
+                if (charPls.length > 0) return false;
+            } else if (playlistSearchFilter === 'any' || playlistSearchFilter === 'yes') {
+                if (charPls.length === 0) return false;
+            } else {
+                if (!charPls.some(p => p.name.toLowerCase().includes(playlistSearchFilter))) return false;
+            }
+        }
+
+        // Playlist filter (outermost constraint)
+        if (activePlaylistFilter && activePlaylistAvatarSet) {
+            if (!activePlaylistAvatarSet.has(c.avatar)) return false;
+        }
+
         // Favorites-only filter (from toolbar button)
         if (showFavoritesOnly) {
             if (!isCharacterFavorite(c)) return false;
@@ -11329,6 +11548,17 @@ function filterLocalByCreator(creatorName) {
 // Debounced search for better performance (150ms delay)
 const debouncedSearch = debounce(performSearch, 150);
 
+const TOPBAR_DROPDOWN_IDS = ['tagFilterPopup', 'playlistFilterPopup', 'searchSettingsMenu', 'moreOptionsMenu', 'gallerySyncDropdown'];
+
+function closeAllTopbarDropdowns(exceptId) {
+    for (const id of TOPBAR_DROPDOWN_IDS) {
+        if (id === exceptId) continue;
+        document.getElementById(id)?.classList.add('hidden');
+    }
+    document.querySelectorAll('.custom-select-menu:not(.hidden)').forEach(m => m.classList.add('hidden'));
+    window.closeActiveBrowseDropdowns?.();
+}
+
 // Event Listeners
 function setupEventListeners() {
     // View Toggle Buttons (Characters / Chats / Online)
@@ -11354,6 +11584,7 @@ function setupEventListeners() {
     if (tagBtn && tagPopup) {
         tagBtn.onclick = (e) => {
             e.stopPropagation();
+            closeAllTopbarDropdowns('tagFilterPopup');
             tagPopup.classList.toggle('hidden');
         };
         
@@ -11375,6 +11606,58 @@ function setupEventListeners() {
         });
     }
 
+    // Playlist Filter Toggle
+    const plBtn = document.getElementById('playlistFilterBtn');
+    const plPopup = document.getElementById('playlistFilterPopup');
+    const plContent = document.getElementById('playlistFilterContent');
+
+    if (plBtn && plPopup && plContent) {
+        plBtn.onclick = (e) => {
+            e.stopPropagation();
+            closeAllTopbarDropdowns('playlistFilterPopup');
+            populatePlaylistDropdown();
+            plPopup.classList.toggle('hidden');
+        };
+
+        plContent.addEventListener('click', (e) => {
+            const item = e.target.closest('.pl-filter-item');
+            if (!item) return;
+            const uid = item.dataset.uid;
+            setPlaylistFilter(uid || null);
+            plPopup.classList.add('hidden');
+        });
+
+        const plSearchInput = document.getElementById('playlistFilterSearch');
+        if (plSearchInput) {
+            plSearchInput.addEventListener('input', () => {
+                const query = plSearchInput.value.trim().toLowerCase();
+                const items = plContent.querySelectorAll('.pl-filter-item[data-uid]');
+                items.forEach(item => {
+                    if (!item.dataset.uid) return;
+                    const name = (item.querySelector('.pl-filter-name')?.textContent || '').toLowerCase();
+                    item.style.display = (!query || name.includes(query)) ? '' : 'none';
+                });
+            });
+        }
+
+        const plManageBtn = document.getElementById('playlistFilterManageBtn');
+        if (plManageBtn) {
+            plManageBtn.addEventListener('click', () => {
+                plPopup.classList.add('hidden');
+                window.openPlaylistManager?.();
+            });
+        }
+
+        window.addEventListener('click', (e) => {
+            if (!plPopup.classList.contains('hidden') &&
+                !plPopup.contains(e.target) &&
+                e.target !== plBtn &&
+                !plBtn.contains(e.target)) {
+                plPopup.classList.add('hidden');
+            }
+        });
+    }
+
     // Settings Toggle
     const settingsBtn = document.getElementById('searchSettingsBtn');
     const settingsMenu = document.getElementById('searchSettingsMenu');
@@ -11382,6 +11665,7 @@ function setupEventListeners() {
     if(settingsBtn && settingsMenu) {
         settingsBtn.onclick = (e) => {
             e.stopPropagation();
+            closeAllTopbarDropdowns('searchSettingsMenu');
             settingsMenu.classList.toggle('hidden');
         };
 
@@ -11403,6 +11687,7 @@ function setupEventListeners() {
     if(moreOptionsBtn && moreOptionsMenu) {
         moreOptionsBtn.onclick = (e) => {
             e.stopPropagation();
+            closeAllTopbarDropdowns('moreOptionsMenu');
             moreOptionsMenu.classList.toggle('hidden');
         };
 
@@ -11424,12 +11709,6 @@ function setupEventListeners() {
         });
 
         // Overflow proxy items — relay clicks to the real topbar buttons
-        const menuRefreshBtn = document.getElementById('menuRefreshBtn');
-        if (menuRefreshBtn) {
-            menuRefreshBtn.addEventListener('click', () => {
-                document.getElementById('refreshBtn')?.click();
-            });
-        }
         const menuGallerySyncBtn = document.getElementById('menuGallerySyncBtn');
         if (menuGallerySyncBtn) {
             if (!getSetting('uniqueGalleryFolders')) menuGallerySyncBtn.style.display = 'none';
@@ -11461,7 +11740,7 @@ function setupEventListeners() {
         const menuFavoritesBtn = document.getElementById('menuFavoritesBtn');
         if (menuFavoritesBtn) {
             menuFavoritesBtn.addEventListener('click', () => {
-                document.getElementById('favoritesFilterBtn')?.click();
+                toggleFavoritesFilter(!showFavoritesOnly);
             });
         }
         const menuTagsBtn = document.getElementById('menuTagsBtn');
@@ -11497,8 +11776,11 @@ function setupEventListeners() {
         performSearch();
     });
     
-    // Favorites Filter Toggle
-    on('favoritesFilterBtn', 'click', toggleFavoritesFilter);
+    // Favorites Filter Toggle (inside search settings dropdown)
+    const favCheckbox = document.getElementById('searchFavoritesOnly');
+    if (favCheckbox) {
+        favCheckbox.addEventListener('change', () => toggleFavoritesFilter());
+    }
     
     // Favorite Character Button in Modal
     const favoriteCharBtn = document.getElementById('favoriteCharBtn');
@@ -11511,14 +11793,10 @@ function setupEventListeners() {
     }
 
     // Refresh - preserves current filters and search
-    on('refreshBtn', 'click', async () => {
-        // Don't reset filters - just refresh the data
+    on('menuRefreshBtn', 'click', async () => {
         document.getElementById('characterGrid').innerHTML = '';
         document.getElementById('loading').style.display = 'block';
         
-        // Also force the opener to re-read its character list so its in-memory
-        // state is current. This prevents a stale opener from overwriting
-        // settings on its next save.
         try {
             if (window.opener && !window.opener.closed && window.opener.SillyTavern?.getContext) {
                 const ctx = window.opener.SillyTavern.getContext();
@@ -11528,8 +11806,7 @@ function setupEventListeners() {
             }
         } catch (e) { /* opener unavailable */ }
         
-        await fetchCharacters(true); // Force refresh from API
-        // Re-apply current search/filters after fetch
+        await fetchCharacters(true);
         performSearch();
     });
     
@@ -20800,6 +21077,7 @@ window.isExtensionsRecoveryInProgress = function() { return !!window.extensionsR
 window.getCSRFToken = getCSRFToken;
 window.sanitizeFolderName = sanitizeFolderName;
 window.initCustomSelect = initCustomSelect;
+window.closeAllTopbarDropdowns = closeAllTopbarDropdowns;
 window.debounce = debounce;
 window.sanitizeTaglineHtml = sanitizeTaglineHtml;
 
@@ -20844,6 +21122,12 @@ window.loadCharInMain = loadCharInMain;
 window.registerGalleryFolderOverride = registerGalleryFolderOverride;
 window.debugLog = debugLog;
 window.performSearch = performSearch;
+window.toggleFavoritesFilter = toggleFavoritesFilter;
+window.setPlaylistFilter = setPlaylistFilter;
+window.clearPlaylistFilter = clearPlaylistFilter;
+window.populatePlaylistDropdown = populatePlaylistDropdown;
+window.renderSidebarPlaylists = renderSidebarPlaylists;
+window.refreshPlaylistBadges = refreshPlaylistBadges;
 
 // Settings
 window.getSetting = getSetting;

@@ -52,6 +52,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Multi-select** for batch tagging, favorites, update checks, export, or deletion
 - **Right-click context menu** on any character card for quick actions
 - **Version history & snapshots** with save/restore, remote version browsing, and full diff preview
+- **Playlists** for organizing characters into named, ordered virtual folders with icons and colors
 
 ### 🎨 Character Details
 
@@ -301,7 +302,8 @@ The **Online** tab lets you browse, search, and import characters from multiple 
 
 All providers share a common set of capabilities:
 - **Browse & search** with filtering and sorting
-- **In-app character preview** with full card details
+- **Infinite scroll** with automatic page loading as you scroll (toggleable per provider)
+- **In-app character preview** with full card details, gallery images, and stats
 - **One-click import** to your local library
 - **"In Library" badges** on characters you already own
 - **"Hide Owned" filter** to only show characters not in your library
@@ -476,6 +478,7 @@ Type these prefixes in the search bar for targeted filtering:
 | `version:` | `version:1.0` | Match character version string |
 | `gallery:` | `gallery:aB3x` or `gallery:none` | Match gallery ID (or `none` for unassigned) |
 | `uid:` | `uid:abc123` or `uid:none` | Match version UID (or `none` for unassigned) |
+| `playlist:` | `playlist:backlog` or `playlist:none` | Match playlist name (or `none`/`any` for membership) |
 
 Regular search matches across name, tags, author, and creator's notes (toggleable via checkboxes).
 

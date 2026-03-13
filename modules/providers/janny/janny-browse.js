@@ -75,7 +75,7 @@ let localLibraryLookup = {
 // ========================================
 
 async function searchJanny(opts = {}) {
-    const { search = '', page = 1, limit = 40, sort = 'newest' } = opts;
+    const { search = '', page = 1, limit = 80, sort = 'newest' } = opts;
 
     // Build MeiliSearch filter array from state
     const filters = [];
@@ -257,10 +257,7 @@ function renderGrid(characters, append = false) {
 }
 
 function updateLoadMore() {
-    const loadMore = document.getElementById('jannyLoadMore');
-    if (loadMore) {
-        loadMore.style.display = jannyHasMore && jannyCharacters.length > 0 ? 'flex' : 'none';
-    }
+    jannyBrowseView.updateLoadMoreVisibility('jannyLoadMore', jannyHasMore, jannyCharacters.length > 0);
 }
 
 // ========================================
@@ -293,7 +290,7 @@ async function loadCharacters(append = false) {
         const data = await searchJanny({
             search: effectiveSearch,
             page: jannyCurrentPage,
-            limit: 40,
+            limit: 80,
             sort: jannySortMode
         });
 
@@ -312,13 +309,13 @@ async function loadCharacters(append = false) {
         // Auto-fetch when client-side filters remove too many results
         if (jannyFilterHideOwned && jannyCurrentPage < totalPages) {
             let autoFetches = 0;
-            while (hits.length < 40 && jannyCurrentPage < totalPages && autoFetches < 3 && delegatesInitialized) {
+            while (hits.length < 80 && jannyCurrentPage < totalPages && autoFetches < 3 && delegatesInitialized) {
                 autoFetches++;
                 jannyCurrentPage++;
                 const moreData = await searchJanny({
                     search: effectiveSearch,
                     page: jannyCurrentPage,
-                    limit: 40,
+                    limit: 80,
                     sort: jannySortMode
                 });
                 if (!delegatesInitialized) return;
@@ -561,6 +558,7 @@ async function fetchAndPopulateDetails(hit, token) {
 }
 
 function cleanupJannyCharModal() {
+    BrowseView.closeAvatarViewer();
     window.currentBrowseAltGreetings = null;
     const creatorEl = document.getElementById('jannyCharCreator');
     if (creatorEl) creatorEl.textContent = '';
@@ -919,6 +917,7 @@ function initJannyView() {
 
     on('jannyTagsBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (filtersDropdown) filtersDropdown.classList.add('hidden');
         if (tagsDropdown) tagsDropdown.classList.toggle('hidden');
     });
@@ -963,6 +962,7 @@ function initJannyView() {
 
     on('jannyFiltersBtn', 'click', (e) => {
         e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
         if (tagsDropdown) tagsDropdown.classList.add('hidden');
         if (filtersDropdown) filtersDropdown.classList.toggle('hidden');
     });
@@ -1352,6 +1352,13 @@ class JannyBrowseView extends BrowseView {
 
     _getImageGridIds() { return ['jannyGrid']; }
 
+    canLoadMore() { return jannyHasMore && !jannyIsLoading; }
+
+    loadMore() {
+        jannyCurrentPage++;
+        loadCharacters(true);
+    }
+
     init() {
         super.init();
         buildLocalLibraryLookup();
@@ -1408,6 +1415,7 @@ class JannyBrowseView extends BrowseView {
     }
 
     deactivate() {
+        jannyDetailFetchToken++;
         delegatesInitialized = false;
         super.deactivate();
         this.disconnectImageObserver();
