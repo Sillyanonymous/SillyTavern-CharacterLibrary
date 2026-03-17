@@ -227,6 +227,18 @@ async function initModuleSystem() {
     }
 
     try {
+        const creatorModule = await import('./character-creator.js');
+        ModuleLoader.register('character-creator', creatorModule.default);
+
+        window.openCharacterCreator = creatorModule.openModal;
+        window.closeCharacterCreator = creatorModule.closeModal;
+        window.closeAiStudio = creatorModule.closeStudio;
+        window.closeNotesPreview = creatorModule.closeNotesPreview;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load character-creator module:', err);
+    }
+
+    try {
         const playlistsModule = await import('./playlists.js');
         ModuleLoader.register('playlists', playlistsModule.default);
 

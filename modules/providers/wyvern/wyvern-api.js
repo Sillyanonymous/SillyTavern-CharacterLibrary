@@ -289,7 +289,10 @@ export function buildCharacterCardFromWyvern(apiData) {
 function convertWyvernLorebook(lorebooks) {
     if (!Array.isArray(lorebooks) || lorebooks.length === 0) return undefined;
     const lb = lorebooks[0];
-    if (!lb.entries?.length) return undefined;
+    const entriesArray = Array.isArray(lb.entries) ? lb.entries
+        : (lb.entries && typeof lb.entries === 'object') ? Object.values(lb.entries)
+        : [];
+    if (entriesArray.length === 0) return undefined;
 
     return {
         name: lb.name || '',
@@ -298,7 +301,7 @@ function convertWyvernLorebook(lorebooks) {
         token_budget: Number(lb.token_budget) || 500,
         recursive_scanning: !!lb.recursive_scanning,
         extensions: lb.extensions || {},
-        entries: lb.entries.map((e, i) => ({
+        entries: entriesArray.map((e, i) => ({
             id: Number(e.entry_id) || i,
             keys: Array.isArray(e.keys) ? e.keys : [],
             secondary_keys: Array.isArray(e.secondary_keys) ? e.secondary_keys : [],

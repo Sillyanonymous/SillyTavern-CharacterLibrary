@@ -1579,7 +1579,7 @@ class ChartavernBrowseView extends BrowseView {
                 </button>
                 <div id="ctTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="text" id="ctTagsSearchInput" placeholder="Search tags...">
+                        <input type="search" id="ctTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
                         <button id="ctTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -1635,7 +1635,7 @@ class ChartavernBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="text" id="ctSearchInput" placeholder="Search CharacterTavern characters...">
+                        <input type="search" id="ctSearchInput" placeholder="Search CharacterTavern characters..." autocomplete="one-time-code">
                         <button id="ctClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>

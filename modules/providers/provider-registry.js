@@ -26,7 +26,7 @@ export function registerProvider(provider) {
         console.warn(`[ProviderRegistry] Provider "${provider.id}" already registered, replacing`);
     }
     providers.set(provider.id, provider);
-    console.log(`[ProviderRegistry] Registered provider: ${provider.name} (${provider.id})`);
+    coreAPI?.debugLog(`[ProviderRegistry] Registered provider: ${provider.name} (${provider.id})`);
 }
 
 /**
@@ -40,7 +40,7 @@ export async function initProviders(api) {
         try {
             await provider.init(api);
             if (provider.browseView) provider.browseView.provider = provider;
-            console.log(`[ProviderRegistry] Initialized provider: ${id}`);
+            coreAPI.debugLog(`[ProviderRegistry] Initialized provider: ${id}`);
         } catch (err) {
             console.error(`[ProviderRegistry] Failed to init provider "${id}":`, err);
         }

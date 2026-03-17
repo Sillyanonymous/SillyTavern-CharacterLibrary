@@ -2305,7 +2305,7 @@ class PygmalionBrowseView extends BrowseView {
                 </button>
                 <div id="pygTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="text" id="pygTagsSearchInput" placeholder="Search tags...">
+                        <input type="search" id="pygTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
                         <button id="pygTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -2349,7 +2349,7 @@ class PygmalionBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="text" id="pygSearchInput" placeholder="Search Pygmalion characters...">
+                        <input type="search" id="pygSearchInput" placeholder="Search Pygmalion characters..." autocomplete="one-time-code">
                         <button id="pygClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>

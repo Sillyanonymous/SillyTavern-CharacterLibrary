@@ -150,8 +150,7 @@ async function openChat(char, chatFile) {
         CoreAPI.showToast("Opening chat...", "success");
 
         // Close any open modals
-        CoreAPI.hideElement('chatPreviewModal');
-        document.querySelector('.modal-overlay')?.classList.add('hidden');
+        CoreAPI.hideModal('chatPreviewModal');
 
         // Register gallery folder override for media localization
         if (CoreAPI.getSetting('uniqueGalleryFolders') && CoreAPI.getCharacterGalleryId(char)) {
@@ -288,6 +287,12 @@ function initChatsView() {
     // Close modal on overlay click
     CoreAPI.onElement('chatPreviewModal', 'click', (e) => {
         if (e.target.id === 'chatPreviewModal') {
+            CoreAPI.hideModal('chatPreviewModal');
+        }
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !document.getElementById('chatPreviewModal')?.classList.contains('hidden')) {
             CoreAPI.hideModal('chatPreviewModal');
         }
     });
@@ -695,12 +700,6 @@ function sortChats(chats) {
         case 'least_messages':
             sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
             break;
-        case 'longest_chat':
-            sorted.sort((a, b) => (b.chat_items || b.mes_count || 0) - (a.chat_items || a.mes_count || 0));
-            break;
-        case 'shortest_chat':
-            sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
-            break;
         case 'most_chats': {
             const charChatCounts = {};
             sorted.forEach(c => {
@@ -1062,19 +1061,26 @@ function renderChatMessages(messages, character) {
 
     const avatarUrl = CoreAPI.getCharacterAvatarUrl(character.avatar) || '/img/ai4.png';
 
+    // Two-pass render: build structural HTML with empty text slots, then populate
+    // text via DOM so unbalanced </div> in message content can't break the structure
+    const formattedTexts = [];
+
     container.innerHTML = messages.map((msg, index) => {
         const isUser = msg.is_user;
         const isSystem = msg.is_system;
         const name = msg.name || (isUser ? 'User' : character.name);
-        const text = msg.mes || '';
-        const time = msg.send_date ? new Date(msg.send_date).toLocaleString() : '';
-
-        const formattedText = CoreAPI.formatRichText(text, character.name, true);
+        const rawSwipeId = msg.swipe_id ?? 0;
+        const swipeId = msg.swipes?.length > 1 ? Math.min(rawSwipeId, msg.swipes.length - 1) : 0;
+        const text = msg.swipes?.length > 1 ? (msg.swipes[swipeId] || '') : (msg.mes || '');
+        const time = getSwipeTimestamp(msg, swipeId);
 
         // Skip rendering metadata-only messages (chat header)
         if (index === 0 && msg.chat_metadata && !msg.mes) {
+            formattedTexts.push(null);
             return '';
         }
+
+        formattedTexts.push(CoreAPI.formatRichText(text, character.name, true));
 
         const isMetadata = msg.chat_metadata !== undefined;
         const actionButtons = isMetadata ? '' : `
@@ -1088,11 +1094,13 @@ function renderChatMessages(messages, character) {
             </div>
         `;
 
+        const swipeNav = msg.swipes?.length > 1 ? buildSwipeNavHtml(index, swipeId, msg.swipes.length) : '';
+
         if (isSystem) {
             return `
                 <div class="chat-message system" data-msg-index="${index}">
                     <div class="chat-message-content">
-                        <div class="chat-message-text">${formattedText}</div>
+                        <div class="chat-message-text"></div>
                     </div>
                     ${actionButtons}
                 </div>
@@ -1104,13 +1112,20 @@ function renderChatMessages(messages, character) {
                 ${!isUser ? `<img src="${avatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
                 <div class="chat-message-content">
                     <div class="chat-message-name">${CoreAPI.escapeHtml(name)}</div>
-                    <div class="chat-message-text">${formattedText}</div>
+                    <div class="chat-message-text"></div>
+                    ${swipeNav}
                     ${time ? `<div class="chat-message-time">${time}</div>` : ''}
                 </div>
                 ${actionButtons}
             </div>
         `;
     }).join('');
+
+    // Populate text content in isolation so HTML in messages can't break the structure
+    container.querySelectorAll('.chat-message-text').forEach(el => {
+        const msgIndex = parseInt(el.closest('.chat-message').dataset.msgIndex, 10);
+        if (formattedTexts[msgIndex]) el.innerHTML = formattedTexts[msgIndex];
+    });
 
     // Add event listeners for message actions
     container.querySelectorAll('.chat-msg-action-btn').forEach(btn => {
@@ -1127,8 +1142,93 @@ function renderChatMessages(messages, character) {
         });
     });
 
+    // Add swipe navigation listeners
+    container.querySelectorAll('.chat-swipe-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const msgIndex = parseInt(btn.dataset.msgIndex, 10);
+            const dir = parseInt(btn.dataset.dir, 10);
+            navigateSwipe(msgIndex, dir, character);
+        });
+    });
+
     // Scroll to bottom
     container.scrollTop = container.scrollHeight;
+}
+
+function getSwipeTimestamp(msg, swipeId) {
+    const swipeDate = msg.swipe_info?.[swipeId]?.send_date;
+    if (swipeDate) return new Date(swipeDate).toLocaleString();
+    if (msg.send_date) return new Date(msg.send_date).toLocaleString();
+    return '';
+}
+
+function buildSwipeNavHtml(msgIndex, activeSwipeId, totalSwipes) {
+    const isFirst = activeSwipeId === 0;
+    const isLast = activeSwipeId === totalSwipes - 1;
+    return `
+        <div class="chat-swipe-nav">
+            <button class="chat-swipe-btn${isFirst ? ' disabled' : ''}" data-msg-index="${msgIndex}" data-dir="-1" ${isFirst ? 'disabled' : ''}>
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+            <span class="chat-swipe-counter">${activeSwipeId + 1} / ${totalSwipes}</span>
+            <button class="chat-swipe-btn${isLast ? ' disabled' : ''}" data-msg-index="${msgIndex}" data-dir="1" ${isLast ? 'disabled' : ''}>
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+    `;
+}
+
+function navigateSwipe(msgIndex, dir, character) {
+    const msg = currentChatMessages[msgIndex];
+    if (!msg?.swipes || msg.swipes.length <= 1) return;
+
+    const currentId = msg.swipe_id ?? 0;
+    const newId = currentId + dir;
+    if (newId < 0 || newId >= msg.swipes.length) return;
+
+    msg.swipe_id = newId;
+    msg.mes = msg.swipes[newId];
+
+    // Update just this message's DOM instead of re-rendering everything
+    const msgEl = document.querySelector(`.chat-message[data-msg-index="${msgIndex}"]`);
+    if (!msgEl) return;
+
+    const textEl = msgEl.querySelector('.chat-message-text');
+    if (textEl) {
+        textEl.innerHTML = CoreAPI.formatRichText(msg.swipes[newId] || '', character?.name || '', true);
+    }
+
+    const navEl = msgEl.querySelector('.chat-swipe-nav');
+    if (navEl) {
+        navEl.outerHTML = buildSwipeNavHtml(msgIndex, newId, msg.swipes.length);
+        // Re-attach listeners on the new nav element
+        msgEl.querySelectorAll('.chat-swipe-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                navigateSwipe(parseInt(btn.dataset.msgIndex, 10), parseInt(btn.dataset.dir, 10), character);
+            });
+        });
+    }
+
+    const timeEl = msgEl.querySelector('.chat-message-time');
+    const time = getSwipeTimestamp(msg, newId);
+    if (timeEl) {
+        if (time) {
+            timeEl.textContent = time;
+            timeEl.style.display = '';
+        } else {
+            timeEl.style.display = 'none';
+        }
+    } else if (time) {
+        const contentEl = msgEl.querySelector('.chat-message-content');
+        if (contentEl) {
+            const newTimeEl = document.createElement('div');
+            newTimeEl.className = 'chat-message-time';
+            newTimeEl.textContent = time;
+            contentEl.appendChild(newTimeEl);
+        }
+    }
 }
 
 // ========================================
@@ -1201,7 +1301,7 @@ async function editChatMessage(messageIndex) {
                         <span><strong>${CoreAPI.escapeHtml(msg.name || (msg.is_user ? 'User' : currentPreviewChar?.name || 'Character'))}</strong></span>
                         ${msg.send_date ? `<span> \u2022 ${new Date(msg.send_date).toLocaleString()}</span>` : ''}
                     </div>
-                    <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;">${CoreAPI.escapeHtml(currentText)}</textarea>
+                    <textarea id="editMessageText" class="glass-input" style="width: 100%; min-height: 200px; resize: vertical;" autocomplete="one-time-code">${CoreAPI.escapeHtml(currentText)}</textarea>
                     <div style="display: flex; gap: 10px; margin-top: 15px; justify-content: flex-end;">
                         <button id="editMessageCancel" class="action-btn secondary">Cancel</button>
                         <button id="editMessageSave" class="action-btn primary"><i class="fa-solid fa-save"></i> Save</button>
@@ -1235,6 +1335,9 @@ async function editChatMessage(messageIndex) {
 
         try {
             currentChatMessages[messageIndex].mes = newText;
+            if (msg.swipes?.length > 1) {
+                msg.swipes[msg.swipe_id ?? 0] = newText;
+            }
 
             const success = await saveChatToServer(currentPreviewChat, currentChatMessages);
 
@@ -1245,10 +1348,16 @@ async function editChatMessage(messageIndex) {
                 clearChatCache();
             } else {
                 currentChatMessages[messageIndex].mes = currentText;
+                if (msg.swipes?.length > 1) {
+                    msg.swipes[msg.swipe_id ?? 0] = currentText;
+                }
                 CoreAPI.showToast('Failed to save changes', 'error');
             }
         } catch (e) {
             currentChatMessages[messageIndex].mes = currentText;
+            if (msg.swipes?.length > 1) {
+                msg.swipes[msg.swipe_id ?? 0] = currentText;
+            }
             CoreAPI.showToast('Error: ' + e.message, 'error');
         }
     };

@@ -15,7 +15,7 @@ const MultiSelect = {
         document.getElementById('multiSelectToggleBtn')?.classList.add('active');
 
         this.updateToolbar();
-        console.log('[MultiSelect] Mode enabled');
+        CoreAPI.debugLog('[MultiSelect] Mode enabled');
     },
 
     disable() {
@@ -30,7 +30,7 @@ const MultiSelect = {
         document.getElementById('multiSelectToggleBtn')?.classList.remove('active');
 
         this.updateToolbar();
-        console.log('[MultiSelect] Mode disabled');
+        CoreAPI.debugLog('[MultiSelect] Mode disabled');
     },
 
     toggle(char, cardElement) {
@@ -570,7 +570,7 @@ function init() {
     };
 
     isInitialized = true;
-    console.log('[MultiSelect] Module initialized');
+    CoreAPI.debugLog('[MultiSelect] Module initialized');
 }
 
 export default {

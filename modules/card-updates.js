@@ -133,7 +133,7 @@ export function init(deps) {
     rebuildEffectiveFields();
     
     isInitialized = true;
-    console.log('[CardUpdates] Module initialized');
+    CoreAPI.debugLog('[CardUpdates] Module initialized');
 }
 
 export async function checkSingleCharacter(char) {

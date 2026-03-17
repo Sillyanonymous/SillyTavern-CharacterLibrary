@@ -87,6 +87,7 @@ let wyvernViewMode = 'browse';
 let wyvernFollowingCharacters = [];
 let wyvernFollowingLoading = false;
 let wyvernCreatorFilter = null; // { uid, displayName, vanityUrl }
+let wyvernCreatorSort = 'created_at';
 let wyvernIsFollowingCurrentCreator = false;
 
 let wyvernCardLookup = new Map();
@@ -170,6 +171,66 @@ function markWyvernCardAsImported(charId) {
     }
     if (badgesEl && !badgesEl.querySelector('.in-library')) {
         badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    }
+}
+
+function applyTagsClamp(tagsEl) {
+    if (!tagsEl) return;
+
+    const existingToggle = tagsEl.querySelector('.browse-tags-more');
+    if (existingToggle) existingToggle.remove();
+
+    tagsEl.querySelectorAll('.browse-tag-hidden').forEach(tag => {
+        tag.classList.remove('browse-tag-hidden');
+    });
+
+    tagsEl.classList.remove('browse-tags-collapsed', 'browse-tags-expanded');
+
+    const tags = Array.from(tagsEl.querySelectorAll('.browse-tag'));
+    if (!tags.length) return;
+
+    tagsEl.classList.add('browse-tags-collapsed');
+
+    const maxHeightValue = getComputedStyle(tagsEl).getPropertyValue('--browse-tags-max-height').trim();
+    const maxHeight = parseFloat(maxHeightValue) || tagsEl.clientHeight || 64;
+
+    let overflowIndex = -1;
+    for (let i = 0; i < tags.length; i++) {
+        const tag = tags[i];
+        const tagBottom = tag.offsetTop + tag.offsetHeight;
+        if (tagBottom > maxHeight + 2) {
+            overflowIndex = i;
+            break;
+        }
+    }
+
+    if (overflowIndex === -1) {
+        tagsEl.classList.remove('browse-tags-collapsed');
+        return;
+    }
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'browse-tag browse-tags-more';
+    toggle.textContent = '...';
+    toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isCollapsed = tagsEl.classList.contains('browse-tags-collapsed');
+        if (isCollapsed) {
+            tagsEl.classList.remove('browse-tags-collapsed');
+            tagsEl.classList.add('browse-tags-expanded');
+            tagsEl.querySelectorAll('.browse-tag-hidden').forEach(tag => tag.classList.remove('browse-tag-hidden'));
+            tagsEl.appendChild(toggle);
+        } else {
+            applyTagsClamp(tagsEl);
+        }
+    });
+
+    const insertIndex = Math.max(overflowIndex - 1, 0);
+    tagsEl.insertBefore(toggle, tags[insertIndex]);
+    for (let i = insertIndex; i < tags.length; i++) {
+        tags[i].classList.add('browse-tag-hidden');
     }
 }
 
@@ -268,7 +329,7 @@ class WyvernBrowseView extends BrowseView {
                 </button>
                 <div id="wyvernTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="text" id="wyvernTagsSearchInput" placeholder="Type a tag name...">
+                        <input type="search" id="wyvernTagsSearchInput" placeholder="Type a tag name..." autocomplete="one-time-code">
                         <button id="wyvernTagsClearBtn" class="glass-btn icon-only" title="Clear tag filter">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -312,7 +373,7 @@ class WyvernBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="text" id="wyvernSearchInput" placeholder="Search Wyvern characters...">
+                        <input type="search" id="wyvernSearchInput" placeholder="Search Wyvern characters..." autocomplete="one-time-code">
                         <button id="wyvernClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
@@ -320,16 +381,14 @@ class WyvernBrowseView extends BrowseView {
                             <i class="fa-solid fa-arrow-right"></i>
                         </button>
                     </div>
-                </div>
-
-                <!-- Creator Search -->
-                <div class="browse-creator-search">
-                    <div class="browse-creator-search-wrapper">
-                        <i class="fa-solid fa-user"></i>
-                        <input type="text" id="wyvernCreatorSearchInput" placeholder="Search by creator...">
-                        <button id="wyvernCreatorSearchBtn" class="browse-search-submit" title="Search by creator">
-                            <i class="fa-solid fa-arrow-right"></i>
-                        </button>
+                    <div class="browse-creator-search">
+                        <div class="browse-creator-search-wrapper">
+                            <i class="fa-solid fa-user"></i>
+                            <input type="search" id="wyvernCreatorSearchInput" placeholder="Search by creator..." autocomplete="one-time-code">
+                            <button id="wyvernCreatorSearchBtn" class="browse-search-submit" title="Search by creator">
+                                <i class="fa-solid fa-arrow-right"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -340,6 +399,11 @@ class WyvernBrowseView extends BrowseView {
                         <span>Showing characters by <strong id="wyvernCreatorName"></strong></span>
                     </div>
                     <div class="chub-author-banner-actions">
+                        <select id="wyvernCreatorSortSelect" class="glass-select" title="Sort creator's characters">
+                            <option value="created_at" selected>🆕 Newest Created</option>
+                            <option value="votes">❤️ Most Likes</option>
+                            <option value="messages">💬 Most Messages</option>
+                        </select>
                         <button id="wyvernFollowCreatorBtn" class="glass-btn" title="Follow this creator on Wyvern">
                             <i class="fa-solid fa-heart"></i> <span>Follow</span>
                         </button>
@@ -700,6 +764,12 @@ function initWyvernView() {
         CoreAPI.initCustomSelect?.(sortEl);
     }
 
+    const creatorSortEl = document.getElementById('wyvernCreatorSortSelect');
+    if (creatorSortEl) {
+        creatorSortEl.value = wyvernCreatorSort;
+        CoreAPI.initCustomSelect?.(creatorSortEl);
+    }
+
     setupWyvernGridDelegates();
 
     // Mode toggle (Browse / Following)
@@ -756,9 +826,13 @@ function initWyvernView() {
         else renderWyvernFollowing();
     });
 
-    // Creator filter clear
+    // Creator filter
     on('wyvernClearCreatorBtn', 'click', clearWyvernCreatorFilter);
     on('wyvernFollowCreatorBtn', 'click', toggleWyvernFollowCreator);
+    on('wyvernCreatorSortSelect', 'change', (e) => {
+        wyvernCreatorSort = e.target.value;
+        renderWyvernGrid();
+    });
 
     // Tags dropdown
     initWyvernTagsDropdown();
@@ -1827,6 +1901,9 @@ function renderWyvernFollowing() {
 
 async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     wyvernCreatorFilter = { uid, displayName, vanityUrl };
+    wyvernCreatorSort = 'created_at';
+    const sortSelect = document.getElementById('wyvernCreatorSortSelect');
+    if (sortSelect) sortSelect.value = 'created_at';
     wyvernCharacters = [];
     wyvernCurrentPage = 1;
     wyvernHasMore = false;
@@ -1965,6 +2042,9 @@ async function toggleWyvernFollowCreator() {
 
 function clearWyvernCreatorFilter() {
     wyvernCreatorFilter = null;
+    wyvernCreatorSort = 'created_at';
+    const sortSelect = document.getElementById('wyvernCreatorSortSelect');
+    if (sortSelect) sortSelect.value = 'created_at';
     const banner = document.getElementById('wyvernCreatorBanner');
     if (banner) banner.classList.add('hidden');
 
@@ -1982,6 +2062,17 @@ function renderWyvernGrid(appendOnly = false) {
     const grid = document.getElementById('wyvernGrid');
 
     let displayCharacters = wyvernCharacters;
+
+    // Client-side sort for creator view
+    if (wyvernCreatorFilter && wyvernCreatorSort !== 'created_at') {
+        const stats = (c) => getCharStats(c);
+        displayCharacters = [...displayCharacters].sort((a, b) => {
+            if (wyvernCreatorSort === 'votes') return stats(b).likes - stats(a).likes;
+            if (wyvernCreatorSort === 'messages') return stats(b).messages - stats(a).messages;
+            return 0;
+        });
+    }
+
     if (wyvernFilterHideOwned) {
         displayCharacters = displayCharacters.filter(c => !isCharInLocalLibrary(c));
     }
@@ -2273,6 +2364,7 @@ async function openWyvernCharPreview(char) {
     // Tags
     const tags = char.tags || [];
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
+    requestAnimationFrame(() => applyTagsClamp(tagsEl));
 
     // Stats
     viewsEl.textContent = formatNumber(stats.views);

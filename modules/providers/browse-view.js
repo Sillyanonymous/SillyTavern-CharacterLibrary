@@ -1,5 +1,7 @@
 // BrowseView — base class for provider browse views in the Online tab
 
+import CoreAPI from '../core-api.js';
+
 /**
  * Base class for Online tab browse views.
  * Subclasses MUST override at least renderView().
@@ -271,7 +273,7 @@ export class BrowseView {
      * @returns {boolean}
      */
     isInfiniteScrollEnabled() {
-        const perProvider = window.getSetting?.('infiniteScroll');
+        const perProvider = CoreAPI.getSetting('infiniteScroll');
         const id = this.provider?.id;
         if (id && perProvider && typeof perProvider === 'object' && id in perProvider) {
             return perProvider[id];

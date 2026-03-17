@@ -181,6 +181,66 @@ function isCharInLocalLibrary(jannyChar) {
 // CARD RENDERING
 // ========================================
 
+function applyTagsClamp(tagsEl) {
+    if (!tagsEl) return;
+
+    const existingToggle = tagsEl.querySelector('.browse-tags-more');
+    if (existingToggle) existingToggle.remove();
+
+    tagsEl.querySelectorAll('.browse-tag-hidden').forEach(tag => {
+        tag.classList.remove('browse-tag-hidden');
+    });
+
+    tagsEl.classList.remove('browse-tags-collapsed', 'browse-tags-expanded');
+
+    const tags = Array.from(tagsEl.querySelectorAll('.browse-tag'));
+    if (!tags.length) return;
+
+    tagsEl.classList.add('browse-tags-collapsed');
+
+    const maxHeightValue = getComputedStyle(tagsEl).getPropertyValue('--browse-tags-max-height').trim();
+    const maxHeight = parseFloat(maxHeightValue) || tagsEl.clientHeight || 64;
+
+    let overflowIndex = -1;
+    for (let i = 0; i < tags.length; i++) {
+        const tag = tags[i];
+        const tagBottom = tag.offsetTop + tag.offsetHeight;
+        if (tagBottom > maxHeight + 2) {
+            overflowIndex = i;
+            break;
+        }
+    }
+
+    if (overflowIndex === -1) {
+        tagsEl.classList.remove('browse-tags-collapsed');
+        return;
+    }
+
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'browse-tag browse-tags-more';
+    toggle.textContent = '...';
+    toggle.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const isCollapsed = tagsEl.classList.contains('browse-tags-collapsed');
+        if (isCollapsed) {
+            tagsEl.classList.remove('browse-tags-collapsed');
+            tagsEl.classList.add('browse-tags-expanded');
+            tagsEl.querySelectorAll('.browse-tag-hidden').forEach(tag => tag.classList.remove('browse-tag-hidden'));
+            tagsEl.appendChild(toggle);
+        } else {
+            applyTagsClamp(tagsEl);
+        }
+    });
+
+    const insertIndex = Math.max(overflowIndex - 1, 0);
+    tagsEl.insertBefore(toggle, tags[insertIndex]);
+    for (let i = insertIndex; i < tags.length; i++) {
+        tags[i].classList.add('browse-tag-hidden');
+    }
+}
+
 function createJannyCard(hit) {
     const name = hit.name || 'Unknown';
     const desc = stripHtml(hit.description) || '';
@@ -418,6 +478,7 @@ function openPreviewModal(hit) {
     // Tags
     const tagsEl = document.getElementById('jannyCharTags');
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
+    requestAnimationFrame(() => applyTagsClamp(tagsEl));
 
     // Creator's Notes (website description — may include inline images from ella.janitorai.com)
     const rawDescription = hit.description || '';
@@ -1173,7 +1234,7 @@ class JannyBrowseView extends BrowseView {
                 </button>
                 <div id="jannyTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="text" id="jannyTagsSearchInput" placeholder="Search tags...">
+                        <input type="search" id="jannyTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
                         <button id="jannyTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -1226,7 +1287,7 @@ class JannyBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="text" id="jannySearchInput" placeholder="Search JannyAI characters...">
+                        <input type="search" id="jannySearchInput" placeholder="Search JannyAI characters..." autocomplete="one-time-code">
                         <button id="jannyClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>

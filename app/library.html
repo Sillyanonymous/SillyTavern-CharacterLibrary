@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -37,7 +37,7 @@
             <div class="search-area">
                 <div class="search-box">
                     <i class="fa-solid fa-search"></i>
-                    <input type="text" id="searchInput" placeholder="Search characters...">
+                    <input type="search" id="searchInput" placeholder="Search characters..." autocomplete="one-time-code">
                     <button id="clearSearchBtn" class="clear-search-btn hidden" title="Clear search">
                         <i class="fa-solid fa-times"></i>
                     </button>
@@ -74,7 +74,7 @@
                     </button>
                     <div id="tagFilterPopup" class="dropdown-menu tag-filter-popup hidden" style="width: 270px; max-height: 420px;">
                         <div class="tag-search-row">
-                            <input type="text" id="tagSearchInput" placeholder="Find tags...">
+                            <input type="search" id="tagSearchInput" placeholder="Find tags..." autocomplete="one-time-code">
                             <button id="clearAllTagsBtn" class="glass-btn icon-only clear-tags-btn" title="Clear all tag filters">
                                 <i class="fa-solid fa-xmark"></i>
                             </button>
@@ -99,7 +99,7 @@
                     <div id="playlistFilterPopup" class="dropdown-menu playlist-filter-popup hidden">
                         <div class="pl-filter-search-wrap">
                             <i class="fa-solid fa-magnifying-glass pl-filter-search-icon"></i>
-                            <input type="text" id="playlistFilterSearch" class="cl-input pl-filter-search" placeholder="Search playlists...">
+                            <input type="search" id="playlistFilterSearch" class="cl-input pl-filter-search" placeholder="Search playlists..." autocomplete="one-time-code">
                         </div>
                         <div id="playlistFilterContent"></div>
                         <div class="pl-filter-footer">
@@ -136,6 +136,9 @@
                         </button>
                         <button id="recommenderBtn" class="dropdown-item">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Card Recommender
+                        </button>
+                        <button id="creatorBtn" class="dropdown-item">
+                            <i class="fa-solid fa-plus-circle"></i> Create Character
                         </button>
                         <div class="dropdown-divider"></div>
                         <button id="menuRefreshBtn" class="dropdown-item">
@@ -307,7 +310,7 @@
                             <!-- Tags injected here -->
                         </div>
                         <div class="tag-input-wrapper hidden" id="tagInputWrapper">
-                            <input type="text" id="tagInput" class="glass-input tag-input" placeholder="Add tag..." autocomplete="off">
+                            <input type="search" id="tagInput" class="glass-input tag-input" placeholder="Add tag..." autocomplete="one-time-code">
                             <div id="tagAutocomplete" class="tag-autocomplete hidden"></div>
                         </div>
                     </div>
@@ -343,8 +346,8 @@
                             <span class="provider-tagline-text" id="modalProviderTagline"></span>
                         </div>
                         
-                        <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 25px;">
-                            <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                        <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 18px;">
+                            <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 8px;">
                                     <i class="fa-solid fa-feather-pointed"></i> 
                                     <span style="flex: 1;">Creator's Notes</span>
@@ -352,37 +355,37 @@
                                         <i class="fa-solid fa-expand"></i>
                                     </button>
                                 </summary>
-                                <div id="modalCreatorNotes" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                                <div id="modalCreatorNotes" class="scrolling-text" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
                         </div>
 
                         <div class="description-box">
-                            <h3><i class="fa-solid fa-scroll" style="margin-right: 8px; opacity: 0.7;"></i>Description</h3>
+                            <h3><i class="fa-solid fa-scroll" style="margin-right: 6px; opacity: 0.7;"></i>Description</h3>
                             <div id="modalDescription" class="scrolling-text"></div>
                         </div>
                         <div class="first-mes-box">
                             <div class="content-header">
-                                <h3 class="expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 8px; opacity: 0.7;"></i>First Message</h3>
+                                <h3 class="expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 6px; opacity: 0.7;"></i>First Message</h3>
                             </div>
                             <div id="modalFirstMes" class="scrolling-text"></div>
                         </div>
 
-                        <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 20px;">
-                            <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                        <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 16px;">
+                            <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 10px;">
                                     <span style="flex: 1;"><i class="fa-solid fa-comments" style="margin-right: 8px; opacity: 0.7;"></i>Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
                                     <button type="button" class="content-expand-btn" id="altGreetingsExpandBtn" title="Expand">
                                         <i class="fa-solid fa-expand"></i>
                                     </button>
                                 </summary>
-                                <div id="modalAltGreetings" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                                <div id="modalAltGreetings" class="scrolling-text" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
                         </div>
 
-                        <div class="lorebook-box" id="modalLorebookBox" style="display:none; margin-top: 20px;">
-                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 10px; border: 1px solid var(--glass-border);">
+                        <div class="lorebook-box" id="modalLorebookBox" style="display:none; margin-top: 16px;">
+                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent);"><i class="fa-solid fa-book"></i> Embedded Lorebook (<span id="lorebookEntryCount">0</span> entries)</summary>
-                                <div id="modalLorebookContent" class="scrolling-text" style="margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--glass-border);"></div>
+                                <div id="modalLorebookContent" class="scrolling-text" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
                         </div>
                     </div>
@@ -404,19 +407,24 @@
                         </div>
 
                         <div class="edit-section">
-                            <h4 class="section-header"><i class="fa-solid fa-user"></i> Basic Information</h4>
+                            <h4 class="section-header">
+                                <i class="fa-solid fa-user"></i> Basic Information
+                                <button type="button" id="editFieldsToggleBtn" class="section-expand-btn hidden" title="Expand all fields to fit content">
+                                    <i class="fa-solid fa-up-right-and-down-left-from-center"></i>
+                                </button>
+                            </h4>
                             <div class="form-group">
                                 <label>Character Name</label>
-                                <input type="text" id="editName" class="glass-input" autocomplete="off">
+                                <input type="text" id="editName" class="glass-input" autocomplete="one-time-code">
                             </div>
                             <div class="form-row">
                                 <div class="form-group half">
                                     <label>Creator / Author</label>
-                                    <input type="text" id="editCreator" class="glass-input" placeholder="Who made this character" autocomplete="off">
+                                    <input type="text" id="editCreator" class="glass-input" placeholder="Who made this character" autocomplete="one-time-code">
                                 </div>
                                 <div class="form-group half">
                                     <label>Character Version</label>
-                                    <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0" autocomplete="off">
+                                    <input type="text" id="editVersion" class="glass-input" placeholder="e.g., 1.0" autocomplete="one-time-code">
                                 </div>
                             </div>
                         </div>
@@ -428,21 +436,21 @@
                                 <button type="button" class="expand-field-btn hidden" data-field="editDescription" data-label="Description / Persona" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editDescription" class="glass-input" rows="5" placeholder="Who is this character?"></textarea>
+                                <textarea id="editDescription" class="glass-input" rows="5" placeholder="Who is this character?" autocomplete="one-time-code"></textarea>
                             </div>
                             <div class="form-group expandable-field">
                                 <label>Personality Summary</label>
                                 <button type="button" class="expand-field-btn hidden" data-field="editPersonality" data-label="Personality Summary" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..."></textarea>
+                                <textarea id="editPersonality" class="glass-input" rows="3" placeholder="Brief personality traits..." autocomplete="one-time-code"></textarea>
                             </div>
                             <div class="form-group expandable-field">
                                 <label>Scenario / Setting</label>
                                 <button type="button" class="expand-field-btn hidden" data-field="editScenario" data-label="Scenario / Setting" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..."></textarea>
+                                <textarea id="editScenario" class="glass-input" rows="3" placeholder="The current situation..." autocomplete="one-time-code"></textarea>
                             </div>
                         </div>
 
@@ -455,7 +463,7 @@
                             </h4>
                             <div class="form-group">
                                 <label>First Message</label>
-                                <textarea id="editFirstMes" class="glass-input" rows="5" placeholder="Opening message from the character..."></textarea>
+                                <textarea id="editFirstMes" class="glass-input" rows="5" placeholder="Opening message from the character..." autocomplete="one-time-code"></textarea>
                             </div>
                             <div class="form-group">
                                 <label>Alternate Greetings <span class="label-hint">(one per text box)</span></label>
@@ -471,7 +479,7 @@
                                 <button type="button" class="expand-field-btn hidden" data-field="editMesExample" data-label="Example Dialogue" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editMesExample" class="glass-input" rows="5" placeholder="{{user}}: Hello!\n{{char}}: *waves* Hi there!"></textarea>
+                                <textarea id="editMesExample" class="glass-input" rows="5" placeholder="{{user}}: Hello!\n{{char}}: *waves* Hi there!" autocomplete="one-time-code"></textarea>
                             </div>
                         </div>
 
@@ -482,21 +490,21 @@
                                 <button type="button" class="expand-field-btn hidden" data-field="editSystemPrompt" data-label="System Prompt" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editSystemPrompt" class="glass-input" rows="4" placeholder="Overrides your default system prompt..."></textarea>
+                                <textarea id="editSystemPrompt" class="glass-input" rows="4" placeholder="Overrides your default system prompt..." autocomplete="one-time-code"></textarea>
                             </div>
                             <div class="form-group expandable-field">
                                 <label>Post-History Instructions <span class="label-hint">(Jailbreak)</span></label>
                                 <button type="button" class="expand-field-btn hidden" data-field="editPostHistoryInstructions" data-label="Post-History Instructions" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editPostHistoryInstructions" class="glass-input" rows="4" placeholder="Instructions placed after chat history..."></textarea>
+                                <textarea id="editPostHistoryInstructions" class="glass-input" rows="4" placeholder="Instructions placed after chat history..." autocomplete="one-time-code"></textarea>
                             </div>
                             <div class="form-group expandable-field">
                                 <label>Creator's Notes <span class="label-hint">(For users, not sent to AI)</span></label>
                                 <button type="button" class="expand-field-btn hidden" data-field="editCreatorNotes" data-label="Creator's Notes" title="Expand editor">
                                     <i class="fa-solid fa-expand"></i>
                                 </button>
-                                <textarea id="editCreatorNotes" class="glass-input" rows="4" placeholder="Tips, warnings, or info for users..."></textarea>
+                                <textarea id="editCreatorNotes" class="glass-input" rows="4" placeholder="Tips, warnings, or info for users..." autocomplete="one-time-code"></textarea>
                             </div>
                         </div>
 
@@ -545,7 +553,7 @@
 
                     <div class="tab-pane" id="pane-gallery">
                         <div class="gallery-header">
-                            <h4><i class="fa-solid fa-images"></i> Character Library</h4>
+                            <h4><i class="fa-solid fa-images"></i> Gallery</h4>
                             <div class="gallery-actions">
                                 <div id="checkLegacyFolderBtn" class="legacy-indicator hidden" title="Legacy images found">
                                     <span id="legacyFolderCount"></span>
@@ -680,9 +688,9 @@
                     <div id="chubLinkUnlinkedState" class="chub-link-state">
                         <div class="chub-link-search-section">
                             <div class="chub-link-search-row">
-                                <input type="text" id="chubLinkSearchName" class="glass-input" placeholder="Character name" autocomplete="off">
+                                <input type="search" id="chubLinkSearchName" class="glass-input" placeholder="Character name" autocomplete="one-time-code">
                                 <span class="chub-link-search-by">by</span>
-                                <input type="text" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator" autocomplete="off">
+                                <input type="search" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator" autocomplete="one-time-code">
                                 <button id="chubLinkSearchBtn" class="chub-link-search-btn" title="Search">
                                     <i class="fa-solid fa-search"></i>
                                 </button>
@@ -693,7 +701,7 @@
                         <div class="chub-link-divider"><span>or paste URL</span></div>
                         
                         <div class="chub-link-url-row">
-                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="off">
+                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="one-time-code">
                             <button id="chubLinkUrlBtn" class="chub-link-btn primary compact">
                                 <i class="fa-solid fa-link"></i>
                             </button>
@@ -773,7 +781,7 @@
                 <!-- URL input (default) -->
                 <div id="importSourceUrl" class="import-source-panel">
                     <p>Paste character URLs below (one per line):</p>
-                    <textarea id="importUrlsInput" class="glass-input import-urls-textarea" placeholder="https://chub.ai/characters/author/character-name
+                    <textarea id="importUrlsInput" class="glass-input import-urls-textarea" autocomplete="one-time-code" placeholder="https://chub.ai/characters/author/character-name
 https://jannyai.com/characters/uuid_slug
 ..."></textarea>
                 </div>
@@ -937,7 +945,7 @@ https://jannyai.com/characters/uuid_slug
                         <option value="incomplete" data-icon="fa-solid fa-circle-half-stroke">Incomplete (Errors/Stopped)</option>
                         <option value="none" data-icon="fa-solid fa-circle-xmark">No Remote Media</option>
                     </select>
-                    <input type="text" id="bulkSummarySearch" class="glass-input" placeholder="Search character...">
+                    <input type="search" id="bulkSummarySearch" class="glass-input" placeholder="Search character..." autocomplete="one-time-code">
                 </div>
                 <div id="bulkSummaryList" class="bulk-summary-list">
                     <!-- Per-character results go here -->
@@ -1021,6 +1029,10 @@ https://jannyai.com/characters/uuid_slug
         <div class="confirm-modal-content gallery-info-modal-content">
             <div class="confirm-modal-header">
                 <h3><i class="fa-solid fa-circle-info"></i> Help & Tips</h3>
+                <div class="help-search-bar">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                    <input type="search" id="helpSearchInput" class="glass-input" placeholder="Search..." autocomplete="one-time-code" spellcheck="false">
+                </div>
                 <button class="close-confirm-btn" id="closeGalleryInfoModal">&times;</button>
             </div>
             <div class="help-layout">
@@ -1049,6 +1061,10 @@ https://jannyai.com/characters/uuid_slug
                         <li class="help-nav-item" data-section="tools">
                             <i class="fa-solid fa-toolbox"></i>
                             <span>Tools</span>
+                        </li>
+                        <li class="help-nav-item" data-section="character-creator">
+                            <i class="fa-solid fa-plus-circle"></i>
+                            <span>Character Creator</span>
                         </li>
                         <li class="help-nav-item" data-section="shortcuts">
                             <i class="fa-solid fa-keyboard"></i>
@@ -1197,7 +1213,10 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>Pygmalion</strong>: Card linking, updates, and gallery downloads</li>
                                 <li><strong>Wyvern</strong>: Card linking, updates, and gallery downloads</li>
                             </ul>
-                            <p><strong>How to link:</strong> Click the <strong>Link</strong> indicator in the character detail sidebar, or right-click → <strong>Link to Provider</strong>. Search by name across all providers, or paste a direct URL.</p>
+                            <p></p>
+                            <p><strong>How to link:</strong></p>
+                            <p>Click the <strong>Link</strong> indicator in the character detail sidebar, or right-click → <strong>Link to Provider</strong>. Search by name across all providers, or paste a direct URL.</p>
+                            <p></p>
                             <p><strong>Once linked:</strong></p>
                             <ul>
                                 <li><strong>Check for Updates</strong>: Compare local vs. remote card fields with a diff preview</li>
@@ -1350,6 +1369,8 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Works with your active SillyTavern Chat Completion source, or a custom OpenAI-compatible API</li>
                                 <li><strong>Batch Mode</strong> for wider library coverage: splits the pool across multiple LLM calls</li>
                                 <li>Filter the sample pool by favorites, chat history, date range, and tags</li>
+                                <li>Click any result card to expand its reasoning, or tap it to open the character</li>
+                                <li>Add individual characters to a playlist from the result card, or use <strong>Add all to playlist</strong> to save every recommendation at once</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> The recommender only sends character names, tags, creator, and taglines, not conversation history or full card text.</p>
                         </div>
@@ -1393,6 +1414,62 @@ https://jannyai.com/characters/uuid_slug
                         </div>
                     </div>
 
+                    <!-- Character Creator -->
+                    <div class="help-panel" data-section="character-creator">
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-plus-circle"></i> Overview</h4>
+                            <p>Create new characters from scratch or edit existing ones with AI assistance. Open via <strong>⋮ menu → Create a Character</strong>.</p>
+                            <p>Each card field (description, personality, scenario, first message, etc.) has a <strong>wand icon button</strong> that opens the <strong>AI Studio</strong> panel for that field.</p>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-wand-magic-sparkles"></i> AI Studio</h4>
+                            <p>The AI Studio is a conversational assistant for generating and refining card fields:</p>
+                            <ul>
+                                <li><strong>Multi-turn chat</strong>: Ask for rewrites, adjustments, or entirely new content. The full conversation history is sent with each request so the LLM has context</li>
+                                <li><strong>Suggestion chips</strong>: Quick-start prompts tailored to each field (e.g. "Write a mysterious backstory", "Make them sarcastic and witty"). Click one to generate immediately</li>
+                                <li><strong>Word target</strong>: Set a target word count for generations. The LLM will aim to match it</li>
+                                <li><strong>Apply to card</strong>: When satisfied with the result, click Apply to Card to write it into the card field</li>
+                                <li><strong>Undo / Redo</strong>: History stack for the current studio session. Use the toolbar buttons or <code>Ctrl+Z</code> / <code>Ctrl+Y</code> (when not focused in a text input). Opening a different field starts a fresh history</li>
+                            </ul>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-highlighter"></i> Highlight Revision</h4>
+                            <p>Select (highlight) any portion of text in the AI Studio content area to enter <strong>revision mode</strong>:</p>
+                            <ul>
+                                <li>The selection is locked and visually highlighted with a colored overlay</li>
+                                <li>A "Revising selection" badge appears above the input row</li>
+                                <li>Your next prompt targets <strong>only the highlighted section</strong>. The LLM rewrites just that segment and splices it back into the surrounding text</li>
+                                <li>Click the <strong>×</strong> on the badge to clear the selection and return to full-field mode</li>
+                            </ul>
+                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> This is useful for tweaking a single paragraph without regenerating the entire field.</p>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-gear"></i> Custom System Prompts & Presets</h4>
+                            <p>Click the <strong>gear icon</strong> in the AI Studio toolbar to open field-specific settings:</p>
+                            <ul>
+                                <li><strong>Custom system prompt</strong>: Override the built-in instruction for that field with your own. The placeholder shows the default prompt for reference</li>
+                                <li><strong>Context checkboxes</strong>: Toggle which other card fields are included as context when generating. For example, uncheck "Personality" when generating a description if you want a fresh take</li>
+                                <li><strong>Save as preset</strong>: Save your custom prompt as a named preset. Load or delete saved presets from the dropdown</li>
+                            </ul>
+                            <p>Presets are saved per field and persist across sessions. A <strong>dot indicator</strong> appears on the gear icon when a field has active overrides (custom prompt or disabled context fields).</p>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-plug"></i> Connection Profiles</h4>
+                            <p>If you have multiple Chat Completion sources configured in SillyTavern, a <strong>Connection Profile</strong> dropdown appears in the sidebar under AI Assist. Select which profile to use for AI generation, letting you use a different model than your chat model.</p>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-file-import"></i> Import from Library</h4>
+                            <p>Click <strong>Import from Library</strong> to load an existing character into the creator form. This populates every field including tags, avatar, alternate greetings, and lorebook. You can then modify and save as a new character or overwrite the original.</p>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-floppy-disk"></i> Save Modes</h4>
+                            <ul>
+                                <li><strong>Create Character</strong>: Saves as a brand-new character in your library</li>
+                                <li><strong>Save as Existing</strong>: Appears after importing from library. Opens a side-by-side <strong>diff review</strong> showing exactly what changed before overwriting the original card. An automatic snapshot is saved first so you can always undo</li>
+                            </ul>
+                        </div>
+                    </div>
+
                     <!-- Shortcuts -->
                     <div class="help-panel" data-section="shortcuts">
                         <div class="info-section">
@@ -1429,6 +1506,7 @@ https://jannyai.com/characters/uuid_slug
                             <p>The <strong>⋮ More Options</strong> button in the topbar contains additional tools:</p>
                             <ul>
                                 <li><strong>Import Characters</strong>: Import from URL or local PNG file</li>
+                                <li><strong>Create a Character</strong>: AI-assisted character creation (see Character Creator section)</li>
                                 <li><strong>Find Duplicates</strong>: Scan your library for potential duplicate characters</li>
                                 <li><strong>Auto-Link Characters</strong>: Bulk-link unlinked characters to providers</li>
                                 <li><strong>Card Recommender</strong>: AI-powered character recommendations</li>
@@ -1516,6 +1594,10 @@ https://jannyai.com/characters/uuid_slug
         <div class="confirm-modal-content settings-modal-content settings-with-sidebar">
             <div class="confirm-modal-header">
                 <h3><i class="fa-solid fa-gear"></i> Gallery Settings</h3>
+                <div class="settings-search-bar">
+                    <i class="fa-solid fa-search"></i>
+                    <input type="search" id="settingsSearchInput" class="glass-input" placeholder="Search..." autocomplete="one-time-code">
+                </div>
                 <button class="close-confirm-btn" id="closeSettingsModal">&times;</button>
             </div>
             <div class="settings-layout">
@@ -1592,6 +1674,9 @@ https://jannyai.com/characters/uuid_slug
                         
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Appearance</div>
+                            <div class="settings-row" id="themeCustomizerBtnRow" style="display:none;">
+                                <button id="openThemeCustomizerBtn" class="settings-action-btn primary"><i class="fa-solid fa-sliders"></i> Open UI Token Customizer</button>
+                            </div>
                             <div class="settings-row">
                                 <label for="settingsHighlightColor">Accent Color:</label>
                                 <div class="settings-input-group color-input-group">
@@ -1604,6 +1689,24 @@ https://jannyai.com/characters/uuid_slug
                                     <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
                                 </label>
                                 <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsAnimateTagPills"> Animate card info on hover
+                                </label>
+                                <span class="settings-hint">Hide card name and tags by default, reveal them with a slide-up animation on hover</span>
+                            </div>
+                            <div class="settings-row" id="animateKeepNameRow" style="padding-left: 24px; display: none;">
+                                <label>
+                                    <input type="checkbox" id="settingsAnimateKeepName"> Always show card name
+                                </label>
+                                <span class="settings-hint">Keep the character name visible at all times, only animate the tag pills (WIP)</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsHidePlaylistBadges"> Hide playlist badges on cards
+                                </label>
+                                <span class="settings-hint">Hide the playlist indicator icon on character cards</span>
                             </div>
                             <div class="settings-row">
                                 <label>
@@ -1694,7 +1797,7 @@ https://jannyai.com/characters/uuid_slug
                                     <div class="settings-row">
                                         <label for="settingsChubToken">URQL Token:</label>
                                         <div class="settings-input-group">
-                                            <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="off" data-sensitive="true">
+                                            <input type="password" id="settingsChubToken" placeholder="Enter your ChubAI URQL token" autocomplete="new-password" data-sensitive="true">
                                             <button id="toggleChubTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
                                                 <i class="fa-solid fa-eye"></i>
                                             </button>
@@ -1782,7 +1885,7 @@ https://jannyai.com/characters/uuid_slug
                                     <div class="settings-row">
                                         <label for="settingsCtCookie">Cookie String:</label>
                                         <div class="settings-input-group">
-                                            <textarea id="settingsCtCookie" class="glass-input" rows="2" placeholder="session=YOUR_VALUE_HERE" style="font-family: monospace; font-size: 12px; resize: vertical;" data-sensitive="true"></textarea>
+                                            <textarea id="settingsCtCookie" class="glass-input" rows="2" placeholder="session=YOUR_VALUE_HERE" style="font-family: monospace; font-size: 12px; resize: vertical;" data-sensitive="true" autocomplete="one-time-code"></textarea>
                                             <button id="validateCtCookieBtn" class="settings-verify-btn" title="Validate Session">
                                                 <i class="fa-solid fa-check"></i>
                                             </button>
@@ -2039,6 +2142,12 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Output detailed info to browser console (DevTools → Console)</span>
                             </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsThemeCustomizer"> Enable UI Token Customizer
+                                </label>
+                                <span class="settings-hint">Show a button in Appearance settings to open the live token customizer</span>
+                            </div>
                         </div>
                         
                         <div class="settings-group">
@@ -2066,7 +2175,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.7.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.8.0</span>
                             </div>
                         </div>
                     </div>

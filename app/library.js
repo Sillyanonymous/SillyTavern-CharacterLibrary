@@ -242,6 +242,7 @@ function initCustomSelect(select) {
     }
 
     let openedAt = 0;
+    let openTriggerRect = null;
 
     function open() {
         // Close any other open custom selects
@@ -256,6 +257,7 @@ function initCustomSelect(select) {
         openedAt = Date.now();
         positionMenu();
         syncVisuals();
+        openTriggerRect = trigger.getBoundingClientRect();
         // Manual scroll instead of scrollIntoView to avoid ancestor scroll side-effects
         const selectedItem = menu.querySelector('.custom-select-item.selected');
         if (selectedItem) {
@@ -272,11 +274,8 @@ function initCustomSelect(select) {
     }
 
     function toggle() {
-        if (menu.classList.contains('hidden')) {
-            open();
-        } else {
-            close();
-        }
+        if (menu.classList.contains('hidden')) open();
+        else close();
     }
 
     buildMenu();
@@ -294,10 +293,13 @@ function initCustomSelect(select) {
         }
     });
 
-    // Close on scroll in any ancestor (but not the menu itself)
-    // Grace period prevents instant close from touch-triggered scroll bubbling
+    // Close on scroll — only if the trigger's viewport position actually changed
+    // (avoids false closes from unrelated scrolls behind fixed-position modals)
     window.addEventListener('scroll', (e) => {
-        if (!menu.classList.contains('hidden') && e.target !== menu && Date.now() - openedAt > 150) close();
+        if (menu.classList.contains('hidden') || e.target === menu || Date.now() - openedAt <= 150) return;
+        if (!openTriggerRect) { close(); return; }
+        const r = trigger.getBoundingClientRect();
+        if (Math.abs(r.top - openTriggerRect.top) > 1 || Math.abs(r.left - openTriggerRect.left) > 1) close();
     }, true);
 
     window.addEventListener('keydown', (e) => {
@@ -425,6 +427,12 @@ const DEFAULT_SETTINGS = {
     notifyAdditionalContent: true,
     // Replace {{user}} placeholder with active persona name
     replaceUserPlaceholder: true,
+    // Animate tag pills on character cards (hidden by default, slide up on hover)
+    animateTagPills: false,
+    // Sub-option: always show card name even when animation is enabled
+    animateKeepName: false,
+    // Hide playlist badges on character cards
+    hidePlaylistBadges: false,
     // Debug mode - enable console logging
     debugMode: false,
     // Unique Gallery Folders: Use gallery_id to create unique folder names, preventing shared galleries
@@ -690,6 +698,21 @@ function applyHighlightColor(color) {
     document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
 }
 
+function applyAnimateTagPills(enabled, keepName) {
+    document.documentElement.classList.toggle('animate-tag-pills', !!enabled);
+    document.documentElement.classList.toggle('animate-keep-name', !!enabled && !!keepName);
+}
+
+function applyHidePlaylistBadges(hidden) {
+    document.documentElement.classList.toggle('hide-playlist-badges', !!hidden);
+}
+
+function updateThemeCustomizerVisibility() {
+    const row = document.getElementById('themeCustomizerBtnRow');
+    if (!row) return;
+    row.style.display = getSetting('themeCustomizer') ? '' : 'none';
+}
+
 /**
  * Check cl-helper plugin availability and update settings UI accordingly.
  */
@@ -781,7 +804,12 @@ function setupSettingsModal() {
     const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
     
     // Appearance
+    const animateTagPillsCheckbox = document.getElementById('settingsAnimateTagPills');
+    const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
+    const animateKeepNameRow = document.getElementById('animateKeepNameRow');
+    const hidePlaylistBadgesCheckbox = document.getElementById('settingsHidePlaylistBadges');
     const highlightColorInput = document.getElementById('settingsHighlightColor');
+    const themeCustomizerCheckbox = document.getElementById('settingsThemeCustomizer');
     
     // Card Updates
     const chubUseV4ApiCheckbox = document.getElementById('settingsChubUseV4Api');
@@ -1186,8 +1214,21 @@ function setupSettingsModal() {
         if (allowRichTaglineCheckbox) {
             allowRichTaglineCheckbox.checked = getSetting('allowRichTagline') === true;
         }
+        if (themeCustomizerCheckbox) {
+            themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
+        }
         
         // Appearance
+        if (animateTagPillsCheckbox) {
+            animateTagPillsCheckbox.checked = getSetting('animateTagPills') || false;
+            if (animateKeepNameRow) animateKeepNameRow.style.display = animateTagPillsCheckbox.checked ? '' : 'none';
+        }
+        if (animateKeepNameCheckbox) {
+            animateKeepNameCheckbox.checked = getSetting('animateKeepName') || false;
+        }
+        if (hidePlaylistBadgesCheckbox) {
+            hidePlaylistBadgesCheckbox.checked = getSetting('hidePlaylistBadges') || false;
+        }
         if (highlightColorInput) {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
         }
@@ -1219,6 +1260,10 @@ function setupSettingsModal() {
         
         // Reset to first section
         switchSettingsSection('general');
+        if (settingsSearchInput) {
+            settingsSearchInput.value = '';
+            settingsSearchInput.dispatchEvent(new Event('input'));
+        }
         
         settingsModal.classList.remove('hidden');
     };
@@ -1240,6 +1285,59 @@ function setupSettingsModal() {
             switchSettingsSection(item.dataset.section);
         });
     });
+    
+    // Settings search/filter
+    const settingsSearchInput = document.getElementById('settingsSearchInput');
+    if (settingsSearchInput) {
+        const layout = settingsModal.querySelector('.settings-layout');
+        settingsSearchInput.addEventListener('input', () => {
+            const q = settingsSearchInput.value.trim().toLowerCase();
+            if (!q) {
+                layout.classList.remove('settings-search-active');
+                clearHighlights(settingsModal);
+                // Restore whichever section was active
+                const activeNav = settingsModal.querySelector('.settings-nav-item.active');
+                if (activeNav) switchSettingsSection(activeNav.dataset.section);
+                settingsModal.querySelectorAll('.settings-search-hidden').forEach(el => el.classList.remove('settings-search-hidden'));
+                // Restore inline display on sub-option rows
+                settingsModal.querySelectorAll('.settings-search-force-show').forEach(el => {
+                    el.classList.remove('settings-search-force-show');
+                    el.style.display = 'none';
+                });
+                return;
+            }
+            layout.classList.add('settings-search-active');
+
+            // Filter settings-rows and settings-groups
+            settingsModal.querySelectorAll('.settings-group, details.settings-provider-section').forEach(group => {
+                const titleEl = group.querySelector('.settings-group-title, summary');
+                const titleText = titleEl ? titleEl.textContent.toLowerCase() : '';
+                const titleMatch = titleText.includes(q);
+
+                const rows = group.querySelectorAll('.settings-row');
+                let anyRowVisible = false;
+                rows.forEach(row => {
+                    const text = row.textContent.toLowerCase();
+                    const match = text.includes(q) || titleMatch;
+                    row.classList.toggle('settings-search-hidden', !match);
+                    // Force-show sub-option rows that have inline display:none
+                    if (match && row.style.display === 'none') {
+                        row.style.display = '';
+                        row.classList.add('settings-search-force-show');
+                    } else if (!match && row.classList.contains('settings-search-force-show')) {
+                        row.classList.remove('settings-search-force-show');
+                        row.style.display = 'none';
+                    }
+                    if (match) anyRowVisible = true;
+                });
+
+                // Hide entire group if no rows match and title doesn't match
+                group.classList.toggle('settings-search-hidden', !anyRowVisible && !titleMatch);
+            });
+
+            highlightText(settingsModal.querySelector('.settings-content'), q);
+        });
+    }
     
     // Close modal
     const closeModal = () => settingsModal.classList.add('hidden');
@@ -1290,6 +1388,22 @@ function setupSettingsModal() {
         });
     }
     
+    // Animate card info sub-option visibility
+    if (animateTagPillsCheckbox && animateKeepNameRow) {
+        animateTagPillsCheckbox.addEventListener('change', () => {
+            animateKeepNameRow.style.display = animateTagPillsCheckbox.checked ? '' : 'none';
+        });
+    }
+
+    if (themeCustomizerCheckbox) {
+        themeCustomizerCheckbox.addEventListener('change', () => updateThemeCustomizerVisibility());
+    }
+
+    const openThemeCustomizerBtnEl = document.getElementById('openThemeCustomizerBtn');
+    if (openThemeCustomizerBtnEl) {
+        openThemeCustomizerBtnEl.addEventListener('click', () => openThemeCustomizer());
+    }
+    
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
         
@@ -1319,10 +1433,14 @@ function setupSettingsModal() {
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
+            themeCustomizer: themeCustomizerCheckbox ? themeCustomizerCheckbox.checked : false,
             showInfoTab: showInfoTabCheckbox ? showInfoTabCheckbox.checked : false,
             exportAsLinks: exportAsLinksCheckbox ? exportAsLinksCheckbox.checked : false,
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
+            animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
+            animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
+            hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
             chubUseV4Api: chubUseV4ApiCheckbox ? chubUseV4ApiCheckbox.checked : false,
             autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
@@ -1352,6 +1470,15 @@ function setupSettingsModal() {
         
         // Apply highlight color
         applyHighlightColor(newHighlightColor);
+
+        // Apply animated tag pills
+        applyAnimateTagPills(
+            animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
+            animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false
+        );
+
+        // Apply hide playlist badges
+        applyHidePlaylistBadges(hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false);
 
         // Keep import modal defaults in sync with settings
         syncImportAutoDownloadGallery();
@@ -3713,7 +3840,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                     <div class="orphaned-destination-picker">
                         <div class="orphaned-search-wrapper">
                             <i class="fa-solid fa-search"></i>
-                            <input type="text" id="orphanedDestSearch" placeholder="Search characters..." autocomplete="off">
+                            <input type="search" id="orphanedDestSearch" placeholder="Search characters..." autocomplete="one-time-code">
                         </div>
                         <div class="orphaned-destination-list" id="orphanedDestList">
                             ${destinationChars.map(char => {
@@ -5236,6 +5363,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Apply saved highlight color
     applyHighlightColor(getSetting('highlightColor'));
     
+    // Apply animated tag pills setting
+    applyAnimateTagPills(getSetting('animateTagPills'), getSetting('animateKeepName'));
+    
+    // Apply hide playlist badges setting
+    applyHidePlaylistBadges(getSetting('hidePlaylistBadges'));
+
+    // Apply any saved token overrides before first render
+    loadCustomTokens();
+    updateThemeCustomizerVisibility();
+    
     initAllCustomSelects();
     
     // Reset filters and search on page load
@@ -6217,6 +6354,7 @@ const CARD_MIN_WIDTH = 200; // Matches CSS minmax(200px, 1fr)
 const CARD_ASPECT_RATIO = 2 / 3; // width/height for portrait cards
 const GRID_GAP_FALLBACK = 20;
 let cachedGridGap = 0; // Read from CSS computed styles — invalidated on resize
+let _gridMetricsCorrection = false; // recursion guard for fallback self-correction
 
 function getGridGap() {
     if (cachedGridGap > 0) return cachedGridGap;
@@ -6400,6 +6538,28 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
                 if (card) fragment.appendChild(card);
             }
             grid.appendChild(fragment);
+
+            // Self-correct fallback metrics: after first cards are in the DOM, measure
+            // actual card dimensions and re-render if the fallback was significantly off.
+            // This fires on every fresh renderGrid() call (view switch, import, search)
+            // and replaces the one-shot MutationObserver approach.
+            const measuredCard = grid.querySelector('.char-card');
+            if (measuredCard && !_gridMetricsCorrection) {
+                const actualHeight = measuredCard.offsetHeight;
+                if (actualHeight > 0 && Math.abs(actualHeight - cardHeight) > 10) {
+                    _gridMetricsCorrection = true;
+                    cachedCardHeight = actualHeight;
+                    cachedCardWidth = measuredCard.offsetWidth;
+                    cachedGridCols = 0;
+                    const tracks = getComputedStyle(grid).gridTemplateColumns;
+                    if (tracks && tracks !== 'none') {
+                        cachedGridCols = tracks.split(' ').length;
+                    }
+                    updateGridHeight(grid);
+                    _gridMetricsCorrection = false;
+                    return updateVisibleCards(grid, scrollContainer, true);
+                }
+            }
         } else {
             // Determine optimal insertion point based on where new cards fall
             // relative to what's already in the DOM
@@ -9637,6 +9797,29 @@ async function saveCharacter() {
 }
 
 // Edit Lock Functions
+
+function toggleEditFieldsExpand() {
+    const btn = document.getElementById('editFieldsToggleBtn');
+    const icon = btn?.querySelector('i');
+    if (!btn || !icon) return;
+    const textareas = document.querySelectorAll('#pane-edit textarea.glass-input');
+    if (btn.classList.contains('active')) {
+        textareas.forEach(ta => { ta.style.height = ''; });
+        btn.classList.remove('active');
+        icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
+        btn.title = 'Expand all fields to fit content';
+    } else {
+        textareas.forEach(ta => {
+            if (ta.scrollHeight > ta.clientHeight) {
+                ta.style.height = (ta.scrollHeight + 4) + 'px';
+            }
+        });
+        btn.classList.add('active');
+        icon.className = 'fa-solid fa-down-left-and-up-right-to-center';
+        btn.title = 'Contract fields to default size';
+    }
+}
+
 function setEditLock(locked) {
     isEditLocked = locked;
     
@@ -9678,6 +9861,16 @@ function setEditLock(locked) {
         // Hide expand buttons when locked
         expandFieldBtns.forEach(btn => btn.classList.add('hidden'));
         sectionExpandBtns.forEach(btn => btn.classList.add('hidden'));
+        
+        // Reset field expand toggle
+        const fieldsToggle = document.getElementById('editFieldsToggleBtn');
+        if (fieldsToggle?.classList.contains('active')) {
+            document.querySelectorAll('#pane-edit textarea.glass-input').forEach(ta => { ta.style.height = ''; });
+            fieldsToggle.classList.remove('active');
+            const icon = fieldsToggle.querySelector('i');
+            if (icon) icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
+            fieldsToggle.title = 'Expand all fields to fit content';
+        }
         
         // Lorebook editor
         const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
@@ -11129,6 +11322,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
     
     // Build iframe document like Creator's Notes does
     const iframeStyles = `<style>
+        html { background: transparent; color-scheme: dark; }
         * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -11151,6 +11345,9 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         .char-placeholder { color: #4a9eff; font-weight: 500; }
         .user-placeholder { color: #9b59b6; font-weight: 500; }
         iframe { max-width: 100%; border-radius: 8px; }
+        @media (max-width: 768px) {
+            body { font-size: 0.88rem; padding: 12px; }
+        }
     </style>`;
     const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${iframeStyles}</head><body>${content}</body></html>`;
     
@@ -11870,6 +12067,12 @@ function setupEventListeners() {
     const toggleEditLockBtn = document.getElementById('toggleEditLockBtn');
     if (toggleEditLockBtn) {
         toggleEditLockBtn.onclick = () => setEditLock(!isEditLocked);
+    }
+    
+    // Edit Fields Expand/Collapse Toggle
+    const editFieldsToggleBtn = document.getElementById('editFieldsToggleBtn');
+    if (editFieldsToggleBtn) {
+        editFieldsToggleBtn.onclick = toggleEditFieldsExpand;
     }
     
     // Confirmation Modal Buttons
@@ -15724,6 +15927,7 @@ async function applyBulkAutoLinks() {
 window.openBulkAutoLinkModal = openBulkAutoLinkModal;
 document.getElementById('bulkAutoLinkBtn')?.addEventListener('click', openBulkAutoLinkModal);
 document.getElementById('recommenderBtn')?.addEventListener('click', () => window.openRecommender?.());
+document.getElementById('creatorBtn')?.addEventListener('click', () => window.openCharacterCreator?.());
 document.getElementById('closeBulkAutoLinkModal')?.addEventListener('click', () => {
     // Just set abort flag and close - state is preserved for resuming
     bulkAutoLinkAborted = true;
@@ -15794,6 +15998,46 @@ document.getElementById('bulkAutoLinkResults')?.addEventListener('change', (e) =
 });
 
 // ==============================================
+// Search Highlighting Utilities
+// ==============================================
+
+function highlightText(container, query) {
+    clearHighlights(container);
+    if (!query) return;
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(${escaped})`, 'gi');
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+        if (node.parentElement?.closest('.search-highlight, input, select, textarea, button, .glass-input')) continue;
+        if (!regex.test(node.nodeValue)) continue;
+        regex.lastIndex = 0;
+        const frag = document.createDocumentFragment();
+        let last = 0;
+        let match;
+        while ((match = regex.exec(node.nodeValue)) !== null) {
+            if (match.index > last) frag.appendChild(document.createTextNode(node.nodeValue.slice(last, match.index)));
+            const mark = document.createElement('mark');
+            mark.className = 'search-highlight';
+            mark.textContent = match[1];
+            frag.appendChild(mark);
+            last = regex.lastIndex;
+        }
+        if (last < node.nodeValue.length) frag.appendChild(document.createTextNode(node.nodeValue.slice(last)));
+        node.parentNode.replaceChild(frag, node);
+    }
+}
+
+function clearHighlights(container) {
+    container.querySelectorAll('mark.search-highlight').forEach(mark => {
+        const parent = mark.parentNode;
+        mark.replaceWith(document.createTextNode(mark.textContent));
+        parent.normalize();
+    });
+}
+
+// ==============================================
 // Help & Tips Modal
 // ==============================================
 
@@ -15802,12 +16046,19 @@ function openGalleryInfoModal() {
 }
 
 document.getElementById('galleryInfoBtn')?.addEventListener('click', openGalleryInfoModal);
-document.getElementById('closeGalleryInfoModal')?.addEventListener('click', () => {
-    document.getElementById('galleryInfoModal').classList.add('hidden');
-});
-document.getElementById('closeGalleryInfoModalBtn')?.addEventListener('click', () => {
-    document.getElementById('galleryInfoModal').classList.add('hidden');
-});
+
+function closeGalleryInfoModal() {
+    const modal = document.getElementById('galleryInfoModal');
+    modal.classList.add('hidden');
+    const searchInput = document.getElementById('helpSearchInput');
+    if (searchInput && searchInput.value) {
+        searchInput.value = '';
+        searchInput.dispatchEvent(new Event('input'));
+    }
+}
+
+document.getElementById('closeGalleryInfoModal')?.addEventListener('click', closeGalleryInfoModal);
+document.getElementById('closeGalleryInfoModalBtn')?.addEventListener('click', closeGalleryInfoModal);
 
 // Help sidebar navigation
 const helpModal = document.getElementById('galleryInfoModal');
@@ -15819,6 +16070,34 @@ if (helpModal) {
             helpModal.querySelectorAll('.help-panel').forEach(p => p.classList.toggle('active', p.dataset.section === section));
         });
     });
+
+    // Help search/filter
+    const helpSearchInput = document.getElementById('helpSearchInput');
+    if (helpSearchInput) {
+        const helpLayout = helpModal.querySelector('.help-layout');
+        helpSearchInput.addEventListener('input', () => {
+            const q = helpSearchInput.value.trim().toLowerCase();
+            if (!q) {
+                helpLayout.classList.remove('help-search-active');
+                clearHighlights(helpModal);
+                const activeNav = helpModal.querySelector('.help-nav-item.active');
+                if (activeNav) {
+                    const section = activeNav.dataset.section;
+                    helpModal.querySelectorAll('.help-panel').forEach(p => p.classList.toggle('active', p.dataset.section === section));
+                }
+                helpModal.querySelectorAll('.help-search-hidden').forEach(el => el.classList.remove('help-search-hidden'));
+                return;
+            }
+            helpLayout.classList.add('help-search-active');
+
+            helpModal.querySelectorAll('.info-section').forEach(section => {
+                const text = section.textContent.toLowerCase();
+                section.classList.toggle('help-search-hidden', !text.includes(q));
+            });
+
+            highlightText(helpModal.querySelector('.help-content'), q);
+        });
+    }
 }
 
 // ==============================================
@@ -20188,6 +20467,8 @@ function getCreatorNotesBaseStyles() {
             html {
                 margin: 0;
                 padding: 0;
+                background: transparent;
+                color-scheme: dark;
             }
             body {
                 margin: 0;
@@ -20315,6 +20596,9 @@ function getCreatorNotesBaseStyles() {
             [style*="z-index"] {
                 z-index: auto !important;
             }
+            @media (max-width: 768px) {
+                body { font-size: 13px; padding: 3px; }
+            }
         </style>
     `;
 }
@@ -20325,7 +20609,7 @@ function getCreatorNotesBaseStyles() {
  * @returns {string} - Complete HTML document
  */
 function buildCreatorNotesIframeDoc(content) {
-    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
     const styles = getCreatorNotesBaseStyles();
     
     return `<!DOCTYPE html><html><head><meta charset="UTF-8">${csp}${styles}</head><body><div id="content-wrapper">${content}</div></body></html>`;
@@ -20525,7 +20809,7 @@ function openCreatorNotesFullscreen(content, charName, urlMap) {
     const hardened = hardenCreatorNotesMedia(sanitizedCSS);
     
     // Build simple iframe document - content fills width naturally
-    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; frame-ancestors 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
+    const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'none'; object-src 'none'; form-action 'none'; img-src * data: blob:; media-src * data: blob:; style-src 'self' 'unsafe-inline'; font-src * data:;">`;
     const styles = getCreatorNotesBaseStyles();
     const iframeDoc = `<!DOCTYPE html><html><head><meta charset="UTF-8">${csp}${styles}</head><body style="overflow-y: auto; overflow-x: hidden; height: 100%; padding: 15px;"><div id="content-wrapper">${hardened}</div></body></html>`;
     
@@ -21005,14 +21289,31 @@ document.addEventListener('keydown', (e) => {
         return;
     }
     
-    // Don't intercept if a modal is open
-    const charModal = document.getElementById('charModal');
-    const chubModal = document.getElementById('chubCharModal');
-    if ((charModal && !charModal.classList.contains('hidden')) ||
-        (chubModal && !chubModal.classList.contains('hidden'))) {
-        // Escape to close modals is handled elsewhere
-        return;
+    // Handle Escape for full-screen modals
+    if (e.key === 'Escape') {
+        const charModal = document.getElementById('charModal');
+        if (charModal && !charModal.classList.contains('hidden')) {
+            closeModal();
+            return;
+        }
+        const reg = window.ProviderRegistry;
+        const previewIds = reg?.getPreviewModalIds?.() || [];
+        for (const id of previewIds) {
+            const el = document.getElementById(id);
+            if (el && !el.classList.contains('hidden')) {
+                reg.closeActivePreviewModal();
+                return;
+            }
+        }
     }
+
+    // Don't intercept other keys when a modal is open
+    const charModal = document.getElementById('charModal');
+    if (charModal && !charModal.classList.contains('hidden')) return;
+    if ((window.ProviderRegistry?.getPreviewModalIds?.() || []).some(id => {
+        const el = document.getElementById(id);
+        return el && !el.classList.contains('hidden');
+    })) return;
     
     const scrollContainer = document.querySelector('.gallery-content');
     if (!scrollContainer) return;
@@ -21038,6 +21339,222 @@ document.addEventListener('keydown', (e) => {
             break;
     }
 });
+
+// ========================================
+// THEME CUSTOMIZER
+// ========================================
+
+const TOKEN_DEFS = [
+    { section: 'Button XL',  name: '--btn-pad-v-xl', label: 'Pad V',  unit: 'px',  min: 4,    max: 24,   step: 1,    default: 10   },
+    { section: 'Button XL',  name: '--btn-pad-h-xl', label: 'Pad H',  unit: 'px',  min: 8,    max: 48,   step: 1,    default: 24   },
+    { section: 'Button XL',  name: '--btn-font-xl',  label: 'Font',   unit: 'rem', min: 0.7,  max: 1.1,  step: 0.01, default: 0.9  },
+    { section: 'Button LG',  name: '--btn-pad-v-lg', label: 'Pad V',  unit: 'px',  min: 4,    max: 20,   step: 1,    default: 8    },
+    { section: 'Button LG',  name: '--btn-pad-h-lg', label: 'Pad H',  unit: 'px',  min: 8,    max: 40,   step: 1,    default: 18   },
+    { section: 'Button LG',  name: '--btn-font-lg',  label: 'Font',   unit: 'rem', min: 0.7,  max: 1.1,  step: 0.01, default: 0.85 },
+    { section: 'Button MD',  name: '--btn-pad-v-md', label: 'Pad V',  unit: 'px',  min: 4,    max: 20,   step: 1,    default: 8    },
+    { section: 'Button MD',  name: '--btn-pad-h-md', label: 'Pad H',  unit: 'px',  min: 8,    max: 40,   step: 1,    default: 15   },
+    { section: 'Button MD',  name: '--btn-font-md',  label: 'Font',   unit: 'rem', min: 0.7,  max: 1.1,  step: 0.01, default: 0.85 },
+    { section: 'Button SM',  name: '--btn-pad-v-sm', label: 'Pad V',  unit: 'px',  min: 2,    max: 16,   step: 1,    default: 7    },
+    { section: 'Button SM',  name: '--btn-pad-h-sm', label: 'Pad H',  unit: 'px',  min: 4,    max: 32,   step: 1,    default: 14   },
+    { section: 'Button SM',  name: '--btn-font-sm',  label: 'Font',   unit: 'rem', min: 0.65, max: 1.0,  step: 0.01, default: 0.8  },
+    { section: 'Spacing', name: '--space-xs',  label: 'XS',  unit: 'px', min: 1,  max: 16, step: 1, default: 4  },
+    { section: 'Spacing', name: '--space-sm',  label: 'SM',  unit: 'px', min: 2,  max: 24, step: 1, default: 8  },
+    { section: 'Spacing', name: '--space-md',  label: 'MD',  unit: 'px', min: 4,  max: 32, step: 1, default: 12 },
+    { section: 'Spacing', name: '--space-lg',  label: 'LG',  unit: 'px', min: 8,  max: 40, step: 1, default: 16 },
+    { section: 'Spacing', name: '--space-xl',  label: 'XL',  unit: 'px', min: 8,  max: 48, step: 1, default: 20 },
+    { section: 'Spacing', name: '--space-2xl', label: '2XL', unit: 'px', min: 12, max: 60, step: 1, default: 24 },
+];
+
+const CUSTOMIZER_LS_KEY = 'cl-custom-tokens';
+let customizerInjected = false;
+
+function applyTokenValue(name, value, unit) {
+    document.documentElement.style.setProperty(name, value + unit);
+}
+
+function loadCustomTokens() {
+    try {
+        const stored = localStorage.getItem(CUSTOMIZER_LS_KEY);
+        if (!stored) return;
+        const vals = JSON.parse(stored);
+        for (const [name, value] of Object.entries(vals)) {
+            document.documentElement.style.setProperty(name, value);
+        }
+    } catch (e) { /* ignore malformed data */ }
+}
+
+function saveCustomTokens() {
+    const vals = {};
+    for (const def of TOKEN_DEFS) {
+        const current = document.documentElement.style.getPropertyValue(def.name).trim();
+        if (current) vals[def.name] = current;
+    }
+    localStorage.setItem(CUSTOMIZER_LS_KEY, JSON.stringify(vals));
+    showToast('Token values saved', 'success', 2000);
+}
+
+function resetCustomTokens() {
+    localStorage.removeItem(CUSTOMIZER_LS_KEY);
+    for (const def of TOKEN_DEFS) {
+        document.documentElement.style.removeProperty(def.name);
+    }
+    syncCustomizerSliders();
+    showToast('Tokens reset to defaults', 'info', 2000);
+}
+
+function getTokenCurrentValue(def) {
+    const inline = document.documentElement.style.getPropertyValue(def.name).trim();
+    if (inline) return parseFloat(inline);
+    const computed = getComputedStyle(document.documentElement).getPropertyValue(def.name).trim();
+    if (computed) return parseFloat(computed);
+    return def.default;
+}
+
+function syncCustomizerSliders() {
+    if (!customizerInjected) return;
+    for (const def of TOKEN_DEFS) {
+        const id = def.name.replace(/^--/, '');
+        const slider = document.getElementById(`tc-range-${id}`);
+        const numInput = document.getElementById(`tc-num-${id}`);
+        if (!slider || !numInput) continue;
+        const val = getTokenCurrentValue(def);
+        slider.value = val;
+        numInput.value = val;
+    }
+}
+
+function buildCustomizerHTML() {
+    const sections = [...new Set(TOKEN_DEFS.map(d => d.section))];
+
+    const controlsHTML = sections.map(section => {
+        const defs = TOKEN_DEFS.filter(d => d.section === section);
+        const rows = defs.map(def => {
+            const id = def.name.replace(/^--/, '');
+            const val = getTokenCurrentValue(def);
+            return `
+            <div class="token-control">
+                <span class="token-control-label">${def.label}</span>
+                <input type="range" id="tc-range-${id}" min="${def.min}" max="${def.max}" step="${def.step}" value="${val}">
+                <input type="number" id="tc-num-${id}" min="${def.min}" max="${def.max}" step="${def.step}" value="${val}">
+            </div>`;
+        }).join('');
+        return `<div class="customizer-section">
+            <div class="customizer-section-title">${section}</div>
+            ${rows}
+        </div>`;
+    }).join('');
+
+    const spacingVars = ['--space-xs', '--space-sm', '--space-md', '--space-lg', '--space-xl', '--space-2xl'];
+    const spacingBlocks = spacingVars.map(n =>
+        `<div class="preview-space-block">
+            <div class="preview-space-bar" style="height: var(${n});"></div>
+            <div class="preview-space-label">${n.replace('--space-', '')}</div>
+        </div>`
+    ).join('');
+
+    return `
+    <div class="theme-customizer-overlay hidden" id="themeCustomizerOverlay">
+        <div class="theme-customizer-modal">
+            <div class="theme-customizer-header">
+                <h2><i class="fa-solid fa-sliders"></i> UI Token Customizer</h2>
+                <button class="glass-btn icon-only" id="themeCustomizerCloseBtn" title="Close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="theme-customizer-body">
+                <div class="customizer-controls">
+                    ${controlsHTML}
+                </div>
+                <div class="customizer-preview">
+                    <div class="customizer-preview-title">Preview</div>
+                    <div class="preview-section">
+                        <div class="preview-section-label">XL Buttons</div>
+                        <div class="preview-btns-row">
+                            <button class="action-btn primary" style="padding: var(--btn-pad-v-xl) var(--btn-pad-h-xl); font-size: var(--btn-font-xl);">Save Changes</button>
+                            <button class="action-btn" style="padding: var(--btn-pad-v-xl) var(--btn-pad-h-xl); font-size: var(--btn-font-xl);">Cancel</button>
+                        </div>
+                    </div>
+                    <div class="preview-section">
+                        <div class="preview-section-label">LG Buttons (action-btn)</div>
+                        <div class="preview-btns-row">
+                            <button class="action-btn primary">Import</button>
+                            <button class="action-btn">Cancel</button>
+                            <button class="action-btn danger">Delete</button>
+                        </div>
+                    </div>
+                    <div class="preview-section">
+                        <div class="preview-section-label">MD Buttons (glass-btn / cl-btn)</div>
+                        <div class="preview-btns-row">
+                            <button class="glass-btn"><i class="fa-solid fa-filter"></i> Filter</button>
+                            <button class="glass-btn"><i class="fa-solid fa-sort"></i> Sort</button>
+                            <button class="cl-btn cl-btn-primary">Apply</button>
+                        </div>
+                    </div>
+                    <div class="preview-section">
+                        <div class="preview-section-label">SM Buttons (action-btn.small)</div>
+                        <div class="preview-btns-row">
+                            <button class="action-btn small primary">Save</button>
+                            <button class="action-btn small">Edit</button>
+                            <button class="action-btn small danger">Remove</button>
+                        </div>
+                    </div>
+                    <div class="preview-section">
+                        <div class="preview-section-label">Spacing Scale</div>
+                        <div class="preview-spacing-row">${spacingBlocks}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="theme-customizer-footer">
+                <button class="action-btn" id="themeCustomizerResetBtn"><i class="fa-solid fa-rotate-left"></i> Reset Defaults</button>
+                <button class="action-btn primary" id="themeCustomizerSaveBtn"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                <button class="action-btn" id="themeCustomizerCloseFooterBtn">Close</button>
+            </div>
+        </div>
+    </div>`;
+}
+
+function initThemeCustomizer() {
+    if (customizerInjected) return;
+    customizerInjected = true;
+    document.body.insertAdjacentHTML('beforeend', buildCustomizerHTML());
+
+    for (const def of TOKEN_DEFS) {
+        const id = def.name.replace(/^--/, '');
+        const slider = document.getElementById(`tc-range-${id}`);
+        const numInput = document.getElementById(`tc-num-${id}`);
+        if (!slider || !numInput) continue;
+
+        slider.addEventListener('input', () => {
+            numInput.value = slider.value;
+            applyTokenValue(def.name, slider.value, def.unit);
+        });
+        numInput.addEventListener('change', () => {
+            const v = Math.min(def.max, Math.max(def.min, parseFloat(numInput.value) || def.default));
+            numInput.value = v;
+            slider.value = v;
+            applyTokenValue(def.name, v, def.unit);
+        });
+    }
+
+    document.getElementById('themeCustomizerCloseBtn').addEventListener('click', closeThemeCustomizer);
+    document.getElementById('themeCustomizerCloseFooterBtn').addEventListener('click', closeThemeCustomizer);
+    document.getElementById('themeCustomizerResetBtn').addEventListener('click', resetCustomTokens);
+    document.getElementById('themeCustomizerSaveBtn').addEventListener('click', saveCustomTokens);
+    document.getElementById('themeCustomizerOverlay').addEventListener('click', e => {
+        if (e.target.id === 'themeCustomizerOverlay') closeThemeCustomizer();
+    });
+
+    window.registerOverlay({ id: 'themeCustomizerOverlay', tier: 5, close: () => closeThemeCustomizer() });
+}
+
+function openThemeCustomizer() {
+    initThemeCustomizer();
+    syncCustomizerSliders();
+    document.getElementById('themeCustomizerOverlay').classList.remove('hidden');
+}
+
+function closeThemeCustomizer() {
+    const el = document.getElementById('themeCustomizerOverlay');
+    if (el) el.classList.add('hidden');
+}
 
 // ========================================
 // CORE API BRIDGE - DO NOT USE DIRECTLY FROM MODULES
@@ -21068,6 +21585,24 @@ document.addEventListener('keydown', (e) => {
 // This prevents modules from becoming tightly coupled to library.js internals,
 // making future refactoring possible without breaking all modules.
 // ========================================
+
+// Global Escape handler — walks the overlay registry (populated via window.registerOverlay)
+// so overlays don't need their own individual keydown listeners for Escape.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const regs = [...(window._overlayRegistry || [])].sort((a, b) => a.tier - b.tier);
+    for (const reg of regs) {
+        if (reg.escape === false) continue;
+        const el = document.getElementById(reg.id);
+        if (!el) continue;
+        const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
+        if (visible) {
+            e.stopPropagation();
+            reg.close(el);
+            return;
+        }
+    }
+}, true);
 
 // API & Utilities
 window.apiRequest = apiRequest;
@@ -21133,6 +21668,7 @@ window.refreshPlaylistBadges = refreshPlaylistBadges;
 window.getSetting = getSetting;
 window.setSetting = setSetting;
 window.setSettings = setSettings;
+window.openThemeCustomizer = openThemeCustomizer;
 
 // Import pipeline utilities — PNG manipulation, media download, etc.
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;

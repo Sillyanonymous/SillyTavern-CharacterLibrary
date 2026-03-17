@@ -373,7 +373,7 @@ class ChubBrowseView extends BrowseView {
                 </button>
                 <div id="chubTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="text" id="chubTagsSearchInput" placeholder="Search tags...">
+                        <input type="search" id="chubTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
                         <button id="chubTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -444,7 +444,7 @@ class ChubBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="text" id="chubSearchInput" placeholder="Search ChubAI characters...">
+                        <input type="search" id="chubSearchInput" placeholder="Search ChubAI characters..." autocomplete="one-time-code">
                         <button id="chubClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
@@ -455,7 +455,7 @@ class ChubBrowseView extends BrowseView {
                     <div class="browse-creator-search">
                         <div class="browse-creator-search-wrapper">
                             <i class="fa-solid fa-user"></i>
-                            <input type="text" id="chubCreatorSearchInput" placeholder="Search by creator...">
+                            <input type="search" id="chubCreatorSearchInput" placeholder="Search by creator..." autocomplete="one-time-code">
                             <button id="chubCreatorSearchBtn" class="browse-search-submit" title="Search by creator">
                                 <i class="fa-solid fa-arrow-right"></i>
                             </button>
@@ -541,7 +541,7 @@ class ChubBrowseView extends BrowseView {
                 <div class="chub-login-form">
                     <div class="form-group">
                         <label for="chubApiKeyInput">URQL_TOKEN</label>
-                        <input type="password" id="chubApiKeyInput" class="glass-input" placeholder="Paste your URQL_TOKEN here..." autocomplete="off">
+                        <input type="password" id="chubApiKeyInput" class="glass-input" placeholder="Paste your URQL_TOKEN here..." autocomplete="new-password">
                     </div>
                     <label class="checkbox-label" style="margin-top: 10px;">
                         <input type="checkbox" id="chubRememberKey" checked> Remember token
@@ -2920,7 +2920,7 @@ async function loadChubCharacters(forceRefresh = false) {
             }
         }
         
-        chubHasMore = nodes.length >= 48;
+        chubHasMore = (data.data?.cursor ?? data.cursor) != null && nodes.length > 0;
         const wasAppend = chubCurrentPage > 1;
         
         // When "hide owned" is active, auto-fetch additional pages if too many
@@ -2960,7 +2960,7 @@ async function loadChubCharacters(forceRefresh = false) {
                         if (fp) existingPaths.add(fp);
                     }
                 }
-                chubHasMore = moreNodes.length >= 48;
+                chubHasMore = (moreData.data?.cursor ?? moreData.cursor) != null && moreNodes.length > 0;
                 visibleNew += moreNodes.filter(c => !isCharInLocalLibrary(c)).length;
             }
             

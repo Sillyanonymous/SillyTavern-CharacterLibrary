@@ -304,15 +304,10 @@ function injectPickerModal() {
             <div class="cl-modal-body" style="padding: 0;">
                 <div class="pl-picker-search-wrap">
                     <i class="fa-solid fa-magnifying-glass pl-picker-search-icon"></i>
-                    <input type="text" id="playlistPickerSearch" class="cl-input pl-picker-search" placeholder="Search playlists...">
+                    <input type="text" id="playlistPickerSearch" class="cl-input pl-picker-search" placeholder="Search or create..." maxlength="100" autocomplete="one-time-code">
                 </div>
                 <div id="playlistPickerList" class="pl-picker-list"></div>
-                <div id="playlistPickerEmpty" class="pl-picker-empty">No playlists yet</div>
-                <div id="playlistPickerNoMatch" class="pl-picker-empty" style="display:none;">No matching playlists</div>
-                <div class="pl-picker-create-footer">
-                    <input type="text" id="playlistPickerNewInput" class="cl-input" placeholder="New playlist..." maxlength="100">
-                    <button id="playlistPickerCreateBtn" class="cl-btn cl-btn-primary" title="Create playlist"><i class="fa-solid fa-plus"></i></button>
-                </div>
+                <div id="playlistPickerEmpty" class="pl-picker-empty">No playlists yet. Type a name above to create one.</div>
             </div>
         </div>
     </div>`;
@@ -323,29 +318,45 @@ function injectPickerModal() {
     document.getElementById('playlistPickerModal').addEventListener('click', (e) => {
         if (e.target.id === 'playlistPickerModal') closePlaylistPicker();
     });
-    document.getElementById('playlistPickerCreateBtn').addEventListener('click', handlePickerCreate);
-    document.getElementById('playlistPickerNewInput').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handlePickerCreate();
-    });
     document.getElementById('playlistPickerList').addEventListener('click', handlePickerRowClick);
     document.getElementById('playlistPickerSearch').addEventListener('input', filterPickerList);
+    document.getElementById('playlistPickerSearch').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const createRow = document.querySelector('#playlistPickerList .pl-create-row');
+            if (createRow && createRow.style.display !== 'none') handlePickerCreate();
+        }
+    });
 }
 
 function filterPickerList() {
     const query = (document.getElementById('playlistPickerSearch')?.value || '').trim().toLowerCase();
     const rows = document.querySelectorAll('#playlistPickerList .pl-picker-row');
     let visible = 0;
+    let exactMatch = false;
     rows.forEach(row => {
         const name = (row.querySelector('.pl-picker-name')?.textContent || '').toLowerCase();
         const show = !query || name.includes(query);
         row.style.display = show ? '' : 'none';
         if (show) visible++;
+        if (query && name === query) exactMatch = true;
     });
     const emptyEl = document.getElementById('playlistPickerEmpty');
-    const noMatchEl = document.getElementById('playlistPickerNoMatch');
     const totalRows = rows.length;
-    if (emptyEl) emptyEl.style.display = totalRows === 0 ? '' : 'none';
-    if (noMatchEl) noMatchEl.style.display = totalRows > 0 && visible === 0 ? '' : 'none';
+    if (emptyEl) emptyEl.style.display = totalRows === 0 && !query ? '' : 'none';
+
+    let createRow = document.querySelector('#playlistPickerList .pl-create-row');
+    if (query && !exactMatch) {
+        if (!createRow) {
+            createRow = document.createElement('div');
+            createRow.className = 'pl-create-row';
+            createRow.addEventListener('click', handlePickerCreate);
+            document.getElementById('playlistPickerList').appendChild(createRow);
+        }
+        createRow.innerHTML = `<i class="fa-solid fa-plus pl-create-row-icon"></i><span class="pl-create-row-text">Create <strong>${esc(document.getElementById('playlistPickerSearch').value.trim())}</strong></span>`;
+        createRow.style.display = '';
+    } else if (createRow) {
+        createRow.style.display = 'none';
+    }
 }
 
 async function openPlaylistPicker(avatars) {
@@ -353,16 +364,15 @@ async function openPlaylistPicker(avatars) {
     injectPickerModal();
     pickerAvatars = [...avatars];
     await loadPlaylists();
+
+    const searchInput = document.getElementById('playlistPickerSearch');
+    if (searchInput) searchInput.value = '';
     renderPickerList();
 
     const countEl = document.getElementById('playlistPickerCount');
     countEl.textContent = avatars.length === 1 ? '1 character' : `${avatars.length} characters`;
 
     document.getElementById('playlistPickerModal').classList.add('visible');
-    const searchInput = document.getElementById('playlistPickerSearch');
-    if (searchInput) { searchInput.value = ''; }
-    const newInput = document.getElementById('playlistPickerNewInput');
-    if (newInput) newInput.value = '';
 }
 
 function closePlaylistPicker() {
@@ -373,14 +383,12 @@ function closePlaylistPicker() {
 function renderPickerList() {
     const listEl = document.getElementById('playlistPickerList');
     const emptyEl = document.getElementById('playlistPickerEmpty');
-    const noMatchEl = document.getElementById('playlistPickerNoMatch');
     const playlists = getAllPlaylists();
-
-    if (noMatchEl) noMatchEl.style.display = 'none';
 
     if (!playlists.length) {
         listEl.innerHTML = '';
         emptyEl.style.display = '';
+        filterPickerList();
         return;
     }
     emptyEl.style.display = 'none';
@@ -437,8 +445,8 @@ async function handlePickerRowClick(e) {
 }
 
 async function handlePickerCreate() {
-    const input = document.getElementById('playlistPickerNewInput');
-    const name = input.value.trim();
+    const input = document.getElementById('playlistPickerSearch');
+    const name = (input?.value || '').trim();
     if (!name) return;
 
     if (playlistNameExists(name)) {
@@ -514,13 +522,13 @@ function injectManageModal() {
                 <h3><i class="fa-solid fa-list-ul"></i> Manage Playlists</h3>
                 <button id="playlistManageCloseBtn" class="cl-modal-close"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="cl-modal-body" style="padding: 16px;">
-                <div id="playlistManageList" class="pl-manage-list"></div>
-                <div id="playlistManageEmpty" class="pl-picker-empty">No playlists yet.</div>
-                <div class="pl-manage-create">
-                    <input type="text" id="playlistManageNewInput" class="cl-input" placeholder="Create new playlist..." maxlength="100">
-                    <button id="playlistManageCreateBtn" class="cl-btn cl-btn-primary" title="Create playlist"><i class="fa-solid fa-plus"></i></button>
+            <div class="cl-modal-body" style="padding: 0;">
+                <div class="pl-manage-search-wrap">
+                    <i class="fa-solid fa-magnifying-glass pl-manage-search-icon"></i>
+                    <input type="search" id="playlistManageSearch" class="cl-input pl-manage-search" placeholder="Search or create..." maxlength="100" autocomplete="one-time-code">
                 </div>
+                <div id="playlistManageList" class="pl-manage-list"></div>
+                <div id="playlistManageEmpty" class="pl-picker-empty">No playlists yet. Type a name above to create one.</div>
             </div>
         </div>
     </div>`;
@@ -531,9 +539,12 @@ function injectManageModal() {
     document.getElementById('playlistManageModal').addEventListener('click', (e) => {
         if (e.target.id === 'playlistManageModal') closePlaylistManager();
     });
-    document.getElementById('playlistManageCreateBtn').addEventListener('click', handleManageCreate);
-    document.getElementById('playlistManageNewInput').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') handleManageCreate();
+    document.getElementById('playlistManageSearch').addEventListener('input', filterManageList);
+    document.getElementById('playlistManageSearch').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const createRow = document.querySelector('#playlistManageList .pl-create-row');
+            if (createRow && createRow.style.display !== 'none') handleManageCreate();
+        }
     });
 
     const list = document.getElementById('playlistManageList');
@@ -583,9 +594,10 @@ function injectManageModal() {
 async function openPlaylistManager() {
     injectManageModal();
     await loadPlaylists();
+    const searchInput = document.getElementById('playlistManageSearch');
+    if (searchInput) searchInput.value = '';
     renderManageList();
     document.getElementById('playlistManageModal').classList.add('visible');
-    document.getElementById('playlistManageNewInput').value = '';
 }
 
 function closePlaylistManager() {
@@ -604,6 +616,7 @@ function renderManageList() {
     if (!playlists.length) {
         listEl.innerHTML = '';
         emptyEl.style.display = '';
+        filterManageList();
         return;
     }
     emptyEl.style.display = 'none';
@@ -614,11 +627,41 @@ function renderManageList() {
         const count = pl.characters.length;
         return `<div class="pl-manage-row" data-uid="${esc(pl.uid)}">
             <button class="pl-manage-icon-btn" title="Change icon">${iconInner}</button>
-            <input type="text" class="pl-manage-name cl-input" value="${esc(pl.name)}" maxlength="100">
+            <input type="text" class="pl-manage-name cl-input" value="${esc(pl.name)}" maxlength="100" autocomplete="one-time-code">
             <span class="pl-manage-count">${count}</span>
             <button class="pl-manage-delete" title="Delete playlist"><i class="fa-solid fa-trash"></i></button>
         </div>`;
     }).join('');
+
+    filterManageList();
+}
+
+function filterManageList() {
+    const query = (document.getElementById('playlistManageSearch')?.value || '').trim().toLowerCase();
+    const rows = document.querySelectorAll('#playlistManageList .pl-manage-row');
+    let exactMatch = false;
+    rows.forEach(row => {
+        const name = (row.querySelector('.pl-manage-name')?.value || '').toLowerCase();
+        const show = !query || name.includes(query);
+        row.style.display = show ? '' : 'none';
+        if (query && name === query) exactMatch = true;
+    });
+    const emptyEl = document.getElementById('playlistManageEmpty');
+    if (emptyEl) emptyEl.style.display = rows.length === 0 && !query ? '' : 'none';
+
+    let createRow = document.querySelector('#playlistManageList .pl-create-row');
+    if (query && !exactMatch) {
+        if (!createRow) {
+            createRow = document.createElement('div');
+            createRow.className = 'pl-create-row';
+            createRow.addEventListener('click', handleManageCreate);
+            document.getElementById('playlistManageList').appendChild(createRow);
+        }
+        createRow.innerHTML = `<i class="fa-solid fa-plus pl-create-row-icon"></i><span class="pl-create-row-text">Create <strong>${esc(document.getElementById('playlistManageSearch').value.trim())}</strong></span>`;
+        createRow.style.display = '';
+    } else if (createRow) {
+        createRow.style.display = 'none';
+    }
 }
 
 function positionPickerAtButton(btn, picker) {
@@ -720,9 +763,14 @@ async function handleManageDelete(uid) {
 }
 
 async function handleManageCreate() {
-    const input = document.getElementById('playlistManageNewInput');
-    const name = input.value.trim();
+    const input = document.getElementById('playlistManageSearch');
+    const name = (input?.value || '').trim();
     if (!name) return;
+
+    if (playlistNameExists(name)) {
+        CoreAPI.showToast(`A playlist named "${name}" already exists`, 'warning');
+        return;
+    }
 
     await createPlaylist(name);
     input.value = '';

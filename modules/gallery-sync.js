@@ -606,7 +606,7 @@ function navigateToGallerySyncSettings(triggerSync = false) {
 export async function init(dependencies = {}) {
     if (isInitialized) return;
     
-    console.log('[GallerySync] Module initializing...');
+    CoreAPI.debugLog('[GallerySync] Module initializing...');
     
     // Setup sync status button click handler
     const syncBtn = document.getElementById('gallerySyncStatusBtn');
@@ -693,7 +693,7 @@ export async function init(dependencies = {}) {
     }, 5000);
     
     isInitialized = true;
-    console.log('[GallerySync] Module initialized');
+    CoreAPI.debugLog('[GallerySync] Module initialized');
 }
 
 // ========================================

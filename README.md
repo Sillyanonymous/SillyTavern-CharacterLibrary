@@ -6,35 +6,25 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 
 ## Screenshots
 
-![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Main.jpg)
+![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](https://github.com/Sillyanonymous/assets/blob/main/v2_Details.png)
+![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.png)
 *View and edit character details, chats, media, and related characters*
 
-![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/v2_Gallery.jpg)
+![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/Gallery.jpg)
 *Download embedded character media*
 
-![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/v2_creatorsNotes.png)
+![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/Expanded%20fields.png)
 *Expand separate views such as Creator's notes*
 
-![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Similar.png)
+![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Related.png)
 *Find potentially related characters*
 
-![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_online_tab.jpg)
+![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/ChubAI.jpg)
 *Browse and download characters from online providers*
 
-![Batch Operations](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchOperations.jpg)
-*Apply changes to any number of selected characters*
 
-![Batch Tagging](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchTagging.jpg)
-*...Such as Batch tagging*
-
-![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchUpdates.jpg)
-*...Batch updates*
-
-![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchPlaylists.jpg)
-*...and much more*
 
 ## Installation
 
@@ -63,6 +53,8 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Right-click context menu** on any character card for quick actions
 - **Version history & snapshots** with save/restore, remote version browsing, and full diff preview
 - **Playlists** for organizing characters into named, ordered virtual folders with icons and colors
+- **Character Creator** with built-in AI Studio for assisted card authoring, brainstorming, and iterative refinement
+- **Animated card info** on hover with configurable visibility options
 
 ### 🎨 Character Details
 
@@ -95,6 +87,59 @@ Click any character for a **rich tabbed interface**:
 - **Bulk localization** across your whole library from Settings, with progress tracking, abort, and history
 - **Optional provider gallery** inclusion in bulk localization
 
+</details>
+
+<details>
+<summary><h3>✏️ Character Creator</h3></summary>
+
+Create new characters from scratch or edit existing ones with an AI-powered assistant built into the library.
+
+#### AI Studio
+
+Each card field (description, personality, scenario, first message, etc.) has a wand icon button that opens the **AI Studio** panel. Inside:
+
+- **Multi-turn conversation**: Chat with the LLM to iteratively refine the field. Ask for rewrites, adjustments, or entirely new content before applying
+- **Suggestion chips**: Quick-start prompts that appear per field (e.g. "Write a mysterious backstory", "Make them sarcastic and witty"). Click one to generate immediately
+- **Word target**: Set a target word count for generations using the number input. The LLM will aim to match it
+- **Undo / Redo**: History stack for the current studio session. Use the toolbar buttons or `Ctrl+Z` / `Ctrl+Y`. Opening a different field starts a fresh history
+- **Brainstorm mode**: Generate description text from scratch using only the character's existing metadata as context
+- **Apply to card**: When satisfied, click Apply to Card to write the generated text into the card field
+
+#### Highlight Revision
+
+Select (highlight) any portion of text in the AI Studio content area. The studio locks the selection, highlights it visually, and switches to **revision mode**: your next prompt targets only the highlighted section. The LLM rewrites just that segment and splices it back into the surrounding text automatically. Clear the selection to return to full-field mode.
+
+#### Custom System Prompts & Presets
+
+Each field has a **Settings** panel (gear icon) where you can:
+
+- **Override the system prompt**: Replace the built-in instruction for that field with your own
+- **Toggle context inclusion**: Choose which other card fields are sent as context when generating (e.g. exclude personality when generating a description)
+- **Save presets**: Save your custom prompt as a named preset, load it later, or delete it. Presets are saved per-field and persist across sessions
+
+A dot indicator appears on the gear icon when a field has active overrides.
+
+#### Connection Profiles
+
+If you have multiple Chat Completion sources configured in SillyTavern, a **Connection Profile** dropdown appears in the sidebar under AI Assist. This lets you use a different model for character creation than your chat model.
+
+#### Import from Library
+
+Click **Import from Library** to load an existing character's data into the creator form. This fully hydrates the character (fetching all card fields) and populates every form field including tags, avatar, alternate greetings, and lorebook. You can then modify and save as a new character or overwrite the original.
+
+#### Save Modes
+
+- **Create Character**: Saves as a brand-new character in your library
+- **Save as Existing**: When you imported from library, this option appears. Opens a stacked diff review (old on top, new below) showing exactly what changed before overwriting the original card. An automatic snapshot is saved before the overwrite so you can always undo
+
+#### Other Features
+
+- **Creator's Notes**: Live preview with zoom and resize controls, supporting rich HTML/CSS content
+- **Avatar**: Upload from file, or import from the library character's existing avatar
+- **Field expand/collapse**: Toggle all text fields between compact and expanded view
+- **AI tag suggestions**: Generate relevant tags from the character's existing card fields
+
+Access via the **⋮ menu** → **Create a Character**.
 </details>
 
 <details>
@@ -190,7 +235,8 @@ An AI-powered recommendation engine that uses your connected LLM to discover cha
 1. **Describe what you want.** "Cozy fantasy girls," "dark horror villains," "sci-fi androids with deep lore," etc.
 2. Characters are **sampled from your library** and their metadata (name, tags, creator, creator notes, tagline) is sent to your LLM.
 3. The model evaluates each character against your prompt and returns a **ranked list with reasons.**
-4. Results appear as clickable cards. Tap any to open the full character detail modal.
+4. Results appear as clickable cards with **expandable reasoning**.
+5. Use **Add all to playlist** to save the entire result set to a playlist in one click.
 
 #### Batch Mode
 
@@ -556,3 +602,14 @@ Some image hosts (Imgur, Catbox, etc.) block direct browser requests due to CORS
 5. Retry the download in Character Library
 
 This affects embedded media downloads, provider gallery downloads, and bulk localization.
+
+## Acknowledgements
+
+Some early endpoint and provider initialization research for the
+JannyAI and CharacterTavern integrations was cross-referenced with
+publicly available work in BotBrowser project, go check it out as they support a lot of online providers:
+https://github.com/mia13165/SillyTavern-BotBrowser
+
+## License
+
+Licensed under the [GNU Affero General Public License v3](LICENSE).

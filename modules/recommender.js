@@ -132,7 +132,7 @@ function createModal() {
             <div class="recommender-body">
                 <div class="recommender-input-area">
                     <textarea id="recommenderPrompt" class="recommender-prompt" rows="3"
-                        placeholder="Describe what you're looking for — e.g. cozy fantasy girls, dark horror, sci-fi androids..."></textarea>
+                        placeholder="Describe what you're looking for — e.g. cozy fantasy girls, dark horror, sci-fi androids..." autocomplete="one-time-code"></textarea>
                     <button class="recommender-submit-btn" id="recommenderSubmitBtn" title="Generate recommendations">
                         <i class="fa-solid fa-wand-magic-sparkles"></i><span class="recommender-submit-label">Recommend</span>
                     </button>
@@ -168,11 +168,11 @@ function createModal() {
 
                 <div id="recommenderCustomApiFields" class="recommender-custom-api hidden">
                     <input type="text" id="recommenderApiUrl" class="recommender-field"
-                        placeholder="Endpoint URL">
+                        placeholder="Endpoint URL" autocomplete="one-time-code">
                     <input type="password" id="recommenderApiKey" class="recommender-field"
-                        placeholder="API Key (optional)">
+                        placeholder="API Key (optional)" autocomplete="new-password">
                     <input type="text" id="recommenderModel" class="recommender-field"
-                        placeholder="Model (e.g. gpt-4o-mini)">
+                        placeholder="Model (e.g. gpt-4o-mini)" autocomplete="one-time-code">
                 </div>
 
                 <div id="recommenderSettingsPanel" class="recommender-settings-panel hidden">
@@ -217,8 +217,8 @@ function createModal() {
                             <div class="recommender-filter-row recommender-filter-row-col">
                                 <label class="recommender-filter-label">Include Tags</label>
                                 <div class="recommender-tag-input-wrap">
-                                    <input type="text" id="recommenderTagIncludeInput" class="recommender-field recommender-field-sm"
-                                        placeholder="Type tag + Enter" autocomplete="off">
+                                    <input type="search" id="recommenderTagIncludeInput" class="recommender-field recommender-field-sm"
+                                        placeholder="Type tag + Enter" autocomplete="one-time-code">
                                     <div id="recommenderTagIncludeAC" class="recommender-tag-autocomplete"></div>
                                     <div id="recommenderTagIncludePills" class="recommender-tag-pills"></div>
                                 </div>
@@ -227,8 +227,8 @@ function createModal() {
                             <div class="recommender-filter-row recommender-filter-row-col">
                                 <label class="recommender-filter-label">Exclude Tags</label>
                                 <div class="recommender-tag-input-wrap">
-                                    <input type="text" id="recommenderTagExcludeInput" class="recommender-field recommender-field-sm"
-                                        placeholder="Type tag + Enter" autocomplete="off">
+                                    <input type="search" id="recommenderTagExcludeInput" class="recommender-field recommender-field-sm"
+                                        placeholder="Type tag + Enter" autocomplete="one-time-code">
                                     <div id="recommenderTagExcludeAC" class="recommender-tag-autocomplete"></div>
                                     <div id="recommenderTagExcludePills" class="recommender-tag-pills"></div>
                                 </div>
@@ -639,6 +639,22 @@ function attachEvents() {
             const card = plBtn.closest('.recommender-result-card');
             const avatar = card?.dataset.avatar;
             if (avatar) CoreAPI.openPlaylistPicker([avatar]);
+            return;
+        }
+
+        const addAllBtn = e.target.closest('.recommender-playlist-all-btn');
+        if (addAllBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const avatars = [...document.querySelectorAll('.recommender-result-card[data-avatar]')]
+                .map(c => c.dataset.avatar).filter(Boolean);
+            if (avatars.length) CoreAPI.openPlaylistPicker(avatars);
+            return;
+        }
+
+        const reason = e.target.closest('.recommender-result-reason');
+        if (reason) {
+            reason.classList.toggle('expanded');
             return;
         }
 
@@ -1105,7 +1121,7 @@ async function callSillyTavernAPI(messages, temperature, signal) {
     const source = profile?.api || activeSource;
     const model = profile?.model || activeModel;
 
-    console.log('[Recommender] Generate debug:', {
+    CoreAPI.debugLog('[Recommender] Generate debug:', {
         profileApi: profile?.api, profileModel: profile?.model,
         activeSource, activeModel, resolvedSource: source, resolvedModel: model,
         hasProfile: !!profile, hasPreset: !!activePreset,
@@ -1676,6 +1692,7 @@ function renderResults(recommendations) {
         <div class="recommender-results-header">
             <i class="fa-solid fa-sparkles"></i>
             <span>${cards.length} Recommendation${cards.length !== 1 ? 's' : ''}</span>
+            <button class="recommender-playlist-all-btn" title="Add all to playlist"><i class="fa-solid fa-list-ul"></i></button>
             <span class="recommender-results-badge">${_lastEvaluatedCount} evaluated</span>
         </div>
         <div class="recommender-results-grid">${cards.join('')}</div>
@@ -1808,7 +1825,7 @@ async function handleSubmit() {
 function init() {
     if (isInitialized) return;
     isInitialized = true;
-    console.log('[Recommender] Module initialized');
+    CoreAPI.debugLog('[Recommender] Module initialized');
 }
 
 export { openModal };

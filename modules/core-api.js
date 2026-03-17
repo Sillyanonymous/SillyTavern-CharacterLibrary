@@ -602,12 +602,12 @@ export function debugLog(...args) {
 
 /**
  * Render creator notes into a container with safe HTML handling
+ * @param {string} content - Raw creator notes content
+ * @param {string} charName - Character name
  * @param {HTMLElement} container - Target container
- * @param {string} notes - Raw creator notes content
- * @param {Object} options - Rendering options
  */
-export function renderCreatorNotesSecure(container, notes, options) {
-    window.renderCreatorNotesSecure?.(container, notes, options);
+export function renderCreatorNotesSecure(content, charName, container) {
+    window.renderCreatorNotesSecure?.(content, charName, container);
 }
 
 /**
@@ -616,6 +616,14 @@ export function renderCreatorNotesSecure(container, notes, options) {
  */
 export function cleanupCreatorNotesContainer(container) {
     window.cleanupCreatorNotesContainer?.(container);
+}
+
+export function openCharacterCreator() {
+    window.openCharacterCreator?.();
+}
+
+export async function autoSnapshotBeforeChange(char, reason) {
+    return window.autoSnapshotBeforeChange?.(char, reason);
 }
 
 /**
@@ -1022,6 +1030,8 @@ export default {
     cleanupCreatorNotesContainer,
     initCreatorNotesHandlers,
     initContentExpandHandlers,
+    openCharacterCreator,
+    autoSnapshotBeforeChange,
     
     // Import / Download Pipeline
     checkCharacterForDuplicates,

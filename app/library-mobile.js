@@ -223,6 +223,26 @@
 })();
 
 /* ========================================
+   OVERLAY REGISTRY
+   Modules call window.registerOverlay(config) to register overlays.
+   The back-button stack (mobile) and global Escape handler (all platforms)
+   both read from this registry so new overlays don't require editing
+   library-mobile.js or wiring their own Escape listeners.
+
+   Config shape:
+     id        {string}   — DOM element ID
+     tier      {number}   — z-order priority (lower number = closes first = higher z-index)
+     close     {function} — called with the element to close it
+     static    {boolean}  — protect from catch-all el.remove() (default: true)
+     escape    {boolean}  — respond to Escape key (default: true)
+     visible   {function} — optional override: (el) => bool. Default: !el.classList.contains('hidden')
+   ======================================== */
+window._overlayRegistry = [];
+window.registerOverlay = function(cfg) {
+    window._overlayRegistry.push(cfg);
+};
+
+/* ========================================
    MAIN MOBILE ENHANCEMENTS IIFE
    ======================================== */
 (function MobileEnhancements() {
@@ -272,7 +292,6 @@
         setupViewportFix();
         relocateTagPopup();
         relocatePlaylistPopup();
-        fixInitialGridRender();
         setDefaultExpandZoom();
         setupLorebookModalToolbar();
         fixInvalidDateText();
@@ -290,16 +309,20 @@
     function setupBackButton() {
         // Built lazily — ProviderRegistry may not exist yet at setup time
         // (ES modules load async, this runs 200ms after DOMContentLoaded)
-        const BASE_STATIC = ['charModal', 'chatPreviewModal', 'chubLoginModal'];
+        const BASE_STATIC_HARDCODED = ['charModal', 'chatPreviewModal', 'chubLoginModal', 'creatorModal'];
         let _staticOverlays = null;
         function getStaticOverlays() {
             if (!_staticOverlays) {
                 const providerIds = window.ProviderRegistry?.getPreviewModalIds?.() || [];
-                if (providerIds.length > 0) {
-                    _staticOverlays = new Set([...BASE_STATIC, ...providerIds]);
+                const registryIds = (window._overlayRegistry || [])
+                    .filter(r => r.static !== false)
+                    .map(r => r.id);
+                if (providerIds.length > 0 || registryIds.length > 0) {
+                    _staticOverlays = new Set([...BASE_STATIC_HARDCODED, ...providerIds, ...registryIds]);
                 }
             }
-            return _staticOverlays || new Set(BASE_STATIC);
+            return _staticOverlays || new Set([...BASE_STATIC_HARDCODED,
+                ...(window._overlayRegistry || []).filter(r => r.static !== false).map(r => r.id)]);
         }
 
         const multiSelectHandler = () => {
@@ -392,6 +415,19 @@
             // Tier 3 — tag editor sheet
             ['.tag-editor-sheet:not(.hidden)', el => { el.classList.add('hidden'); document.getElementById('tagEditorSheetAutocomplete')?.classList.add('hidden'); }],
 
+            // Tier 3.5 — registered overlays (populated via window.registerOverlay)
+            () => {
+                const regs = [...(window._overlayRegistry || [])]
+                    .sort((a, b) => a.tier - b.tier);
+                for (const reg of regs) {
+                    const el = document.getElementById(reg.id);
+                    if (!el) continue;
+                    const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
+                    if (visible) { reg.close(el); return true; }
+                }
+                return false;
+            },
+
             // Tier 3 — full-screen modals
             ['#chatPreviewModal:not(.hidden)',  el => el.classList.add('hidden')],
             ['#chubLoginModal:not(.hidden)',    el => el.classList.add('hidden')],
@@ -412,7 +448,8 @@
             ['.vt-container.vt-detail-open', el => el.classList.remove('vt-detail-open')],
 
             // Tier 5 — main modals (lowest priority full-screen)
-            ['#charModal:not(.hidden)', () => window.closeModal?.()],
+            ['#charModal:not(.hidden)',    () => window.closeModal?.()],
+            ['#creatorModal:not(.hidden)', () => window.closeCharacterCreator?.()],
 
             // Tier 5.5 — multi-select mode
             multiSelectHandler,
@@ -426,6 +463,17 @@
                 const tags = document.querySelector('body > .browse-tags-dropdown[data-mobile-relocated]:not(.hidden)');
                 if (tags) { tags.classList.add('hidden'); return true; }
                 return false;
+            },
+
+            // Tier 7 — active text search on characters view
+            () => {
+                if (window.getCurrentView?.() !== 'characters') return false;
+                const input = document.getElementById('searchInput');
+                if (!input || !input.value.trim()) return false;
+                input.value = '';
+                document.getElementById('clearSearchBtn')?.classList.add('hidden');
+                window.performSearch?.();
+                return true;
             },
         ];
 
@@ -482,7 +530,9 @@
                 const el = m.target;
                 const oldClasses = m.oldValue || '';
 
-                if (el.classList.contains('modal-overlay') || el.classList.contains('confirm-modal')) {
+                if (el.classList.contains('modal-overlay') || el.classList.contains('confirm-modal') ||
+                    el.classList.contains('ai-studio-overlay') || el.classList.contains('creator-import-overlay') ||
+                    el.classList.contains('creator-saveas-diff-overlay')) {
                     const wasHidden = oldClasses.includes('hidden');
                     const isHidden = el.classList.contains('hidden');
                     if (wasHidden && !isHidden) {
@@ -519,11 +569,19 @@
                         node.classList.contains('confirm-modal') ||
                         node.classList.contains('mobile-avatar-viewer') ||
                         node.classList.contains('browse-avatar-viewer')) {
-                        pushGuard();
+                        if (!node.classList.contains('hidden')) pushGuard();
                         classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
                     }
                     if (node.classList.contains('gv-modal') || node.classList.contains('cl-modal')) {
                         classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+                    }
+                    if (node.classList.contains('ai-studio-overlay') ||
+                        node.classList.contains('creator-import-overlay') ||
+                        node.classList.contains('creator-saveas-diff-overlay')) {
+                        classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+                        // Inject + show often happen in the same sync block — by the time
+                        // childObserver fires, 'hidden' is already gone. Push now if visible.
+                        if (!node.classList.contains('hidden')) pushGuard();
                     }
                 }
             }
@@ -595,6 +653,7 @@
                 // Move original search box into the overlay to preserve bindings
                 container.appendChild(searchBox);
             }
+            overlay.style.top = `${topbar.offsetHeight}px`;
             overlay.classList.remove('hidden');
             // Focus after transition
             setTimeout(() => {
@@ -2205,33 +2264,6 @@
             document.head.appendChild(viewport);
         }
         viewport.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-    }
-
-    /* ========================================
-       FIX: INITIAL GRID RENDER
-       Force virtual scroll recalculation after first cards appear
-       so the real cardHeight is used instead of fallback 300px
-       ======================================== */
-    function fixInitialGridRender() {
-        const scrollContainer = document.querySelector('.gallery-content');
-        if (!scrollContainer) return;
-
-        // Wait for actual cards to appear, then force recalc
-        const observer = new MutationObserver(() => {
-            const card = document.querySelector('.char-card');
-            if (card) {
-                observer.disconnect();
-                // Small delay to ensure browser has laid out the card
-                setTimeout(() => {
-                    // Dispatch a resize to clear cached dimensions and re-render
-                    window.dispatchEvent(new Event('resize'));
-                }, 50);
-            }
-        });
-        const grid = document.getElementById('characterGrid');
-        if (grid) {
-            observer.observe(grid, { childList: true, subtree: true });
-        }
     }
 
     /* ========================================

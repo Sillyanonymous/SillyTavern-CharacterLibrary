@@ -191,7 +191,7 @@ async function storageSaveSnapshot(avatar, charName, label, source, data, versio
         if (existing.length > 0) {
             const latest = existing[existing.length - 1];
             if (JSON.stringify(latest.data) === JSON.stringify(dataCopy)) {
-                console.log('[CharVersions] Skipping duplicate auto-backup snapshot');
+                CoreAPI.debugLog('[CharVersions] Skipping duplicate auto-backup snapshot');
                 return latest.id;
             }
         }
@@ -330,7 +330,7 @@ async function ensureVersionUid(char) {
         if (!char.data) char.data = {};
         if (!char.data.extensions) char.data.extensions = {};
         char.data.extensions.version_uid = uid;
-        console.log(`[CharVersions] Assigned version_uid ${uid} to ${char.name || char.avatar}`);
+        CoreAPI.debugLog(`[CharVersions] Assigned version_uid ${uid} to ${char.name || char.avatar}`);
     } else {
         console.warn('[CharVersions] Failed to persist version_uid — using ephemeral');
     }
@@ -363,7 +363,7 @@ export function init(deps) {
     ensureIndexLoaded()
         .catch(e => console.error('[CharVersions] Init error:', e));
     isInitialized = true;
-    console.log('[CharVersions] Module initialized (v4 — filesystem storage)');
+    CoreAPI.debugLog('[CharVersions] Module initialized (v4 — filesystem storage)');
 }
 
 // ========================================
@@ -1915,7 +1915,7 @@ function inputDialog(title, msg, defaultVal = '') {
             <div class="vt-dialog">
                 <div class="vt-dialog-title">${esc(title)}</div>
                 <div class="vt-dialog-msg">${esc(msg)}</div>
-                <input type="text" class="vt-input" value="${esc(defaultVal)}" />
+                <input type="text" class="vt-input" value="${esc(defaultVal)}" autocomplete="one-time-code" />
                 <div class="vt-dialog-btns">
                     <button class="vt-dialog-btn" data-a="cancel">Cancel</button>
                     <button class="vt-dialog-btn primary" data-a="ok">OK</button>

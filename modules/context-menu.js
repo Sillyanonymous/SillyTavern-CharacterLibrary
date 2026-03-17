@@ -40,7 +40,7 @@ export function init(deps) {
     };
     
     isInitialized = true;
-    console.log('[ContextMenu] Module initialized');
+    CoreAPI.debugLog('[ContextMenu] Module initialized');
 }
 
 function createMenu() {

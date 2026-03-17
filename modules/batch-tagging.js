@@ -525,7 +525,7 @@ function injectModal() {
                 <div class="bt-section">
                     <div class="bt-section-title"><i class="fa-solid fa-plus"></i> Add Tags</div>
                     <div class="bt-input-wrapper">
-                        <input type="text" id="batchTagAddInput" class="cl-input" placeholder="Type tag and press Enter (comma-separated for multiple)" autocomplete="off">
+                        <input type="search" id="batchTagAddInput" class="cl-input" placeholder="Type tag and press Enter (comma-separated for multiple)" autocomplete="one-time-code">
                         <div id="batchTagAddSuggestions" class="bt-suggestions hidden"></div>
                     </div>
                     <div id="batchTagAddPills" class="bt-pills"></div>
@@ -535,7 +535,7 @@ function injectModal() {
                 <div class="bt-section">
                     <div class="bt-section-title"><i class="fa-solid fa-minus"></i> Remove Tags</div>
                     <div class="bt-input-wrapper">
-                        <input type="text" id="batchTagRemoveInput" class="cl-input" placeholder="Type tag and press Enter, or click tags above" autocomplete="off">
+                        <input type="search" id="batchTagRemoveInput" class="cl-input" placeholder="Type tag and press Enter, or click tags above" autocomplete="one-time-code">
                         <div id="batchTagRemoveSuggestions" class="bt-suggestions hidden"></div>
                     </div>
                     <div id="batchTagRemovePills" class="bt-pills"></div>
