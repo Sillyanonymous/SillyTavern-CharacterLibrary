@@ -1950,6 +1950,11 @@ function openStudio(fieldKey) {
 
     document.getElementById('aiStudioOverlay').classList.remove('hidden');
 
+    if (BRAINSTORM_FIELDS.has(fieldKey) && bsToggle) {
+        bsToggle.classList.add('brainstorm-hint');
+        bsToggle.addEventListener('animationend', () => bsToggle.classList.remove('brainstorm-hint'), { once: true });
+    }
+
     requestAnimationFrame(() => {
         document.getElementById('studioInput')?.focus();
     });

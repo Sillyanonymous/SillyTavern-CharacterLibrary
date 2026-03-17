@@ -14194,6 +14194,17 @@ details.settings-provider-section > .settings-provider-body {
     background: rgba(var(--accent-rgb, 74, 158, 255), 0.15);
 }
 
+@keyframes brainstormHint {
+    0% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 74, 158, 255), 0.5); }
+    50% { box-shadow: 0 0 10px 3px rgba(var(--accent-rgb, 74, 158, 255), 0.35); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--accent-rgb, 74, 158, 255), 0); }
+}
+
+#studioBrainstormToggle.brainstorm-hint {
+    animation: brainstormHint 0.8s ease-in-out 2;
+    border-radius: 6px;
+}
+
 .ai-studio-modal.brainstorm-mode .ai-studio-content-area {
     display: none;
 }
