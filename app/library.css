@@ -13019,6 +13019,11 @@ details.settings-provider-section > .settings-provider-body {
 .creator-connection-dot.connected { background: #4caf50; }
 .creator-connection-dot.neutral { background: #888; }
 
+/* Mobile-only quick-access strip (avatar + profile) */
+.creator-mobile-topbar {
+    display: none;
+}
+
 /* Main content area */
 .creator-content {
     flex: 1;

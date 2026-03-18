@@ -159,6 +159,17 @@ function createModal() {
 
                 <div class="creator-content">
                     <div class="creator-fields">
+                        <div class="creator-mobile-topbar">
+                            <div class="creator-mobile-avatar" id="creatorMobileAvatarPreview">
+                                <i class="fa-solid fa-image"></i>
+                            </div>
+                            <div class="creator-mobile-profile">
+                                <span class="creator-connection-dot neutral" id="creatorMobileProfileDot"></span>
+                                <select id="creatorMobileProfileSelect" class="creator-mobile-profile-select">
+                                    <option value="" disabled selected>Loading...</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="edit-section">
                             <h4 class="section-header"><i class="fa-solid fa-user"></i> Basic Information</h4>
                             <div class="form-group">
@@ -419,6 +430,8 @@ function resetForm() {
         preview.querySelector('span').style.display = '';
     }
     document.getElementById('creatorAvatarClear')?.classList.add('hidden');
+    const mobileAvatar = document.getElementById('creatorMobileAvatarPreview');
+    if (mobileAvatar) mobileAvatar.innerHTML = '<i class="fa-solid fa-image"></i>';
     document.getElementById('creatorAltGreetings').innerHTML = '';
     renderCreatorTags();
     clearAllFieldStates();
@@ -525,6 +538,23 @@ function attachEvents() {
         updateProfileStatus();
     });
 
+    // Mobile profile select → sync with main + update status
+    document.getElementById('creatorMobileProfileSelect')?.addEventListener('change', (e) => {
+        const mainSelect = document.getElementById('creatorStProfile');
+        if (mainSelect) {
+            mainSelect.value = e.target.value;
+            mainSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        } else {
+            setOpt('stProfileId', e.target.value);
+            updateProfileStatus();
+        }
+    });
+
+    // Mobile avatar → trigger file input
+    document.getElementById('creatorMobileAvatarPreview')?.addEventListener('click', () => {
+        document.getElementById('creatorAvatarInput')?.click();
+    });
+
     // Tag input
     const tagInput = document.getElementById('creatorTagInput');
     tagInput?.addEventListener('keydown', handleTagKeydown);
@@ -577,6 +607,11 @@ async function handleAvatarSelect(e) {
         preview.querySelector('i').style.display = 'none';
         preview.querySelector('span').style.display = 'none';
         document.getElementById('creatorAvatarClear').classList.remove('hidden');
+
+        const mobileAvatar = document.getElementById('creatorMobileAvatarPreview');
+        if (mobileAvatar) {
+            mobileAvatar.innerHTML = `<img src="${avatarDataUrl}" alt="">`;
+        }
     } catch (err) {
         console.error('[Creator] Avatar processing failed:', err);
         CoreAPI.showToast('Failed to process avatar image', 'error');
@@ -597,6 +632,11 @@ function handleAvatarClear() {
     preview.querySelector('i').style.display = '';
     preview.querySelector('span').style.display = '';
     document.getElementById('creatorAvatarClear').classList.add('hidden');
+
+    const mobileAvatar = document.getElementById('creatorMobileAvatarPreview');
+    if (mobileAvatar) {
+        mobileAvatar.innerHTML = '<i class="fa-solid fa-image"></i>';
+    }
 }
 
 async function convertToPng(imageBuffer) {
@@ -916,6 +956,9 @@ async function loadProfiles() {
             `<option value="${CoreAPI.escapeHtml(p.id)}">${CoreAPI.escapeHtml(p.name || p.api || 'Unnamed')}</option>`
         ).join('');
 
+        const mobileSelect = document.getElementById('creatorMobileProfileSelect');
+        if (mobileSelect) mobileSelect.innerHTML = selectEl.innerHTML;
+
         const savedId = getOpt('stProfileId');
         if (savedId && ccProfiles.some(p => p.id === savedId)) {
             selectEl.value = savedId;
@@ -925,6 +968,8 @@ async function loadProfiles() {
             selectEl.value = ccProfiles[0].id;
         }
         setOpt('stProfileId', selectEl.value);
+
+        if (mobileSelect) mobileSelect.value = selectEl.value;
 
         selectEl._customSelect?.refresh();
         if (selectContainer) selectContainer.classList.remove('hidden');
@@ -953,14 +998,18 @@ function updateProfileStatus() {
     const source = profile?.api || activeSource;
     const model = profile?.model || activeModel;
 
+    const btnDot = document.getElementById('creatorMobileProfileDot');
+
     if (!source) {
         dot.className = 'creator-connection-dot neutral';
         label.textContent = 'No active Chat Completion source';
+        if (btnDot) btnDot.className = 'creator-connection-dot neutral';
         return;
     }
 
     dot.className = 'creator-connection-dot connected';
     label.textContent = model || source;
+    if (btnDot) btnDot.className = 'creator-connection-dot connected';
 }
 
 
@@ -1506,6 +1555,8 @@ async function importCharacterFromLibrary(avatar) {
                 preview.querySelector('span').style.display = 'none';
             }
             document.getElementById('creatorAvatarClear')?.classList.remove('hidden');
+            const mobileAvatar = document.getElementById('creatorMobileAvatarPreview');
+            if (mobileAvatar) mobileAvatar.innerHTML = `<img src="${avatarDataUrl}" alt="">`;
         }
     } catch { /* avatar load failed, non-critical */ }
 
