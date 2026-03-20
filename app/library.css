@@ -16244,3 +16244,16 @@ details.settings-provider-section > .settings-provider-body {
     }
 }
 
+/* ======================================== */
+/* Embedded Mode (within SillyTavern iframe) */
+/* ======================================== */
+
+.embedded-back-btn {
+    margin-right: var(--space-xs, 4px);
+    font-size: 15px;
+}
+
+body.embedded-mode .logo-area {
+    gap: var(--space-xs, 4px);
+}
+

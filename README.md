@@ -6,25 +6,35 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 
 ## Screenshots
 
-![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Main.jpg)
+![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](https://github.com/Sillyanonymous/assets/blob/main/Details.png)
+![Character Details](https://github.com/Sillyanonymous/assets/blob/main/v2_Details.png)
 *View and edit character details, chats, media, and related characters*
 
-![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/Gallery.jpg)
+![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/v2_Gallery.jpg)
 *Download embedded character media*
 
-![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/Expanded%20fields.png)
+![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/v2_creatorsNotes.png)
 *Expand separate views such as Creator's notes*
 
-![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/Related.png)
+![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Similar.png)
 *Find potentially related characters*
 
-![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/ChubAI.jpg)
+![ChubAI Integration](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_online_tab.jpg)
 *Browse and download characters from online providers*
 
+![Batch Operations](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchOperations.jpg)
+*Apply changes to any number of selected characters*
 
+![Batch Tagging](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchTagging.jpg)
+*...Such as Batch tagging*
+
+![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchUpdates.jpg)
+*...Batch updates*
+
+![Batch Updates](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_batchPlaylists.jpg)
+*...and much more*
 
 ## Installation
 
@@ -34,7 +44,8 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
    ```
 2. Refresh SillyTavern's page
 3. Click SillyTavern's native "Character Management" button. A dropdown appears where you can select Character Library
-4. *(Optional)* For Pygmalion and CharacterTavern login (required for NSFW browsing), install the [cl-helper plugin](#cl-helper-plugin-not-detected)
+4. *(Optional)* Switch to **Embedded Panel** mode in the extension settings for an integrated experience (see [Display Modes](#-display-modes))
+5. *(Optional)* For Pygmalion and CharacterTavern login (required for NSFW browsing), install the [cl-helper plugin](#cl-helper-plugin-not-detected)
 
 
 
@@ -71,6 +82,28 @@ Click any character for a **rich tabbed interface**:
 | **Info** | Debug/metadata panel for power users (enable in Settings) |
 
 **Edit Lock** prevents accidental changes.
+
+---
+
+## 🖥️ Display Modes
+
+Character Library can run in two modes, configurable in SillyTavern's **Extensions** panel under **Character Library**:
+
+| Mode | Description |
+|------|-------------|
+| **New Tab** (default) | Opens in a separate browser tab. The Characters button shows a dropdown to choose between SillyTavern's native character manager and Character Library. |
+| **Embedded Panel** | Runs inside SillyTavern as an overlay panel. The Characters button toggles CL directly without opening a new tab. |
+
+### Embedded Panel Settings
+
+These options appear when Embedded Panel mode is selected:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Launch on startup** | Off | Automatically open the embedded panel when SillyTavern loads. |
+| **Show SillyTavern top bar** | Off | Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height. A "Back" button inside the panel returns you to your chat. |
+| **Show launcher dropdown** | Off | Show the choice dropdown (native manager vs. Character Library) instead of direct toggle. Useful if you frequently switch between both. |
+| **Exclusive panels** | Off | When enabled, opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping. |
 
 ---
 

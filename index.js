@@ -1,5 +1,6 @@
 const EXTENSION_NAME = "Character Library";
 const EXTENSION_DIR = "SillyTavern-CharacterLibrary";
+const CL_SETTINGS_KEY = 'SillyTavernCharacterGallery';
 
 // Helper to get the correct path for this extension
 function getExtensionUrl() {
@@ -41,15 +42,314 @@ async function getCsrfToken() {
 // Pre-fetch at load time — token is stable for the session
 getCsrfToken().then(t => { _csrfToken = t; });
 
+// ==============================================
+// Display Mode Setting
+// ==============================================
+
+function getDisplayMode() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.displayMode || 'tab';
+    } catch { return 'tab'; }
+}
+
+function setDisplayMode(mode) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+            context.extensionSettings[CL_SETTINGS_KEY] = {};
+        }
+        context.extensionSettings[CL_SETTINGS_KEY].displayMode = mode;
+        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+    } catch (e) {
+        console.warn(`${EXTENSION_NAME}: Failed to save display mode:`, e);
+    }
+}
+
+function getLaunchOnBoot() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.launchOnBoot === true;
+    } catch { return false; }
+}
+
+function setLaunchOnBoot(enabled) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+            context.extensionSettings[CL_SETTINGS_KEY] = {};
+        }
+        context.extensionSettings[CL_SETTINGS_KEY].launchOnBoot = enabled;
+        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+    } catch (e) {
+        console.warn(`${EXTENSION_NAME}: Failed to save launchOnBoot:`, e);
+    }
+}
+
+function getShowTopBar() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.showTopBar === true;
+    } catch { return false; }
+}
+
+function shouldHideTopBar() {
+    return !getShowTopBar();
+}
+
+function setShowTopBar(enabled) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+            context.extensionSettings[CL_SETTINGS_KEY] = {};
+        }
+        context.extensionSettings[CL_SETTINGS_KEY].showTopBar = enabled;
+        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+    } catch (e) {
+        console.warn(`${EXTENSION_NAME}: Failed to save showTopBar:`, e);
+    }
+}
+
+function getShowDropdownInEmbedded() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.showDropdownInEmbedded === true;
+    } catch { return false; }
+}
+
+function setShowDropdownInEmbedded(enabled) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+            context.extensionSettings[CL_SETTINGS_KEY] = {};
+        }
+        context.extensionSettings[CL_SETTINGS_KEY].showDropdownInEmbedded = enabled;
+        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+    } catch (e) {
+        console.warn(`${EXTENSION_NAME}: Failed to save showDropdownInEmbedded:`, e);
+    }
+}
+
+function getExclusivePanes() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.exclusivePanes === true;
+    } catch { return false; }
+}
+
+function setExclusivePanes(enabled) {
+    try {
+        const context = SillyTavern?.getContext?.();
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+            context.extensionSettings[CL_SETTINGS_KEY] = {};
+        }
+        context.extensionSettings[CL_SETTINGS_KEY].exclusivePanes = enabled;
+        if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+    } catch (e) {
+        console.warn(`${EXTENSION_NAME}: Failed to save exclusivePanes:`, e);
+    }
+}
+
+function migrateSettings() {
+    try {
+        const context = SillyTavern?.getContext?.();
+        const settings = context?.extensionSettings?.[CL_SETTINGS_KEY];
+        if (!settings) return;
+        if ('hideTopBar' in settings) {
+            settings.showTopBar = !settings.hideTopBar;
+            delete settings.hideTopBar;
+            if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+        }
+    } catch { /* not critical */ }
+}
+
+// ==============================================
+// Embedded Iframe Management
+// ==============================================
+
+let _iframeContainer = null;
+let _iframe = null;
+let _embeddedVisible = false;
+
+function isEmbeddedActive() {
+    return _embeddedVisible;
+}
+
+function buildIframeUrl() {
+    const baseUrl = getExtensionUrl();
+    const token = _csrfToken || '';
+    let url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}&embedded=1`;
+    if (getShowTopBar()) url += '&showTopBar=1';
+    return url;
+}
+
+function createEmbeddedContainer() {
+    if (_iframeContainer) return;
+
+    const container = document.createElement('div');
+    container.id = 'charlib-embedded-container';
+    Object.assign(container.style, {
+        position: 'fixed',
+        top: 'var(--topBarBlockSize, 37px)',
+        left: '0',
+        right: '0',
+        bottom: '0',
+        zIndex: '2999',
+        display: 'none',
+        background: '#1a1a2e',
+    });
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'charlib-embedded-iframe';
+    iframe.src = buildIframeUrl();
+    iframe.setAttribute('allow', 'clipboard-write');
+    Object.assign(iframe.style, {
+        width: '100%',
+        height: '100%',
+        border: 'none',
+    });
+
+    container.appendChild(iframe);
+    document.body.appendChild(container);
+
+    _iframeContainer = container;
+    _iframe = iframe;
+}
+
+function closeAllSTDrawers() {
+    const sheld = document.getElementById('sheld');
+    if (sheld) sheld.click();
+
+    // Some top-bar panes are not tied to #sheld and track state via openDrawer.
+    // Toggle any open pane controls off so embedded CL becomes exclusive.
+    const openPaneControls = document.querySelectorAll(
+        '#top-bar .openDrawer.interactable, #top-settings-holder .openDrawer.interactable, #top-bar .menu_button.openDrawer, #top-settings-holder .menu_button.openDrawer'
+    );
+    openPaneControls.forEach((el) => {
+        if (typeof el.click === 'function') el.click();
+    });
+
+    // Final fallback for panes that listen to Escape for close.
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+}
+
+function showEmbedded() {
+    if (!_iframeContainer) createEmbeddedContainer();
+    if (getExclusivePanes()) closeAllSTDrawers();
+    _iframeContainer.style.display = 'block';
+    _embeddedVisible = true;
+    if (shouldHideTopBar()) {
+        _iframeContainer.style.top = '0';
+        _iframeContainer.style.height = '100dvh';
+        for (const id of ['top-bar', 'top-settings-holder']) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+    } else {
+        _iframeContainer.style.top = 'var(--topBarBlockSize, 37px)';
+        _iframeContainer.style.height = 'calc(100dvh - var(--topBarBlockSize, 37px))';
+    }
+}
+
+function hideEmbedded() {
+    if (!_iframeContainer) return;
+    _iframeContainer.style.display = 'none';
+    _embeddedVisible = false;
+    _iframeContainer.style.top = 'var(--topBarBlockSize, 37px)';
+    _iframeContainer.style.height = '';
+    for (const id of ['top-bar', 'top-settings-holder']) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = '';
+    }
+}
+
+let _exclusivePanesObserver = null;
+
+function setupExclusivePanesWatcher() {
+    if (_exclusivePanesObserver) return;
+    _exclusivePanesObserver = new MutationObserver((mutations) => {
+        if (!isEmbeddedActive() || !getExclusivePanes()) return;
+        for (const m of mutations) {
+            if (m.target.id && m.target.classList?.contains('openDrawer')) {
+                hideEmbedded();
+                return;
+            }
+        }
+    });
+    _exclusivePanesObserver.observe(document.body, {
+        subtree: true,
+        attributes: true,
+        attributeFilter: ['class'],
+    });
+}
+
+function toggleEmbedded() {
+    if (_embeddedVisible) {
+        hideEmbedded();
+    } else {
+        showEmbedded();
+    }
+}
+
+// ==============================================
+// PostMessage Bridge (CL iframe -> ST)
+// ==============================================
+
+function setupPostMessageBridge() {
+    window.addEventListener('message', async (e) => {
+        if (e.origin !== window.location.origin) return;
+        const msg = e.data;
+        if (!msg || typeof msg !== 'object' || msg.source !== 'character-library') return;
+
+        switch (msg.type) {
+            case 'cl-close': {
+                hideEmbedded();
+                break;
+            }
+            case 'cl-open-character': {
+                if (!msg.avatar) break;
+                hideEmbedded();
+                try {
+                    const context = SillyTavern?.getContext?.();
+                    if (!context) break;
+                    const idx = (context.characters || []).findIndex(c => c.avatar === msg.avatar);
+                    if (idx !== -1 && typeof context.selectCharacterById === 'function') {
+                        await context.selectCharacterById(idx);
+                    }
+                } catch (err) {
+                    console.error(`${EXTENSION_NAME}: Failed to open character:`, err);
+                }
+                break;
+            }
+        }
+    });
+}
+
+// ==============================================
+// Open Gallery (branches on display mode)
+// ==============================================
+
 function openGallery() {
+    const mode = getDisplayMode();
+
+    if (mode === 'embedded') {
+        toggleEmbedded();
+        return;
+    }
+
+    // Default: new tab
     const baseUrl = getExtensionUrl();
     if (_csrfToken) {
-        // Token ready — open directly, no blank page flash
         const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(_csrfToken)}`;
         window.open(url, '_blank');
         return;
     }
-    // Token not yet available (rare) — fall back to sync open + async navigate
+    // Token not yet available (rare)
     const tab = window.open('about:blank', '_blank');
     if (tab) {
         try {
@@ -88,6 +388,14 @@ function injectLauncherStyles() {
     const style = document.createElement('style');
     style.id = 'charlib-launcher-styles';
     style.textContent = `
+        /* ---- Embedded container mobile override ---- */
+        @media screen and (max-width: 1000px) {
+            #charlib-embedded-container {
+                left: 0 !important;
+                right: 0 !important;
+                width: 100vw !important;
+            }
+        }
         /* ---- Launcher dropdown ---- */
         .charlib-launcher-dropdown {
             position: fixed;
@@ -205,12 +513,15 @@ function setupLauncherDropdown() {
     document.body.appendChild(scrim);
     document.body.appendChild(dropdown);
 
-    // ---- Add chevron indicator to the icon ----
+    // ---- Add chevron indicator to the icon (tab mode only) ----
     if (getComputedStyle(drawerIcon).position === 'static') {
         drawerIcon.style.position = 'relative';
     }
     const chevron = document.createElement('i');
     chevron.className = 'fa-solid fa-caret-down charlib-chevron-badge';
+    if (getDisplayMode() === 'embedded' && !getShowDropdownInEmbedded()) {
+        chevron.style.display = 'none';
+    }
     drawerIcon.appendChild(chevron);
 
     // ---- State ----
@@ -250,6 +561,15 @@ function setupLauncherDropdown() {
             return;                                          // Let through to ST
         }
 
+        // Embedded mode without dropdown: toggle CL directly
+        if (getDisplayMode() === 'embedded' && !getShowDropdownInEmbedded()) {
+            e.stopPropagation();
+            e.preventDefault();
+            if (isOpen) hide();
+            toggleEmbedded();
+            return;
+        }
+
         // If ST's character panel is already open, let the click through so ST
         // can close it.  Without this, mobile users get stuck with the panel
         // open because our dropdown intercepts the "close" click.
@@ -261,6 +581,7 @@ function setupLauncherDropdown() {
         e.stopPropagation();
         e.preventDefault();
 
+        // Show/hide the launcher dropdown
         if (isOpen) {
             hide();
         } else {
@@ -280,6 +601,8 @@ function setupLauncherDropdown() {
         hide();
 
         if (item.dataset.action === 'native') {
+            // Close embedded CL if it's open, then show ST's character panel
+            if (isEmbeddedActive()) hideEmbedded();
             bypassIntercept = true;
             drawerToggle.click();               // Replay click to ST's handler
         } else if (item.dataset.action === 'library') {
@@ -356,6 +679,145 @@ function createStandaloneGalleryButton() {
 }
 
 // ==============================================
+// Extension Settings UI (injected into ST's Extensions panel)
+// ==============================================
+
+function injectExtensionSettings() {
+    if (document.getElementById('charlib-settings-injected')) return;
+
+    const attach = () => {
+        // Find ST's extensions settings container
+        const container = document.querySelector('#extensions_settings')
+            || document.querySelector('#extensions-settings')
+            || document.querySelector('#extensions_settings2');
+        if (!container) return false;
+        if (document.getElementById('charlib-settings-injected')) return true;
+
+        const currentMode = getDisplayMode();
+
+        const panel = document.createElement('div');
+        panel.id = 'charlib-settings-injected';
+        panel.innerHTML = `
+            <div class="inline-drawer">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b>${EXTENSION_NAME}</b>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content" style="font-size: 13px;">
+                    <div style="display: flex; align-items: center; gap: 10px; padding: 4px 0;">
+                        <label for="charlib-display-mode" style="white-space: nowrap;">Display Mode</label>
+                        <select id="charlib-display-mode" class="text_pole" style="flex: 1;">
+                            <option value="tab"${currentMode === 'tab' ? ' selected' : ''}>New Tab</option>
+                            <option value="embedded"${currentMode === 'embedded' ? ' selected' : ''}>Embedded Panel</option>
+                        </select>
+                    </div>
+                    <div id="charlib-embedded-options" style="${currentMode === 'embedded' ? '' : 'display: none;'}">
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Automatically open the embedded panel when SillyTavern loads">
+                        <input type="checkbox" id="charlib-launch-on-boot"${getLaunchOnBoot() ? ' checked' : ''} />
+                        <span>Launch on startup</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height and a Back button inside the panel returns you to your chat.">
+                        <input type="checkbox" id="charlib-show-topbar"${getShowTopBar() ? ' checked' : ''} />
+                        <span>Show SillyTavern top bar</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Show the choice dropdown (Character Management vs. Character Library) instead of toggling the panel directly. Useful if you frequently switch between both.">
+                        <input type="checkbox" id="charlib-show-dropdown"${getShowDropdownInEmbedded() ? ' checked' : ''} />
+                        <span>Show launcher dropdown</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping.">
+                        <input type="checkbox" id="charlib-exclusive-panes"${getExclusivePanes() ? ' checked' : ''} />
+                        <span>Exclusive panels</span>
+                    </label>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        container.appendChild(panel);
+
+        document.getElementById('charlib-launch-on-boot').addEventListener('change', (e) => {
+            setLaunchOnBoot(e.target.checked);
+        });
+
+        document.getElementById('charlib-show-topbar').addEventListener('change', (e) => {
+            setShowTopBar(e.target.checked);
+            if (_iframe?.contentWindow) {
+                _iframe.contentWindow.postMessage(
+                    { source: 'character-library-host', type: 'cl-show-topbar', value: e.target.checked },
+                    window.location.origin
+                );
+            }
+            if (isEmbeddedActive()) {
+                if (e.target.checked) {
+                    _iframeContainer.style.top = 'var(--topBarBlockSize, 37px)';
+                    _iframeContainer.style.height = 'calc(100dvh - var(--topBarBlockSize, 37px))';
+                    for (const id of ['top-bar', 'top-settings-holder']) {
+                        const el = document.getElementById(id);
+                        if (el) el.style.display = '';
+                    }
+                } else {
+                    _iframeContainer.style.top = '0';
+                    _iframeContainer.style.height = '100dvh';
+                    for (const id of ['top-bar', 'top-settings-holder']) {
+                        const el = document.getElementById(id);
+                        if (el) el.style.display = 'none';
+                    }
+                }
+            }
+        });
+
+        document.getElementById('charlib-show-dropdown').addEventListener('change', (e) => {
+            setShowDropdownInEmbedded(e.target.checked);
+            const chev = document.querySelector('.charlib-chevron-badge');
+            if (chev) {
+                chev.style.display = (getDisplayMode() === 'embedded' && !e.target.checked) ? 'none' : '';
+            }
+        });
+
+        document.getElementById('charlib-exclusive-panes').addEventListener('change', (e) => {
+            setExclusivePanes(e.target.checked);
+        });
+
+        document.getElementById('charlib-display-mode').addEventListener('change', (e) => {
+            const mode = e.target.value;
+            setDisplayMode(mode);
+
+            // Show/hide embedded-specific options
+            const embeddedOpts = document.getElementById('charlib-embedded-options');
+            if (embeddedOpts) embeddedOpts.style.display = mode === 'embedded' ? '' : 'none';
+
+            // Update chevron visibility
+            const chev = document.querySelector('.charlib-chevron-badge');
+            if (chev) {
+                chev.style.display = (mode === 'embedded' && !getShowDropdownInEmbedded()) ? 'none' : '';
+            }
+
+            if (mode !== 'embedded' && isEmbeddedActive()) {
+                hideEmbedded();
+            }
+
+            if (mode === 'tab' && _iframeContainer) {
+                _iframeContainer.remove();
+                _iframeContainer = null;
+                _iframe = null;
+                _embeddedVisible = false;
+            }
+        });
+
+        return true;
+    };
+
+    if (attach()) return;
+
+    // Extensions panel may not be rendered yet; watch for it
+    const observer = new MutationObserver(() => {
+        if (attach()) observer.disconnect();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    setTimeout(() => observer.disconnect(), 15000);
+}
+
+// ==============================================
 // Main Init
 // ==============================================
 
@@ -363,6 +825,18 @@ jQuery(async () => {
     // Delay to ensure ST's UI is fully loaded
     await new Promise(resolve => setTimeout(resolve, 2000));
     
+    // Migrate legacy settings before anything reads them
+    migrateSettings();
+
+    // Set up the postMessage bridge for embedded mode
+    setupPostMessageBridge();
+
+    // Watch for ST drawer panels opening (mutual exclusion with CL)
+    setupExclusivePanesWatcher();
+
+    // Inject extension settings into ST's Extensions panel
+    injectExtensionSettings();
+
     // Try to hijack ST's Characters button with a launcher dropdown
     const hijacked = setupLauncherDropdown();
     
@@ -390,6 +864,11 @@ jQuery(async () => {
     
     // Initialize media localization for chat messages
     initMediaLocalizationInChat();
+
+    // Auto-launch embedded CL if enabled
+    if (getDisplayMode() === 'embedded' && getLaunchOnBoot()) {
+        openGallery();
+    }
     
     console.log(`${EXTENSION_NAME}: Loaded successfully.`);
 });

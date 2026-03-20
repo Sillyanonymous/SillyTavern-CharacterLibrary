@@ -763,13 +763,14 @@ async function bulkDelete() {
         
         // Sync main ST window's character list
         try {
-            if (window.opener && !window.opener.closed) {
-                const context = window.opener.SillyTavern?.getContext?.();
+            const host = CoreAPI.getHostWindow();
+            if (host) {
+                const context = host.SillyTavern?.getContext?.();
                 if (context?.getCharacters) {
                     await context.getCharacters();
                 }
-                if (typeof window.opener.printCharactersDebounced === 'function') {
-                    window.opener.printCharactersDebounced();
+                if (typeof host.printCharactersDebounced === 'function') {
+                    host.printCharactersDebounced();
                 }
             }
         } catch (e) {

@@ -157,15 +157,16 @@ async function openChat(char, chatFile) {
             CoreAPI.registerGalleryFolderOverride(char, true);
         }
 
-        if (window.opener && !window.opener.closed) {
+        const host = CoreAPI.getHostWindow();
+        if (host) {
             let context = null;
             let mainCharacters = [];
 
-            if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                context = window.opener.SillyTavern.getContext();
+            if (host.SillyTavern && host.SillyTavern.getContext) {
+                context = host.SillyTavern.getContext();
                 mainCharacters = context.characters || [];
-            } else if (window.opener.characters) {
-                mainCharacters = window.opener.characters;
+            } else if (host.characters) {
+                mainCharacters = host.characters;
             }
 
             const characterIndex = mainCharacters.findIndex(c => c.avatar === char.avatar);
@@ -176,8 +177,8 @@ async function openChat(char, chatFile) {
 
                 if (context.openChat) {
                     await context.openChat(chatName);
-                } else if (window.opener.jQuery) {
-                    const $ = window.opener.jQuery;
+                } else if (host.jQuery) {
+                    const $ = host.jQuery;
                     const chatItems = $('#past_chats_popup .select_chat_block_wrapper');
                     chatItems.each(function() {
                         if ($(this).attr('file_name') === chatName) {
@@ -186,15 +187,20 @@ async function openChat(char, chatFile) {
                     });
                 }
 
+                if (CoreAPI.getIsEmbedded()) {
+                    window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
+                }
+
                 return;
             }
         }
 
         // Fallback: open in main window
         CoreAPI.showToast("Opening in main window...", "info");
-        if (window.opener && !window.opener.closed) {
-            window.opener.location.href = `/?character=${encodeURIComponent(char.avatar)}`;
-            window.opener.focus();
+        const fallbackHost = CoreAPI.getHostWindow();
+        if (fallbackHost) {
+            fallbackHost.location.href = `/?character=${encodeURIComponent(char.avatar)}`;
+            fallbackHost.focus();
         }
     } catch (e) {
         console.error('openChat error:', e);

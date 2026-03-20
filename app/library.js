@@ -1,6 +1,8 @@
 ﻿// SillyTavern Character Library Logic
 
 const API_BASE = '/api'; 
+const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
+const embeddedShowTopBar = new URLSearchParams(window.location.search).get('showTopBar') === '1';
 let allCharacters = [];
 let currentCharacters = [];
 
@@ -484,10 +486,21 @@ function debugError(...args) {
 // In-memory settings cache
 let gallerySettings = { ...DEFAULT_SETTINGS };
 
+function getHostWindow() {
+    try {
+        if (window.opener && !window.opener.closed) return window.opener;
+    } catch { /* cross-origin */ }
+    try {
+        if (window.parent !== window) return window.parent;
+    } catch { /* cross-origin */ }
+    return null;
+}
+
 function getSTContext() {
     try {
-        if (window.opener && !window.opener.closed && window.opener.SillyTavern?.getContext) {
-            return window.opener.SillyTavern.getContext();
+        const host = getHostWindow();
+        if (host?.SillyTavern?.getContext) {
+            return host.SillyTavern.getContext();
         }
     } catch (e) {
         console.warn('[Settings] Cannot access main window context:', e);
@@ -498,12 +511,7 @@ function getSTContext() {
 // Uses explicit property assignment for cross-window write reliability
 function setSTExtensionSetting(path, key, value, immediate = false) {
     try {
-        if (!window.opener || window.opener.closed) {
-            debugWarn('[ST Settings] window.opener not available');
-            return false;
-        }
-        
-        const stContext = window.opener.SillyTavern?.getContext?.();
+        const stContext = getSTContext();
         if (!stContext?.extensionSettings) {
             debugWarn('[ST Settings] ST context or extensionSettings unavailable');
             return false;
@@ -5348,8 +5356,45 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
     return result;
 }
 
+// ==============================================
+// Embedded Mode UI
+// ==============================================
+
+function setupEmbeddedUI() {
+    document.body.classList.add('embedded-mode');
+
+    const logoArea = document.querySelector('.topbar .logo-area');
+    if (logoArea) {
+        const backBtn = document.createElement('button');
+        backBtn.id = 'embeddedBackBtn';
+        backBtn.className = 'glass-btn icon-only embedded-back-btn';
+        backBtn.title = 'Back to Chat';
+        backBtn.innerHTML = '<i class="fa-solid fa-arrow-left"></i>';
+        if (embeddedShowTopBar) backBtn.style.display = 'none';
+        backBtn.addEventListener('click', () => {
+            window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
+        });
+        logoArea.insertBefore(backBtn, logoArea.firstChild);
+    }
+
+    window.addEventListener('message', (e) => {
+        if (e.origin !== window.location.origin) return;
+        const msg = e.data;
+        if (!msg || msg.source !== 'character-library-host') return;
+        if (msg.type === 'cl-show-topbar') {
+            const btn = document.getElementById('embeddedBackBtn');
+            if (btn) btn.style.display = msg.value ? 'none' : '';
+        }
+    });
+}
+
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
+    // Inject embedded mode UI adjustments
+    if (isEmbedded) {
+        setupEmbeddedUI();
+    }
+
     // Load settings first to ensure defaults are available
     await loadGallerySettings();
     
@@ -5453,7 +5498,23 @@ function showToast(message, type = 'info', duration = 3000) {
 
 // Sync with Main Window
 async function loadCharInMain(charOrAvatar) {
-    if (!window.opener || window.opener.closed) {
+    // In embedded mode, send a message to the parent frame
+    if (isEmbedded && window.parent !== window) {
+        let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
+        let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
+        if (!charObj && avatar) charObj = allCharacters.find(c => c.avatar === avatar);
+
+        if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
+            registerGalleryFolderOverride(charObj);
+        }
+
+        window.parent.postMessage({ source: 'character-library', type: 'cl-open-character', avatar }, window.location.origin);
+        showToast(`Loading ${charObj?.name || avatar}...`, 'success');
+        return true;
+    }
+
+    const host = getHostWindow();
+    if (!host) {
         showToast("Main window disconnected", "error");
         return false;
     }
@@ -5480,11 +5541,11 @@ async function loadCharInMain(charOrAvatar) {
         let context = null;
         let mainCharacters = [];
         
-        if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-            context = window.opener.SillyTavern.getContext();
+        if (host.SillyTavern && host.SillyTavern.getContext) {
+            context = host.SillyTavern.getContext();
             mainCharacters = context.characters || [];
-        } else if (window.opener.characters) {
-            mainCharacters = window.opener.characters;
+        } else if (host.characters) {
+            mainCharacters = host.characters;
         }
 
         // 1. Find character INDEX in main list (Strict Filename Match)
@@ -5551,10 +5612,10 @@ async function loadCharInMain(charOrAvatar) {
         }
 
         // Method 3: Global loadCharacter (Legacy)
-        if (typeof window.opener.loadCharacter === 'function') {
+        if (typeof host.loadCharacter === 'function') {
             debugLog("Trying global loadCharacter");
             try {
-                window.opener.loadCharacter(avatar);
+                host.loadCharacter(avatar);
                 return true;
             } catch (err) {
                 console.warn("global loadCharacter failed:", err);
@@ -5562,8 +5623,8 @@ async function loadCharInMain(charOrAvatar) {
         }
 
         // Method 4: UI Click Simulation (Virtualization Fallback)
-        if (window.opener.$) {
-            const $ = window.opener.$;
+        if (host.$) {
+            const $ = host.$;
             let charBtn = $('.character-list-item').filter((i, el) => {
                 const file = $(el).attr('data-file');
                 // Check both full filename and filename without extension
@@ -5618,24 +5679,25 @@ async function fetchCharacters(forceRefresh = false) {
         // Method 1: Try to get data directly from the opener (Main Window)
         // Only used for non-forced fetches — the opener's in-memory data may be stale
         // after imports. forceRefresh always goes to the API for authoritative disk data.
-        if (!forceRefresh && window.opener && !window.opener.closed) {
+        const hostWindow = getHostWindow();
+        if (!forceRefresh && hostWindow) {
             try {
-                debugLog("Attempting to read characters from window.opener...");
+                debugLog("Attempting to read characters from host window...");
                 let openerChars = null;
                 
-                if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                    const context = window.opener.SillyTavern.getContext();
+                if (hostWindow.SillyTavern && hostWindow.SillyTavern.getContext) {
+                    const context = hostWindow.SillyTavern.getContext();
                     if (context && context.characters) openerChars = context.characters;
                 }
-                if (!openerChars && window.opener.characters) openerChars = window.opener.characters;
+                if (!openerChars && hostWindow.characters) openerChars = hostWindow.characters;
 
                 if (openerChars && Array.isArray(openerChars)) {
-                    debugLog(`Loaded ${openerChars.length} characters from main window.`);
+                    debugLog(`Loaded ${openerChars.length} characters from host window.`);
                     processAndRender(openerChars);
                     return;
                 }
             } catch (err) {
-                console.warn("Opener access failed:", err);
+                console.warn("Host window access failed:", err);
             }
         }
 
@@ -9125,10 +9187,11 @@ async function deleteCharacter(char, deleteChats = false) {
         // which would hang cross-window await calls indefinitely.
         const refreshOpener = async () => {
             try {
-                if (window.opener && !window.opener.closed) {
+                const host = getHostWindow();
+                if (host) {
                     // Method 1: Use SillyTavern context API if available
-                    if (window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                        const context = window.opener.SillyTavern.getContext();
+                    if (host.SillyTavern && host.SillyTavern.getContext) {
+                        const context = host.SillyTavern.getContext();
                         if (context && typeof context.getCharacters === 'function') {
                             debugLog('[Delete] Triggering getCharacters() in main window...');
                             await context.getCharacters();
@@ -9136,21 +9199,21 @@ async function deleteCharacter(char, deleteChats = false) {
                     }
                     
                     // Method 2: Try to emit the CHARACTER_DELETED event directly
-                    if (window.opener.eventSource && window.opener.event_types) {
+                    if (host.eventSource && host.event_types) {
                         debugLog('[Delete] Emitting CHARACTER_DELETED event...');
-                        const charIndex = window.opener.characters?.findIndex(c => c.avatar === avatar);
+                        const charIndex = host.characters?.findIndex(c => c.avatar === avatar);
                         if (charIndex !== undefined && charIndex >= 0) {
-                            await window.opener.eventSource.emit(
-                                window.opener.event_types.CHARACTER_DELETED, 
+                            await host.eventSource.emit(
+                                host.event_types.CHARACTER_DELETED, 
                                 { id: charIndex, character: char }
                             );
                         }
                     }
                     
                     // Method 3: Call printCharactersDebounced to refresh the UI
-                    if (typeof window.opener.printCharactersDebounced === 'function') {
+                    if (typeof host.printCharactersDebounced === 'function') {
                         debugLog('[Delete] Calling printCharactersDebounced()...');
-                        window.opener.printCharactersDebounced();
+                        host.printCharactersDebounced();
                     }
                 }
             } catch (e) {
@@ -11995,13 +12058,11 @@ function setupEventListeners() {
         document.getElementById('loading').style.display = 'block';
         
         try {
-            if (window.opener && !window.opener.closed && window.opener.SillyTavern?.getContext) {
-                const ctx = window.opener.SillyTavern.getContext();
-                if (typeof ctx?.getCharacters === 'function') {
-                    ctx.getCharacters().catch(e => console.warn('[Refresh] Opener refresh failed:', e));
-                }
+            const ctx = getSTContext();
+            if (typeof ctx?.getCharacters === 'function') {
+                ctx.getCharacters().catch(e => console.warn('[Refresh] Host refresh failed:', e));
             }
-        } catch (e) { /* opener unavailable */ }
+        } catch (e) { /* host unavailable */ }
         
         await fetchCharacters(true);
         performSearch();
@@ -14128,12 +14189,10 @@ startImportBtn?.addEventListener('click', async () => {
             
             // Also refresh the main SillyTavern window's character list (fire-and-forget)
             try {
-                if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                    const context = window.opener.SillyTavern.getContext();
-                    if (context && typeof context.getCharacters === 'function') {
-                        debugLog('Triggering character refresh in main window...');
-                        context.getCharacters().catch(e => console.warn('Main window refresh failed:', e));
-                    }
+                const context = getSTContext();
+                if (context && typeof context.getCharacters === 'function') {
+                    debugLog('Triggering character refresh in main window...');
+                    context.getCharacters().catch(e => console.warn('Main window refresh failed:', e));
                 }
             } catch (e) {
                 console.warn('Could not refresh main window characters:', e);
@@ -21663,6 +21722,11 @@ window.clearPlaylistFilter = clearPlaylistFilter;
 window.populatePlaylistDropdown = populatePlaylistDropdown;
 window.renderSidebarPlaylists = renderSidebarPlaylists;
 window.refreshPlaylistBadges = refreshPlaylistBadges;
+
+// Host window / ST context access
+window.getHostWindow = getHostWindow;
+window.getSTContext = getSTContext;
+window.isEmbedded = isEmbedded;
 
 // Settings
 window.getSetting = getSetting;

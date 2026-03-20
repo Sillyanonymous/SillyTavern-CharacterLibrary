@@ -3,6 +3,22 @@
 import ProviderRegistry from './providers/provider-registry.js';
 
 // ========================================
+// HOST WINDOW / EMBEDDED MODE
+// ========================================
+
+export function getHostWindow() {
+    return window.getHostWindow?.() || null;
+}
+
+export function getSTContext() {
+    return window.getSTContext?.() || null;
+}
+
+export function getIsEmbedded() {
+    return window.isEmbedded || false;
+}
+
+// ========================================
 // STATE ACCESS
 // ========================================
 
@@ -1098,4 +1114,9 @@ export default {
     closePlaylistManager,
     refreshPlaylistBadges,
     closeAllTopbarDropdowns,
+
+    // Host window / Embedded mode
+    getHostWindow,
+    getSTContext,
+    getIsEmbedded,
 };

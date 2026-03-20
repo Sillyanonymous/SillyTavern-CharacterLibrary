@@ -4090,12 +4090,10 @@ async function downloadChubCharacter() {
         
         // Also refresh main ST window's character list (fire-and-forget)
         try {
-            if (window.opener && !window.opener.closed && window.opener.SillyTavern && window.opener.SillyTavern.getContext) {
-                const context = window.opener.SillyTavern.getContext();
-                if (context && typeof context.getCharacters === 'function') {
-                    debugLog('[ChubDownload] Triggering character refresh in main window...');
-                    context.getCharacters().catch(e => console.warn('[ChubDownload] Main window refresh failed:', e));
-                }
+            const context = CoreAPI.getSTContext();
+            if (context && typeof context.getCharacters === 'function') {
+                debugLog('[ChubDownload] Triggering character refresh in main window...');
+                context.getCharacters().catch(e => console.warn('[ChubDownload] Main window refresh failed:', e));
             }
         } catch (e) {
             console.warn('[ChubDownload] Could not access main window:', e);

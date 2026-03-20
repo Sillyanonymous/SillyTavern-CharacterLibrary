@@ -306,9 +306,12 @@ export async function fullSync(options = {}) {
  * Get SillyTavern context
  */
 function getSTContext() {
-    if (window.opener?.SillyTavern?.getContext) {
-        return window.opener.SillyTavern.getContext();
-    }
+    try {
+        const host = CoreAPI.getHostWindow();
+        if (host?.SillyTavern?.getContext) {
+            return host.SillyTavern.getContext();
+        }
+    } catch { /* cross-origin or unavailable */ }
     if (window.SillyTavern?.getContext) {
         return window.SillyTavern.getContext();
     }

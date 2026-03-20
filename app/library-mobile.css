@@ -2945,6 +2945,15 @@
         overscroll-behavior-y: contain;
         scroll-behavior: auto;
     }
+    .loading-spinner {
+        position: static;
+        transform: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 100%;
+    }
     .character-grid {
         grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
         gap: 20px;
