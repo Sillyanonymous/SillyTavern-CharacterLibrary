@@ -300,6 +300,7 @@ window.registerOverlay = function(cfg) {
         fixRefreshLoadingStuck();
         preventAutoFocusOnOpen();
         setupMobileTagEditor();
+        setupModalHeaderCollapse();
         setupBackButton();
     }
 
@@ -1362,6 +1363,102 @@ window.registerOverlay = function(cfg) {
             section.appendChild(lbl);
         }
         return section;
+    }
+
+    /* ========================================
+       MODAL HEADER COLLAPSE ON SCROLL
+       ======================================== */
+    function setupModalHeaderCollapse() {
+        const wired = new WeakSet();
+
+        function wireOverlay(overlay, glass, getScrollBody, resetSelector) {
+            if (wired.has(overlay)) return;
+            wired.add(overlay);
+
+            let lastScrollY = 0;
+            let attached = false;
+            let scrollBody = null;
+            let snapEnabled = false;
+            let collapsedAt = 0;
+
+            function handleScroll() {
+                if (!scrollBody) return;
+                const y = scrollBody.scrollTop;
+                const isBrowse = glass.classList.contains('browse-char-modal');
+                if (!snapEnabled && isBrowse && y > 5 && window.getSetting?.('browseSnapSections') !== false) {
+                    snapEnabled = true;
+                    scrollBody.classList.add('snap-active');
+                }
+                const isCollapsed = glass.classList.contains('header-collapsed');
+                const topZone = isCollapsed ? 2 : (isBrowse ? 3 : 10);
+                if (y <= topZone) {
+                    glass.classList.remove('header-collapsed');
+                } else if (y > lastScrollY + 2) {
+                    if (!isCollapsed) collapsedAt = Date.now();
+                    glass.classList.add('header-collapsed');
+                } else if (y < lastScrollY - 4 && Date.now() - collapsedAt > 300) {
+                    glass.classList.remove('header-collapsed');
+                }
+                lastScrollY = y;
+            }
+
+            function attach() {
+                if (attached) return;
+                scrollBody = getScrollBody();
+                if (!scrollBody) return;
+                lastScrollY = scrollBody.scrollTop;
+                scrollBody.addEventListener('scroll', handleScroll, { passive: true });
+                attached = true;
+            }
+
+            function detach() {
+                if (!attached) return;
+                if (scrollBody) {
+                    scrollBody.removeEventListener('scroll', handleScroll);
+                    scrollBody.classList.remove('snap-active');
+                }
+                glass.classList.remove('header-collapsed');
+                snapEnabled = false;
+                lastScrollY = 0;
+                attached = false;
+                scrollBody = null;
+            }
+
+            if (resetSelector) {
+                overlay.addEventListener('click', (e) => {
+                    if (e.target.closest(resetSelector)) {
+                        setTimeout(() => {
+                            glass.classList.remove('header-collapsed');
+                            if (scrollBody) scrollBody.scrollTop = 0;
+                            lastScrollY = 0;
+                        }, 20);
+                    }
+                });
+            }
+
+            new MutationObserver(() => {
+                const isOpen = !overlay.classList.contains('hidden');
+                if (isOpen) attach();
+                else detach();
+            }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        // charModal (local character details)
+        const charModal = document.getElementById('charModal');
+        if (charModal) {
+            const glass = charModal.querySelector('.modal-glass');
+            if (glass) wireOverlay(charModal, glass, () => charModal.querySelector('.modal-body'), '.tab-btn');
+        }
+
+        // Browse preview modals (injected lazily by providers)
+        function scanBrowseModals() {
+            document.querySelectorAll('.modal-overlay').forEach(overlay => {
+                const glass = overlay.querySelector('.browse-char-modal');
+                if (glass) wireOverlay(overlay, glass, () => glass.querySelector('.browse-char-body'));
+            });
+        }
+        scanBrowseModals();
+        new MutationObserver(scanBrowseModals).observe(document.body, { childList: true });
     }
 
     /* ========================================

@@ -487,6 +487,15 @@
         position: relative;
         z-index: 1;
     }
+
+    /* Collapsing animation — scoped to charModal only */
+    #charModal .modal-header {
+        max-height: 80px;
+        overflow: hidden;
+        transition: max-height 0.25s ease, min-height 0.25s ease,
+                    padding-top 0.25s ease, padding-bottom 0.25s ease,
+                    opacity 0.2s ease, border-color 0.25s ease;
+    }
     .modal-header h2 {
         font-size: 0.95rem;
         flex: 1;
@@ -677,10 +686,40 @@
         display: none !important;
     }
 
+    /* Collapsing header: hide when user scrolls down */
+    #charModal .modal-glass.header-collapsed .modal-header {
+        max-height: 0 !important;
+        min-height: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+        opacity: 0;
+        border-bottom-color: transparent !important;
+    }
+
+    /* Make .modal-body the scroll container instead of individual tab panes.
+       Tab panes inherit flex:1 + overflow-y:auto from desktop which creates
+       inner scroll surfaces — preventing the modal-body scroll listener from
+       ever seeing a non-zero scrollTop. */
+    #charModal .modal-content-tabs {
+        flex: none;
+    }
+    #charModal .tab-pane {
+        overflow: visible !important;
+        flex: none !important;
+    }
+
+    /* Tab strip sticky below the header so it never scrolls away */
+    #charModal .tab-nav {
+        position: sticky;
+        top: 0;
+        z-index: 5;
+        background: #141414;
+    }
+
     /* Sidebar completely hidden */
     .modal-sidebar { display: none !important; }
 
-    /* Body stacks vertically */
+    /* Body stacks vertically, is the one true scroll surface on mobile */
     .modal-body {
         flex-direction: column;
         overflow-y: auto;
@@ -1110,6 +1149,19 @@
     }
     .browse-char-modal .browse-char-header-info {
         width: 100%; /* force controls to wrap below */
+        max-height: 60px;
+        overflow: hidden;
+        transition: max-height 0.25s ease, opacity 0.2s ease;
+    }
+    .browse-char-modal.header-collapsed .browse-char-header-info {
+        max-height: 0 !important;
+        opacity: 0;
+    }
+    .browse-char-modal .modal-header {
+        transition: row-gap 0.25s ease;
+    }
+    .browse-char-modal.header-collapsed .modal-header {
+        row-gap: 0 !important;
     }
     .browse-char-modal .modal-controls {
         display: flex;
@@ -1139,6 +1191,8 @@
     .browse-char-header-info h2 { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .browse-char-meta { font-size: 0.75rem; overflow: hidden; }
     .browse-char-body { overflow-x: hidden !important; padding: 10px; gap: 10px; }
+    .browse-char-body.snap-active { scroll-snap-type: y proximity; }
+    .browse-char-body.snap-active > .browse-char-section { scroll-snap-align: start; }
     .browse-char-tagline {
         padding: 8px 10px;
         border-radius: 8px;
@@ -3260,7 +3314,8 @@
     }
     .filter-area.online-filters .chub-view-btn,
     .filter-area.online-filters .pyg-view-btn,
-    .filter-area.online-filters .wyvern-view-btn {
+    .filter-area.online-filters .wyvern-view-btn,
+    .filter-area.online-filters .datacat-view-btn {
         font-size: 0.72rem;
         padding: 4px 7px;
     }
@@ -3358,6 +3413,8 @@
     #wyvernCreatorSortSelect, [data-select-id="wyvernCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
     [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
     #wyvernFollowCreatorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
+    #datacatCreatorSortSelect, [data-select-id="datacatCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    [data-select-id="datacatCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
 
     /* Card grid */
     .browse-grid {

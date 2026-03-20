@@ -6621,6 +6621,56 @@ details.settings-provider-section > .settings-provider-body {
     opacity: 1;
 }
 
+/* @canonical provider-beta-badge */
+.provider-beta-badge {
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(230, 126, 34, 0.2);
+    color: #e67e22;
+    flex-shrink: 0;
+    line-height: 1.4;
+}
+
+/* @canonical provider-toggle-btn */
+.provider-toggle-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    opacity: 0.4;
+    cursor: pointer;
+    padding: 4px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    transition: opacity 0.15s ease, color 0.15s ease;
+    line-height: 1;
+}
+
+.provider-toggle-btn:hover {
+    opacity: 0.8;
+}
+
+.provider-toggle-btn.disabled {
+    color: #e74c3c;
+    opacity: 0.6;
+}
+
+.provider-toggle-btn.disabled:hover {
+    opacity: 0.9;
+}
+
+.provider-order-item.provider-disabled {
+    opacity: 0.45;
+}
+
+.provider-order-item.provider-disabled .provider-order-name {
+    text-decoration: line-through;
+    text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
 .settings-group-title {
     font-size: 0.85rem;
     font-weight: 600;
@@ -6941,6 +6991,43 @@ details.settings-provider-section > .settings-provider-body {
 .settings-input-group input + .settings-verify-btn {
     align-self: center;
     margin-top: 0;
+}
+
+/* @canonical settings-status-badge */
+.settings-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 12px;
+    white-space: nowrap;
+}
+.settings-status-badge i {
+    font-size: 0.55rem;
+}
+.settings-status-badge.active {
+    color: #4CAF50;
+    background: rgba(76, 175, 80, 0.1);
+}
+.settings-status-badge.inactive {
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* @canonical settings-provider-badge */
+.settings-provider-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(var(--accent-rgb, 139, 92, 246), 0.15);
+    color: var(--accent);
+    margin-left: 6px;
+    vertical-align: middle;
 }
 
 /* Color picker input group */
@@ -9440,7 +9527,8 @@ details.settings-provider-section > .settings-provider-body {
 
 .chub-view-btn,
 .pyg-view-btn,
-.wyvern-view-btn {
+.wyvern-view-btn,
+.datacat-view-btn {
     padding: 8px 14px;
     background: transparent;
     border: none;
@@ -9458,14 +9546,16 @@ details.settings-provider-section > .settings-provider-body {
 
 .chub-view-btn:hover,
 .pyg-view-btn:hover,
-.wyvern-view-btn:hover {
+.wyvern-view-btn:hover,
+.datacat-view-btn:hover {
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.05);
 }
 
 .chub-view-btn.active,
 .pyg-view-btn.active,
-.wyvern-view-btn.active {
+.wyvern-view-btn.active,
+.datacat-view-btn.active {
     background: var(--accent);
     color: white;
     box-shadow: 0 2px 8px rgba(74, 158, 255, 0.3);
@@ -9473,7 +9563,8 @@ details.settings-provider-section > .settings-provider-body {
 
 .chub-view-btn i,
 .pyg-view-btn i,
-.wyvern-view-btn i {
+.wyvern-view-btn i,
+.datacat-view-btn i {
     font-size: 0.8rem;
 }
 
@@ -9712,7 +9803,31 @@ details.settings-provider-section > .settings-provider-body {
     cursor: wait;
 }
 
+#datacatFollowCreatorBtn {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+#datacatFollowCreatorBtn:hover {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#datacatFollowCreatorBtn.active {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
 [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger {
+    min-width: 150px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+}
+
+[data-select-id="datacatCreatorSortSelect"] .custom-select-trigger {
     min-width: 150px;
     font-size: 0.85rem;
     padding: 6px 10px;

@@ -1174,6 +1174,10 @@ https://jannyai.com/characters/uuid_slug
                                     <span>Filter by Wyvern link status</span>
                                 </div>
                                 <div class="info-code-item">
+                                    <code>dc:yes</code> / <code>dc:no</code>
+                                    <span>Filter by DataCat link status</span>
+                                </div>
+                                <div class="info-code-item">
                                     <code>favorite:yes</code> / <code>fav:no</code>
                                     <span>Filter by favorite status</span>
                                 </div>
@@ -1756,6 +1760,12 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Render HTML formatting in taglines (sanitized). Use with care.</span>
                             </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews (mobile)
+                                </label>
+                                <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews on mobile</span>
+                            </div>
                         </div>
                         
                         <div class="settings-group">
@@ -1958,6 +1968,56 @@ https://jannyai.com/characters/uuid_slug
                                             <input type="checkbox" id="settingsWyvernRememberCredentials" checked> Remember credentials (auto-refresh token)
                                         </label>
                                         <span class="settings-hint">Credentials are stored locally and used to authenticate via Firebase. Never sent to third parties.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- DataCat provider settings -->
+                        <details class="settings-provider-section" id="settingsDatacatSection">
+                            <summary>
+                                <i class="fa-solid fa-cat provider-icon"></i> DataCat
+                                <span class="settings-provider-badge">Beta</span>
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="cl-helper-banner cl-hidden" id="datacatPluginBanner">
+                                    <i class="fa-solid fa-puzzle-piece"></i>
+                                    <div>
+                                        <strong>cl-helper plugin required</strong>
+                                        <span>DataCat requires the cl-helper server plugin for API proxying. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group" id="datacatSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-key"></i> Session</div>
+                                    <div class="settings-row">
+                                        <label>Status:</label>
+                                        <div class="settings-input-group">
+                                            <span id="datacatSessionStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Checking...</span>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>Token:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsDatacatToken" readonly placeholder="No token" autocomplete="off" data-sensitive="true">
+                                            <button id="toggleDatacatTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                            <button id="validateDatacatBtn" class="settings-verify-btn" title="Test Connection">
+                                                <i class="fa-solid fa-check"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Anonymous session token. Persists across sessions. Used for browsing public characters.</span>
+                                    </div>
+                                    <div class="settings-row" style="gap: 8px;">
+                                        <button id="datacatRefreshTokenBtn" class="settings-action-btn">
+                                            <i class="fa-solid fa-rotate"></i> New Token
+                                        </button>
+                                        <button id="datacatClearTokenBtn" class="settings-action-btn danger">
+                                            <i class="fa-solid fa-trash-can"></i> Clear Session
+                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -2205,7 +2265,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.8.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.8.5</span>
                             </div>
                         </div>
                     </div>

@@ -3,6 +3,8 @@
 // Provides server-side request proxying for providers that require
 // custom headers (like Origin) that browsers forbid setting.
 
+import { randomUUID } from 'node:crypto';
+
 export const info = {
     id: 'cl-helper',
     name: 'Character Library Helper',
@@ -86,8 +88,8 @@ export async function init(router) {
         }
 
         // Reject if it looks like multiple cookies or contains suspicious characters
-        if (value.includes(';') || value.includes('=') || value.length > 4096) {
-            return res.status(400).json({ error: 'Invalid cookie value — paste only the session cookie value' });
+        if (value.includes(';') || value.length > 4096) {
+            return res.status(400).json({ error: 'Invalid cookie value. Paste only the session cookie value.' });
         }
 
         if (!value) {
@@ -228,6 +230,185 @@ export async function init(router) {
         } catch (err) {
             console.error('[cl-helper] CT proxy error:', err.message);
             res.status(502).json({ error: 'Failed to reach CharacterTavern' });
+        }
+    });
+
+    // =================================================================
+    // DataCat — token-based session + read-only API proxy
+    // =================================================================
+
+    const DATACAT_BASE = 'https://datacat.run';
+    const DATACAT_ORIGIN = 'https://datacat.run';
+
+    let dcSessionToken = null;
+
+    function dcHeaders(token) {
+        return {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json',
+            'Origin': DATACAT_ORIGIN,
+            'Referer': DATACAT_ORIGIN + '/',
+            'X-Session-Token': token,
+        };
+    }
+
+    async function testDcToken(token) {
+        const response = await fetch(`${DATACAT_BASE}/api/characters/recent-public?limit=1&offset=0&summary=1&minTotalTokens=889`, {
+            headers: dcHeaders(token),
+        });
+        return response;
+    }
+
+    router.post('/dc-init', async (req, res) => {
+        const { force } = req.body ?? {};
+
+        // If we already have a token and not forcing refresh, verify it still works
+        if (dcSessionToken && !force) {
+            try {
+                const check = await testDcToken(dcSessionToken);
+                if (check.ok) {
+                    return res.json({ ok: true, cached: true, token: dcSessionToken });
+                }
+            } catch { /* fall through to create new */ }
+            dcSessionToken = null;
+        }
+
+        // Create anonymous session via the Liberator identify endpoint
+        const deviceToken = randomUUID();
+        try {
+            const response = await fetch(`${DATACAT_BASE}/api/liberator/identify`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    'Origin': DATACAT_ORIGIN,
+                    'Referer': DATACAT_ORIGIN + '/',
+                },
+                body: JSON.stringify({ deviceToken }),
+            });
+
+            if (!response.ok) {
+                const text = await response.text();
+                console.warn(`[cl-helper] DC identify failed: HTTP ${response.status}`);
+                return res.json({ ok: false, reason: `identify returned ${response.status}: ${text.slice(0, 200)}` });
+            }
+
+            const data = await response.json();
+            if (data?.success && data?.sessionToken) {
+                dcSessionToken = data.sessionToken;
+                console.log('[cl-helper] DC anonymous session initialized');
+                return res.json({ ok: true, token: dcSessionToken });
+            }
+
+            console.warn('[cl-helper] DC identify returned unexpected shape:', JSON.stringify(data).slice(0, 300));
+            res.json({ ok: false, reason: 'identify response missing sessionToken' });
+        } catch (err) {
+            console.error('[cl-helper] DC auto-init error:', err.message);
+            res.json({ ok: false, reason: err.message });
+        }
+    });
+
+    router.post('/dc-set-token', async (req, res) => {
+        const { token } = req.body ?? {};
+
+        if (!token || typeof token !== 'string' || !token.trim()) {
+            return res.status(400).json({ error: 'token string is required' });
+        }
+
+        const value = token.trim();
+        if (value.length > 256) {
+            return res.status(400).json({ error: 'Token too long' });
+        }
+
+        dcSessionToken = value;
+        console.log('[cl-helper] DC session token stored');
+        res.json({ ok: true });
+    });
+
+    router.post('/dc-clear-token', (_req, res) => {
+        dcSessionToken = null;
+        console.log('[cl-helper] DC session token cleared');
+        res.json({ ok: true });
+    });
+
+    router.get('/dc-session', (_req, res) => {
+        res.json({ active: !!dcSessionToken });
+    });
+
+    router.get('/dc-validate', async (_req, res) => {
+        if (!dcSessionToken) {
+            return res.json({ valid: false, reason: 'no token stored' });
+        }
+
+        try {
+            const response = await testDcToken(dcSessionToken);
+
+            if (response.ok) {
+                const data = await response.json();
+                const count = data?.totalCount || 0;
+                console.log(`[cl-helper] DC validate: ${count} total chars available`);
+                res.json({ valid: true, totalCount: count });
+            } else {
+                const text = await response.text();
+                console.warn(`[cl-helper] DC validate failed: HTTP ${response.status}`);
+                res.json({ valid: false, reason: `HTTP ${response.status}: ${text.slice(0, 200)}` });
+            }
+        } catch (err) {
+            console.error('[cl-helper] DC validate error:', err.message);
+            res.json({ valid: false, reason: err.message });
+        }
+    });
+
+    const DC_ALLOWED_PATHS = [
+        /^\/api\/characters\/fresh\b/,
+        /^\/api\/characters\/recent-public\b/,
+        /^\/api\/characters\/[a-f0-9-]+$/,
+        /^\/api\/characters\/[a-f0-9-]+\/download\b/,
+        /^\/api\/creators\/[a-f0-9-]+$/,
+        /^\/api\/creators\/[a-f0-9-]+\/characters\b/,
+        /^\/api\/tags\/faceted\b/,
+    ];
+
+    router.get('/dc-proxy/*', async (req, res) => {
+        if (!dcSessionToken) {
+            return res.status(401).json({ error: 'No DataCat session token configured' });
+        }
+
+        const targetPath = '/' + req.params[0];
+
+        const normalizedPath = new URL(targetPath, DATACAT_BASE).pathname;
+        if (!DC_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            console.warn(`[cl-helper] DC proxy blocked: ${normalizedPath}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, DATACAT_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+
+        if (targetUrl.hostname !== 'datacat.run') {
+            return res.status(403).json({ error: 'Proxy target must be datacat.run' });
+        }
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers: dcHeaders(dcSessionToken),
+                redirect: 'follow',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            res.status(response.status);
+            res.set('Content-Type', contentType);
+
+            if (contentType.includes('application/json')) {
+                res.send(await response.text());
+            } else {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                res.send(buffer);
+            }
+        } catch (err) {
+            console.error('[cl-helper] DC proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach DataCat' });
         }
     });
 

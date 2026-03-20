@@ -18,6 +18,10 @@ export function getIsEmbedded() {
     return window.isEmbedded || false;
 }
 
+export function closeEmbeddedPanel() {
+    return window.closeEmbeddedPanel?.();
+}
+
 // ========================================
 // STATE ACCESS
 // ========================================
@@ -1119,4 +1123,5 @@ export default {
     getHostWindow,
     getSTContext,
     getIsEmbedded,
+    closeEmbeddedPanel,
 };

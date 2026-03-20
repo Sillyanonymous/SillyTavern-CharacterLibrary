@@ -74,7 +74,8 @@ export function getAllProviders() {
  * @returns {import('./provider-interface.js').ProviderBase[]}
  */
 export function getViewProviders() {
-    const all = getAllProviders().filter(p => p.hasView);
+    const disabledSet = new Set(coreAPI?.getSetting?.('disabledProviders') || []);
+    const all = getAllProviders().filter(p => p.hasView && !disabledSet.has(p.id));
     const savedOrder = coreAPI?.getSetting?.('providerOrder');
     if (!Array.isArray(savedOrder) || savedOrder.length === 0) return all;
 
@@ -255,7 +256,8 @@ export function renderProviderSelector(activeId) {
     const options = vps.map(p => {
         const selected = p.id === activeId ? ' selected' : '';
         const iconUrl = p.iconUrl || '';
-        return `<option value="${p.id}"${selected} data-icon-url="${iconUrl}">${p.name}</option>`;
+        const beta = p.beta ? ' data-beta="true"' : '';
+        return `<option value="${p.id}"${selected} data-icon-url="${iconUrl}"${beta}>${p.name}</option>`;
     }).join('');
 
     return `<select id="providerSelect" class="glass-select">${options}</select>`;

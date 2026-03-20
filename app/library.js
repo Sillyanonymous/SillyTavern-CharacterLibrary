@@ -188,7 +188,7 @@ function initCustomSelect(select) {
             iconHtml = `<i class="${iconClass} item-icon"></i>`;
         }
 
-        item.innerHTML = `${iconHtml}<span>${option.textContent}</span>`;
+        item.innerHTML = `${iconHtml}<span>${option.textContent}</span>${option.dataset.beta ? '<span class="provider-beta-badge">Beta</span>' : ''}`;
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -399,6 +399,7 @@ const SETTINGS_KEY = 'SillyTavernCharacterGallery';
 const DEFAULT_SETTINGS = {
     chubToken: null,
     chubRememberToken: true,
+    datacatToken: null,
     pygmalionEmail: null,
     pygmalionPassword: null,
     pygmalionRememberCredentials: true,
@@ -448,6 +449,8 @@ const DEFAULT_SETTINGS = {
     showProviderTagline: true,
     // Allow rich HTML/CSS in tagline rendering (sanitized)
     allowRichTagline: false,
+    // Snap-scroll to content sections in browse preview modals on mobile
+    browseSnapSections: true,
     // Use V4 Git API for card update checks (more complete but slower)
     chubUseV4Api: false,
     // Fast filename-based skip for media localization (skips expensive hash verification)
@@ -460,6 +463,8 @@ const DEFAULT_SETTINGS = {
     providerDefaults: {},
     // Per-provider infinite scroll toggle (providerId → boolean, default true)
     infiniteScroll: {},
+    // Providers disabled by default on first run
+    disabledProviders: ['datacat'],
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -724,7 +729,7 @@ function updateThemeCustomizerVisibility() {
 /**
  * Check cl-helper plugin availability and update settings UI accordingly.
  */
-async function checkClHelperPlugin(pygBanner, pygFields, ctBanner, ctFields) {
+async function checkClHelperPlugin(...pairs) {
     let available = false;
     try {
         const resp = await apiRequest('/plugins/cl-helper/health');
@@ -734,11 +739,9 @@ async function checkClHelperPlugin(pygBanner, pygFields, ctBanner, ctFields) {
         }
     } catch { /* plugin not reachable */ }
 
-    const banners = [pygBanner, ctBanner];
-    const fields = [pygFields, ctFields];
-    for (let i = 0; i < banners.length; i++) {
-        const banner = banners[i];
-        const field = fields[i];
+    for (let i = 0; i < pairs.length; i += 2) {
+        const banner = pairs[i];
+        const field = pairs[i + 1];
         if (!banner || !field) continue;
         if (available) {
             banner.classList.add('cl-hidden');
@@ -748,6 +751,7 @@ async function checkClHelperPlugin(pygBanner, pygFields, ctBanner, ctFields) {
             field.classList.add('cl-helper-fields-disabled');
         }
     }
+    return available;
 }
 
 /**
@@ -777,6 +781,11 @@ function setupSettingsModal() {
     const wyvernPasswordInput = document.getElementById('settingsWyvernPassword');
     const wyvernRememberCredsCheckbox = document.getElementById('settingsWyvernRememberCredentials');
     const toggleWyvernPasswordVisibility = document.getElementById('toggleWyvernPasswordVisibility');
+    const datacatTokenInput = document.getElementById('settingsDatacatToken');
+    const toggleDatacatTokenVisibility = document.getElementById('toggleDatacatTokenVisibility');
+    const datacatPluginBanner = document.getElementById('datacatPluginBanner');
+    const datacatSettingsFields = document.getElementById('datacatSettingsFields');
+    const datacatSessionStatus = document.getElementById('datacatSessionStatus');
     const minScoreSlider = document.getElementById('settingsMinScore');
     const minScoreValue = document.getElementById('minScoreValue');
     
@@ -810,6 +819,7 @@ function setupSettingsModal() {
     const exportAsLinksCheckbox = document.getElementById('settingsExportAsLinks');
     const showProviderTaglineCheckbox = document.getElementById('settingsShowProviderTagline');
     const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
+    const browseSnapSectionsCheckbox = document.getElementById('settingsBrowseSnapSections');
     
     // Appearance
     const animateTagPillsCheckbox = document.getElementById('settingsAnimateTagPills');
@@ -839,6 +849,58 @@ function setupSettingsModal() {
 
     // ── Provider Order & Defaults UI ────────────────────────
 
+    function applyProviderToggle(btn, isNowDisabled) {
+        btn.classList.toggle('disabled', isNowDisabled);
+        const icon = btn.querySelector('i');
+        if (icon) icon.className = isNowDisabled ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        btn.title = `${isNowDisabled ? 'Enable' : 'Disable'} in Online tab`;
+        const orderItem = btn.closest('.provider-order-item');
+        if (orderItem) orderItem.classList.toggle('provider-disabled', isNowDisabled);
+    }
+
+    function wireProviderToggleListeners(container, viewProviders) {
+        container.querySelectorAll('.provider-toggle-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const isCurrentlyDisabled = btn.classList.contains('disabled');
+                const pid = btn.dataset.provider;
+                const prov = viewProviders.find(p => p.id === pid);
+
+                if (isCurrentlyDisabled && prov?.enableWarning) {
+                    const modal = document.createElement('div');
+                    modal.className = 'confirm-modal';
+                    modal.innerHTML = `
+                        <div class="confirm-modal-content" style="max-width: 450px;">
+                            <div class="confirm-modal-header">
+                                <h3><i class="fa-solid fa-triangle-exclamation" style="color: var(--accent);"></i> Enable ${prov.name}?</h3>
+                                <button class="close-confirm-btn" data-action="cancel">&times;</button>
+                            </div>
+                            <div class="confirm-modal-body">
+                                <p>${prov.enableWarning}</p>
+                            </div>
+                            <div class="confirm-modal-footer">
+                                <button class="action-btn secondary" data-action="cancel">Cancel</button>
+                                <button class="action-btn primary" data-action="confirm"><i class="fa-solid fa-check"></i> Enable</button>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(modal);
+                    modal.addEventListener('click', (e) => {
+                        const action = e.target.closest('[data-action]')?.dataset.action;
+                        if (action === 'confirm') {
+                            applyProviderToggle(btn, false);
+                            modal.remove();
+                        } else if (action === 'cancel') {
+                            modal.remove();
+                        }
+                    });
+                    return;
+                }
+
+                applyProviderToggle(btn, !isCurrentlyDisabled);
+            });
+        });
+    }
+
     function buildProviderOrderUI() {
         const container = document.getElementById('providerOrderList');
         if (!container) return;
@@ -846,7 +908,7 @@ function setupSettingsModal() {
         const registry = window.ProviderRegistry;
         if (!registry) return;
 
-        const viewProviders = registry.getViewProviders();
+        const viewProviders = registry.getAllProviders().filter(p => p.hasView);
         if (viewProviders.length === 0) {
             container.innerHTML = '<p class="settings-hint" style="text-align:center; padding:8px;">No providers available</p>';
             return;
@@ -854,6 +916,7 @@ function setupSettingsModal() {
 
         const savedOrder = getSetting('providerOrder');
         const savedDefaults = getSetting('providerDefaults') || {};
+        const disabledProviders = new Set(getSetting('disabledProviders') || []);
 
         // Sort providers: if saved order exists, use it; otherwise registration order
         let ordered;
@@ -905,10 +968,17 @@ function setupSettingsModal() {
                 </select>`;
             }
 
+            const isDisabled = disabledProviders.has(provider.id);
+            if (isDisabled) item.classList.add('provider-disabled');
+
             item.innerHTML = `
                 <i class="fa-solid fa-grip-vertical drag-handle"></i>
+                <button type="button" class="provider-toggle-btn${isDisabled ? ' disabled' : ''}" data-provider="${provider.id}" title="${isDisabled ? 'Enable' : 'Disable'} in Online tab">
+                    <i class="fa-solid ${isDisabled ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                </button>
                 <i class="fa-solid ${provider.icon || 'fa-globe'} provider-order-icon"></i>
                 <span class="provider-order-name">${provider.name}</span>
+                ${provider.beta ? '<span class="provider-beta-badge">Beta</span>' : ''}
                 <span class="provider-order-badge">Default</span>
                 <div class="provider-order-defaults">
                     ${viewSelect}${sortSelect}
@@ -918,7 +988,8 @@ function setupSettingsModal() {
             container.appendChild(item);
         }
 
-        // Wire up view→sort dependency: when view changes, rebuild sort options
+        // Toggle enable/disable
+        wireProviderToggleListeners(container, viewProviders);
         container.querySelectorAll('.provider-default-view').forEach(viewSel => {
             viewSel.addEventListener('change', () => {
                 const pid = viewSel.dataset.provider;
@@ -1017,16 +1088,22 @@ function setupSettingsModal() {
 
     function readProviderOrderFromUI() {
         const container = document.getElementById('providerOrderList');
-        if (!container) return { providerOrder: null, providerDefaults: {} };
+        if (!container) return { providerOrder: null, providerDefaults: {}, disabledProviders: [] };
 
         const items = container.querySelectorAll('.provider-order-item');
         const order = [];
         const defaults = {};
+        const disabled = [];
 
         items.forEach(item => {
             const pid = item.dataset.providerId;
             if (!pid) return;
             order.push(pid);
+
+            const toggleBtn = item.querySelector('.provider-toggle-btn');
+            if (toggleBtn?.classList.contains('disabled')) {
+                disabled.push(pid);
+            }
 
             const viewSel = item.querySelector('.provider-default-view');
             const sortSel = item.querySelector('.provider-default-sort');
@@ -1040,7 +1117,7 @@ function setupSettingsModal() {
             }
         });
 
-        return { providerOrder: order.length > 0 ? order : null, providerDefaults: defaults };
+        return { providerOrder: order.length > 0 ? order : null, providerDefaults: defaults, disabledProviders: disabled };
     }
 
     function resetProviderOrderUI() {
@@ -1079,10 +1156,17 @@ function setupSettingsModal() {
                 </select>`;
             }
 
+            const isDisabled = provider.disabledByDefault;
+            if (isDisabled) item.classList.add('provider-disabled');
+
             item.innerHTML = `
                 <i class="fa-solid fa-grip-vertical drag-handle"></i>
+                <button type="button" class="provider-toggle-btn${isDisabled ? ' disabled' : ''}" data-provider="${provider.id}" title="${isDisabled ? 'Enable' : 'Disable'} in Online tab">
+                    <i class="fa-solid ${isDisabled ? 'fa-eye-slash' : 'fa-eye'}"></i>
+                </button>
                 <i class="fa-solid ${provider.icon || 'fa-globe'} provider-order-icon"></i>
                 <span class="provider-order-name">${provider.name}</span>
+                ${provider.beta ? '<span class="provider-beta-badge">Beta</span>' : ''}
                 <span class="provider-order-badge">Default</span>
                 <div class="provider-order-defaults">
                     ${viewSelect}${sortSelect}
@@ -1090,6 +1174,9 @@ function setupSettingsModal() {
             `;
             container.appendChild(item);
         }
+
+        // Toggle enable/disable
+        wireProviderToggleListeners(container, viewProviders);
 
         // Re-wire view→sort dependency for providers with mode toggle
         container.querySelectorAll('.provider-default-view').forEach(viewSel => {
@@ -1160,9 +1247,25 @@ function setupSettingsModal() {
         if (wyvernEmailInput) wyvernEmailInput.value = getSetting('wyvernEmail') || '';
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
+        if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
         
         // Check cl-helper plugin availability for provider sections
-        checkClHelperPlugin(pygmalionPluginBanner, pygmalionSettingsFields, ctPluginBanner, ctSettingsFields);
+        checkClHelperPlugin(
+            pygmalionPluginBanner, pygmalionSettingsFields,
+            ctPluginBanner, ctSettingsFields,
+            datacatPluginBanner, datacatSettingsFields,
+        ).then(available => {
+            if (datacatSessionStatus) {
+                if (!available) {
+                    datacatSessionStatus.className = 'settings-status-badge inactive';
+                    datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Plugin missing';
+                } else {
+                    datacatSessionStatus.className = 'settings-status-badge inactive';
+                    datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Checking...';
+                    updateDatacatSessionStatus();
+                }
+            }
+        });
         
         const minScore = getSetting('duplicateMinScore') || 35;
         minScoreSlider.value = minScore;
@@ -1221,6 +1324,9 @@ function setupSettingsModal() {
         }
         if (allowRichTaglineCheckbox) {
             allowRichTaglineCheckbox.checked = getSetting('allowRichTagline') === true;
+        }
+        if (browseSnapSectionsCheckbox) {
+            browseSnapSectionsCheckbox.checked = getSetting('browseSnapSections') !== false;
         }
         if (themeCustomizerCheckbox) {
             themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
@@ -1376,6 +1482,14 @@ function setupSettingsModal() {
             toggleWyvernPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
         };
     }
+
+    if (toggleDatacatTokenVisibility && datacatTokenInput) {
+        toggleDatacatTokenVisibility.onclick = () => {
+            const isPassword = datacatTokenInput.type === 'password';
+            datacatTokenInput.type = isPassword ? 'text' : 'password';
+            toggleDatacatTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
     
     // Slider value display
     minScoreSlider.oninput = () => {
@@ -1446,6 +1560,7 @@ function setupSettingsModal() {
             exportAsLinks: exportAsLinksCheckbox ? exportAsLinksCheckbox.checked : false,
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
+            browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : true,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
             animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
             hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
@@ -1598,6 +1713,9 @@ function setupSettingsModal() {
         if (showProviderTaglineCheckbox) {
             showProviderTaglineCheckbox.checked = DEFAULT_SETTINGS.showProviderTagline;
         }
+        if (browseSnapSectionsCheckbox) {
+            browseSnapSectionsCheckbox.checked = DEFAULT_SETTINGS.browseSnapSections;
+        }
 
         // Provider Order & Defaults — reset to registration order
         resetProviderOrderUI();
@@ -1614,13 +1732,15 @@ function setupSettingsModal() {
         // Clear caches
         clearAllMediaLocalizationCache();
         
-        // Save defaults to storage (preserving token if "remember" was checked)
+        // Save defaults to storage (preserving tokens/credentials)
         const preserveToken = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
         const preservePygToken = getSetting('pygmalionRememberToken') ? getSetting('pygmalionToken') : null;
+        const preserveDcToken = getSetting('datacatToken') || null;
         setSettings({
             ...DEFAULT_SETTINGS,
             chubToken: preserveToken,
             pygmalionToken: preservePygToken,
+            datacatToken: preserveDcToken,
         });
         
         const searchName = document.getElementById('searchName');
@@ -1789,6 +1909,112 @@ function setupSettingsModal() {
                     validateWyvernBtn.classList.remove('success', 'error');
                     validateWyvernBtn.innerHTML = originalHtml;
                 }, 3000);
+            }
+        };
+    }
+
+    // DataCat session management
+    function updateDatacatSessionStatus() {
+        if (!datacatSessionStatus) return;
+        if (!window.datacatValidateSession) {
+            datacatSessionStatus.className = 'settings-status-badge inactive';
+            datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Module not loaded';
+            return;
+        }
+        window.datacatValidateSession().then(result => {
+            if (result.valid) {
+                datacatSessionStatus.className = 'settings-status-badge active';
+                datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Active';
+            } else {
+                datacatSessionStatus.className = 'settings-status-badge inactive';
+                datacatSessionStatus.innerHTML = `<i class="fa-solid fa-circle"></i> Inactive`;
+            }
+        });
+    }
+
+    const validateDatacatBtn = document.getElementById('validateDatacatBtn');
+    if (validateDatacatBtn) {
+        validateDatacatBtn.onclick = async (e) => {
+            e.preventDefault();
+            validateDatacatBtn.classList.remove('success', 'error');
+            const originalHtml = '<i class="fa-solid fa-check"></i>';
+            validateDatacatBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateDatacatBtn.disabled = true;
+
+            try {
+                if (!window.datacatValidateSession) {
+                    showToast('DataCat module not ready', 'error');
+                    throw new Error('Module not ready');
+                }
+                const result = await window.datacatValidateSession();
+                if (result.valid) {
+                    showToast('DataCat session is valid!', 'success');
+                    validateDatacatBtn.classList.add('success');
+                    updateDatacatSessionStatus();
+                } else {
+                    showToast(`Session invalid: ${result.reason || 'Unknown'}`, 'error');
+                    validateDatacatBtn.classList.add('error');
+                    validateDatacatBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    updateDatacatSessionStatus();
+                }
+            } catch (err) {
+                if (!validateDatacatBtn.classList.contains('error')) {
+                    showToast(`Validation error: ${err.message}`, 'error');
+                    validateDatacatBtn.classList.add('error');
+                    validateDatacatBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                }
+            } finally {
+                validateDatacatBtn.disabled = false;
+                if (validateDatacatBtn.classList.contains('success')) {
+                    validateDatacatBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                }
+                setTimeout(() => {
+                    validateDatacatBtn.classList.remove('success', 'error');
+                    validateDatacatBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
+    const datacatRefreshTokenBtn = document.getElementById('datacatRefreshTokenBtn');
+    if (datacatRefreshTokenBtn) {
+        datacatRefreshTokenBtn.onclick = async () => {
+            datacatRefreshTokenBtn.disabled = true;
+            datacatRefreshTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Requesting...';
+            try {
+                if (!window.datacatRefreshToken) {
+                    showToast('DataCat module not ready', 'error');
+                    return;
+                }
+                const newToken = await window.datacatRefreshToken();
+                if (newToken) {
+                    setSetting('datacatToken', newToken);
+                    if (datacatTokenInput) datacatTokenInput.value = newToken;
+                    showToast('New DataCat token obtained!', 'success');
+                    updateDatacatSessionStatus();
+                } else {
+                    showToast('Failed to obtain new token', 'error');
+                }
+            } catch (err) {
+                showToast(`Refresh error: ${err.message}`, 'error');
+            } finally {
+                datacatRefreshTokenBtn.disabled = false;
+                datacatRefreshTokenBtn.innerHTML = '<i class="fa-solid fa-rotate"></i> New Token';
+            }
+        };
+    }
+
+    const datacatClearTokenBtn = document.getElementById('datacatClearTokenBtn');
+    if (datacatClearTokenBtn) {
+        datacatClearTokenBtn.onclick = async () => {
+            try {
+                if (window.datacatClearSession) await window.datacatClearSession();
+                setSetting('datacatToken', null);
+                if (datacatTokenInput) datacatTokenInput.value = '';
+                showToast('DataCat session cleared', 'info');
+                updateDatacatSessionStatus();
+            } catch (err) {
+                showToast(`Clear error: ${err.message}`, 'error');
             }
         };
     }
@@ -5360,6 +5586,12 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
 // Embedded Mode UI
 // ==============================================
 
+function closeEmbeddedPanel() {
+    if (isEmbedded && window.parent !== window) {
+        window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
+    }
+}
+
 function setupEmbeddedUI() {
     document.body.classList.add('embedded-mode');
 
@@ -5371,9 +5603,7 @@ function setupEmbeddedUI() {
         backBtn.title = 'Back to Chat';
         backBtn.innerHTML = '<i class="fa-solid fa-arrow-left"></i>';
         if (embeddedShowTopBar) backBtn.style.display = 'none';
-        backBtn.addEventListener('click', () => {
-            window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
-        });
+        backBtn.addEventListener('click', () => closeEmbeddedPanel());
         logoArea.insertBefore(backBtn, logoArea.firstChild);
     }
 
@@ -11564,7 +11794,7 @@ function performSearch() {
     //   "creator:john linked:yes dark elf"
     // ========================================================================
     
-    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern|playlist):(?:[^\s]+))/gi;
+    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern|datacat|dc|playlist):(?:[^\s]+))/gi;
     
     let creatorFilter = null;
     let versionFilter = null;
@@ -11601,7 +11831,7 @@ function performSearch() {
             favoriteFilter = value;
             filterFavoriteYes = value === 'yes' || value === 'true';
             filterFavoriteNo = value === 'no' || value === 'false';
-        } else if (['linked', 'chub', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern'].includes(prefix)) {
+        } else if (['linked', 'chub', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern', 'datacat', 'dc'].includes(prefix)) {
             linkFilterPrefix = prefix;
             linkFilterWantLinked = value === 'yes' || value === 'true' || value === 'linked';
         } else if (prefix === 'playlist') {
@@ -11662,6 +11892,7 @@ function performSearch() {
                     : (linkFilterPrefix === 'charactertavern' || linkFilterPrefix === 'ct') ? 'chartavern'
                     : linkFilterPrefix === 'pygmalion' ? 'pygmalion'
                     : linkFilterPrefix === 'wyvern' ? 'wyvern'
+                    : (linkFilterPrefix === 'datacat' || linkFilterPrefix === 'dc') ? 'datacat'
                     : null;
                 const prov = provId ? window.ProviderRegistry?.getProvider(provId) : null;
                 isLinked = prov ? !!prov.getLinkInfo(c) : false;
@@ -21727,6 +21958,7 @@ window.refreshPlaylistBadges = refreshPlaylistBadges;
 window.getHostWindow = getHostWindow;
 window.getSTContext = getSTContext;
 window.isEmbedded = isEmbedded;
+window.closeEmbeddedPanel = closeEmbeddedPanel;
 
 // Settings
 window.getSetting = getSetting;

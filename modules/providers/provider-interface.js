@@ -65,6 +65,15 @@ export class ProviderBase {
     /** URL to a provider logo/favicon for richer display. @returns {string|null} */
     get iconUrl() { return null; }
 
+    /** Whether this provider is in beta. Shows a badge in UI. @returns {boolean} */
+    get beta() { return false; }
+
+    /** Whether this provider should be disabled on first run. @returns {boolean} */
+    get disabledByDefault() { return false; }
+
+    /** Warning message shown when enabling this provider. Null = no warning. @returns {string|null} */
+    get enableWarning() { return null; }
+
     /** Reference to this provider's BrowseView subclass instance, if any. @returns {import('./browse-view.js').BrowseView|null} */
     get browseView() { return null; }
 

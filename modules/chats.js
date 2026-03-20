@@ -23,6 +23,13 @@ let currentPreviewChar = null;
 let currentChatMessages = [];
 let _modalChatsChar = null;
 
+// Pagination / lazy-load state
+const PAGE_SIZE = 50;
+let _renderedCount = 0;
+let _sortedChats = [];
+let _previewObserver = null;
+let _sentinelObserver = null;
+
 // ========================================
 // CHATS CACHING
 // ========================================
@@ -188,7 +195,7 @@ async function openChat(char, chatFile) {
                 }
 
                 if (CoreAPI.getIsEmbedded()) {
-                    window.parent.postMessage({ source: 'character-library', type: 'cl-close' }, window.location.origin);
+                    CoreAPI.closeEmbeddedPanel();
                 }
 
                 return;
@@ -544,15 +551,6 @@ async function fetchFreshChats(isBackground = false) {
 
         allChats = newChats;
         renderChats();
-
-        // Load previews for chats that need them, and model data for chats missing it
-        const chatsNeedingLoad = allChats.filter(c => c.preview === null || !c.models);
-        CoreAPI.debugLog(`[ChatsCache] ${chatsNeedingLoad.length} of ${allChats.length} chats need loading (preview or model data)`);
-
-        if (chatsNeedingLoad.length > 0) {
-            await loadChatPreviews(chatsNeedingLoad);
-        }
-
         saveChatCache(allChats);
 
     } catch (e) {
@@ -569,72 +567,17 @@ async function fetchFreshChats(isBackground = false) {
     }
 }
 
-async function loadChatPreviews(chatsToLoad = null) {
-    const BATCH_SIZE = 5;
-    const targetChats = chatsToLoad || allChats;
-    CoreAPI.debugLog(`[ChatPreviews] Starting to load previews for ${targetChats.length} chats`);
-
-    for (let i = 0; i < targetChats.length; i += BATCH_SIZE) {
-        const batch = targetChats.slice(i, i + BATCH_SIZE);
-        CoreAPI.debugLog(`[ChatPreviews] Processing batch ${i/BATCH_SIZE + 1}, chats ${i} to ${i + batch.length}`);
-
-        await Promise.all(batch.map(async (chat) => {
-            try {
-                const chatFileName = chat.file_name.replace('.jsonl', '');
-
-                const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
-                    ch_name: chat.character.name,
-                    file_name: chatFileName,
-                    avatar_url: chat.character.avatar
-                });
-
-                CoreAPI.debugLog(`[ChatPreviews] ${chat.file_name}: response status ${response.status}`);
-
-                if (response.ok) {
-                    const messages = await response.json();
-                    CoreAPI.debugLog(`[ChatPreviews] ${chat.file_name}: got ${messages?.length || 0} messages`);
-
-                    // Extract model usage stats (free — we already have all messages)
-                    chat.models = extractModelStats(messages);
-
-                    if (messages && messages.length > 0) {
-                        const lastMsg = [...messages].reverse().find(m => !m.is_system && m.mes);
-                        if (lastMsg) {
-                            const previewText = lastMsg.mes.substring(0, 150);
-                            chat.preview = (lastMsg.is_user ? 'You: ' : '') + previewText + (lastMsg.mes.length > 150 ? '...' : '');
-                            updateChatCardPreview(chat);
-                        } else {
-                            chat.preview = '';
-                            updateChatCardPreview(chat);
-                        }
-                    } else {
-                        chat.preview = '';
-                        updateChatCardPreview(chat);
-                    }
-                } else {
-                    console.warn(`[ChatPreviews] ${chat.file_name}: HTTP error ${response.status}`);
-                    chat.preview = '';
-                    updateChatCardPreview(chat);
-                }
-            } catch (e) {
-                console.warn(`[ChatPreviews] ${chat.file_name}: Exception:`, e);
-                chat.preview = '';
-                updateChatCardPreview(chat);
-            }
-        }));
-    }
-
-    CoreAPI.debugLog(`[ChatPreviews] Finished loading all previews`);
-}
-
 function updateChatCardPreview(chat) {
     const card = document.querySelector(`.chat-card[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
     if (card) {
         const previewEl = card.querySelector('.chat-card-preview');
-        if (previewEl && chat.preview) {
-            previewEl.textContent = chat.preview;
+        if (previewEl) {
+            if (chat.preview) {
+                previewEl.textContent = chat.preview;
+            } else {
+                previewEl.innerHTML = '<span style="opacity: 0.5;">No messages</span>';
+            }
         }
-        // Insert model badge if not already present
         if (chat.models && !card.querySelector('.chat-model-badge')) {
             const metaEl = card.querySelector('.chat-card-meta');
             if (metaEl) metaEl.insertAdjacentHTML('beforeend', buildModelBadgeHtml(chat.models));
@@ -642,8 +585,16 @@ function updateChatCardPreview(chat) {
     }
 
     // Also update in grouped view
-    const groupItem = document.querySelector(`.chat-group-item[data-chat-file="${CSS.escape(chat.file_name)}"]`);
+    const groupItem = document.querySelector(`.chat-group-item[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
     if (groupItem) {
+        const previewEl = groupItem.querySelector('.chat-group-item-preview');
+        if (previewEl) {
+            if (chat.preview) {
+                previewEl.textContent = chat.preview;
+            } else {
+                previewEl.innerHTML = '<span class="no-preview">No messages</span>';
+            }
+        }
         if (chat.models && !groupItem.querySelector('.chat-model-badge')) {
             const metaEl = groupItem.querySelector('.chat-group-item-meta');
             if (metaEl) metaEl.insertAdjacentHTML('beforeend', buildModelBadgeHtml(chat.models));
@@ -701,9 +652,11 @@ function sortChats(chats) {
             sorted.sort((a, b) => (b.charName || '').localeCompare(a.charName || ''));
             break;
         case 'most_messages':
+        case 'longest_chat':
             sorted.sort((a, b) => (b.chat_items || b.mes_count || 0) - (a.chat_items || a.mes_count || 0));
             break;
         case 'least_messages':
+        case 'shortest_chat':
             sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
             break;
         case 'most_chats': {
@@ -725,6 +678,7 @@ function renderFlatChats(chats) {
 
     chatsGrid.classList.remove('hidden');
     groupedView.classList.add('hidden');
+    disconnectObservers();
 
     if (chats.length === 0) {
         chatsGrid.innerHTML = `
@@ -737,7 +691,13 @@ function renderFlatChats(chats) {
         return;
     }
 
-    chatsGrid.innerHTML = chats.map(chat => createChatCard(chat)).join('');
+    _sortedChats = chats;
+    _renderedCount = 0;
+    chatsGrid.innerHTML = '';
+
+    appendFlatPage(chatsGrid);
+    setupSentinelObserver(chatsGrid, 'flat');
+    setupPreviewObserver();
 }
 
 function renderGroupedChats(chats) {
@@ -746,6 +706,7 @@ function renderGroupedChats(chats) {
 
     chatsGrid.classList.add('hidden');
     groupedView.classList.remove('hidden');
+    disconnectObservers();
 
     // Group by character
     const groups = {};
@@ -780,6 +741,7 @@ function renderGroupedChats(chats) {
         return;
     }
 
+    // Grouped view renders all groups (pagination is per-group via collapse)
     groupedView.innerHTML = groupKeys.map(key => {
         const group = groups[key];
         const char = group.character;
@@ -805,9 +767,137 @@ function renderGroupedChats(chats) {
             </div>
         `;
     }).join('');
+
+    setupPreviewObserver();
 }
 
+// ========================================
+// PAGINATION (FLAT VIEW)
+// ========================================
 
+function appendFlatPage(container) {
+    const start = _renderedCount;
+    const end = Math.min(start + PAGE_SIZE, _sortedChats.length);
+    if (start >= end) return;
+
+    const fragment = document.createDocumentFragment();
+    for (let i = start; i < end; i++) {
+        const tmp = document.createElement('template');
+        tmp.innerHTML = createChatCard(_sortedChats[i]);
+        fragment.appendChild(tmp.content.firstElementChild);
+    }
+    container.appendChild(fragment);
+    _renderedCount = end;
+}
+
+function setupSentinelObserver(container, mode) {
+    if (_sentinelObserver) { _sentinelObserver.disconnect(); _sentinelObserver = null; }
+    if (mode !== 'flat') return;
+
+    let sentinel = document.getElementById('chatsSentinel');
+    if (!sentinel) {
+        sentinel = document.createElement('div');
+        sentinel.id = 'chatsSentinel';
+        sentinel.style.height = '1px';
+        container.appendChild(sentinel);
+    }
+
+    _sentinelObserver = new IntersectionObserver((entries) => {
+        if (!entries[0].isIntersecting) return;
+        if (_renderedCount >= _sortedChats.length) {
+            _sentinelObserver.disconnect();
+            sentinel.remove();
+            return;
+        }
+        appendFlatPage(container);
+        // Re-observe new cards for preview loading
+        observeNewCards();
+        // Move sentinel to end
+        container.appendChild(sentinel);
+    }, { rootMargin: '400px' });
+
+    _sentinelObserver.observe(sentinel);
+}
+
+// ========================================
+// LAZY PREVIEW LOADING (IntersectionObserver)
+// ========================================
+
+function setupPreviewObserver() {
+    if (_previewObserver) _previewObserver.disconnect();
+
+    _previewObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const el = entry.target;
+            _previewObserver.unobserve(el);
+            lazyLoadPreview(el);
+        }
+    }, { rootMargin: '200px' });
+
+    observeNewCards();
+}
+
+function observeNewCards() {
+    if (!_previewObserver) return;
+    // Observe flat cards that still need preview
+    document.querySelectorAll('.chat-card[data-needs-preview="1"]').forEach(card => {
+        _previewObserver.observe(card);
+    });
+    // Observe grouped items that still need preview
+    document.querySelectorAll('.chat-group-item[data-needs-preview="1"]').forEach(item => {
+        _previewObserver.observe(item);
+    });
+}
+
+async function lazyLoadPreview(el) {
+    const chatFile = el.dataset.chatFile;
+    const charAvatar = el.dataset.charAvatar;
+    const chat = allChats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar);
+    if (!chat || (chat.preview !== null && chat.models)) return;
+
+    el.removeAttribute('data-needs-preview');
+
+    try {
+        const chatFileName = chat.file_name.replace('.jsonl', '');
+        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
+            ch_name: chat.character.name,
+            file_name: chatFileName,
+            avatar_url: chat.character.avatar
+        });
+
+        if (response.ok) {
+            const messages = await response.json();
+            chat.models = extractModelStats(messages);
+
+            if (messages && messages.length > 0) {
+                const lastMsg = [...messages].reverse().find(m => !m.is_system && m.mes);
+                if (lastMsg) {
+                    const previewText = lastMsg.mes.substring(0, 150);
+                    chat.preview = (lastMsg.is_user ? 'You: ' : '') + previewText + (lastMsg.mes.length > 150 ? '...' : '');
+                } else {
+                    chat.preview = '';
+                }
+            } else {
+                chat.preview = '';
+            }
+        } else {
+            chat.preview = '';
+        }
+    } catch {
+        chat.preview = '';
+    }
+
+    updateChatCardPreview(chat);
+    saveChatCacheDebounced();
+}
+
+const saveChatCacheDebounced = debounce(() => saveChatCache(allChats), 2000);
+
+function disconnectObservers() {
+    if (_previewObserver) { _previewObserver.disconnect(); _previewObserver = null; }
+    if (_sentinelObserver) { _sentinelObserver.disconnect(); _sentinelObserver = null; }
+}
 
 // ========================================
 // MODEL EXTRACTION
@@ -875,10 +965,11 @@ function createChatCard(chat) {
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
     const isActive = char.chat === chatName;
+    const needsPreview = chat.preview === null || !chat.models;
 
     let previewHtml;
     if (chat.preview === null) {
-        previewHtml = '<i class="fa-solid fa-spinner fa-spin" style="opacity: 0.5;"></i> <span style="opacity: 0.5;">Loading preview...</span>';
+        previewHtml = '<span style="opacity: 0.5;">Loading preview...</span>';
     } else if (chat.preview) {
         previewHtml = CoreAPI.escapeHtml(chat.preview);
     } else {
@@ -890,7 +981,7 @@ function createChatCard(chat) {
         : `<div class="chat-card-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
 
     return `
-        <div class="chat-card ${isActive ? 'active' : ''}" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">
+        <div class="chat-card ${isActive ? 'active' : ''}" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}"${needsPreview ? ' data-needs-preview="1"' : ''}>
             <div class="chat-card-header">
                 ${avatarHtml}
                 <div class="chat-card-char-info">
@@ -924,10 +1015,11 @@ function createGroupedChatItem(chat) {
     const chatName = (chat.file_name || '').replace('.jsonl', '');
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
+    const needsPreview = chat.preview === null || !chat.models;
 
     let previewText;
     if (chat.preview === null) {
-        previewText = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+        previewText = '<span style="opacity: 0.5;">Loading...</span>';
     } else if (chat.preview) {
         previewText = CoreAPI.escapeHtml(chat.preview);
     } else {
@@ -935,7 +1027,7 @@ function createGroupedChatItem(chat) {
     }
 
     return `
-        <div class="chat-group-item" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}">
+        <div class="chat-group-item" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(chat.charAvatar)}"${needsPreview ? ' data-needs-preview="1"' : ''}>
             <div class="chat-group-item-icon"><i class="fa-solid fa-message"></i></div>
             <div class="chat-group-item-info">
                 <div class="chat-group-item-name">${CoreAPI.escapeHtml(chatName)}</div>
