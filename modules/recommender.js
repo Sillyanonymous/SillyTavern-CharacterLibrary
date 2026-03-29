@@ -615,11 +615,10 @@ function attachEvents() {
         if (e.target.id === 'recommenderModal') closeModal();
     });
 
-    // Escape key
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !document.getElementById('recommenderModal')?.classList.contains('hidden')) {
-            closeModal();
-        }
+    window.registerOverlay?.({
+        id: 'recommenderModal',
+        tier: 5,
+        close: () => closeModal(),
     });
 
     // Enter key to submit

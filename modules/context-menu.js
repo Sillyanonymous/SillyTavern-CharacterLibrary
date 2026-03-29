@@ -33,6 +33,13 @@ export function init(deps) {
     createMenu();
     setupGlobalListeners();
 
+    window.registerOverlay?.({
+        id: 'clContextMenu',
+        tier: 8,
+        close: () => hide(),
+        visible: (el) => el.classList.contains('visible'),
+    });
+
     // Bridge for legacy card creation paths
     window.attachCardContextMenu = function(cardElement, char) {
         if (!cardElement || !char) return;
@@ -53,12 +60,6 @@ function createMenu() {
 function setupGlobalListeners() {
     document.addEventListener('click', (e) => {
         if (!menuElement.contains(e.target)) {
-            hide();
-        }
-    });
-    
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
             hide();
         }
     });
@@ -378,29 +379,35 @@ function renderMenu(items) {
 }
 
 function positionMenu(x, y) {
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+    x /= zoom;
+    y /= zoom;
+
     menuElement.style.left = '0';
     menuElement.style.top = '0';
     
-    const menuRect = menuElement.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
+    const rawMenuRect = menuElement.getBoundingClientRect();
+    const menuWidth = rawMenuRect.width / zoom;
+    const menuHeight = rawMenuRect.height / zoom;
+    const vw = window.innerWidth / zoom;
+    const vh = window.innerHeight / zoom;
     const pad = 10;
     
     let finalX = x;
-    if (x + menuRect.width + pad > vw) finalX = x - menuRect.width;
+    if (x + menuWidth + pad > vw) finalX = x - menuWidth;
     if (finalX < pad) finalX = pad;
     
     const spaceBelow = vh - y;
     const spaceAbove = y;
-    const openUpward = menuRect.height + pad > spaceBelow && spaceAbove > spaceBelow;
+    const openUpward = menuHeight + pad > spaceBelow && spaceAbove > spaceBelow;
     
     let finalY;
     if (openUpward) {
-        finalY = Math.max(pad, y - menuRect.height);
+        finalY = Math.max(pad, y - menuHeight);
         menuElement.style.transformOrigin = 'bottom left';
     } else {
         finalY = y;
-        if (finalY + menuRect.height + pad > vh) finalY = vh - menuRect.height - pad;
+        if (finalY + menuHeight + pad > vh) finalY = vh - menuHeight - pad;
         if (finalY < pad) finalY = pad;
         menuElement.style.transformOrigin = 'top left';
     }
@@ -626,7 +633,7 @@ async function bulkDelete() {
     modal.className = 'confirm-modal';
     modal.id = 'bulkDeleteConfirmModal';
     modal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: 480px;">
+        <div class="confirm-modal-content" style="max-width: calc(480px * var(--modal-scale, 1));">
             <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
                 <h3 style="border: none; padding: 0; margin: 0;">
                     <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>

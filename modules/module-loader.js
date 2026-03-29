@@ -11,6 +11,26 @@ import CoreAPI from './core-api.js';
 
 
 // ========================================
+// CSS LOADER
+// ========================================
+
+const MODULE_CSS_VERSION = 5;
+
+function loadModuleCSS(path) {
+    return new Promise((resolve) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        const url = new URL(path, import.meta.url);
+        url.searchParams.set('v', MODULE_CSS_VERSION);
+        link.href = url.href;
+        link.onload = resolve;
+        link.onerror = resolve;
+        document.head.appendChild(link);
+    });
+}
+
+
+// ========================================
 // LAZY BRIDGE HELPERS
 // ========================================
 
@@ -159,6 +179,7 @@ async function initModuleSystem() {
 
     try {
         const multiSelectModule = await import('./multi-select.js');
+        loadModuleCSS('./multi-select.css');
         ModuleLoader.register('multi-select', multiSelectModule.default);
     } catch (err) {
         console.warn('[ModuleLoader] Could not load multi-select module:', err);
@@ -166,6 +187,7 @@ async function initModuleSystem() {
 
     try {
         const contextMenuModule = await import('./context-menu.js');
+        loadModuleCSS('./context-menu.css');
         ModuleLoader.register('context-menu', contextMenuModule.default);
     } catch (err) {
         console.warn('[ModuleLoader] Could not load context-menu module:', err);
@@ -173,6 +195,7 @@ async function initModuleSystem() {
 
     try {
         const galleryViewerModule = await import('./gallery-viewer.js');
+        loadModuleCSS('./gallery-viewer.css');
         ModuleLoader.register('gallery-viewer', galleryViewerModule.default);
 
         window.openGalleryViewer = galleryViewerModule.openViewer;
@@ -184,6 +207,7 @@ async function initModuleSystem() {
 
     try {
         const charVersionsModule = await import('./character-versions.js');
+        loadModuleCSS('./character-versions.css');
         ModuleLoader.register('character-versions', charVersionsModule.default);
 
         window.openCharVersionHistory = charVersionsModule.openVersionHistory;
@@ -195,6 +219,7 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./card-updates.css');
         const cardUpdatesModule = await import('./card-updates.js');
         ModuleLoader.register('card-updates', cardUpdatesModule.default);
 
@@ -206,6 +231,7 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./gallery-sync.css');
         const gallerySyncModule = await import('./gallery-sync.js');
         ModuleLoader.register('gallery-sync', gallerySyncModule.default);
 
@@ -218,6 +244,7 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./recommender.css');
         const recommenderModule = await import('./recommender.js');
         ModuleLoader.register('recommender', recommenderModule.default);
 
@@ -227,6 +254,7 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./character-creator.css');
         const creatorModule = await import('./character-creator.js');
         ModuleLoader.register('character-creator', creatorModule.default);
 
@@ -239,6 +267,7 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./playlists.css');
         const playlistsModule = await import('./playlists.js');
         ModuleLoader.register('playlists', playlistsModule.default);
 
@@ -267,6 +296,12 @@ async function initModuleSystem() {
 
     // Providers — must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
+    loadModuleCSS('./providers/browse-shared.css');
+    loadModuleCSS('./providers/chub/chub-browse.css');
+    loadModuleCSS('./providers/chartavern/chartavern-browse.css');
+    loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
+    loadModuleCSS('./providers/wyvern/wyvern-browse.css');
+    loadModuleCSS('./providers/datacat/datacat-browse.css');
     try {
         const [chubMod, jannyMod, chartavernMod, pygmalionMod, wyvernMod, datacatMod] = await Promise.all([
             import('./providers/chub/chub-provider.js'),
@@ -297,6 +332,7 @@ async function initModuleSystem() {
     // ============================
 
     setupLazyBatchTagging();
+    loadModuleCSS('./chats.css');
     setupLazyChats();
 
     // Initialize all Tier 1 modules
@@ -313,6 +349,7 @@ async function initModuleSystem() {
 function setupLazyBatchTagging() {
     ModuleLoader._registerLazy('batch-tagging', async () => {
         const mod = await import('./batch-tagging.js');
+        loadModuleCSS('./batch-tagging.css');
         ModuleLoader.register('batch-tagging', mod.default);
         await mod.default.init({});
         mod.default._mlInitDone = true;

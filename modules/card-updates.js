@@ -127,7 +127,6 @@ export function init(deps) {
         return;
     }
     
-    injectStyles();
     injectModals();
     setupEventListeners();
     rebuildEffectiveFields();
@@ -149,6 +148,28 @@ export async function checkSingleCharacter(char) {
     }
     
     showSingleCheckModal(char);
+
+    if (CoreAPI.isUpdateLocked(char)) {
+        const statusEl = document.getElementById('cardUpdateSingleStatus');
+        if (statusEl) {
+            statusEl.innerHTML = `<i class="fa-solid fa-lock"></i> Updates are locked for this character
+                <button id="cardUpdateSingleUnlockBtn" class="card-update-unlock-check-btn">
+                    <i class="fa-solid fa-lock-open"></i> Unlock & Check
+                </button>`;
+            document.getElementById('cardUpdateSingleUnlockBtn')?.addEventListener('click', async () => {
+                try {
+                    await CoreAPI.setUpdateLocked(char.avatar, false);
+                    statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking for updates...';
+                    await performSingleCheck(char);
+                } catch (err) {
+                    console.error('[CardUpdates] Failed to unlock:', err);
+                    statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Failed to unlock character';
+                }
+            });
+        }
+        return;
+    }
+
     await performSingleCheck(char);
 }
 
@@ -1373,7 +1394,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
         const curStatus = statusEl?.textContent?.trim() || '';
         if (curStatus.includes('Up to date') || curStatus.includes('update') || 
             curStatus.includes('Updated') || curStatus.includes('Failed') || curStatus.includes('Error') ||
-            curStatus.includes('Removed')) {
+            curStatus.includes('Removed') || curStatus.includes('Locked')) {
             continue;
         }
         
@@ -1997,19 +2018,25 @@ function startBatchCheck() {
     listEl.innerHTML = pendingBatchCharacters.map(char => {
         const providerLink = getProviderLinkInfo(char);
         const name = char.data?.name || char.name || 'Unknown';
-        batchSelectedAvatars.add(char.avatar);
+        const locked = CoreAPI.isUpdateLocked(char);
+        if (!locked) batchSelectedAvatars.add(char.avatar);
         return `
-            <div class="card-update-batch-item" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" data-status="pending">
+            <div class="card-update-batch-item" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" data-status="${locked ? 'locked' : 'pending'}">
                 <label class="card-update-batch-item-check">
-                    <input type="checkbox" class="card-update-batch-checkbox" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" checked>
+                    <input type="checkbox" class="card-update-batch-checkbox" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" ${locked ? 'disabled' : 'checked'}>
                 </label>
                 <div class="card-update-batch-item-info">
                     <span class="card-update-batch-item-name card-update-char-link" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">${CoreAPI.escapeHtml(name)}</span>
                     <span class="card-update-batch-item-path">${CoreAPI.escapeHtml(providerLink?.fullPath || '')}</span>
                 </div>
                 <div class="card-update-batch-item-status">
-                    <i class="fa-solid fa-clock"></i> Pending
+                    ${locked
+                        ? '<i class="fa-solid fa-lock"></i> Locked'
+                        : '<i class="fa-solid fa-clock"></i> Pending'}
                 </div>
+                <button class="card-update-lock-toggle" data-avatar="${CoreAPI.escapeHtml(char.avatar)}" title="${locked ? 'Unlock and check' : 'Lock updates'}">
+                    <i class="fa-solid ${locked ? 'fa-lock' : 'fa-unlock'}"></i>
+                </button>
             </div>
         `;
     }).join('');
@@ -2030,12 +2057,68 @@ function startBatchCheck() {
 // BATCH FILTERING & SELECTION
 // ========================================
 
+async function toggleBatchItemLock(avatar) {
+    const allChars = CoreAPI.getAllCharacters();
+    const char = allChars.find(c => c.avatar === avatar);
+    if (!char) return;
+
+    const itemEl = document.querySelector(`.card-update-batch-item[data-avatar="${CSS.escape(avatar)}"]`);
+    const statusEl = itemEl?.querySelector('.card-update-batch-item-status');
+    const toggleBtn = itemEl?.querySelector('.card-update-lock-toggle');
+    if (!itemEl) return;
+
+    const wasLocked = CoreAPI.isUpdateLocked(char);
+
+    try {
+        await CoreAPI.setUpdateLocked(avatar, !wasLocked);
+    } catch (err) {
+        console.error('[CardUpdates] Failed to toggle lock:', err);
+        CoreAPI.showToast('Failed to toggle update lock', 'error');
+        return;
+    }
+
+    if (wasLocked) {
+        // Unlock: reset to pending and re-check
+        itemEl.dataset.status = 'pending';
+        if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-clock"></i> Pending';
+        const cb = itemEl.querySelector('.card-update-batch-checkbox');
+        if (cb) { cb.disabled = false; cb.checked = true; }
+        batchSelectedAvatars.add(avatar);
+        if (toggleBtn) {
+            toggleBtn.title = 'Lock updates';
+            toggleBtn.innerHTML = '<i class="fa-solid fa-unlock"></i>';
+        }
+        updateBatchFilterCounts();
+        const stateA = batchCheckRunning ? 'checking' : batchCheckPaused ? 'paused' : 'done';
+        updateBatchFooter(stateA);
+
+        if (!batchCheckRunning) {
+            performBatchCheck(pendingBatchCharacters, new Set(batchFieldSelection), 0);
+        }
+    } else {
+        // Lock: set to locked status
+        itemEl.dataset.status = 'locked';
+        if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-lock"></i> Locked';
+        const cb = itemEl.querySelector('.card-update-batch-checkbox');
+        if (cb) { cb.checked = false; cb.disabled = true; }
+        batchSelectedAvatars.delete(avatar);
+        currentUpdateChecks.delete(avatar);
+        if (toggleBtn) {
+            toggleBtn.title = 'Unlock and check';
+            toggleBtn.innerHTML = '<i class="fa-solid fa-lock"></i>';
+        }
+        updateBatchFilterCounts();
+        const stateB = batchCheckRunning ? 'checking' : batchCheckPaused ? 'paused' : 'done';
+        updateBatchFooter(stateB);
+    }
+}
+
 /**
  * Count batch items by status and update filter pill badges
  */
 function updateBatchFilterCounts() {
     const items = document.querySelectorAll('#cardUpdateBatchList .card-update-batch-item');
-    const counts = { all: 0, 'has-updates': 0, 'up-to-date': 0, errors: 0, unavailable: 0, applied: 0 };
+    const counts = { all: 0, 'has-updates': 0, 'up-to-date': 0, errors: 0, unavailable: 0, locked: 0, applied: 0 };
     
     for (const item of items) {
         counts.all++;
@@ -2044,6 +2127,7 @@ function updateBatchFilterCounts() {
         else if (status === 'up-to-date') counts['up-to-date']++;
         else if (status === 'error') counts.errors++;
         else if (status === 'unavailable') counts.unavailable++;
+        else if (status === 'locked') counts.locked++;
         else if (status === 'applied') counts.applied++;
     }
     
@@ -2053,6 +2137,7 @@ function updateBatchFilterCounts() {
         'up-to-date': 'batchFilterCountUpToDate',
         errors: 'batchFilterCountErrors',
         unavailable: 'batchFilterCountUnavailable',
+        locked: 'batchFilterCountLocked',
         applied: 'batchFilterCountApplied'
     };
     
@@ -2088,6 +2173,7 @@ function applyBatchStatusFilter(filter) {
             const status = item.dataset.status || 'pending';
             const matches = (filter === 'errors' && status === 'error')
                 || (filter === 'unavailable' && status === 'unavailable')
+                || (filter === 'locked' && status === 'locked')
                 || (filter === status);
             item.style.display = matches ? '' : 'none';
         }
@@ -2102,7 +2188,7 @@ function resetBatchFilterPills() {
     for (const pill of pills) {
         pill.classList.toggle('active', pill.dataset.filter === 'all');
     }
-    const ids = ['batchFilterCountAll', 'batchFilterCountUpdates', 'batchFilterCountUpToDate', 'batchFilterCountErrors', 'batchFilterCountUnavailable', 'batchFilterCountApplied'];
+    const ids = ['batchFilterCountAll', 'batchFilterCountUpdates', 'batchFilterCountUpToDate', 'batchFilterCountErrors', 'batchFilterCountUnavailable', 'batchFilterCountLocked', 'batchFilterCountApplied'];
     for (const id of ids) {
         const el = document.getElementById(id);
         if (el) el.textContent = '0';
@@ -2227,13 +2313,19 @@ function setupEventListeners() {
         }
     });
     
-    // Event delegation for batch list: View buttons, character name clicks, and checkboxes
+    // Event delegation for batch list: View buttons, character name clicks, unlock buttons, and checkboxes
     const batchListEl = document.getElementById('cardUpdateBatchList');
     batchListEl?.addEventListener('click', (e) => {
         const viewBtn = e.target.closest('.card-update-batch-view-btn');
         if (viewBtn) {
             const avatar = viewBtn.dataset.viewAvatar;
             if (avatar) viewBatchItemDiffs(avatar);
+            return;
+        }
+        const lockToggle = e.target.closest('.card-update-lock-toggle');
+        if (lockToggle) {
+            const avatar = lockToggle.dataset.avatar;
+            if (avatar) toggleBatchItemLock(avatar);
             return;
         }
         const nameLink = e.target.closest('.card-update-char-link[data-char-avatar]');
@@ -2284,1141 +2376,6 @@ function setupEventListeners() {
     document.getElementById('cardUpdateBatchFieldSelectNone')?.addEventListener('click', () => setBatchFieldsChecked(false));
 }
 
-// ========================================
-// STYLES
-// ========================================
-
-function injectStyles() {
-    if (document.getElementById('card-updates-styles')) return;
-    
-    const style = document.createElement('style');
-    style.id = 'card-updates-styles';
-    style.textContent = `
-        /* Card Updates Modal - Override base modal */
-        .card-update-modal {
-            background: transparent !important;
-        }
-        
-        /* Ensure single modal appears above batch modal when opened from batch view */
-        #cardUpdateBatchModal {
-            z-index: 10000;
-        }
-        
-        #cardUpdateSingleModal {
-            z-index: 10001;
-        }
-
-        /* When character details is opened above update checker */
-        body.char-modal-above .modal-overlay {
-            z-index: 10002 !important;
-        }
-        body.char-modal-above .confirm-modal:not(.hidden) {
-            z-index: 10003 !important;
-        }
-        body.char-modal-above .gv-modal.visible {
-            z-index: 10004 !important;
-        }
-        
-        .card-update-modal .cl-modal-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.75);
-            backdrop-filter: blur(4px);
-        }
-        
-        .card-update-modal .cl-modal-content {
-            position: relative;
-            z-index: 1;
-            max-width: 750px;
-            width: 95%;
-            background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
-            border: 1px solid var(--cl-border, rgba(80, 80, 80, 0.5));
-        }
-        
-        .card-update-modal .cl-modal-body {
-            max-height: 65vh;
-            overflow-y: auto;
-        }
-
-        .card-update-batch-list.hidden,
-        .card-update-batch-progress.hidden {
-            display: none;
-        }
-        
-        /* Status line */
-        .card-update-status {
-            padding: 12px 16px;
-            background: var(--cl-glass-bg, rgba(40, 40, 40, 0.9));
-            border: 1px solid var(--cl-border, rgba(80, 80, 80, 0.4));
-            border-radius: 8px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .card-update-status i {
-            font-size: 1.1em;
-        }
-        
-        /* Diff list */
-        .card-update-diff-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .card-update-select-all {
-            padding: 8px 12px;
-            background: rgba(255,255,255,0.05);
-            border: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        
-        /* Diff item */
-        .card-update-diff-item {
-            border: 1px solid var(--cl-border, rgba(80,80,80,0.4));
-            border-radius: 8px;
-            overflow: hidden;
-            background: rgba(0,0,0,0.2);
-        }
-        
-        .card-update-diff-item.short {
-            padding: 10px 12px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-        }
-        
-        .card-update-diff-item.short label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-        
-        .card-update-diff-values {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 0.9em;
-            overflow: hidden;
-        }
-        
-        .card-update-diff-values .local-value {
-            background: rgba(244, 67, 54, 0.2);
-            color: #ff8a80;
-            text-decoration: line-through;
-            padding: 2px 6px;
-            border-radius: 3px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 150px;
-        }
-        
-        .card-update-diff-values .remote-value {
-            background: rgba(76, 175, 80, 0.2);
-            color: #b9f6ca;
-            padding: 2px 6px;
-            border-radius: 3px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 150px;
-        }
-        
-        .card-update-diff-values i {
-            color: var(--cl-text-secondary, #aaa);
-            flex-shrink: 0;
-            opacity: 0.7;
-        }
-
-        .card-update-array-diff {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            width: 100%;
-        }
-
-        .card-update-array-column {
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid var(--cl-border, rgba(80,80,80,0.35));
-            background: rgba(0,0,0,0.2);
-            min-width: 0;
-        }
-
-        .card-update-array-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 0.8em;
-            color: var(--cl-text-secondary, #aaa);
-            margin-bottom: 8px;
-        }
-
-        .card-update-array-count {
-            padding: 2px 6px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.08);
-            font-size: 0.85em;
-        }
-
-        .card-update-array-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            max-height: 140px;
-            overflow: auto;
-        }
-
-        .card-update-pill {
-            display: inline-flex;
-            align-items: center;
-            padding: 3px 8px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.08);
-            border: 1px solid rgba(255,255,255,0.12);
-            font-size: 0.8em;
-        }
-
-        .card-update-pill.tag {
-            color: var(--cl-accent, #4a9eff);
-            border-color: rgba(74, 158, 255, 0.4);
-            background: rgba(74, 158, 255, 0.12);
-        }
-
-        /* Highlight items unique to one side (added/removed) */
-        .card-update-array-column.local .card-update-pill-unique {
-            border-color: rgba(255, 80, 80, 0.6);
-            background: rgba(255, 80, 80, 0.15);
-            color: #ff6b6b;
-        }
-        .card-update-array-column.remote .card-update-pill-unique {
-            border-color: rgba(80, 200, 80, 0.6);
-            background: rgba(80, 200, 80, 0.15);
-            color: #5ec85e;
-        }
-
-        .card-update-empty {
-            color: var(--cl-text-secondary, #888);
-            font-size: 0.85em;
-        }
-        
-        /* Long text diff item */
-        .card-update-diff-item.long-text .card-update-diff-header {
-            padding: 10px 12px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            background: rgba(255,255,255,0.03);
-        }
-        
-        .card-update-diff-item.long-text label {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-            flex-shrink: 0;
-        }
-        
-        .card-update-diff-stats {
-            font-size: 0.8em;
-            color: var(--cl-text-secondary, #999);
-            flex: 1;
-            text-align: right;
-            padding-right: 8px;
-        }
-        
-        .card-update-diff-expand {
-            background: none;
-            border: none;
-            color: var(--cl-text-secondary, #999);
-            cursor: pointer;
-            padding: 4px 8px;
-            border-radius: 4px;
-            transition: background 0.15s, color 0.15s;
-            flex-shrink: 0;
-        }
-        
-        .card-update-diff-expand:hover {
-            color: var(--cl-text-primary, #fff);
-            background: rgba(255,255,255,0.1);
-        }
-        
-        .card-update-diff-content {
-            border-top: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-        }
-        
-        .card-update-diff-content.collapsed {
-            display: none;
-        }
-        
-        /* Side-by-side diff view */
-        .card-update-diff-sidebyside {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 0;
-        }
-        
-        .card-update-diff-panel {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-        }
-        
-        .card-update-diff-panel.local {
-            border-right: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-        }
-        
-        .card-update-source-badge {
-            display: inline-block;
-            font-size: 0.6rem;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            padding: 2px 7px;
-            margin-left: 8px;
-            border-radius: 4px;
-            vertical-align: middle;
-            background: rgba(var(--cl-accent-rgb, 74,158,255), 0.12);
-            color: var(--cl-accent, #4a9eff);
-            border: 1px solid rgba(var(--cl-accent-rgb, 74,158,255), 0.25);
-            cursor: help;
-        }
-
-        .card-update-diff-panel-header {
-            padding: 8px 12px;
-            font-size: 0.75em;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        
-        .card-update-diff-panel.local .card-update-diff-panel-header {
-            background: rgba(244, 67, 54, 0.1);
-            color: #ff8a80;
-            border-bottom: 2px solid #f44336;
-        }
-        
-        .card-update-diff-panel.remote .card-update-diff-panel-header {
-            background: rgba(76, 175, 80, 0.1);
-            color: #b9f6ca;
-            border-bottom: 2px solid #4caf50;
-        }
-        
-        .card-update-diff-panel-content {
-            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-            font-size: 0.82em;
-            line-height: 1.6;
-            max-height: 300px;
-            overflow-y: auto;
-            background: rgba(0,0,0,0.2);
-        }
-        
-        .card-update-diff-panel-content .diff-line {
-            padding: 2px 10px;
-            white-space: pre-wrap;
-            word-break: break-word;
-            min-height: 1.6em;
-            border-left: 3px solid transparent;
-        }
-        
-        .card-update-diff-panel-content .diff-line.empty {
-            background: rgba(128,128,128,0.1);
-            border-left-color: rgba(128,128,128,0.3);
-        }
-        
-        .card-update-diff-panel.local .diff-line.changed,
-        .card-update-diff-panel.local .diff-line.removed {
-            background: rgba(244, 67, 54, 0.15);
-            border-left-color: #f44336;
-        }
-        
-        .card-update-diff-panel.remote .diff-line.changed,
-        .card-update-diff-panel.remote .diff-line.added {
-            background: rgba(76, 175, 80, 0.15);
-            border-left-color: #4caf50;
-        }
-        
-        /* Word-level highlighting within side-by-side panels */
-        .diff-line .word-removed {
-            background: rgba(244, 67, 54, 0.5);
-            color: #ffcdd2;
-            text-decoration: line-through;
-            text-decoration-color: rgba(255, 205, 210, 0.7);
-            border-radius: 2px;
-            padding: 1px 3px;
-            margin: 0 1px;
-        }
-        
-        .diff-line .word-added {
-            background: rgba(76, 175, 80, 0.5);
-            color: #c8e6c9;
-            border-radius: 2px;
-            padding: 1px 3px;
-            margin: 0 1px;
-        }
-        
-        /* Batch modal */
-        .card-update-batch-list {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            max-height: 50vh;
-            overflow-y: auto;
-        }
-        
-        .card-update-batch-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            background: rgba(0,0,0,0.2);
-            border: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-            border-radius: 6px;
-            gap: 12px;
-        }
-        
-        .card-update-batch-item-info {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-            flex: 1;
-        }
-        
-        .card-update-batch-item-name {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .card-update-char-link {
-            cursor: pointer;
-            color: var(--cl-accent, #4a9eff);
-        }
-        .card-update-char-link:hover {
-            text-decoration: underline;
-        }
-        
-        .card-update-batch-item-path {
-            font-size: 0.8em;
-            color: var(--cl-text-secondary, #999);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        
-        .card-update-batch-item-status {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.9em;
-            flex-shrink: 0;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-        }
-        
-        .card-update-batch-item-status .has-updates {
-            color: #b9f6ca;
-            background: rgba(76, 175, 80, 0.2);
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-weight: 500;
-        }
-
-        .card-update-batch-item[data-status="unavailable"] {
-            opacity: 0.55;
-        }
-
-        .card-update-batch-item[data-status="unavailable"] .card-update-batch-item-status {
-            color: #ffab91;
-        }
-
-        .card-update-batch-item[data-status="unavailable"] .card-update-batch-checkbox {
-            opacity: 0.4;
-            cursor: not-allowed;
-        }
-        
-        .card-update-batch-view-btn {
-            padding: 4px 10px;
-            background: var(--cl-accent, #4a9eff);
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.85em;
-            transition: filter 0.15s;
-        }
-        
-        .card-update-batch-view-btn:hover {
-            filter: brightness(1.15);
-        }
-        
-        .card-update-batch-progress {
-            padding: 10px;
-            text-align: center;
-            color: var(--cl-text-secondary, #999);
-        }
-        
-        .card-update-batch-actions {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            padding-top: 12px;
-            border-top: 1px solid var(--cl-border, rgba(80,80,80,0.4));
-            margin-top: 12px;
-        }
-
-        /* Pause / Resume button */
-        .card-update-pause-btn {
-            transition: background-color 0.2s ease, border-color 0.2s ease;
-        }
-        .card-update-pause-btn.pause {
-            background: rgba(255, 152, 0, 0.2);
-            border: 1px solid rgba(255, 152, 0, 0.45);
-            color: #ffcc80;
-        }
-        .card-update-pause-btn.pause:hover {
-            background: rgba(255, 152, 0, 0.35);
-        }
-        .card-update-pause-btn.resume {
-            background: rgba(76, 175, 80, 0.2);
-            border: 1px solid rgba(76, 175, 80, 0.45);
-            color: #a5d6a7;
-        }
-        .card-update-pause-btn.resume:hover {
-            background: rgba(76, 175, 80, 0.35);
-        }
-
-        .card-update-apply-progress {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            padding: 12px;
-            border-radius: 10px;
-            border: 1px solid rgba(74, 158, 255, 0.3);
-            background: rgba(74, 158, 255, 0.08);
-            margin-bottom: 10px;
-        }
-
-        .card-update-apply-text {
-            font-size: 0.9rem;
-            color: var(--cl-text-primary, #eee);
-        }
-
-        .card-update-apply-bar {
-            width: 100%;
-            height: 8px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.1);
-            overflow: hidden;
-        }
-
-        .card-update-apply-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, rgba(74, 158, 255, 0.8), rgba(99, 102, 241, 0.9));
-            transition: width 0.2s ease;
-        }
-
-        .card-update-field-select {
-            padding: 14px;
-            border: 1px solid rgba(90, 120, 180, 0.35);
-            border-radius: 12px;
-            background: linear-gradient(135deg, rgba(30, 40, 70, 0.4), rgba(20, 20, 30, 0.6));
-            margin-bottom: 16px;
-            box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.08);
-        }
-
-        .card-update-field-select.hidden {
-            display: none;
-        }
-
-        .card-update-field-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-
-        .card-update-field-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .card-update-field-title i {
-            color: var(--cl-accent, #4a9eff);
-            font-size: 1.1rem;
-        }
-
-        .card-update-field-heading {
-            font-weight: 600;
-        }
-
-        .card-update-field-sub {
-            font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.65);
-        }
-
-        .card-update-field-actions {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .card-update-field-count {
-            font-size: 0.85rem;
-            color: rgba(255, 255, 255, 0.75);
-            padding: 4px 8px;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        .card-update-field-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 8px;
-        }
-
-        .card-update-field-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .card-update-field-option:hover {
-            border-color: rgba(74, 158, 255, 0.4);
-            background: rgba(74, 158, 255, 0.08);
-        }
-
-        .card-update-field-option input {
-            accent-color: var(--cl-accent, #4a9eff);
-        }
-
-        .card-update-field-label {
-            font-size: 0.9rem;
-        }
-
-        /* ========================================
-           BATCH FILTER BAR
-           ======================================== */
-        .card-update-batch-filter-bar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-        }
-
-        .card-update-batch-filter-bar.hidden {
-            display: none;
-        }
-
-        .card-update-filter-pills {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-        }
-
-        .card-update-filter-pill {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 5px 10px;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--cl-text-secondary, #999);
-            font-size: 0.82em;
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-
-        .card-update-filter-pill:hover {
-            border-color: rgba(74, 158, 255, 0.4);
-            background: rgba(74, 158, 255, 0.08);
-            color: var(--cl-text-primary, #eee);
-        }
-
-        .card-update-filter-pill.active {
-            border-color: var(--cl-accent, #4a9eff);
-            background: rgba(74, 158, 255, 0.15);
-            color: var(--cl-accent, #4a9eff);
-            font-weight: 500;
-        }
-
-        .filter-count {
-            font-size: 0.85em;
-            padding: 1px 5px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.1);
-            min-width: 16px;
-            text-align: center;
-        }
-
-        .card-update-filter-pill.active .filter-count {
-            background: rgba(74, 158, 255, 0.25);
-        }
-
-        /* Batch selection controls */
-        .card-update-batch-selection-controls {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.82em;
-        }
-
-        .card-update-select-link {
-            background: none;
-            border: none;
-            color: var(--cl-accent, #4a9eff);
-            cursor: pointer;
-            font-size: inherit;
-            padding: 2px 4px;
-        }
-
-        .card-update-select-link:hover {
-            text-decoration: underline;
-        }
-
-        .card-update-select-divider {
-            color: rgba(255, 255, 255, 0.2);
-        }
-
-        /* Batch item checkbox */
-        .card-update-batch-item-check {
-            display: flex;
-            align-items: center;
-            flex-shrink: 0;
-            cursor: pointer;
-        }
-
-        .card-update-batch-checkbox {
-            width: 16px;
-            height: 16px;
-            accent-color: var(--cl-accent, #4a9eff);
-            cursor: pointer;
-        }
-
-        /* Inline field icons (inside status area, next to update count + View) */
-        .card-update-batch-item-fields {
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-        }
-
-        .batch-field-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 24px;
-            height: 24px;
-            border-radius: 5px;
-            background: rgba(74, 158, 255, 0.12);
-            color: var(--cl-accent, #4a9eff);
-            font-size: 0.72em;
-        }
-
-        /* ========================================
-           PRE-APPLY SUMMARY
-           ======================================== */
-        .card-update-batch-summary {
-            padding: 0;
-        }
-
-        .card-update-batch-summary.hidden {
-            display: none;
-        }
-
-        .batch-summary-header {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 12px 14px;
-            background: rgba(74, 158, 255, 0.08);
-            border: 1px solid rgba(74, 158, 255, 0.2);
-            border-radius: 10px;
-            margin-bottom: 14px;
-        }
-
-        .batch-summary-header i {
-            color: var(--cl-accent, #4a9eff);
-            font-size: 1.1em;
-        }
-
-        .batch-summary-fields {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-bottom: 16px;
-        }
-
-        .batch-summary-field-group {
-            display: inline-flex;
-        }
-
-        .batch-summary-field-name {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .batch-summary-field-count {
-            font-size: 0.8em;
-            color: var(--cl-text-secondary, #999);
-        }
-
-        .batch-summary-chars-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 0;
-            margin-bottom: 6px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            font-size: 0.9em;
-            font-weight: 500;
-        }
-
-        .batch-summary-toggle-all {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 0.85em;
-            color: var(--cl-text-secondary, #999);
-            cursor: pointer;
-        }
-
-        .batch-summary-toggle-all input {
-            accent-color: var(--cl-accent, #4a9eff);
-        }
-
-        .batch-summary-char-list {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-            max-height: 45vh;
-            overflow-y: auto;
-        }
-
-        .batch-summary-char-item {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 10px;
-            border-radius: 6px;
-            background: rgba(0, 0, 0, 0.15);
-            cursor: pointer;
-            transition: background 0.1s;
-        }
-
-        .batch-summary-char-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-        }
-
-        .batch-summary-char-cb {
-            width: 16px;
-            height: 16px;
-            accent-color: var(--cl-accent, #4a9eff);
-            flex-shrink: 0;
-            cursor: pointer;
-        }
-
-        .batch-summary-char-info {
-            display: flex;
-            flex-direction: column;
-            min-width: 0;
-        }
-
-        .batch-summary-char-name {
-            font-weight: 500;
-            font-size: 0.9em;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .batch-summary-char-name.card-update-char-link {
-            color: var(--cl-accent, #4a9eff);
-            cursor: pointer;
-        }
-        .batch-summary-char-name.card-update-char-link:hover {
-            text-decoration: underline;
-        }
-
-        .batch-summary-char-fields {
-            display: flex;
-            align-items: center;
-            gap: 3px;
-            flex-wrap: wrap;
-        }
-
-        /* Lorebook diff */
-        .lorebook-diff-entries {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 10px 12px;
-        }
-
-        .lorebook-diff-entry {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 0.88em;
-        }
-
-        .lorebook-diff-entry.added { background: rgba(76, 175, 80, 0.1); }
-        .lorebook-diff-entry.removed { background: rgba(244, 67, 54, 0.1); }
-        .lorebook-diff-entry.modified { background: rgba(255, 152, 0, 0.1); }
-        .lorebook-diff-entry.unchanged { padding: 4px 10px; }
-
-        .lorebook-diff-badge {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            font-weight: bold;
-            font-size: 13px;
-            flex-shrink: 0;
-            line-height: 1;
-        }
-
-        .lorebook-diff-badge.added { background: rgba(76, 175, 80, 0.25); color: #81c784; }
-        .lorebook-diff-badge.removed { background: rgba(244, 67, 54, 0.25); color: #ef9a9a; }
-        .lorebook-diff-badge.modified { background: rgba(255, 152, 0, 0.25); color: #ffcc80; }
-        .lorebook-diff-badge.local-only { background: rgba(158, 158, 158, 0.25); color: #bdbdbd; font-size: 11px; }
-        .lorebook-diff-entry.local-only { opacity: 0.7; }
-
-        .lorebook-diff-summary {
-            padding: 6px 10px;
-            font-size: 0.82em;
-            color: var(--cl-text-secondary, #999);
-            border-bottom: 1px dashed rgba(255,255,255,0.08);
-            line-height: 1.4;
-        }
-
-        .lorebook-diff-info-box {
-            display: flex;
-            gap: 10px;
-            padding: 10px 12px;
-            margin: 6px 10px;
-            background: rgba(74, 158, 255, 0.08);
-            border: 1px solid rgba(74, 158, 255, 0.2);
-            border-radius: 8px;
-            font-size: 0.82em;
-            line-height: 1.5;
-            color: var(--cl-text-secondary, #bbb);
-        }
-        .lorebook-diff-info-box > i {
-            color: var(--cl-accent, #4a9eff);
-            margin-top: 2px;
-            flex-shrink: 0;
-        }
-        .lorebook-diff-info-box strong {
-            color: var(--cl-text-primary, #eee);
-        }
-        .lorebook-diff-help-details { margin-top: 6px; }
-        .lorebook-diff-help-details summary {
-            cursor: pointer;
-            font-size: 0.9em;
-            color: var(--cl-accent, #4a9eff);
-            user-select: none;
-            list-style: none;
-        }
-        .lorebook-diff-help-details summary::-webkit-details-marker { display: none; }
-        .lorebook-diff-help-details summary::before {
-            content: '▸ ';
-            font-size: 0.8em;
-        }
-        .lorebook-diff-help-details[open] summary::before {
-            content: '▾ ';
-        }
-        .lorebook-diff-help-body {
-            margin-top: 8px;
-            padding-top: 8px;
-            border-top: 1px solid rgba(74, 158, 255, 0.15);
-            font-size: 0.92em;
-            line-height: 1.6;
-        }
-        .lorebook-diff-help-body p { margin: 6px 0; }
-        .lorebook-diff-help-body ul {
-            margin: 4px 0 6px 0;
-            padding-left: 18px;
-        }
-        .lorebook-diff-help-body li { margin: 3px 0; }
-        .lorebook-diff-help-body code {
-            background: rgba(255,255,255,0.08);
-            padding: 1px 5px;
-            border-radius: 3px;
-            font-size: 0.9em;
-        }
-
-        .lorebook-diff-entry-tag {
-            margin-left: auto;
-            font-size: 0.75em;
-            padding: 1px 7px;
-            border-radius: 9px;
-            flex-shrink: 0;
-            white-space: nowrap;
-            font-weight: 500;
-        }
-        .lorebook-diff-entry-tag.added {
-            background: rgba(76, 175, 80, 0.2);
-            color: #81c784;
-        }
-        .lorebook-diff-entry-tag.local-only {
-            background: rgba(158, 158, 158, 0.15);
-            color: #bdbdbd;
-        }
-        .lorebook-diff-entry-tag.warning {
-            background: rgba(255, 152, 0, 0.2);
-            color: #ffb74d;
-        }
-
-        .lorebook-world-check {
-            flex-shrink: 0;
-            display: inline-flex;
-            align-items: center;
-            margin-left: 4px;
-        }
-
-        .lorebook-diff-local-only-section { padding: 6px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
-        .lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82em; color: var(--cl-text-secondary, #999); }
-        .lorebook-diff-keep-toggle input { accent-color: var(--accent, #7b68ee); }
-
-        .lorebook-diff-entry-name {
-            font-weight: 500;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            min-width: 0;
-        }
-
-        .lorebook-diff-entry-keys {
-            font-size: 0.85em;
-            color: var(--cl-text-secondary, #999);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            flex-shrink: 1;
-            min-width: 0;
-        }
-
-        .lorebook-diff-entry-keys::before {
-            content: '\\2014\\00a0';
-            opacity: 0.4;
-        }
-
-        .lorebook-diff-entry-changes {
-            font-size: 0.8em;
-            color: var(--cl-text-secondary, #999);
-            margin-left: auto;
-            flex-shrink: 0;
-            white-space: nowrap;
-        }
-
-        .lorebook-diff-unchanged-count {
-            opacity: 0.5;
-            font-style: italic;
-            font-size: 0.85em;
-        }
-
-        .lorebook-entry-counts {
-            font-size: 0.85em;
-            opacity: 0.65;
-            margin-left: 8px;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }
-
-        .lorebook-entry-counts i {
-            font-size: 8px;
-            opacity: 0.6;
-        }
-
-        .lorebook-diff-meta-section {
-            padding: 8px 10px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-        }
-
-        .lorebook-diff-meta-title {
-            font-size: 0.75em;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: var(--cl-text-secondary, #999);
-            margin-bottom: 6px;
-            font-weight: 600;
-        }
-
-        .lorebook-diff-meta-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 3px 0;
-            font-size: 0.85em;
-        }
-
-        .lorebook-diff-meta-key {
-            font-weight: 500;
-            min-width: 100px;
-            flex-shrink: 0;
-        }
-
-        .lorebook-diff-meta-old {
-            color: #ff8a80;
-            background: rgba(244, 67, 54, 0.15);
-            padding: 1px 6px;
-            border-radius: 3px;
-        }
-
-        .lorebook-diff-meta-new {
-            color: #b9f6ca;
-            background: rgba(76, 175, 80, 0.15);
-            padding: 1px 6px;
-            border-radius: 3px;
-        }
-
-        .lorebook-diff-meta-row i {
-            color: var(--cl-text-secondary, #aaa);
-            font-size: 0.7em;
-            opacity: 0.6;
-            flex-shrink: 0;
-        }
-
-    `;
-    
-    document.head.appendChild(style);
-}
 
 // ========================================
 // MODALS HTML
@@ -3458,7 +2415,7 @@ function injectModals() {
             <div class="cl-modal-overlay"></div>
             <div class="cl-modal-content">
                 <div class="cl-modal-header">
-                    <h3>Check for Card Updates (<span id="cardUpdateBatchCount">0</span> characters)</h3>
+                    <h3>Check for Card Updates <span style="white-space:nowrap">(<span id="cardUpdateBatchCount">0</span> characters)</span></h3>
                     <button class="cl-modal-close" id="cardUpdateBatchCloseBtn">
                         <i class="fa-solid fa-xmark"></i>
                     </button>
@@ -3488,6 +2445,7 @@ function injectModals() {
                             <button class="card-update-filter-pill" data-filter="up-to-date">Up to Date <span class="filter-count" id="batchFilterCountUpToDate">0</span></button>
                             <button class="card-update-filter-pill" data-filter="errors">Errors <span class="filter-count" id="batchFilterCountErrors">0</span></button>
                             <button class="card-update-filter-pill" data-filter="unavailable">Unavailable <span class="filter-count" id="batchFilterCountUnavailable">0</span></button>
+                            <button class="card-update-filter-pill" data-filter="locked">Locked <span class="filter-count" id="batchFilterCountLocked">0</span></button>
                             <button class="card-update-filter-pill" data-filter="applied">Applied <span class="filter-count" id="batchFilterCountApplied">0</span></button>
                         </div>
                         <div class="card-update-batch-selection-controls">

@@ -22,7 +22,7 @@
         -webkit-tap-highlight-color: transparent;
     }
     button, a, .glass-btn, .view-toggle-btn, .char-card, .chat-card,
-    .ms-btn, .browse-card, .mobile-sheet-item, .dropdown-item {
+    .browse-card, .mobile-sheet-item, .dropdown-item {
         touch-action: manipulation; /* eliminate 300ms tap delay */
     }
 
@@ -47,9 +47,10 @@
         transform: none !important;
     }
 
-    /* Gallery items — critical for gallery scroll performance */
+    /* Gallery items */
     .sprite-item {
         transition: none !important;
+        contain-intrinsic-size: 80px;
     }
     .sprite-item:hover {
         transform: none !important;
@@ -219,68 +220,6 @@
         z-index: 1099;
     }
 
-    /* Playlist filter popup – fixed overlay (moved to body via JS) */
-    #playlistFilterPopup {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        top: auto !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        max-height: 70vh !important;
-        border-radius: 16px 16px 0 0 !important;
-        z-index: 1100 !important;
-        background: var(--bg-secondary) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-bottom: none !important;
-        backdrop-filter: blur(12px) !important;
-        box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
-        flex-direction: column !important;
-        padding: 0 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-    }
-    #playlistFilterPopup .pl-filter-search-wrap {
-        padding: 14px 14px 10px;
-        border-bottom: 1px solid var(--glass-border);
-        position: sticky;
-        top: 0;
-        background: var(--bg-secondary);
-        z-index: 1;
-    }
-    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
-    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
-    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: 0.9rem; }
-    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
-    #playlistFilterContent { padding: 4px 0; }
-
-    /* Scrim behind playlist popup */
-    .mobile-playlist-scrim {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 1099;
-    }
-
-    /* Playlist picker & manage modals: fill viewport, list uses all available space */
-    #playlistPickerModal .cl-modal-body,
-    #playlistManageModal .cl-modal-body {
-        display: flex;
-        flex-direction: column;
-        flex: 1 !important;
-        min-height: 0 !important;
-        max-height: none !important;
-        overflow: hidden;
-    }
-    .pl-picker-list,
-    .pl-manage-list {
-        flex: 1;
-        min-height: 0;
-        max-height: none !important;
-    }
-    .pl-manage-search-wrap,
-    .pl-picker-search-wrap {
-        flex-shrink: 0;
-    }
 
     /* Search area: only holds the mobile search btn */
     .search-area {
@@ -376,6 +315,58 @@
     .mobile-sheet-item:active { background: rgba(255, 255, 255, 0.1); }
     .mobile-sheet-item i { width: 20px; text-align: center; color: var(--accent); }
 
+    /* Confirm bottom sheet */
+    .mobile-confirm-body {
+        padding: 20px 24px 12px;
+        text-align: center;
+    }
+    .mobile-confirm-icon {
+        font-size: 1.5rem;
+        color: var(--accent);
+        margin-bottom: 10px;
+    }
+    .mobile-confirm-title {
+        font-size: 1rem;
+        font-weight: 600;
+        color: var(--text-primary, #fff);
+        margin-bottom: 6px;
+    }
+    .mobile-confirm-desc {
+        font-size: 0.85rem;
+        color: var(--text-secondary, #aaa);
+    }
+    .mobile-confirm-actions {
+        display: flex;
+        gap: 10px;
+        padding: 16px 24px;
+    }
+    .mobile-confirm-cancel,
+    .mobile-confirm-ok {
+        flex: 1;
+        padding: 12px;
+        border-radius: 10px;
+        border: none;
+        font-size: 0.9rem;
+        font-weight: 500;
+        cursor: pointer;
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+    .mobile-confirm-cancel {
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--text-secondary, #aaa);
+    }
+    .mobile-confirm-cancel:active {
+        background: rgba(255, 255, 255, 0.15);
+    }
+    .mobile-confirm-ok {
+        background: var(--accent, #4a9eff);
+        color: #fff;
+    }
+    .mobile-confirm-ok:active {
+        filter: brightness(0.85);
+    }
+
     /* Settings sheet fields */
     .mobile-settings-body { padding: 0 20px 20px; }
     .mobile-settings-section { margin-bottom: 16px; }
@@ -419,6 +410,7 @@
     .mobile-filter-chip.active {
         background: var(--accent);
         border-color: var(--accent);
+        color: var(--accent-text);
     }
     .mobile-settings-checks {
         display: grid;
@@ -571,23 +563,6 @@
         flex-shrink: 0;
         padding: 0;
         -webkit-tap-highlight-color: rgba(255,255,255,0.1);
-    }
-    #modalChatBtn {
-        padding: 6px 8px;
-        font-size: 0;
-        gap: 0;
-        border-radius: 10px;
-        margin-right: 10px;
-        background: transparent;
-        border: 1px solid rgba(var(--accent-rgb), 0.85);
-        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45), inset 0 0 6px rgba(var(--accent-rgb), 0.25);
-    }
-    #modalChatBtn i {
-        font-size: 0.95rem;
-        color: var(--accent);
-    }
-    .mobile-chat-hidden {
-        display: none !important;
     }
 
     /* ---------------------------------------------------
@@ -847,178 +822,6 @@
         font-size: 0.8rem;
         padding: 8px 12px;
     }
-    #editPaneVersionsBtn {
-        background: rgba(var(--accent-rgb), 0.12);
-        border-color: rgba(var(--accent-rgb), 0.3);
-        color: var(--accent);
-    }
-
-    /* ---------------------------------------------------
-       VERSIONS TAB (character-versions.js module)
-       Drill-down: list view → tap item → detail view
-       --------------------------------------------------- */
-
-    .vt-container { gap: 8px; }
-
-    /* Back button — only visible in detail view */
-    .vt-back-btn { display: none !important; }
-    .vt-container.vt-detail-open .vt-back-btn {
-        display: flex !important;
-        min-height: 36px;
-        color: var(--cl-accent, #4a9eff);
-        border-color: rgba(var(--cl-accent-rgb, 74,158,255), 0.3);
-        background: rgba(var(--cl-accent-rgb, 74,158,255), 0.08);
-        touch-action: manipulation;
-    }
-
-    /* Toolbar — sub-tabs fill first row, buttons fill second */
-    .vt-toolbar { flex-wrap: wrap; gap: 6px; }
-    .vt-sub-tabs { flex: 1 1 100%; order: -1; }
-    .vt-sub-tab {
-        flex: 1;
-        justify-content: center;
-        padding: 8px 10px;
-        font-size: 0.8rem;
-        min-height: 36px;
-    }
-    .vt-toolbar-right { flex: 1 1 100%; justify-content: stretch; }
-    .vt-toolbar-right .vt-btn {
-        flex: 1;
-        justify-content: center;
-        min-height: 36px;
-    }
-
-    .vt-status { font-size: 0.8rem; padding: 6px 10px; }
-
-    /* Body — vertical stack */
-    .vt-body { flex-direction: column; overflow: visible; }
-
-    /* List — full-width vertical, standard mobile list */
-    .vt-list {
-        min-width: unset;
-        max-width: 100%;
-        max-height: none;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 4px;
-        gap: 6px;
-    }
-
-    /* Items — full-width rows, touch-friendly */
-    .vt-item { padding: 10px 12px; min-height: 44px; }
-    .vt-item-header { gap: 4px; }
-    .vt-item-id { font-size: 0.78rem; }
-    .vt-item-label { font-size: 0.82rem; }
-    .vt-item-title { font-size: 0.75rem; }
-    .vt-item-date { font-size: 0.7rem; }
-
-    /* --- Drill-down: hide list in detail view --- */
-    .vt-container.vt-detail-open .vt-toolbar { display: none; }
-    .vt-container.vt-detail-open .vt-status { display: none; }
-    .vt-container.vt-detail-open .vt-list { display: none; }
-
-    /* Hide preview & actions until detail is open */
-    .vt-container:not(.vt-detail-open) .vt-preview { display: none !important; }
-    .vt-container:not(.vt-detail-open) .vt-actions { display: none !important; }
-
-    /* Preview — scrollable content in detail view */
-    .vt-preview {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    .vt-preview-header { font-size: 0.82rem; padding: 6px 8px; margin-bottom: 8px; }
-
-    /* Diff items */
-    .vt-diff-list { gap: 6px; }
-    .vt-diff-item.short {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        padding: 8px 10px;
-    }
-    .vt-diff-label { font-size: 0.78rem; min-width: unset; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
-    .vt-diff-vals { width: 100%; font-size: 0.78rem; }
-    .vt-diff-header { padding: 8px 10px; min-height: 44px; flex-wrap: wrap; gap: 6px; }
-    .vt-diff-stats { max-width: 100%; gap: 3px 4px; }
-    .vt-stat { font-size: 0.68rem; padding: 1px 4px; }
-    .vt-lb-header { gap: 3px; }
-    .vt-lb-stat-row { padding-left: 0; gap: 3px 5px; }
-    .vt-lb-counts { font-size: 0.8em; margin-left: 4px; gap: 3px; }
-    .vt-diff-content { max-height: 220px; font-size: 0.78rem; }
-    .vt-diff-line { padding: 2px 8px 2px 4px; }
-
-    /* Version history lorebook entries (mobile) */
-    .vt-lb-content { padding: 6px 8px; gap: 3px; }
-    .vt-lb-section { border-radius: 5px; }
-    .vt-lb-section-header {
-        padding: 6px 8px; min-height: 44px;
-        font-size: 0.76rem; gap: 6px;
-        touch-action: manipulation;
-    }
-    .vt-lb-section-body { padding: 3px 4px; }
-    .vt-lb-entry {
-        flex-wrap: wrap;
-        gap: 3px 6px;
-        padding: 4px 6px;
-        font-size: 0.78rem;
-    }
-    .vt-lb-badge { width: 18px; height: 18px; font-size: 10px; }
-    .vt-lb-name { max-width: 50%; }
-    .vt-lb-world-check { margin-left: 0; }
-    .vt-lb-keys { font-size: 0.75em; flex-basis: 100%; padding-left: 4px; }
-    .vt-lb-changes { font-size: 0.72em; }
-
-    .vt-lb-meta-row { flex-wrap: wrap; gap: 3px 6px; font-size: 0.78em; }
-    .vt-lb-meta-key { min-width: unset; }
-    .vt-lb-unchanged-row { padding: 3px 6px; }
-
-    /* Provider page version entry */
-    .vt-page-version-banner { font-size: 0.75rem; padding: 6px 10px; gap: 6px; }
-
-    /* Tags diff */
-    .vt-tag-content { padding: 8px; }
-    .vt-tag-pills { gap: 5px; }
-    .vt-tag-pill { font-size: 0.75rem; padding: 3px 8px; }
-
-    /* Greetings diff */
-    .vt-greeting-header { padding: 8px 10px; min-height: 40px; font-size: 0.78rem; }
-    .vt-greeting-body { max-height: 180px; font-size: 0.78rem; }
-
-    /* Avatar preview */
-    .vt-avatar-preview { padding: 8px; gap: 10px; }
-    .vt-avatar-thumb { width: 48px; height: 48px; }
-    .vt-apply-avatar { width: 36px; height: 36px; }
-
-    /* Actions bar — pinned at bottom of detail view */
-    .vt-actions { flex-wrap: wrap; gap: 6px; padding-top: 8px; flex-shrink: 0; }
-    .vt-actions-left, .vt-actions-right { gap: 6px; }
-    .vt-actions .vt-btn { min-height: 40px; padding: 8px 12px; font-size: 0.8rem; }
-
-    /* Buttons — touch sizing */
-    .vt-btn { min-height: 36px; font-size: 0.8rem; touch-action: manipulation; }
-
-    /* Dialogs */
-    .vt-dialog { width: 95vw; max-width: 95vw; padding: 18px; border-radius: 12px; }
-    .vt-dialog-title { font-size: 1rem; }
-    .vt-dialog-msg { font-size: 0.85rem; }
-    .vt-dialog-btns { gap: 8px; }
-    .vt-dialog-btn { min-height: 40px; padding: 8px 14px; font-size: 0.85rem; }
-    .vt-input { font-size: 16px; padding: 10px 12px; }
-
-    .vt-loading, .vt-error { padding: 20px 12px; font-size: 0.82rem; }
-
-    /* Chats tab (inside character modal) */
-    .chats-header { display: none !important; } /* hide title + buttons */
-    .chats-list { max-height: none; gap: 6px; }
-    .chat-item { padding: 10px; gap: 10px; }
-    .chat-item-icon { width: 32px; height: 32px; font-size: 0.8rem; border-radius: 8px; margin-right: 0; }
-    .chat-item-info { min-width: 0; }
-    .chat-item-name { font-size: 0.85rem; }
-    .chat-item-meta { font-size: 0.7rem; gap: 8px; flex-wrap: wrap; }
-    .chat-item-actions { opacity: 1; gap: 4px; } /* always visible on mobile */
-    .chat-action-btn { width: 34px; height: 34px; border-radius: 8px; }
 
     /* Gallery tab (inside character modal) */
     .gallery-header { flex-wrap: nowrap; gap: 6px; padding-bottom: 10px; margin-bottom: 12px; }
@@ -1132,626 +935,6 @@
     .confirm-modal-body { padding: 14px 16px; font-size: 0.85rem; }
     .confirm-modal-footer { padding: 10px 16px; }
 
-    /* ChubAI character detail modal */
-    .browse-char-modal {
-        width: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        height: 100% !important;
-        border-radius: 0 !important;
-    }
-    .browse-char-modal .modal-header {
-        padding: 10px 12px;
-        padding-right: 40px; /* room for absolute close btn */
-        position: relative;
-        flex-wrap: wrap;
-        gap: 6px 8px;
-    }
-    .browse-char-modal .browse-char-header-info {
-        width: 100%; /* force controls to wrap below */
-        max-height: 60px;
-        overflow: hidden;
-        transition: max-height 0.25s ease, opacity 0.2s ease;
-    }
-    .browse-char-modal.header-collapsed .browse-char-header-info {
-        max-height: 0 !important;
-        opacity: 0;
-    }
-    .browse-char-modal .modal-header {
-        transition: row-gap 0.25s ease;
-    }
-    .browse-char-modal.header-collapsed .modal-header {
-        row-gap: 0 !important;
-    }
-    .browse-char-modal .modal-controls {
-        display: flex;
-        gap: 6px;
-        flex-wrap: nowrap;
-        align-items: center;
-        justify-content: flex-start;
-    }
-    .browse-char-modal .modal-controls > .close-btn {
-        display: flex !important;
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        width: 30px; height: 30px;
-        font-size: 1.1rem;
-    }
-    .browse-char-modal .action-btn {
-        font-size: 0.72rem;
-        padding: 5px 10px;
-        min-height: 28px;
-        gap: 5px;
-        white-space: nowrap;
-    }
-    .browse-char-avatar { width: 40px; height: 40px; border-radius: 8px; }
-    .browse-char-header-info { gap: 10px; min-width: 0; overflow: hidden; }
-    .browse-char-header-info > div { min-width: 0; overflow: hidden; }
-    .browse-char-header-info h2 { font-size: 0.95rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .browse-char-meta { font-size: 0.75rem; overflow: hidden; }
-    .browse-char-body { overflow-x: hidden !important; padding: 10px; gap: 10px; }
-    .browse-char-body.snap-active { scroll-snap-type: y proximity; }
-    .browse-char-body.snap-active > .browse-char-section { scroll-snap-align: start; }
-    .browse-char-tagline {
-        padding: 8px 10px;
-        border-radius: 8px;
-        font-size: 0.82rem;
-        line-height: 1.4;
-        gap: 8px;
-        margin-top: 0;
-    }
-    .provider-tagline-text { font-size: 0.82rem; }
-    .browse-char-meta-grid {
-        grid-template-columns: 1fr;
-        gap: 10px;
-    }
-    .browse-char-stats {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px 10px;
-        padding: 6px 8px;
-        font-size: 0.78rem;
-    }
-    .browse-stat { gap: 4px; font-size: 0.78rem; white-space: nowrap; }
-    .browse-char-tags { gap: 5px; }
-    .browse-char-tags { --browse-tags-max-height: 56px; }
-    .browse-tag { font-size: 0.75rem; padding: 3px 8px; }
-    .browse-tags-more { font-size: 0.7rem; padding: 2px 6px; }
-    .browse-char-section { padding: 0; border-radius: 0; background: none; border: none; }
-    .browse-char-section h3 { margin-bottom: 6px; font-size: 0.88rem; }
-    .browse-char-section .scrolling-text { font-size: 0.82rem; padding: 8px 10px; border-radius: 8px; }
-    .browse-section-title {
-        font-size: 0.82rem;
-        padding: 4px 0;
-        min-height: 32px;
-        display: flex;
-        align-items: center;
-    }
-    .browse-section-count { font-size: 0.75rem; }
-    .scrolling-text {
-        font-size: 0.82rem;
-        line-height: 1.45;
-        padding: 10px;
-    }
-    .browse-alt-greeting summary { padding: 6px 8px; gap: 6px; }
-    .browse-alt-greeting-index { font-size: 0.68rem; padding: 2px 5px; }
-    .browse-alt-greeting-preview { font-size: 0.75rem; }
-    .browse-alt-greeting-body { font-size: 0.82rem; padding: 8px 10px; }
-    .audio-item-name { font-size: 0.78rem; }
-    .browse-gallery-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 6px; }
-    .browse-gallery-thumb:hover { opacity: 1; }
-
-    /* Card updates modal (mobile) */
-    .card-update-modal .cl-modal-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-        border: none !important;
-    }
-    .card-update-modal .cl-modal-header {
-        padding: 10px 12px;
-        gap: 8px;
-        flex-wrap: wrap;
-        flex-shrink: 0;
-    }
-    .card-update-source-badge { font-size: 0.55rem; padding: 1px 5px; margin-left: 5px; }
-    .card-update-modal .cl-modal-body {
-        flex: 1 !important;
-        min-height: 0 !important;
-        max-height: none !important;
-        overflow-y: auto;
-        padding: 12px;
-        font-size: 0.85rem;
-        -webkit-overflow-scrolling: touch;
-    }
-    .card-update-status { font-size: 0.82rem; padding: 10px 12px; gap: 8px; }
-    .card-update-select-all { font-size: 0.82rem; }
-    .card-update-diff-values { font-size: 0.82em; }
-    .card-update-diff-expand { font-size: 0.82rem; }
-    .card-update-empty { font-size: 0.78em; }
-    .card-update-apply-text { font-size: 0.82rem; }
-    .card-update-array-count { font-size: 0.75rem; }
-
-    .card-update-field-select {
-        padding: 12px;
-        border-radius: 14px;
-        background: linear-gradient(140deg, rgba(40, 50, 90, 0.55), rgba(20, 20, 30, 0.75));
-        border: 1px solid rgba(90, 140, 210, 0.35);
-    }
-    .card-update-field-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    .card-update-field-actions {
-        width: 100%;
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 8px;
-    }
-    .card-update-field-actions .cl-btn {
-        padding: 6px 8px;
-        font-size: 0.8rem;
-    }
-    .card-update-field-count {
-        grid-column: 1 / -1;
-        text-align: center;
-        font-size: 0.78rem;
-    }
-    .card-update-field-grid {
-        grid-template-columns: 1fr;
-        gap: 10px;
-    }
-    .card-update-field-title i { font-size: 0.92rem; }
-    .card-update-field-heading { font-size: 0.85rem; }
-    .card-update-field-sub { font-size: 0.78rem; }
-    .card-update-field-label { font-size: 0.82rem; }
-    .card-update-field-option {
-        padding: 10px 12px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
-
-    /* =============================================
-       Batch list — compact iOS-style cells
-       Each row: [name + clamped path] ... [status badge] [>]
-       Fits ~8+ items on screen before scrolling
-       ============================================= */
-    .card-update-batch-list {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        overflow-x: hidden;
-        max-height: none;
-        overflow-y: visible;
-        background: rgba(255, 255, 255, 0.04);
-        border-radius: 12px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-    }
-
-    .card-update-batch-item {
-        flex-direction: row;
-        align-items: center;
-        gap: 10px;
-        padding: 9px 12px;
-        border-radius: 0;
-        background: rgba(255, 255, 255, 0.02);
-        border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        width: auto;
-        min-height: 44px;
-        box-sizing: border-box;
-    }
-    .card-update-batch-item:last-child {
-        border-bottom: none;
-    }
-    .card-update-batch-item:first-child {
-        border-radius: 12px 12px 0 0;
-    }
-    .card-update-batch-item:last-child {
-        border-radius: 0 0 12px 12px;
-    }
-    .card-update-batch-item:only-child {
-        border-radius: 12px;
-    }
-
-    /* Info column — name + path, single lines, truncated */
-    .card-update-batch-item-info {
-        width: auto;
-        flex: 1;
-        min-width: 0;
-        gap: 1px;
-    }
-    .card-update-batch-item-name {
-        font-size: 0.88rem;
-        font-weight: 600;
-        line-height: 1.25;
-    }
-    .card-update-batch-item-path {
-        font-size: 0.72rem;
-        opacity: 0.5;
-        line-height: 1.2;
-    }
-    .card-update-batch-item-name,
-    .card-update-batch-item-path {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        word-break: normal;
-        overflow-wrap: normal;
-    }
-
-    /* Status area — compact inline badges */
-    .card-update-batch-item-status {
-        width: auto;
-        justify-content: flex-end;
-        gap: 6px;
-        flex-wrap: nowrap;
-        flex-shrink: 0;
-        font-size: 0.78rem;
-        white-space: nowrap;
-    }
-
-    /* Status badge — "3 updates" pill */
-    .card-update-batch-item-status .has-updates {
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        letter-spacing: 0.01em;
-    }
-
-    /* View button → compact pill instead of full-width block */
-    .card-update-batch-view-btn {
-        width: auto;
-        padding: 3px 10px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-    }
-
-    /* Card update lorebook header — prevent overflow on mobile */
-    .card-update-diff-item.long-text .card-update-diff-header {
-        flex-wrap: wrap;
-        gap: 8px;
-        padding: 8px 10px;
-    }
-    .card-update-diff-item.long-text .card-update-diff-header label { flex-shrink: 1; min-width: 0; }
-    .card-update-diff-stats { font-size: 0.75em; white-space: nowrap; }
-    .lorebook-entry-counts { font-size: 0.78em; margin-left: 4px; gap: 3px; }
-    .lorebook-diff-summary { font-size: 0.78em; }
-
-    /* --- Card update lorebook diff entries (mobile) --- */
-    .lorebook-diff-entries { padding: 6px 8px; gap: 3px; }
-    .lorebook-diff-info-box {
-        flex-direction: column;
-        gap: 6px;
-        padding: 8px 10px;
-        margin: 4px 6px;
-        font-size: 0.78em;
-        line-height: 1.4;
-    }
-    .lorebook-diff-info-detail { font-size: 0.88em; }
-    .lorebook-diff-entry {
-        flex-wrap: wrap;
-        gap: 4px 6px;
-        padding: 5px 8px;
-        font-size: 0.82em;
-    }
-    .lorebook-diff-badge { width: 18px; height: 18px; font-size: 10px; }
-    .lorebook-diff-entry-name { max-width: 45%; }
-    .lorebook-diff-entry-tag {
-        font-size: 0.7em;
-        padding: 1px 5px;
-        order: 10;
-    }
-    .lorebook-world-check { margin-left: 0; }
-    .lorebook-diff-entry-keys { font-size: 0.78em; flex-basis: 100%; padding-left: 26px; }
-    .lorebook-diff-entry-changes { font-size: 0.75em; }
-    .lorebook-diff-meta-row { flex-wrap: wrap; gap: 4px 6px; font-size: 0.82em; }
-    .lorebook-diff-meta-key { min-width: unset; }
-
-    .card-update-diff-item.short {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 8px;
-    }
-    .card-update-diff-values {
-        width: 100%;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-        align-items: center;
-        gap: 6px;
-    }
-    .card-update-diff-values .local-value,
-    .card-update-diff-values .remote-value {
-        white-space: normal;
-        max-width: none;
-        width: auto;
-        display: block;
-    }
-
-    .card-update-array-diff {
-        grid-template-columns: 1fr;
-    }
-    .card-update-array-list {
-        max-height: none;
-        overflow: visible;
-    }
-    .card-update-pill {
-        font-size: 0.78em;
-        padding: 3px 8px;
-    }
-
-    .card-update-diff-sidebyside {
-        grid-template-columns: 1fr;
-    }
-    .card-update-diff-panel.local {
-        border-right: none;
-        border-bottom: 1px solid rgba(80,80,80,0.3);
-    }
-    .card-update-diff-panel-content {
-        max-height: none;
-        overflow: visible;
-        font-size: 0.75em;
-    }
-    /* =============================================
-       Batch modal footer — mobile
-       States:  idle     → [Start Check] [Close]
-                checking → [Pause]       [Close]
-                paused   → [Apply All ···········]    (full row, primary CTA)
-                           [Resume]      [Close]
-                done     → [Apply All ···········]    (full row, primary CTA)
-                                         [Close]
-       ============================================= */
-    .card-update-modal .cl-modal-footer {
-        padding: 12px;
-        gap: 8px;
-        display: flex;
-        flex-wrap: wrap;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
-        flex-shrink: 0;
-    }
-
-    /* Uniform button sizing — every button in the footer */
-    .card-update-modal .cl-modal-footer .cl-btn,
-    .card-update-modal .cl-modal-footer .card-update-pause-btn {
-        height: 44px;
-        padding: 0 16px;
-        border-radius: 12px;
-        font-size: 0.92rem;
-        font-weight: 500;
-        box-sizing: border-box;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        flex: 1 1 0;
-        min-width: 0;
-    }
-
-    /* Apply progress bar — full width row */
-    .card-update-modal .cl-modal-footer .card-update-apply-progress {
-        flex: 0 0 100%;
-        order: -2;
-    }
-
-    /* Apply All wrapper — full width, primary CTA row */
-    .card-update-batch-actions {
-        flex: 0 0 100% !important;
-        order: -1;
-        padding-top: 0;
-        border-top: none;
-        margin-top: 0;
-        gap: 0;
-    }
-    .card-update-batch-actions .cl-btn {
-        width: 100%;
-        height: 48px;          /* slightly taller — primary action */
-        font-size: 0.95rem;
-        font-weight: 600;
-        border-radius: 12px;
-        letter-spacing: 0.01em;
-    }
-
-    /* Pause / Resume — colour variants */
-    .card-update-pause-btn {
-        font-weight: 600 !important;
-    }
-    .card-update-pause-btn.pause {
-        background: rgba(255, 152, 0, 0.18) !important;
-        border: 1px solid rgba(255, 152, 0, 0.4) !important;
-        color: #ffd54f !important;
-    }
-    .card-update-pause-btn.resume {
-        background: rgba(76, 175, 80, 0.18) !important;
-        border: 1px solid rgba(76, 175, 80, 0.4) !important;
-        color: #81c784 !important;
-    }
-
-    /* Batch progress text - mobile */
-    .card-update-batch-progress {
-        padding: 12px 14px;
-        font-size: 0.9rem;
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.75);
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: 10px;
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        margin-top: 8px;
-    }
-
-    /* =============================================
-       Batch filter bar, checkboxes, field pills,
-       selection controls, pre-apply summary
-       ============================================= */
-
-    /* Filter bar — horizontal scroll on narrow screens */
-    .card-update-batch-filter-bar {
-        gap: 8px;
-        margin-bottom: 10px;
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 2px;
-    }
-
-    .card-update-filter-pills {
-        flex-wrap: nowrap;
-        gap: 5px;
-        flex-shrink: 0;
-    }
-
-    /* Touch-friendly pills */
-    .card-update-filter-pill {
-        padding: 6px 10px;
-        font-size: 0.78rem;
-        min-height: 32px;
-        white-space: nowrap;
-        touch-action: manipulation;
-    }
-    .card-update-filter-pill:hover {
-        border-color: rgba(255, 255, 255, 0.12);
-        background: rgba(255, 255, 255, 0.05);
-        color: var(--cl-text-secondary, #999);
-    }
-    .card-update-filter-pill.active:hover {
-        border-color: var(--cl-accent, #4a9eff);
-        background: rgba(74, 158, 255, 0.15);
-        color: var(--cl-accent, #4a9eff);
-    }
-
-    .filter-count {
-        font-size: 0.8em;
-        padding: 0 4px;
-        min-width: 14px;
-    }
-
-    /* Selection controls — compact row */
-    .card-update-batch-selection-controls {
-        font-size: 0.78rem;
-        flex-shrink: 0;
-        gap: 4px;
-    }
-    .card-update-select-link {
-        padding: 4px 6px;
-        min-height: 32px;
-        display: inline-flex;
-        align-items: center;
-        touch-action: manipulation;
-    }
-
-    /* Batch item checkbox — 44px touch target */
-    .card-update-batch-item-check {
-        min-width: 44px;
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: -9px -6px -9px -8px;
-    }
-    .card-update-batch-checkbox {
-        width: 18px;
-        height: 18px;
-    }
-
-    /* Inline field icons in status area */
-    .card-update-batch-item-fields {
-        gap: 2px;
-    }
-    .batch-field-icon {
-        width: 20px;
-        height: 20px;
-        font-size: 0.65em;
-    }
-
-    /* Pre-apply summary — full-width mobile layout */
-    .batch-summary-header {
-        padding: 10px 12px;
-        border-radius: 8px;
-        margin-bottom: 10px;
-        gap: 8px;
-        font-size: 0.88rem;
-    }
-
-    .batch-summary-fields {
-        gap: 5px;
-        margin-bottom: 12px;
-    }
-    .batch-summary-field-count {
-        font-size: 0.75em;
-    }
-
-    .batch-summary-chars-header {
-        padding: 6px 0;
-        margin-bottom: 4px;
-        font-size: 0.85em;
-    }
-
-    .batch-summary-toggle-all {
-        font-size: 0.8em;
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-        touch-action: manipulation;
-    }
-    .batch-summary-toggle-all input {
-        width: 18px;
-        height: 18px;
-    }
-
-    .batch-summary-char-list {
-        max-height: 55vh;
-        gap: 1px;
-    }
-
-    .batch-summary-char-item {
-        gap: 10px;
-        padding: 10px 10px;
-        min-height: 44px;
-        border-radius: 4px;
-        touch-action: manipulation;
-    }
-    .batch-summary-char-item:hover {
-        background: rgba(0, 0, 0, 0.15);
-    }
-
-    .batch-summary-char-cb {
-        width: 18px;
-        height: 18px;
-    }
-
-    .batch-summary-char-name {
-        font-size: 0.85em;
-    }
-    .batch-summary-char-fields {
-        gap: 2px;
-    }
-    .batch-summary-char-fields .batch-field-icon {
-        width: 18px;
-        height: 18px;
-        font-size: 0.6em;
-    }
-
-    /* Summary footer buttons — match existing batch footer styling */
-    #cardUpdateBatchSummaryBackBtn,
-    #cardUpdateBatchSummaryConfirmBtn {
-        height: 44px;
-        border-radius: 12px;
-        font-size: 0.92rem;
-        font-weight: 500;
-        touch-action: manipulation;
-    }
-    #cardUpdateBatchSummaryConfirmBtn {
-        height: 48px;
-        font-weight: 600;
-    }
-
     /* ---------------------------------------------------
        TOAST NOTIFICATIONS – top-anchored on mobile
        Keeps toasts out of the way of bottom buttons
@@ -1783,181 +966,9 @@
         to   { transform: translateY(-100%); opacity: 0; }
     }
 
-    /* ---------------------------------------------------
-       CONTEXT MENU → hidden on mobile (replaced by bottom sheet)
-       --------------------------------------------------- */
-    .cl-context-menu {
-        display: none !important;  /* always hidden – mobile uses bottom sheet */
-    }
-
-    /* Mobile context-menu bottom sheet */
-    .mobile-ctx-scrim {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.5);
-        z-index: 9000;
-    }
-    .mobile-ctx-scrim.visible { display: block; }
-
-    .mobile-ctx-sheet {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: var(--bg-secondary, #1e1e2e);
-        border-top: 1px solid rgba(255,255,255,0.1);
-        border-radius: 16px 16px 0 0;
-        z-index: 9001;
-        max-height: 75vh;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 0 0 env(safe-area-inset-bottom, 8px) 0;
-        transform: translateY(100%);
-        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-    .mobile-ctx-sheet.visible {
-        transform: translateY(0);
-    }
-
-    .mobile-ctx-handle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 12px 0 4px;
-        cursor: pointer;
-    }
-    .mobile-ctx-handle-bar {
-        width: 40px; height: 4px;
-        border-radius: 2px;
-        background: rgba(255,255,255,0.3);
-    }
-
-    /* Items inside the sheet inherit context-menu styling */
-    .mobile-ctx-sheet .cl-context-menu-separator {
-        height: 1px;
-        background: rgba(255,255,255,0.08);
-        margin: 4px 12px;
-    }
-    .mobile-ctx-sheet .cl-context-menu-header {
-        padding: 10px 20px 6px;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: var(--text-secondary, #999);
-        font-weight: 600;
-    }
-    .mobile-ctx-sheet .cl-context-menu-item {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        padding: 14px 20px;
-        min-height: 48px;
-        font-size: 0.9rem;
-        color: var(--text-primary, #eee);
-        cursor: pointer;
-        border-radius: 0;
-        transition: background 0.15s;
-    }
-    .mobile-ctx-sheet .cl-context-menu-item:active {
-        background: rgba(255,255,255,0.08);
-    }
-    .mobile-ctx-sheet .cl-context-menu-item i {
-        width: 22px;
-        text-align: center;
-        opacity: 0.8;
-        font-size: 1rem;
-    }
-    .mobile-ctx-sheet .cl-context-menu-item.danger {
-        color: #ff6b7a;
-    }
 
     /* ---------------------------------------------------
-       GALLERY VIEWER (injected by gallery-viewer.js)
-       --------------------------------------------------- */
-    .gv-header { padding: 10px 12px; }
-    .gv-header-left { font-size: 0.85em; gap: 6px; }
-    .gv-btn { width: 40px; height: 40px; }
-    .gv-nav { display: none !important; } /* hidden on mobile – swipe to navigate */
-    .gv-thumbnails { padding: 8px 12px; gap: 6px; }
-    .gv-thumb { width: 50px; height: 50px; }
-    .gv-footer { padding: 8px 12px; }
-    .gv-filename { font-size: 0.75em; }
-    .gv-image-container {
-        padding: 0;
-        touch-action: none; /* JS handles all touch gestures */
-        overflow: hidden;
-        user-select: none;
-        -webkit-user-select: none;
-    }
-    .gv-content {
-        touch-action: none;
-        overflow: hidden;
-    }
-    .gv-image {
-        transform-origin: center center;
-        will-change: transform;
-    }
-
-    /* ---------------------------------------------------
-       MULTI-SELECT TOOLBAR (injected by module-loader.js)
-       Smooth show/hide — no layout shift flash
-       --------------------------------------------------- */
-    .multi-select-toolbar {
-        flex-wrap: wrap;
-        padding: 8px 10px;
-        gap: 8px;
-        flex-shrink: 0;
-        overflow: hidden;
-        backdrop-filter: none !important;
-        transition: none !important;
-    }
-    .multi-select-toolbar.hidden {
-        display: none !important;
-    }
-
-    /* Kill per-card checkbox transition — toggling body class repaints every card */
-    body.multi-select-mode .char-card::before,
-    body.multi-select-mode .char-card::after {
-        transition: none !important;
-    }
-    .multi-select-left {
-        gap: 6px;
-        flex-shrink: 0;
-    }
-    .multi-select-badge {
-        padding: 4px 10px;
-        font-size: 0.8em;
-        gap: 6px;
-    }
-    .multi-select-label {
-        display: none; /* hide "characters selected" text */
-    }
-    .multi-select-actions {
-        flex: 1 1 auto;
-        flex-wrap: wrap;
-        gap: 4px;
-        justify-content: flex-start;
-        min-width: 0;
-    }
-    .ms-btn {
-        padding: 6px 8px;
-        font-size: 0.78em;
-        gap: 4px;
-    }
-    .ms-btn span {
-        display: none; /* icon-only on mobile */
-    }
-    .ms-divider {
-        display: none; /* hide dividers to save space */
-    }
-    .multi-select-right {
-        gap: 4px;
-    }
-    .ms-btn-exit {
-        padding: 6px 8px;
-    }
-
-    /* ---------------------------------------------------
-       BATCH TAG / CL-MODAL (injected by batch-tagging.js)
+       CL-MODAL
        --------------------------------------------------- */
     .cl-modal-content {
         width: 100% !important;
@@ -1972,49 +983,13 @@
     .cl-modal-footer { padding: 12px 14px; }
     .cl-input { font-size: 16px; } /* prevent iOS zoom */
     .cl-btn { min-height: 44px; }
-    .bt-suggestions { max-height: 40vh; }
 
-    /* ---------------------------------------------------
-       CHUB LOGIN MODAL
-       --------------------------------------------------- */
-    .chub-login-modal {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
-    .chub-login-body { padding: 14px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .chub-login-info { font-size: 0.85rem; padding: 12px; }
-    .chub-login-actions { flex-wrap: wrap; }
-    .chub-login-form .glass-input { font-size: 16px; }
-    .pyg-plugin-status { font-size: 0.8rem; }
-    .pyg-manual-token-body .glass-input { font-size: 16px; }
 
-    /* ---------------------------------------------------
-       GALLERY SYNC DROPDOWN (moved to body via JS)
-       --------------------------------------------------- */
-    .gallery-sync-dropdown {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        top: auto !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        max-width: none !important;
-        min-width: 0 !important;
-        max-height: 70vh !important;
-        overflow-y: auto !important;
-        border-radius: 16px 16px 0 0 !important;
-        border-bottom: none !important;
-        z-index: 1100 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-    }
 
     /* ---------------------------------------------------
        PROVIDER LINK MODAL
        --------------------------------------------------- */
-    .chub-link-modal-content {
+    .provider-link-modal-content {
         width: 100% !important;
         max-width: 100% !important;
         max-height: 100% !important;
@@ -2022,33 +997,33 @@
         border-radius: 0 !important;
         border: none !important;
     }
-    .chub-link-modal-body {
+    .provider-link-modal-body {
         flex-direction: column;
         gap: 14px;
     }
 
     /* Sidebar → horizontal strip with avatar + name + status */
-    .chub-link-sidebar {
+    .provider-link-sidebar {
         flex-direction: row;
         gap: 12px;
         align-items: center;
         padding-bottom: 10px;
         border-bottom: 1px solid var(--glass-border);
     }
-    .chub-link-avatar-wrapper { flex-shrink: 0; }
-    .chub-link-avatar {
+    .provider-link-avatar-wrapper { flex-shrink: 0; }
+    .provider-link-avatar {
         width: 48px;
         height: 48px;
         border-radius: 10px;
     }
-    .chub-link-status-icon {
+    .provider-link-status-icon {
         width: 20px;
         height: 20px;
         font-size: 0.55rem;
         bottom: -4px;
         right: -4px;
     }
-    .chub-link-char-name {
+    .provider-link-char-name {
         max-width: none;
         font-size: 0.9rem;
         text-align: left;
@@ -2060,139 +1035,123 @@
     }
 
     /* Linked state */
-    .chub-link-current-path {
+    .provider-link-current-path {
         padding: 10px 12px;
         font-size: 0.85rem;
         gap: 8px;
     }
-    .chub-link-current-path:hover {
+    .provider-link-current-path:hover {
         transform: none;
     }
-    .chub-link-stats {
+    .provider-link-stats {
         gap: 12px;
         font-size: 0.8rem;
         flex-wrap: wrap;
     }
-    .chub-link-actions {
+    .provider-link-actions {
         gap: 8px;
     }
-    .chub-link-btn {
+    .provider-link-btn {
         min-height: 44px;
         font-size: 0.85rem;
         padding: 10px 16px;
         border-radius: 10px;
     }
-    .chub-link-btn.primary:hover,
-    .chub-link-btn.secondary:hover,
-    .chub-link-btn.text-danger:hover {
+    .provider-link-btn.primary:hover,
+    .provider-link-btn.secondary:hover,
+    .provider-link-btn.text-danger:hover {
         transform: none !important;
         box-shadow: none !important;
     }
-    .chub-link-btn.text-danger {
+    .provider-link-btn.text-danger {
         min-height: 40px;
         padding: 8px 16px;
     }
-    .chub-link-btn.compact {
+    .provider-link-btn.compact {
         min-height: 44px;
         padding: 10px 14px;
     }
 
     /* Search section */
-    .chub-link-search-row {
+    .provider-link-search-row {
         flex-wrap: wrap;
         gap: 8px;
     }
-    .chub-link-search-row input {
+    .provider-link-search-row input {
         font-size: 16px;
         min-height: 44px;
     }
-    .chub-link-search-row input:first-child {
+    .provider-link-search-row input:first-child {
         flex: 1 1 100%;
     }
-    .chub-link-search-row input:nth-child(3) {
+    .provider-link-search-row input:nth-child(3) {
         flex: 1;
     }
-    .chub-link-search-by {
+    .provider-link-search-by {
         font-size: 0.75rem;
     }
-    .chub-link-search-btn {
+    .provider-link-search-btn {
         min-height: 44px;
         min-width: 44px;
         padding: 10px 14px;
     }
 
     /* Search results */
-    .chub-link-search-results {
+    .provider-link-search-results {
         max-height: 50vh;
     }
-    .chub-link-search-result {
+    .provider-link-search-result {
         padding: 10px;
         gap: 10px;
         min-height: 44px;
     }
-    .chub-link-search-result:hover {
+    .provider-link-search-result:hover {
         transform: none;
     }
-    .chub-link-search-result-avatar {
+    .provider-link-search-result-avatar {
         width: 40px;
         height: 40px;
         border-radius: 8px;
     }
-    .chub-link-search-result-name {
+    .provider-link-search-result-name {
         font-size: 0.85rem;
     }
-    .chub-link-search-result-creator {
+    .provider-link-search-result-creator {
         font-size: 0.75rem;
     }
-    .chub-link-search-result-stats {
+    .provider-link-search-result-stats {
         font-size: 0.7rem;
         gap: 8px;
     }
-    .chub-link-search-result-btn {
+    .provider-link-search-result-btn {
         min-height: 36px;
         padding: 6px 12px;
         font-size: 0.78rem;
         white-space: nowrap;
         flex-shrink: 0;
     }
-    .chub-link-search-empty {
+    .provider-link-search-empty {
         padding: 16px 12px;
         font-size: 0.82rem;
     }
 
     /* Divider + URL row */
-    .chub-link-divider {
+    .provider-link-divider {
         margin: 10px 0;
     }
-    .chub-link-url-row {
+    .provider-link-url-row {
         gap: 8px;
     }
-    .chub-link-url-row input {
+    .provider-link-url-row input {
         font-size: 16px;
         min-height: 44px;
     }
 
-    /* ---------------------------------------------------
-       SETTINGS MODAL (gallery settings)
-       --------------------------------------------------- */
-    .settings-modal-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
+    /* --- Settings: search bars, inputs, controls --- */
     .settings-search-bar .glass-input { font-size: 16px !important; width: 120px !important; }
     .settings-search-bar .glass-input:focus { width: 160px !important; }
     .help-search-bar .glass-input { font-size: 16px !important; width: 120px !important; }
     .help-search-bar .glass-input:focus { width: 160px !important; }
-    .settings-content { padding: 14px; }
-    .settings-panel-header h4 { font-size: 0.95rem; }
-    .settings-panel-desc { font-size: 0.78rem; }
-    .settings-group-title { font-size: 0.85rem; }
-    .settings-row { font-size: 0.85rem; }
-    .settings-row > label { font-size: 0.82rem; }
-    .color-preview-label { font-size: 0.78rem; }
     .settings-input-group {
         flex-wrap: wrap;
     }
@@ -2205,6 +1164,18 @@
         min-width: 44px !important;
         min-height: 44px !important;
     }
+
+    /* Provider exclude tags */
+    .provider-exclude-tags-input {
+        font-size: 16px !important;
+    }
+    .provider-exclude-tag-remove {
+        min-width: 28px;
+        min-height: 28px;
+    }
+
+    /* Platform-specific settings visibility */
+    .settings-row[data-platform="desktop"] { display: none !important; }
 
     /* ---------------------------------------------------
        ALL CONFIRM MODALS – holistic mobile treatment
@@ -2773,6 +1744,10 @@
         padding: 10px;
         font-size: 0.75rem;
     }
+    .char-dup-card.pre-import-match-card:hover {
+        background: rgba(0, 0, 0, 0.3) !important;
+        border-color: var(--glass-border) !important;
+    }
     .char-dup-card-avatar {
         width: 40px; height: 40px;
     }
@@ -2781,6 +1756,10 @@
     .char-dup-card-creator { font-size: 0.7rem; }
     .char-dup-card-meta { gap: 4px; font-size: 0.7rem; }
     .char-dup-card-meta-item { padding: 2px 5px; }
+    .char-dup-card-meta .char-dup-group-confidence {
+        white-space: normal;
+        flex-basis: 100%;
+    }
     .char-dup-card-diffs { gap: 3px; }
     .diff-badge { font-size: 0.6rem; padding: 2px 4px; }
     .char-dup-card-actions {
@@ -3007,6 +1986,7 @@
         justify-content: center;
         width: 100%;
         height: 100%;
+        font-size: 0.95rem;
     }
     .character-grid {
         grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -3051,1179 +2031,6 @@
         top: 4px; right: 4px;
     }
 
-    /* ---------------------------------------------------
-       CHATS VIEW  (main view)
-       --------------------------------------------------- */
-    .chats-view {
-        padding: 8px;
-        padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
-    }
-    .chats-grid {
-        grid-template-columns: 1fr;
-        gap: 8px;
-    }
-
-    /* Flat chat cards — compact list rows */
-    .chat-card {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    .chat-card:hover {
-        transform: none;
-        box-shadow: none;
-    }
-    .chat-card-header {
-        padding: 8px 10px;
-        gap: 8px;
-    }
-    .chat-card-avatar,
-    .chat-card-avatar-fallback {
-        width: 36px;
-        height: 36px;
-    }
-    .chat-card-char-name {
-        font-size: 0.85rem;
-    }
-    .chat-card.active .chat-card-char-info {
-        padding-right: 60px;
-    }
-    .chat-card-chat-name {
-        font-size: 0.72rem;
-    }
-    .chat-card-body {
-        padding: 0 10px 8px;
-        gap: 4px;
-    }
-    .chat-card-preview {
-        font-size: 0.78rem !important;
-        line-height: 1.4 !important;
-        padding: 6px 8px !important;
-        min-height: 0 !important;
-        max-height: 3.2em !important;
-        display: block !important;
-        -webkit-line-clamp: unset !important;
-        line-clamp: unset !important;
-        -webkit-box-orient: unset !important;
-        overflow: hidden !important;
-        border-radius: 6px;
-        word-break: break-word;
-    }
-    .chat-card-footer {
-        padding: 6px 10px;
-        font-size: 0.7rem;
-    }
-    .chat-card-meta {
-        gap: 8px;
-    }
-    .chat-card-actions {
-        opacity: 1;
-        gap: 4px;
-    }
-    .chat-card-action {
-        padding: 6px 10px;
-        font-size: 0.72rem;
-        min-height: 32px;
-        display: flex;
-        align-items: center;
-        border-radius: 6px;
-    }
-    .chat-card.active::before {
-        font-size: 0.55rem;
-        top: 4px;
-        right: 4px;
-        padding: 2px 5px;
-    }
-    .chat-model-badge {
-        max-width: 100px;
-        font-size: 0.62rem;
-        padding: 1px 5px;
-    }
-
-    /* Grouped chats view — iOS-style sections */
-    .chats-grouped-view { gap: 8px; }
-    .chat-group {
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    .chat-group-header {
-        padding: 10px 12px;
-        gap: 10px;
-        min-height: 44px;
-    }
-    .chat-group-header:hover { background: rgba(0, 0, 0, 0.25); }
-    .chat-group-avatar,
-    .chat-group-avatar-fallback { width: 36px; height: 36px; }
-    .chat-group-name { font-size: 0.88rem; }
-    .chat-group-count { font-size: 0.75rem; }
-    .chat-group-toggle { font-size: 0.8rem; }
-    .chat-group-item {
-        padding: 10px 12px 10px 16px;
-        gap: 10px;
-        min-height: 44px;
-    }
-    .chat-group-item:hover { background: none; }
-    .chat-group-item-icon { font-size: 0.9rem; }
-    .chat-group-item-name { font-size: 0.78rem; }
-    .chat-group-item-preview {
-        display: none;
-    }
-    .chat-group-item-meta {
-        font-size: 0.72rem;
-        gap: 8px;
-        display: flex;
-        align-items: center;
-        flex-wrap: nowrap;
-    }
-    .chat-group-item-meta > span {
-        display: inline-flex;
-        align-items: center;
-        flex-shrink: 0;
-        gap: 3px;
-    }
-    .chat-group-item-actions {
-        opacity: 1;
-        gap: 4px;
-    }
-    .chat-group-item-actions .chat-card-action {
-        min-height: 32px;
-        padding: 6px 10px;
-    }
-    .chat-group-item .chat-model-badge {
-        display: inline-block;
-        max-width: 80px;
-        height: 1.1rem;
-        line-height: 1.1rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: middle;
-    }
-
-    /* Chat preview modal */
-    .chat-preview-modal {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        border-radius: 0 !important;
-    }
-    .chat-preview-modal .modal-header {
-        padding: 10px 12px;
-        padding-right: 44px; /* room for close button */
-        flex-wrap: wrap;
-        gap: 8px;
-        position: relative;
-    }
-    .chat-preview-header-info { gap: 10px; min-width: 0; width: 100%; }
-    .chat-preview-header-info > div { min-width: 0; }
-    .chat-preview-avatar { width: 36px; height: 36px; }
-    .chat-preview-meta { font-size: 0.75rem; }
-    /* Chat preview modal buttons — icon-only on mobile */
-    #chatPreviewOpenBtn span,
-    #chatPreviewOpenBtn .btn-label {
-        font-size: 0; /* hide text fallback */
-    }
-    #chatPreviewOpenBtn {
-        font-size: 0; /* hide "Open in SillyTavern" text */
-        gap: 0;
-        padding: 8px 12px;
-        min-width: 38px;
-        justify-content: center;
-    }
-    #chatPreviewOpenBtn i {
-        font-size: 0.9rem; /* icon stays visible */
-    }
-    #chatPreviewDeleteBtn {
-        padding: 8px 12px;
-        min-width: 38px;
-        justify-content: center;
-    }
-    .chat-preview-modal .modal-controls {
-        display: flex;
-        gap: 6px;
-        margin-left: auto; /* push right */
-        flex-shrink: 0;
-    }
-    .chat-preview-modal .modal-controls .action-btn {
-        min-height: 36px;
-    }
-    .chat-preview-modal .modal-controls .close-btn {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-    }
-    .chat-preview-body {
-        flex: 1;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    .chat-preview-messages { padding: 12px; gap: 10px; }
-    .chat-message { max-width: 90%; }
-    .chat-message-avatar { width: 28px; height: 28px; }
-    .chat-message-content { padding: 8px 12px; font-size: 0.85rem; }
-    .chat-message-name { font-size: 0.75rem; }
-    .chat-message-actions { opacity: 1; }
-    .chat-msg-action-btn { width: 28px; height: 28px; }
-    .chat-swipe-btn { min-width: 44px; min-height: 44px; width: 28px; height: 28px; touch-action: manipulation; }
-    .chat-model-badge { max-width: 120px; font-size: 0.68rem; padding: 1px 6px; }
-
-    /* Chats empty/loading states */
-    .chats-empty { padding: 40px 16px; }
-    .chats-empty i { font-size: 2.5rem; }
-    .chats-empty h3 { font-size: 1rem; }
-    .chats-empty p { font-size: 0.85rem; }
-    .chats-view .chats-loading { padding: 40px; font-size: 0.95rem; }
-
-    /* ---------------------------------------------------
-       CHUB FILTER AREA – topbar second row
-       --------------------------------------------------- */
-    .topbar.chub-active {
-        flex-wrap: wrap !important;
-    }
-    .filter-area.online-filters {
-        width: 100% !important;
-        order: 99;
-        flex-wrap: nowrap !important;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        gap: 6px !important;
-        padding: 6px 4px !important;
-        border-top: 1px solid var(--glass-border);
-        align-items: center;
-    }
-    .filter-area.online-filters::-webkit-scrollbar { display: none; }
-    .filter-area.online-filters .glass-btn {
-        flex-shrink: 0;
-        font-size: 0.75rem;
-        padding: 5px 8px;
-        min-height: 30px;
-        white-space: nowrap;
-    }
-    .filter-area.online-filters .glass-select {
-        flex-shrink: 0;
-        font-size: 0.75rem;
-        max-width: 170px;
-    }
-    .filter-area.online-filters .browse-sort-container {
-        flex-shrink: 0;
-    }
-    .filter-area.online-filters .chub-view-toggle {
-        flex-shrink: 0;
-        padding: 1px;
-        gap: 2px;
-    }
-    .filter-area.online-filters .chub-view-btn,
-    .filter-area.online-filters .pyg-view-btn,
-    .filter-area.online-filters .wyvern-view-btn,
-    .filter-area.online-filters .datacat-view-btn {
-        font-size: 0.72rem;
-        padding: 4px 7px;
-    }
-    .filter-area.online-filters .nsfw-toggle {
-        min-width: auto;
-    }
-    .filter-area.online-filters .nsfw-toggle span {
-        display: none; /* icon only on mobile */
-    }
-
-    /* Provider selector */
-    #providerSelectorArea {
-        flex-shrink: 0;
-    }
-    #onlineFilterContent {
-        margin-left: 0;
-        gap: 6px;
-    }
-    #providerSelectorArea .custom-select-container {
-        min-width: 0;
-    }
-    #providerSelectorArea .custom-select-trigger {
-        font-size: 0.75rem;
-        padding: 5px 8px;
-        min-height: 30px;
-        white-space: nowrap;
-        touch-action: manipulation;
-    }
-
-    /* ---------------------------------------------------
-       CHUB VIEW  (main view)
-       --------------------------------------------------- */
-
-    /* Tags dropdown – full width on mobile */
-    .browse-tags-dropdown {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        top: auto !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        max-height: 60vh !important;
-        border-radius: 16px 16px 0 0 !important;
-        border-bottom: none !important;
-        z-index: 1100 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-    }
-    .browse-tags-search-row input { font-size: 16px; } /* prevent iOS zoom */
-    .browse-tags-search-row input::placeholder { font-size: 13px; }
-    .browse-tag-filter-item { padding: 8px 6px; } /* bigger tap targets */
-    .browse-tag-state-btn { width: 28px; height: 28px; min-width: 28px; }
-
-    /* Features dropdown – bottom sheet for all providers */
-    .browse-features-dropdown {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        top: auto !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        border-radius: 16px 16px 0 0 !important;
-        border-bottom: none !important;
-        z-index: 1100 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
-    }
-    .filter-checkbox { padding: 8px 12px; font-size: 0.85rem; }
-
-    /* Online/Chub view container */
-    .online-view, .chub-view { padding: 0; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); gap: 12px; }
-    .browse-recovery-banner { margin: 8px 8px 8px 8px; padding: 8px 12px; font-size: 12px; border-radius: 6px; }
-    .browse-section { gap: 12px; }
-
-    /* Search bar */
-    .browse-search-bar { padding: 12px; border-radius: 10px; gap: 8px; }
-    .browse-search-input-wrapper { padding: 0 10px; gap: 8px; border-radius: 8px; overflow: hidden; }
-    .browse-search-input-wrapper input { padding: 12px 0; font-size: 16px; min-width: 0; } /* 16px prevents iOS zoom */
-    .browse-search-input-wrapper input::placeholder { font-size: 13px; }
-    .browse-search-input-wrapper i { font-size: 0.9rem; flex-shrink: 0; }
-    .browse-search-submit { width: 34px; height: 34px; min-width: 34px; flex-shrink: 0; border-radius: 6px; }
-    .browse-creator-search { margin-top: 6px; }
-    .browse-creator-search-wrapper { max-width: 100%; padding: 0 10px; gap: 8px; border-radius: 8px; }
-    .browse-creator-search-wrapper input { padding: 10px 0; font-size: 16px; }
-    .browse-creator-search-wrapper input::placeholder { font-size: 13px; }
-
-    /* Author banner */
-    .browse-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
-    .browse-author-banner-content { font-size: 0.85rem; }
-    .browse-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
-    .chub-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
-    .chub-author-banner-content { font-size: 0.85rem; }
-    .chub-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
-    #chubAuthorSortSelect, [data-select-id="chubAuthorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
-    [data-select-id="chubAuthorSortSelect"] .custom-select-trigger { min-width: 0; }
-    #chubFollowAuthorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
-    #wyvernCreatorSortSelect, [data-select-id="wyvernCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
-    [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
-    #wyvernFollowCreatorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
-    #datacatCreatorSortSelect, [data-select-id="datacatCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
-    [data-select-id="datacatCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
-
-    /* Card grid */
-    .browse-grid {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-        gap: 8px;
-    }
-    .browse-card {
-        border-radius: 10px;
-        transition: none;
-        content-visibility: auto;
-        contain-intrinsic-size: 140px 220px;
-    }
-    .browse-card:hover { transform: none; } /* disable hover lift on touch */
-    .browse-card-image img { transition: none; } /* kill scale transition on touch */
-    .browse-card-body { padding: 8px; min-height: 60px; }
-    .browse-card-name { font-size: 0.8rem; }
-    .browse-card-creator { font-size: 0.7rem; margin-bottom: 4px; }
-    .browse-card-tags { display: none !important; }
-    .browse-nsfw-badge { font-size: 0.6rem; padding: 2px 5px; top: 5px; right: 5px; }
-    .browse-card-footer { padding: 6px 8px; font-size: 0.65rem; min-height: 32px; }
-    .browse-card-stat { font-size: 0.65rem; }
-    .browse-card-date { font-size: 0.6rem; }
-
-    /* Load more */
-    .browse-load-more { padding: 12px; }
-    .browse-load-more .glass-btn { padding: 10px 24px; font-size: 0.85rem; }
-
-    /* Timeline header */
-    .chub-timeline-header { padding: 12px 14px; border-radius: 10px; margin-bottom: 10px; }
-    .chub-timeline-header h3 { font-size: 1rem; }
-    .chub-timeline-header p { font-size: 0.8rem; }
-
-    /* Timeline empty */
-    .chub-timeline-empty { padding: 40px 16px; }
-    .chub-timeline-empty i { font-size: 2rem; }
-    .chub-timeline-empty h3 { font-size: 1rem; }
-
-    /* Chub loading/error/empty states */
-    .browse-loading, .browse-error, .browse-empty { padding: 40px 16px; }
-
-    /* ChubAI character detail modal */
-    .browse-char-body { padding: 8px; gap: 8px; }
-    .browse-char-description { font-size: 0.82rem; line-height: 1.45; }
-
-    /* --- Character Creator --- */
-
-    .creator-modal-glass {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
-
-    .creator-body {
-        flex-direction: column !important;
-    }
-
-    .creator-mobile-topbar {
-        display: flex !important;
-        align-items: center;
-        gap: 10px;
-        padding: 0 0 10px;
-        border-bottom: 1px solid var(--glass-border);
-        margin-bottom: 10px;
-    }
-
-    .creator-mobile-avatar {
-        width: 52px;
-        height: 52px;
-        border-radius: 8px;
-        background: rgba(255,255,255,0.06);
-        border: 1px dashed rgba(255,255,255,0.15);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        cursor: pointer;
-        color: var(--text-secondary);
-        font-size: 1.1rem;
-        overflow: hidden;
-        touch-action: manipulation;
-    }
-
-    .creator-mobile-avatar img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
-
-    .creator-mobile-profile {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex: 1;
-        min-width: 0;
-        min-height: 44px;
-    }
-
-    .creator-mobile-profile-select {
-        flex: 1;
-        min-width: 0;
-        font-size: 16px;
-        padding: 8px 10px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid var(--glass-border);
-        border-radius: 8px;
-        color: var(--text-primary);
-        -webkit-appearance: none;
-        appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 10px center;
-        background-size: 10px;
-        padding-right: 28px;
-    }
-
-    .creator-fields {
-        padding: 12px !important;
-    }
-
-    .creator-fields .glass-input {
-        font-size: 16px !important;
-    }
-
-    .creator-fields textarea.glass-input {
-        font-size: 0.85rem !important;
-    }
-
-    .creator-footer {
-        padding: 8px 12px !important;
-        padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
-    }
-
-    .creator-footer-left,
-    .creator-footer-right {
-        gap: 6px !important;
-    }
-
-    .creator-footer .action-btn {
-        padding: 8px 12px !important;
-        font-size: 0.8rem !important;
-        min-height: 38px;
-    }
-
-    .creator-footer .creator-split-btn .action-btn:first-child {
-        padding: 8px 12px !important;
-    }
-
-    /* Hide import button label text, keep icon only */
-    #creatorImportBtn .fa-file-import {
-        margin: 0;
-    }
-
-    #creatorImportBtn {
-        font-size: 0 !important;
-        padding: 8px 14px !important;
-        min-width: 44px;
-    }
-
-    #creatorImportBtn i {
-        font-size: 1rem !important;
-    }
-
-    .creator-tag-input-row .glass-input {
-        font-size: 16px !important;
-    }
-
-    .creator-ai-btn {
-        min-height: 44px;
-        min-width: 44px;
-        touch-action: manipulation;
-        padding: 0 !important;
-        justify-content: center;
-    }
-
-    .creator-alt-remove {
-        min-height: 44px;
-        min-width: 44px;
-        touch-action: manipulation;
-    }
-
-    .creator-split-caret {
-        min-height: 44px;
-        min-width: 44px;
-        touch-action: manipulation;
-    }
-
-    .creator-split-menu .dropdown-item {
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    /* Discard confirm dialogs: bottom sheet treatment */
-    #creatorDiscardConfirmOverlay,
-    #studioDiscardConfirmOverlay {
-        align-items: flex-end !important;
-        justify-content: center !important;
-        padding: 0 !important;
-    }
-    #creatorDiscardConfirmOverlay .confirm-modal-content,
-    #studioDiscardConfirmOverlay .confirm-modal-content {
-        max-width: 100% !important;
-        width: 100% !important;
-        border-radius: 16px 16px 0 0 !important;
-        animation: mobileSheetUp 0.3s ease-out !important;
-        padding-bottom: max(0px, env(safe-area-inset-bottom));
-    }
-    #creatorDiscardConfirmOverlay .confirm-modal-footer,
-    #studioDiscardConfirmOverlay .confirm-modal-footer {
-        padding: 12px 16px;
-        padding-bottom: max(12px, env(safe-area-inset-bottom));
-    }
-    #creatorDiscardConfirmOverlay .confirm-modal-footer .action-btn,
-    #studioDiscardConfirmOverlay .confirm-modal-footer .action-btn {
-        flex: 1;
-        min-height: 44px;
-    }
-
-    .creator-saveas-diff-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
-
-    .diff-avatar-row {
-        gap: 10px;
-    }
-
-    .diff-avatar-side img {
-        width: 52px;
-        height: 52px;
-    }
-
-    .diff-item-label { font-size: 0.75rem; }
-    .diff-old,
-    .diff-new { font-size: 0.78rem; }
-
-    /* --- Import Picker --- */
-
-    .creator-import-panel {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
-
-    .creator-import-search .glass-input {
-        font-size: 16px !important;
-    }
-
-    .creator-import-item {
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    .creator-import-name { font-size: 0.78rem; }
-
-    /* --- AI Studio --- */
-
-    .ai-studio-modal {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-        border: none !important;
-    }
-
-    .ai-studio-header {
-        padding: 10px 14px;
-    }
-
-    .ai-studio-header-actions {
-        gap: 4px;
-    }
-
-    .ai-studio-icon {
-        width: 30px;
-        height: 30px;
-        font-size: 0.82rem;
-    }
-
-    .ai-studio-title h3 { font-size: 0.92rem; }
-
-    .ai-studio-history-nav {
-        gap: 2px;
-        padding: 2px;
-    }
-
-    .ai-studio-nav-btn {
-        width: 38px;
-        height: 38px;
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    .ai-studio-close-btn {
-        width: 38px;
-        height: 38px;
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    .ai-studio-content-area {
-        padding: 10px 12px 6px;
-    }
-
-    .ai-studio-textarea {
-        font-size: 0.85rem !important;
-        padding: 12px 14px;
-        border-radius: 10px;
-    }
-    .ai-studio-textarea::placeholder { font-size: 0.78rem; }
-
-    .ai-studio-highlight-layer {
-        padding: 12px 14px;
-        font-size: 0.85rem !important;
-    }
-
-    .ai-studio-conversation {
-        padding: 6px 12px;
-        max-height: 160px;
-    }
-
-    .ai-studio-conversation:has(.ai-studio-empty-state) {
-        max-height: none;
-        overflow-y: visible;
-    }
-
-    .ai-studio-suggestions {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        justify-content: flex-start;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 4px;
-        scrollbar-width: none;
-    }
-
-    .ai-studio-suggestions::-webkit-scrollbar {
-        display: none;
-    }
-
-    .ai-studio-suggestion-chip {
-        flex-shrink: 0;
-        padding: 5px 10px;
-        font-size: 0.72rem;
-        min-height: 32px;
-        display: flex;
-        align-items: center;
-        touch-action: manipulation;
-    }
-
-    .ai-studio-input-area {
-        padding: 6px 12px 10px;
-        padding-bottom: max(10px, env(safe-area-inset-bottom));
-    }
-
-    .ai-studio-selection-badge {
-        font-size: 0.7rem;
-    }
-
-    .ai-studio-selection-clear {
-        width: 22px;
-        height: 22px;
-        min-height: 22px;
-        touch-action: manipulation;
-    }
-
-    .ai-studio-input {
-        font-size: 14px !important;
-    }
-
-    .ai-studio-input-row {
-        padding: 3px 3px 3px 14px;
-    }
-
-    .ai-studio-send-btn,
-    .ai-studio-stop-btn {
-        width: 36px;
-        height: 36px;
-        min-height: 36px;
-        touch-action: manipulation;
-    }
-
-    .ai-studio-footer {
-        padding: 10px 12px;
-        padding-bottom: max(10px, env(safe-area-inset-bottom));
-    }
-
-    .ai-studio-send-btn:hover {
-        transform: none !important;
-    }
-
-    .studio-settings-panel {
-        padding: 10px 14px;
-    }
-
-    .studio-settings-prompt {
-        font-size: 0.82rem !important;
-    }
-    .studio-settings-prompt::placeholder { font-size: 0.75rem; }
-
-    .studio-settings-preset-select {
-        font-size: 16px !important;
-    }
-
-    .studio-settings-check {
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    .studio-settings-checks {
-        flex-direction: column;
-    }
-
-    /* --- Card Recommender --- */
-
-    .recommender-modal-content {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-        border: none !important;
-        display: flex !important;
-        flex-direction: column !important;
-        overflow: hidden;
-        box-shadow: none !important;
-    }
-
-    .recommender-header {
-        padding: 10px 14px;
-        flex-shrink: 0;
-    }
-
-    .recommender-header-title {
-        font-size: 0.85rem;
-    }
-
-    .recommender-body {
-        flex: 1 1 0% !important;
-        min-height: 0 !important;
-        overflow-y: auto !important;
-        overflow-x: hidden;
-        -webkit-overflow-scrolling: touch;
-        padding: 12px 14px max(16px, env(safe-area-inset-bottom));
-        overscroll-behavior: contain;
-        justify-content: flex-start;
-    }
-
-    /* --- Input area --- */
-
-    .recommender-input-area {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 8px;
-        margin-bottom: 10px;
-    }
-
-    .recommender-prompt {
-        font-size: 0.85rem;
-        min-height: 80px;
-        padding: 12px 14px;
-        border-radius: 10px;
-    }
-    .recommender-prompt::placeholder { font-size: 0.78rem; }
-
-    .recommender-submit-btn {
-        width: 100%;
-        height: 44px;
-        min-width: unset;
-        min-height: 44px;
-        border-radius: 10px;
-        flex-shrink: 0;
-        touch-action: manipulation;
-        gap: 8px;
-        font-size: 0.82rem;
-        font-weight: 600;
-    }
-
-    .recommender-submit-label {
-        display: inline;
-    }
-
-    .recommender-close-btn {
-        min-width: 44px;
-        min-height: 44px;
-        touch-action: manipulation;
-    }
-
-    /* --- Toolbar --- */
-
-    .recommender-toolbar {
-        margin-bottom: 10px;
-        gap: 6px;
-        overflow: hidden;
-    }
-
-    .recommender-profile-area {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-    }
-
-    .recommender-profile-area .custom-select-container {
-        max-width: 140px;
-        flex-shrink: 1;
-        min-width: 0;
-    }
-
-    .recommender-profile-area .custom-select-trigger {
-        max-width: 140px;
-    }
-
-    .recommender-profile-area .trigger-text {
-        max-width: 100px;
-    }
-
-    .recommender-profile-status {
-        min-width: 0;
-        overflow: hidden;
-    }
-
-    .recommender-connection-text {
-        font-size: 0.65rem;
-    }
-
-    .recommender-toolbar-btn {
-        min-width: 44px;
-        min-height: 44px;
-        flex-shrink: 0;
-        touch-action: manipulation;
-    }
-
-    /* --- Settings panel --- */
-
-    .recommender-settings-panel {
-        overflow: visible !important;
-        max-height: none !important;
-        border-radius: 10px;
-        margin-bottom: 10px;
-    }
-
-    .recommender-settings-inner {
-        padding: 12px;
-        gap: 14px;
-    }
-
-    .recommender-setting-section {
-        gap: 10px;
-    }
-
-    .recommender-setting-section-title {
-        font-size: 0.65rem;
-    }
-
-    /* --- Filter rows --- */
-
-    .recommender-filter-row {
-        gap: 8px;
-    }
-
-    .recommender-filter-label {
-        font-size: 0.76rem;
-    }
-
-    .recommender-tristate {
-        flex-shrink: 0;
-    }
-
-    .recommender-tristate-btn {
-        min-height: 38px;
-        padding: 6px 12px;
-        font-size: 0.72rem;
-        touch-action: manipulation;
-    }
-
-    .recommender-date-range {
-        gap: 6px;
-    }
-
-    .recommender-date-range input[type="date"] {
-        flex: 1;
-        min-width: 0;
-    }
-
-    /* --- LLM Context chips --- */
-
-    .recommender-toggles-row {
-        gap: 5px;
-    }
-
-    .recommender-toggle-chip span {
-        min-height: 38px;
-        padding: 6px 10px;
-        font-size: 0.72rem;
-        touch-action: manipulation;
-    }
-
-    /* --- Generation sliders --- */
-
-    .recommender-slider-row {
-        grid-template-columns: 48px 1fr 36px;
-        gap: 8px;
-        min-height: 36px;
-    }
-
-    .recommender-slider-row label {
-        font-size: 0.76rem;
-    }
-
-    .recommender-slider-row input[type="range"] {
-        height: 6px;
-    }
-
-    /* --- Batch mode toggle --- */
-
-    .recommender-batch-toggle {
-        margin-top: 6px;
-    }
-
-    .recommender-batch-toggle span {
-        min-height: 38px;
-        touch-action: manipulation;
-    }
-
-    .recommender-batch-slider-row {
-        grid-template-columns: 52px 1fr 28px;
-        gap: 8px;
-        min-height: 36px;
-        padding-left: 10px;
-    }
-
-    .recommender-batch-slider-row label {
-        font-size: 0.72rem;
-    }
-
-    .recommender-batch-slider-row input[type="range"] {
-        height: 6px;
-    }
-
-    /* --- API toggle (in toolbar) --- */
-
-    .recommender-api-toggle {
-        flex-shrink: 0;
-    }
-
-    .recommender-api-mode-btn {
-        min-height: 32px;
-        padding: 4px 8px;
-        font-size: 0.65rem;
-        touch-action: manipulation;
-    }
-
-    .recommender-custom-api {
-        margin-bottom: 10px;
-    }
-
-    /* --- All inputs 16px to prevent iOS zoom --- */
-
-    .recommender-field {
-        font-size: 16px;
-        padding: 10px 12px;
-    }
-
-    .recommender-field-sm {
-        font-size: 16px;
-        padding: 8px 10px;
-    }
-
-    /* --- Tag pills & autocomplete --- */
-
-    .recommender-pill {
-        min-height: 32px;
-        padding: 4px 10px;
-        font-size: 0.72rem;
-        touch-action: manipulation;
-    }
-
-    .recommender-tag-autocomplete {
-        max-height: 200px;
-    }
-
-    .recommender-tag-ac-item {
-        min-height: 44px;
-        display: flex;
-        align-items: center;
-        padding: 10px 14px;
-        font-size: 0.85rem;
-        touch-action: manipulation;
-    }
-
-    /* --- Result cards --- */
-
-    .recommender-results-grid {
-        gap: 6px;
-    }
-
-    .recommender-result-card {
-        gap: 10px;
-        padding: 10px 12px;
-        border-radius: 10px;
-        transform: none !important;
-        box-shadow: none !important;
-    }
-
-    .recommender-result-card:hover {
-        transform: none !important;
-        box-shadow: none !important;
-    }
-
-    .recommender-result-rank {
-        width: 14px;
-        height: 14px;
-        font-size: 0.5rem;
-        top: 5px;
-        left: 5px;
-    }
-
-    .recommender-result-avatar {
-        width: 44px;
-        height: 44px;
-        border-radius: 8px;
-        flex-shrink: 0;
-    }
-
-    .recommender-result-card:hover .recommender-result-avatar {
-        border-color: rgba(255, 255, 255, 0.06) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-    }
-
-    .recommender-result-info {
-        min-width: 0;
-    }
-
-    .recommender-result-header {
-        flex-direction: column;
-        gap: 1px;
-    }
-
-    .recommender-result-name-link {
-        font-size: 0.82rem;
-        white-space: normal;
-        overflow: visible;
-        text-overflow: unset;
-        touch-action: manipulation;
-    }
-
-    .recommender-result-creator {
-        font-size: 0.6rem;
-    }
-
-    .recommender-result-reason {
-        font-size: 0.72rem;
-        -webkit-line-clamp: unset;
-        -webkit-box-orient: unset;
-        display: block;
-        overflow: visible;
-        line-height: 1.5;
-    }
-
-    .recommender-result-tags {
-        gap: 3px;
-        margin-top: 4px;
-    }
-
-    .recommender-tag {
-        font-size: 0.56rem;
-        padding: 1px 5px;
-    }
-
-    /* --- Status & raw response --- */
-
-    .recommender-status {
-        font-size: 0.76rem;
-        padding: 10px 12px;
-        border-radius: 8px;
-    }
-
-    .recommender-status-row {
-        gap: 8px;
-    }
-
-    .recommender-status-message {
-        min-width: 0;
-    }
-
-    .recommender-error-detail {
-        font-size: 0.68rem;
-    }
-
-    .recommender-copy-debug {
-        width: 36px;
-        height: 36px;
-        min-width: 36px;
-        min-height: 36px;
-        touch-action: manipulation;
-    }
-
-    .recommender-raw-response {
-        font-size: 0.74rem;
-        padding: 12px;
-        max-height: none;
-        border-radius: 8px;
-    }
 }
 
 
@@ -4270,22 +2077,6 @@
         gap: 20px;
     }
 
-    /* Chub grid tighter */
-    .browse-grid {
-        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-        gap: 6px;
-    }
-    .browse-card { contain-intrinsic-size: 120px 190px; }
-
-    /* Provider selector — icon only on phones */
-    .provider-tab-btn {
-        font-size: 0;
-        gap: 0;
-        padding: 5px 8px;
-    }
-    .provider-tab-btn i {
-        font-size: 0.8rem;
-    }
 
     /* Provider order — compact for phones */
     .provider-order-item {
@@ -4522,66 +2313,6 @@
     .tags-container {
         max-height: 200px;
         overflow-y: auto;
-    }
-
-    /* --- AI Recommender (phone) --- */
-
-    .recommender-body {
-        padding: 10px 10px max(14px, env(safe-area-inset-bottom));
-    }
-
-    .recommender-input-area {
-        gap: 6px;
-    }
-
-    .recommender-prompt {
-        font-size: 16px;
-        padding: 8px 10px;
-    }
-
-    .recommender-settings-inner {
-        padding: 10px;
-    }
-
-    .recommender-filter-row {
-        gap: 6px;
-    }
-
-    .recommender-tristate-btn {
-        padding: 6px 10px;
-        font-size: 0.72rem;
-    }
-
-    .recommender-date-range {
-        flex-wrap: wrap;
-    }
-
-    .recommender-toggle-chip span {
-        font-size: 0.72rem;
-        padding: 5px 8px;
-    }
-
-    .recommender-result-card {
-        padding: 8px 10px;
-        gap: 8px;
-    }
-
-    .recommender-result-avatar {
-        width: 38px;
-        height: 38px;
-        border-radius: 7px;
-    }
-
-    .recommender-result-name-link {
-        font-size: 0.84rem;
-    }
-
-    .recommender-result-reason {
-        font-size: 0.76rem;
-    }
-
-    .recommender-slider-row {
-        grid-template-columns: 48px 1fr 36px;
     }
 
     /* Help nav — icon-only on phones */

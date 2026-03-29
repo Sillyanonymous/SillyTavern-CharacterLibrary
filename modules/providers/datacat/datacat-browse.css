@@ -1,0 +1,39 @@
+/* ============================================
+   DataCat Browse CSS
+   Extracted from library.css
+   ============================================ */
+
+
+#datacatFollowCreatorBtn {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+#datacatFollowCreatorBtn:hover {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#datacatFollowCreatorBtn.active {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+
+[data-select-id="datacatCreatorSortSelect"] .custom-select-trigger {
+    min-width: 150px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+}
+
+
+/* Mobile overrides */
+@media screen and (max-width: 768px) {
+
+    #datacatCreatorSortSelect, [data-select-id="datacatCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    [data-select-id="datacatCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
+
+}

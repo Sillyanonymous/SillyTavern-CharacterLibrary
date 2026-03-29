@@ -301,6 +301,7 @@ window.registerOverlay = function(cfg) {
         preventAutoFocusOnOpen();
         setupMobileTagEditor();
         setupModalHeaderCollapse();
+        setupMultiSelectConfirm();
         setupBackButton();
     }
 
@@ -336,7 +337,7 @@ window.registerOverlay = function(cfg) {
 
         const stack = [
             // Tier 0 — avatar/gallery quick-view (highest z-index)
-            ['.browse-avatar-viewer', el => {
+            ['#browseAvatarViewer', el => {
                 if (el._onKey) document.removeEventListener('keydown', el._onKey);
                 el.remove();
             }],
@@ -379,8 +380,8 @@ window.registerOverlay = function(cfg) {
             ['#disableGalleryFoldersModal',          el => el.remove()],
             ['#confirmSaveModal:not(.hidden)',        el => el.classList.add('hidden')],
             ['#preImportDuplicateModal:not(.hidden)', el => el.classList.add('hidden')],
-            ['#chubLinkModal:not(.hidden)',           el => el.classList.add('hidden')],
-            ['#bulkChubLinkModal:not(.hidden)',       el => el.classList.add('hidden')],
+            ['#providerLinkModal:not(.hidden)',           el => el.classList.add('hidden')],
+            ['#bulkAutoLinkModal:not(.hidden)',       el => el.classList.add('hidden')],
             ['#galleryInfoModal:not(.hidden)',        el => el.classList.add('hidden')],
             ['#gallerySettingsModal:not(.hidden)',    el => el.classList.add('hidden')],
             ['#localizeModal:not(.hidden)',           el => el.classList.add('hidden')],
@@ -2256,6 +2257,126 @@ window.registerOverlay = function(cfg) {
     }
 
     /* ========================================
+       MULTI-SELECT CONFIRM SHEETS
+       ======================================== */
+    function setupMultiSelectConfirm() {
+        const btnConfigs = {
+            multiSelectFavToggleBtn: {
+                getTitle: () => {
+                    const selected = window.MultiSelect?.getSelected?.() || [];
+                    const allFav = selected.length > 0 && selected.every(c =>
+                        c.fav === true || c.fav === 'true' ||
+                        c.data?.extensions?.fav === true || c.data?.extensions?.fav === 'true'
+                    );
+                    return allFav ? 'Remove from Favorites' : 'Add to Favorites';
+                },
+                getDesc: () => {
+                    const count = window.MultiSelect?.selectedCharacters?.size || 0;
+                    return `${count} character${count !== 1 ? 's' : ''} will be updated`;
+                },
+                icon: 'fa-solid fa-star',
+                confirmLabel: 'Confirm'
+            },
+            multiSelectExportBtn: {
+                getTitle: () => 'Export Characters',
+                getDesc: () => {
+                    const count = window.MultiSelect?.selectedCharacters?.size || 0;
+                    return `Download ${count} character${count !== 1 ? 's' : ''} as PNG files`;
+                },
+                icon: 'fa-solid fa-download',
+                confirmLabel: 'Export'
+            },
+            multiSelectCheckUpdatesBtn: {
+                getTitle: () => 'Check for Updates',
+                getDesc: () => {
+                    const count = window.MultiSelect?.selectedCharacters?.size || 0;
+                    return `Check ${count} character${count !== 1 ? 's' : ''} for provider updates`;
+                },
+                icon: 'fa-solid fa-arrows-rotate',
+                confirmLabel: 'Check'
+            },
+            multiSelectAllBtn: {
+                getTitle: () => 'Select All',
+                getDesc: () => {
+                    const total = window.currentCharacters?.length || 0;
+                    return `Select all ${total} filtered character${total !== 1 ? 's' : ''}`;
+                },
+                icon: 'fa-solid fa-check-double',
+                confirmLabel: 'Select All'
+            },
+            multiSelectBatchTagBtn: {
+                getTitle: () => 'Batch Tagging',
+                getDesc: () => {
+                    const count = window.MultiSelect?.selectedCharacters?.size || 0;
+                    return `Edit tags on ${count} selected character${count !== 1 ? 's' : ''}`;
+                },
+                icon: 'fa-solid fa-tags',
+                confirmLabel: 'Open'
+            }
+        };
+
+        let confirmed = false;
+
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('#multiSelectFavToggleBtn, #multiSelectExportBtn, #multiSelectCheckUpdatesBtn, #multiSelectAllBtn, #multiSelectBatchTagBtn');
+            if (!btn) return;
+            const cfg = btnConfigs[btn.id];
+            if (!cfg) return;
+            if (confirmed) { confirmed = false; return; }
+            e.stopImmediatePropagation();
+            e.preventDefault();
+            showConfirmSheet(cfg, btn);
+        }, true);
+
+        function showConfirmSheet(cfg, originalBtn) {
+            const { overlay, sheet, close } = createBottomSheet();
+
+            const handle = document.createElement('div');
+            handle.className = 'mobile-sheet-handle';
+            sheet.appendChild(handle);
+
+            const body = document.createElement('div');
+            body.className = 'mobile-confirm-body';
+            body.innerHTML = `
+                <div class="mobile-confirm-icon"><i class="${cfg.icon}"></i></div>
+                <div class="mobile-confirm-title">${cfg.getTitle()}</div>
+                <div class="mobile-confirm-desc">${cfg.getDesc()}</div>
+            `;
+            sheet.appendChild(body);
+
+            const actions = document.createElement('div');
+            actions.className = 'mobile-confirm-actions';
+
+            const cancelBtn = document.createElement('button');
+            cancelBtn.className = 'mobile-confirm-cancel';
+            cancelBtn.textContent = 'Cancel';
+            cancelBtn.addEventListener('click', () => {
+                close();
+                setTimeout(() => overlay.remove(), 350);
+            });
+
+            const confirmBtn = document.createElement('button');
+            confirmBtn.className = 'mobile-confirm-ok';
+            confirmBtn.textContent = cfg.confirmLabel;
+            confirmBtn.addEventListener('click', () => {
+                close();
+                setTimeout(() => {
+                    overlay.remove();
+                    confirmed = true;
+                    originalBtn.click();
+                }, 350);
+            });
+
+            actions.appendChild(cancelBtn);
+            actions.appendChild(confirmBtn);
+            sheet.appendChild(actions);
+
+            document.body.appendChild(overlay);
+            openSheet(overlay, sheet);
+        }
+    }
+
+    /* ========================================
        CONTEXT MENU → BOTTOM SHEET
        ======================================== */
     function setupContextMenu() {
@@ -2291,17 +2412,34 @@ window.registerOverlay = function(cfg) {
             sheetEl.appendChild(handle);
 
             // Copy every child from the desktop context menu
-            Array.from(menuEl.children).forEach(child => {
+            const children = Array.from(menuEl.children);
+            const clones = children.map(child => {
                 const clone = child.cloneNode(true);
-                // Re-attach click handler for action items
                 if (child.classList.contains('cl-context-menu-item') && !child.classList.contains('disabled')) {
                     clone.addEventListener('click', () => {
                         closeSheet();
-                        child.click(); // Trigger the original handler
+                        child.click();
                     });
                 }
-                sheetEl.appendChild(clone);
+                clone._origChild = child;
+                return clone;
             });
+
+            // Move "Select for Batch" / "Deselect" to right after the header
+            const selectIdx = clones.findIndex(c => c._origChild?.querySelector?.('.fa-square-check, .fa-square-minus'));
+            if (selectIdx > 1) {
+                const [selectClone] = clones.splice(selectIdx, 1);
+                // Remove the separator that was before it if it's now orphaned
+                if (selectIdx > 0 && clones[selectIdx - 1]?._origChild?.classList?.contains('cl-context-menu-separator')) {
+                    clones.splice(selectIdx - 1, 1);
+                }
+                // Insert after header (index 0) with a separator after it
+                const sep = document.createElement('div');
+                sep.className = 'cl-context-menu-separator';
+                clones.splice(1, 0, selectClone, sep);
+            }
+
+            clones.forEach(c => { delete c._origChild; sheetEl.appendChild(c); });
 
             scrimEl.classList.add('visible');
             sheetEl.classList.add('visible');

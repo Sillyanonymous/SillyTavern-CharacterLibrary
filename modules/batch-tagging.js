@@ -15,7 +15,6 @@ export function init(deps) {
         return;
     }
     
-    injectStyles();
     injectModal();
     setupEventListeners();
     
@@ -504,7 +503,7 @@ function selectSuggestion(input, suggestions, tag, mode) {
 function injectModal() {
     const modalHtml = `
     <div id="batchTagModal" class="cl-modal">
-        <div class="cl-modal-content" style="max-width: 600px;">
+        <div class="cl-modal-content" style="max-width: calc(600px * var(--modal-scale, 1));">
             <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-tags"></i> Batch Tag Editor</h3>
                 <span class="bt-char-count"><span id="batchTagCharCount">0</span> selected</span>
@@ -550,147 +549,6 @@ function injectModal() {
     </div>`;
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-function injectStyles() {
-    if (document.getElementById('batch-tagging-styles')) return;
-    
-    const styles = `
-    <style id="batch-tagging-styles">
-        /* Batch Tagging specific styles - using bt- prefix */
-        
-        .bt-char-count {
-            font-size: 0.85em;
-            color: var(--cl-text-secondary);
-            margin-left: auto;
-            margin-right: 8px;
-        }
-        
-        .bt-section {
-            margin-bottom: 20px;
-        }
-        
-        .bt-section:last-child {
-            margin-bottom: 0;
-        }
-        
-        .bt-section-title {
-            font-weight: 600;
-            margin-bottom: 10px;
-            color: var(--cl-text-primary);
-            font-size: 0.95em;
-        }
-        
-        .bt-existing {
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
-            padding: 12px;
-            min-height: 40px;
-        }
-        
-        .bt-group {
-            margin-bottom: 12px;
-        }
-        
-        .bt-group:last-child {
-            margin-bottom: 0;
-        }
-        
-        .bt-group-label {
-            font-size: 0.8em;
-            color: var(--cl-text-secondary);
-            margin-bottom: 6px;
-        }
-        
-        .bt-group-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-        }
-        
-        .bt-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            min-height: 32px;
-            margin-top: 10px;
-        }
-        
-        .bt-hint {
-            font-size: 0.75em;
-            color: var(--cl-text-secondary);
-            margin-top: 8px;
-            font-style: italic;
-            opacity: 0.8;
-        }
-        
-        .bt-empty {
-            color: var(--cl-text-secondary);
-            font-style: italic;
-            font-size: 0.9em;
-        }
-        
-        .bt-count {
-            font-size: 0.8em;
-            opacity: 0.7;
-        }
-        
-        /* Tag pill close button */
-        .bt-pill-close {
-            cursor: pointer;
-            opacity: 0.7;
-            font-size: 0.85em;
-            margin-left: 2px;
-        }
-        
-        .bt-pill-close:hover {
-            opacity: 1;
-        }
-        
-        /* Autocomplete input wrapper */
-        .bt-input-wrapper {
-            position: relative;
-        }
-        
-        /* Autocomplete suggestions dropdown */
-        .bt-suggestions {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background: var(--cl-glass-bg);
-            border: 1px solid var(--cl-border);
-            border-top: none;
-            border-radius: 0 0 8px 8px;
-            max-height: 200px;
-            overflow-y: auto;
-            z-index: 10001;
-            box-shadow: var(--cl-shadow-lg);
-        }
-        
-        .bt-suggestions.hidden {
-            display: none;
-        }
-        
-        .bt-suggestion-item {
-            padding: 8px 12px;
-            cursor: pointer;
-            color: var(--cl-text-primary);
-            font-size: 0.9em;
-            transition: background 0.15s;
-        }
-        
-        .bt-suggestion-item:hover,
-        .bt-suggestion-item.selected {
-            background: rgba(255, 255, 255, 0.1);
-        }
-        
-        .bt-suggestion-item strong {
-            color: var(--cl-accent);
-        }
-    </style>`;
-    
-    document.head.insertAdjacentHTML('beforeend', styles);
 }
 
 export default {

@@ -1,0 +1,451 @@
+/* ============================================
+   ChubAI Browse CSS
+   Extracted from library.css
+   ============================================ */
+
+/* Chub Gallery Info Modal */
+.chub-gallery-modal-content {
+    max-width: calc(550px * var(--modal-scale, 1));
+}
+
+.chub-gallery-list {
+    max-height: calc(300px * var(--modal-scale, 1));
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 0;
+}
+
+.chub-gallery-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 15px;
+    padding: 12px 15px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    border: 1px solid var(--glass-border);
+}
+
+.chub-gallery-item-avatar {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.chub-gallery-item-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.chub-gallery-item-info i {
+    color: var(--accent-primary);
+    font-size: 1.1rem;
+}
+
+.chub-gallery-item-name {
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chub-gallery-item-creator {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chub-gallery-link {
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    white-space: nowrap;
+}
+
+.chub-gallery-link:hover {
+    background: var(--accent-primary);
+    color: var(--accent-text);
+}
+
+
+/* Timeline Header */
+.chub-timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    border: 1px solid var(--glass-border);
+    margin-bottom: 16px;
+}
+
+.chub-timeline-header-left {
+    text-align: left;
+}
+
+.chub-timeline-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.chub-timeline-header h3 {
+    font-size: 1.4rem;
+    margin: 0 0 4px 0;
+    color: var(--text-primary);
+}
+
+.chub-timeline-header h3 i {
+    color: var(--accent);
+    margin-right: 8px;
+}
+
+.chub-timeline-header p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+#chubTimelineSortSelect {
+    min-width: 150px;
+    font-size: 0.85rem;
+}
+
+/* Timeline Empty/Login Required State */
+.chub-timeline-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-secondary);
+}
+
+.chub-timeline-empty i {
+    font-size: 3rem;
+    color: var(--accent);
+    opacity: 0.5;
+    margin-bottom: 15px;
+}
+
+.chub-timeline-empty h3 {
+    color: var(--text-primary);
+    margin: 0 0 10px 0;
+}
+
+.chub-timeline-empty p {
+    margin: 0 0 20px 0;
+}
+
+/* Author Banner (shown when filtering by author) */
+.chub-author-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.15), rgba(var(--accent-secondary-rgb), 0.15));
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    border-radius: 10px;
+    padding: 12px 16px;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chub-author-banner.hidden {
+    display: none;
+}
+
+.chub-author-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--text-primary);
+}
+
+.chub-author-banner-content i {
+    color: var(--accent);
+    font-size: 1.1rem;
+}
+
+.chub-author-banner-content strong {
+    color: var(--accent);
+}
+
+/* Author Banner Actions */
+.chub-author-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+
+[data-select-id="chubAuthorSortSelect"] .custom-select-trigger {
+    min-width: 150px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+}
+
+
+#chubFollowAuthorBtn {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+#chubFollowAuthorBtn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#chubFollowAuthorBtn.following {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+#chubFollowAuthorBtn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+/* ChubAI Favorite Button - Inline version in header */
+.chub-favorite-btn-inline {
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background: transparent;
+}
+
+.chub-favorite-btn-inline:hover {
+    background: rgba(255, 100, 100, 0.15);
+}
+
+.chub-favorite-btn-inline i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.chub-favorite-btn-inline:hover i {
+    transform: scale(1.15);
+}
+
+.chub-favorite-btn-inline.favorited i {
+    font-weight: 900;
+}
+
+.chub-favorite-btn-inline.favorited {
+    background: rgba(255, 100, 100, 0.1);
+}
+
+.chub-favorite-btn-inline.loading {
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+/* ChubAI Favorite Button - Block version (legacy) */
+.chub-favorite-btn {
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    background: rgba(255, 100, 100, 0.05);
+    border: 1px solid transparent;
+}
+
+.chub-favorite-btn:hover {
+    background: rgba(255, 100, 100, 0.15);
+    border-color: rgba(255, 100, 100, 0.3);
+}
+
+.chub-favorite-btn i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.chub-favorite-btn:hover i {
+    transform: scale(1.1);
+}
+
+.chub-favorite-btn.favorited i {
+    font-weight: 900;
+}
+
+.chub-favorite-btn.favorited {
+    background: rgba(255, 100, 100, 0.2);
+    border-color: rgba(255, 100, 100, 0.4);
+}
+
+.chub-favorite-btn.loading {
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+/* ChubAI Modal Section Styles */
+
+/* ChubAI Login Modal */
+.chub-login-modal {
+    max-width: calc(500px * var(--modal-scale, 1));
+    width: 95%;
+}
+
+.chub-login-body {
+    padding: 20px;
+}
+
+.chub-login-info {
+    background: rgba(255, 255, 255, 0.03);
+    padding: 15px;
+    border-radius: 8px;
+    line-height: 1.8;
+    margin-bottom: 20px;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+}
+
+.chub-login-info code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    color: var(--accent);
+}
+
+.chub-login-info a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.chub-login-info a:hover {
+    text-decoration: underline;
+}
+
+.chub-login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.chub-login-form label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.chub-login-form input[type="password"] {
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.chub-login-remember {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chub-login-remember label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.chub-login-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.chub-login-status {
+    margin-top: 15px;
+    padding: 10px;
+    border-radius: 6px;
+    text-align: center;
+}
+
+.chub-login-status.success {
+    background: rgba(46, 204, 113, 0.2);
+    color: #2ecc71;
+}
+
+.chub-login-status.error {
+    background: rgba(231, 76, 60, 0.2);
+    color: #e74c3c;
+}
+
+/* Login button states */
+#chubLoginBtn.logged-in {
+    background: rgba(46, 204, 113, 0.15);
+    border-color: rgba(46, 204, 113, 0.3);
+}
+
+#chubLoginBtn.logged-in i {
+    color: #2ecc71;
+}
+
+/* Favorites filter disabled state */
+#chubFavoritesLabel[title="Login required"] {
+    opacity: 0.6;
+}
+
+#chubFavoritesLabel:not([title="Login required"]) {
+    opacity: 1;
+}
+
+
+
+/* Mobile overrides */
+@media screen and (max-width: 768px) {
+
+    /* ---------------------------------------------------
+       CHUB LOGIN MODAL
+       --------------------------------------------------- */
+    .chub-login-modal {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+    }
+    .chub-login-body { padding: 14px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+    .chub-login-info { font-size: 0.85rem; padding: 12px; }
+    .chub-login-actions { flex-wrap: wrap; }
+    .chub-login-form .glass-input { font-size: 16px; }
+
+    .chub-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
+    .chub-author-banner-content { font-size: 0.85rem; }
+    .chub-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
+    #chubAuthorSortSelect, [data-select-id="chubAuthorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    [data-select-id="chubAuthorSortSelect"] .custom-select-trigger { min-width: 0; }
+    #chubFollowAuthorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
+
+    /* Timeline header */
+    .chub-timeline-header { padding: 12px 14px; border-radius: 10px; margin-bottom: 10px; }
+    .chub-timeline-header h3 { font-size: 1rem; }
+    .chub-timeline-header p { font-size: 0.8rem; }
+
+    /* Timeline empty */
+    .chub-timeline-empty { padding: 40px 16px; }
+    .chub-timeline-empty i { font-size: 2rem; }
+    .chub-timeline-empty h3 { font-size: 1rem; }
+
+}

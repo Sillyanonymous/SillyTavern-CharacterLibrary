@@ -1,0 +1,191 @@
+/* ========================================
+   Context Menu Styles
+   ======================================== */
+
+.cl-context-menu {
+    display: none;
+    position: fixed;
+    background: var(--cl-glass-bg);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(var(--cl-accent-rgb), 0.2);
+    border-radius: 12px;
+    box-shadow:
+        var(--cl-shadow-xl),
+        0 0 40px rgba(0, 0, 0, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    z-index: 10000;
+    min-width: 200px;
+    max-height: calc(100vh - 20px);
+    overflow-y: auto;
+    padding: 5px;
+    opacity: 0;
+    transform: scale(0.97);
+    transform-origin: top left;
+    transition: opacity 0.08s ease-out, transform 0.08s ease-out;
+}
+
+.cl-context-menu.visible {
+    display: block;
+    animation: clContextMenuSlide 0.15s ease forwards;
+}
+
+@keyframes clContextMenuSlide {
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.cl-context-menu-item {
+    padding: 7px 12px;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.03s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--cl-text-primary);
+    font-size: 13px;
+    user-select: none;
+}
+
+.cl-context-menu-item i {
+    width: 16px;
+    text-align: center;
+    opacity: 0.8;
+    font-size: 13px;
+}
+
+.cl-context-menu-item:hover {
+    background: rgba(var(--cl-accent-rgb), 0.2);
+}
+
+.cl-context-menu-item:hover i {
+    opacity: 1;
+}
+
+.cl-context-menu-item.danger {
+    color: #ff6b7a;
+}
+
+.cl-context-menu-item.danger:hover {
+    background: rgba(244, 67, 54, 0.25);
+}
+
+.cl-context-menu-item.secondary {
+    color: var(--cl-text-secondary);
+}
+
+.cl-context-menu-item.secondary:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.cl-context-menu-item.disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.cl-context-menu-separator {
+    height: 1px;
+    background: var(--cl-border);
+    margin: 4px 0;
+}
+
+.cl-context-menu-header {
+    padding: 8px 14px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--cl-text-secondary);
+    font-weight: 600;
+}
+
+/* ========================================
+   Mobile Overrides
+   ======================================== */
+@media (max-width: 768px) {
+    /* Desktop context menu hidden on mobile (replaced by bottom sheet) */
+    .cl-context-menu {
+        display: none !important;
+    }
+
+    /* Mobile context-menu bottom sheet */
+    .mobile-ctx-scrim {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 9000;
+    }
+    .mobile-ctx-scrim.visible { display: block; }
+
+    .mobile-ctx-sheet {
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        background: var(--bg-secondary, #1e1e2e);
+        border-top: 1px solid rgba(255,255,255,0.1);
+        border-radius: 16px 16px 0 0;
+        z-index: 9001;
+        max-height: 75vh;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 0 0 env(safe-area-inset-bottom, 8px) 0;
+        transform: translateY(100%);
+        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .mobile-ctx-sheet.visible {
+        transform: translateY(0);
+    }
+
+    .mobile-ctx-handle {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 0 4px;
+        cursor: pointer;
+    }
+    .mobile-ctx-handle-bar {
+        width: 40px; height: 4px;
+        border-radius: 2px;
+        background: rgba(255,255,255,0.3);
+    }
+
+    /* Items inside the sheet inherit context-menu styling */
+    .mobile-ctx-sheet .cl-context-menu-separator {
+        height: 1px;
+        background: rgba(255,255,255,0.08);
+        margin: 4px 12px;
+    }
+    .mobile-ctx-sheet .cl-context-menu-header {
+        padding: 10px 20px 6px;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: var(--text-secondary, #999);
+        font-weight: 600;
+    }
+    .mobile-ctx-sheet .cl-context-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 14px 20px;
+        min-height: 48px;
+        font-size: 0.9rem;
+        color: var(--text-primary, #eee);
+        cursor: pointer;
+        border-radius: 0;
+        transition: background 0.15s;
+    }
+    .mobile-ctx-sheet .cl-context-menu-item:active {
+        background: rgba(255,255,255,0.08);
+    }
+    .mobile-ctx-sheet .cl-context-menu-item i {
+        width: 22px;
+        text-align: center;
+        opacity: 0.8;
+        font-size: 1rem;
+    }
+    .mobile-ctx-sheet .cl-context-menu-item.danger {
+        color: #ff6b7a;
+    }
+}

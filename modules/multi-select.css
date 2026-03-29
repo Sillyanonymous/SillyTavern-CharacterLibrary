@@ -1,0 +1,234 @@
+/* =========================================================
+   Multi-Select Module Styles
+   ========================================================= */
+
+/* Multi-select mode indicator */
+body.multi-select-mode .char-card {
+    cursor: pointer;
+    position: relative;
+}
+
+body.multi-select-mode .char-card::before {
+    content: '';
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.3);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 14px;
+    z-index: 10;
+    transition: all 0.2s;
+}
+
+body.multi-select-mode .char-card.selected::before {
+    background-color: var(--SmartThemeQuoteColor, #4a9eff);
+    border-color: var(--SmartThemeQuoteColor, #4a9eff);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 12 10 18 20 6'/%3E%3C/svg%3E");
+}
+
+body.multi-select-mode .char-card:hover::before {
+    border-color: var(--SmartThemeQuoteColor, #4a9eff);
+}
+
+/* Multi-select toolbar */
+.multi-select-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(30, 30, 50, 0.95) 100%);
+    border-bottom: 1px solid rgba(74, 158, 255, 0.2);
+    gap: 16px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+}
+
+.multi-select-toolbar.hidden {
+    display: none;
+}
+
+.multi-select-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.multi-select-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--accent-text);
+    box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+.multi-select-badge i {
+    font-size: 0.9em;
+    opacity: 0.9;
+}
+
+.multi-select-label {
+    color: var(--SmartThemeBodyColor, #aaa);
+    font-size: 0.9em;
+}
+
+.multi-select-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    justify-content: center;
+    flex-wrap: nowrap;
+}
+
+.multi-select-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ms-divider {
+    width: 1px;
+    height: 24px;
+    background: rgba(255, 255, 255, 0.15);
+    margin: 0 6px;
+}
+
+.ms-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--SmartThemeBodyColor, #eee);
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.ms-btn:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.1);
+    transform: translateY(-1px);
+}
+
+.ms-btn:active {
+    transform: translateY(0);
+}
+
+.ms-btn i {
+    font-size: 0.95em;
+}
+
+.ms-btn-ghost {
+    background: transparent;
+}
+
+.ms-btn-ghost:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.ms-btn-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.ms-btn-danger:hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: rgba(239, 68, 68, 0.4);
+}
+
+.ms-btn-exit {
+    background: rgba(100, 100, 120, 0.3);
+    padding: 8px 10px;
+}
+
+.ms-btn-exit:hover {
+    background: rgba(100, 100, 120, 0.5);
+}
+
+/* Toggle button active state */
+#multiSelectToggleBtn.active {
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
+    color: var(--accent-text);
+    box-shadow: 0 2px 8px var(--accent-glow);
+}
+
+/* =========================================================
+   Mobile overrides (max-width: 768px)
+   ========================================================= */
+@media (max-width: 768px) {
+    .ms-btn {
+        touch-action: manipulation;
+    }
+
+    .multi-select-toolbar {
+        flex-wrap: wrap;
+        padding: 8px 10px;
+        gap: 8px;
+        flex-shrink: 0;
+        overflow: hidden;
+        backdrop-filter: none !important;
+        transition: none !important;
+    }
+    .multi-select-toolbar.hidden {
+        display: none !important;
+    }
+
+    /* Kill per-card checkbox transition */
+    body.multi-select-mode .char-card::before {
+        transition: none !important;
+    }
+    .multi-select-left {
+        gap: 6px;
+        flex-shrink: 0;
+    }
+    .multi-select-badge {
+        padding: 4px 10px;
+        font-size: 0.8em;
+        gap: 6px;
+    }
+    .multi-select-label {
+        display: none;
+    }
+    .multi-select-actions {
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        gap: 4px;
+        justify-content: flex-start;
+        min-width: 0;
+    }
+    .ms-btn {
+        padding: 6px 8px;
+        font-size: 0.78em;
+        gap: 4px;
+    }
+    .ms-btn span {
+        display: none;
+    }
+    .ms-divider {
+        display: none;
+    }
+    .multi-select-right {
+        gap: 4px;
+    }
+    .ms-btn-exit {
+        padding: 6px 8px;
+    }
+}

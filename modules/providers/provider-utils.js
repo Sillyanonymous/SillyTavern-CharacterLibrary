@@ -87,6 +87,24 @@ export function stripHtml(html) {
 }
 
 /**
+ * Normalize a character name for cross-provider matching.
+ * Strips version suffixes, common modifiers, and collapses whitespace.
+ * @param {string} name
+ * @returns {string}
+ */
+export function normalizeBrowseName(name) {
+    if (!name) return '';
+    return name
+        .toLowerCase()
+        .trim()
+        .replace(/\s*[\(\[\{]?\s*v(?:er(?:sion)?)?\.?\s*\d+[\)\]\}]?\s*$/i, '')
+        .replace(/\s*-?\s*v\d+(\.\d+)*$/i, '')
+        .replace(/\s*[\(\[\{]?(?:updated?|fixed?|new|old|alt(?:ernate)?|edit(?:ed)?|copy|backup|nsfw)[\)\]\}]?\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+/**
  * Format a number with K/M suffixes.
  * @param {number} num
  * @returns {string}

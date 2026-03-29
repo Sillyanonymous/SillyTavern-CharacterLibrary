@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=48">
-    <link rel="stylesheet" href="library-mobile.css?v=1" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=56">
+    <link rel="stylesheet" href="library-mobile.css?v=4" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -229,7 +229,7 @@
             <!-- Online View — populated by active provider -->
             <div id="browseRecoveryBanner" class="browse-recovery-banner hidden">
                 <i class="fa-solid fa-sync fa-spin"></i>
-                <span>Loading library data — some <em>In Library</em> badges may be incomplete</span>
+                <span>Loading library data<span class="recovery-progress"></span> &mdash; some <em>In Library</em> badges may be incomplete</span>
                 <button class="browse-recovery-dismiss" title="Dismiss">&times;</button>
             </div>
             <div id="onlineView" class="online-view hidden">
@@ -637,72 +637,83 @@
         </div>
     </div>
 
-    <!-- ChubAI Link Modal -->
-    <div id="chubLinkModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content chub-link-modal-content">
+    <!-- Provider Link Modal -->
+    <div id="providerLinkModal" class="confirm-modal hidden">
+        <div class="confirm-modal-content provider-link-modal-content">
             <div class="confirm-modal-header">
-                <h3><i class="fa-solid fa-link"></i> <span id="chubLinkModalTitle">ChubAI Link</span></h3>
-                <button class="close-confirm-btn" id="closeChubLinkModal">&times;</button>
+                <h3><i class="fa-solid fa-link"></i> <span id="providerLinkModalTitle">Provider Link</span></h3>
+                <button class="close-confirm-btn" id="closeProviderLinkModal">&times;</button>
             </div>
-            <div class="confirm-modal-body chub-link-modal-body">
+            <div class="confirm-modal-body provider-link-modal-body">
                 <!-- Character sidebar with avatar -->
-                <div class="chub-link-sidebar">
-                    <div class="chub-link-avatar-wrapper">
-                        <img id="chubLinkCharAvatar" class="chub-link-avatar" src="" alt="Character">
-                        <div id="providerLinkStatusIcon" class="chub-link-status-icon unlinked">
+                <div class="provider-link-sidebar">
+                    <div class="provider-link-avatar-wrapper">
+                        <img id="providerLinkCharAvatar" class="provider-link-avatar" src="" alt="Character">
+                        <div id="providerLinkStatusIcon" class="provider-link-status-icon unlinked">
                             <i class="fa-solid fa-link-slash"></i>
                         </div>
                     </div>
-                    <div class="chub-link-char-name" id="chubLinkCharName">Character</div>
+                    <div class="provider-link-char-name" id="providerLinkCharName">Character</div>
                 </div>
                 
                 <!-- Main content area -->
-                <div class="chub-link-main">
+                <div class="provider-link-main">
                     <!-- Linked State -->
-                    <div id="chubLinkLinkedState" class="chub-link-state hidden">
-                        <a id="chubLinkCurrentPath" href="#" target="_blank" class="chub-link-current-path">
+                    <div id="providerLinkLinkedState" class="provider-link-state hidden">
+                        <a id="providerLinkCurrentPath" href="#" target="_blank" class="provider-link-current-path">
                             <i class="fa-solid fa-external-link-alt"></i>
                             <span></span>
                         </a>
                         
                         <!-- Quick stats from linked character -->
-                        <div id="providerLinkStats" class="chub-link-stats"></div>
-                        
-                        <div class="chub-link-actions">
-                            <button id="chubLinkViewInGalleryBtn" class="chub-link-btn primary">
-                                <i class="fa-solid fa-eye"></i> View on ChubAI
+                        <div id="providerLinkStats" class="provider-link-stats"></div>
+
+                        <div id="providerLinkUpdateLockRow" class="provider-link-update-lock-row">
+                            <div class="provider-link-update-lock-label">
+                                <i class="fa-solid fa-lock"></i> Update Lock
+                            </div>
+                            <div class="provider-link-update-lock-hint">Skip this character during update checks</div>
+                            <button id="providerLinkUpdateLockBtn" class="provider-link-update-lock-btn" title="Toggle update lock">
+                                <span class="update-lock-status"></span>
+                                <i class="fa-solid fa-toggle-off update-lock-toggle-icon"></i>
                             </button>
-                            <button id="chubLinkGalleryBtn" class="chub-link-btn secondary">
+                        </div>
+                        
+                        <div class="provider-link-actions">
+                            <button id="providerLinkViewInGalleryBtn" class="provider-link-btn primary">
+                                <i class="fa-solid fa-eye"></i> View on Provider
+                            </button>
+                            <button id="providerLinkGalleryBtn" class="provider-link-btn secondary">
                                 <i class="fa-solid fa-images"></i> Download Gallery
                             </button>
-                            <button id="chubLinkVersionsBtn" class="chub-link-btn secondary">
+                            <button id="providerLinkVersionsBtn" class="provider-link-btn secondary">
                                 <i class="fa-solid fa-clock-rotate-left"></i> Version History
                             </button>
-                            <button id="chubLinkUnlinkBtn" class="chub-link-btn text-danger">
+                            <button id="providerLinkUnlinkBtn" class="provider-link-btn text-danger">
                                 <i class="fa-solid fa-unlink"></i> Unlink
                             </button>
                         </div>
                     </div>
                     
                     <!-- Unlinked State -->
-                    <div id="chubLinkUnlinkedState" class="chub-link-state">
-                        <div class="chub-link-search-section">
-                            <div class="chub-link-search-row">
-                                <input type="search" id="chubLinkSearchName" class="glass-input" placeholder="Character name" autocomplete="one-time-code">
-                                <span class="chub-link-search-by">by</span>
-                                <input type="search" id="chubLinkSearchCreator" class="glass-input" placeholder="Creator" autocomplete="one-time-code">
-                                <button id="chubLinkSearchBtn" class="chub-link-search-btn" title="Search">
+                    <div id="providerLinkUnlinkedState" class="provider-link-state">
+                        <div class="provider-link-search-section">
+                            <div class="provider-link-search-row">
+                                <input type="search" id="providerLinkSearchName" class="glass-input" placeholder="Character name" autocomplete="one-time-code">
+                                <span class="provider-link-search-by">by</span>
+                                <input type="search" id="providerLinkSearchCreator" class="glass-input" placeholder="Creator" autocomplete="one-time-code">
+                                <button id="providerLinkSearchBtn" class="provider-link-search-btn" title="Search">
                                     <i class="fa-solid fa-search"></i>
                                 </button>
                             </div>
-                            <div id="chubLinkSearchResults" class="chub-link-search-results"></div>
+                            <div id="providerLinkSearchResults" class="provider-link-search-results"></div>
                         </div>
                         
-                        <div class="chub-link-divider"><span>or paste URL</span></div>
+                        <div class="provider-link-divider"><span>or paste URL</span></div>
                         
-                        <div class="chub-link-url-row">
-                            <input type="text" id="chubLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="one-time-code">
-                            <button id="chubLinkUrlBtn" class="chub-link-btn primary compact">
+                        <div class="provider-link-url-row">
+                            <input type="text" id="providerLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="one-time-code">
+                            <button id="providerLinkUrlBtn" class="provider-link-btn primary compact">
                                 <i class="fa-solid fa-link"></i>
                             </button>
                         </div>
@@ -962,7 +973,7 @@ https://jannyai.com/characters/uuid_slug
         </div>
     </div>
 
-    <!-- Bulk ChubAI Link Modal -->
+    <!-- Bulk Auto-Link Modal -->
     <div id="bulkAutoLinkModal" class="confirm-modal hidden">
         <div class="confirm-modal-content bulk-auto-link-modal-content">
             <div class="confirm-modal-header">
@@ -1711,11 +1722,32 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-row" id="themeCustomizerBtnRow" style="display:none;">
                                 <button id="openThemeCustomizerBtn" class="settings-action-btn primary"><i class="fa-solid fa-sliders"></i> Open UI Token Customizer</button>
                             </div>
+                            <div class="settings-row" data-platform="desktop">
+                                <label for="settingsUiScale">UI Scale: <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i></label>
+                                <select id="settingsUiScale" class="glass-select">
+                                    <option value="1" data-icon="fa-solid fa-magnifying-glass-minus">80%</option>
+                                    <option value="2" data-icon="fa-solid fa-magnifying-glass-minus">90%</option>
+                                    <option value="3" data-icon="fa-solid fa-magnifying-glass" selected>100% (Default)</option>
+                                    <option value="4" data-icon="fa-solid fa-magnifying-glass-plus">110%</option>
+                                    <option value="5" data-icon="fa-solid fa-magnifying-glass-plus">120%</option>
+                                </select>
+                                <span class="settings-hint">Adjust the overall UI zoom level</span>
+                            </div>
+                            <div class="settings-row" data-platform="desktop">
+                                <label for="settingsModalSize">Modal Size: <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i></label>
+                                <select id="settingsModalSize" class="glass-select">
+                                    <option value="1" data-icon="fa-solid fa-compress">Small</option>
+                                    <option value="2" data-icon="fa-solid fa-expand" selected>Medium (Default)</option>
+                                    <option value="3" data-icon="fa-solid fa-up-right-and-down-left-from-center">Large</option>
+                                </select>
+                                <span class="settings-hint">Adjust the size of modal dialogs</span>
+                            </div>
                             <div class="settings-row">
                                 <label for="settingsHighlightColor">Accent Color:</label>
                                 <div class="settings-input-group color-input-group">
                                     <input type="color" id="settingsHighlightColor" value="#4a9eff">
                                     <span class="color-preview-label">Click to change</span>
+                                    <button type="button" id="resetAccentColor" class="color-reset-btn" title="Reset to default"><i class="fa-solid fa-rotate-left"></i></button>
                                 </div>
                             </div>
                             <div class="settings-row">
@@ -1724,15 +1756,15 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
                             </div>
-                            <div class="settings-row">
+                            <div class="settings-row" data-platform="desktop">
                                 <label>
-                                    <input type="checkbox" id="settingsAnimateTagPills"> Animate card info on hover
+                                    <input type="checkbox" id="settingsAnimateTagPills"> Animate card info on hover <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i>
                                 </label>
                                 <span class="settings-hint">Hide card name and tags by default, reveal them with a slide-up animation on hover</span>
                             </div>
-                            <div class="settings-row" id="animateKeepNameRow" style="padding-left: 24px; display: none;">
+                            <div class="settings-row" id="animateKeepNameRow" data-platform="desktop" style="padding-left: 24px; display: none;">
                                 <label>
-                                    <input type="checkbox" id="settingsAnimateKeepName"> Always show card name
+                                    <input type="checkbox" id="settingsAnimateKeepName"> Always show card name <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i>
                                 </label>
                                 <span class="settings-hint">Keep the character name visible at all times, only animate the tag pills (WIP)</span>
                             </div>
@@ -1760,11 +1792,11 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Render HTML formatting in taglines (sanitized). Use with care.</span>
                             </div>
-                            <div class="settings-row">
+                            <div class="settings-row" data-platform="mobile">
                                 <label>
-                                    <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews (mobile)
+                                    <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
                                 </label>
-                                <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews on mobile</span>
+                                <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
                             </div>
                         </div>
                         
@@ -1859,6 +1891,16 @@ https://jannyai.com/characters/uuid_slug
                                         <span class="settings-hint">Uses the Git repository's card.json instead of the metadata API. Slower and may fail for some characters. Lorebooks from linked projects always use V4 regardless.</span>
                                     </div>
                                 </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="chubExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="chubExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from ChubAI browse results.</span>
+                                    </div>
+                                </div>
                             </div>
                         </details>
 
@@ -1903,6 +1945,36 @@ https://jannyai.com/characters/uuid_slug
                                         <span class="settings-hint">Credentials are stored locally and used to log in via the cl-helper server plugin. Never sent to third parties.</span>
                                     </div>
                                 </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="pygmalionExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="pygmalionExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from Pygmalion browse results.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- JannyAI provider settings -->
+                        <details class="settings-provider-section" id="settingsJannySection">
+                            <summary>
+                                <i class="fa-solid fa-robot provider-icon"></i> JannyAI
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="jannyExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="jannyExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from JannyAI browse results (filtered client-side).</span>
+                                    </div>
+                                </div>
                             </div>
                         </details>
 
@@ -1931,6 +2003,16 @@ https://jannyai.com/characters/uuid_slug
                                             </button>
                                         </div>
                                         <span class="settings-hint">Paste your session cookie from DevTools → Application → Cookies. Expires after ~10 days. Required for NSFW content visibility.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="ctExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="ctExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from CharacterTavern browse results.</span>
                                     </div>
                                 </div>
                             </div>
@@ -1968,6 +2050,16 @@ https://jannyai.com/characters/uuid_slug
                                             <input type="checkbox" id="settingsWyvernRememberCredentials" checked> Remember credentials (auto-refresh token)
                                         </label>
                                         <span class="settings-hint">Credentials are stored locally and used to authenticate via Firebase. Never sent to third parties.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="wyvernExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="wyvernExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from Wyvern browse results.</span>
                                     </div>
                                 </div>
                             </div>
@@ -2018,6 +2110,16 @@ https://jannyai.com/characters/uuid_slug
                                         <button id="datacatClearTokenBtn" class="settings-action-btn danger">
                                             <i class="fa-solid fa-trash-can"></i> Clear Session
                                         </button>
+                                    </div>
+                                </div>
+                                <div class="settings-group" style="opacity: 0.45; pointer-events: none;">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="datacatExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="datacatExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off" disabled>
+                                        </div>
+                                        <span class="settings-hint">Not available for DataCat.</span>
                                     </div>
                                 </div>
                             </div>
@@ -2265,7 +2367,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.8.5</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.0</span>
                             </div>
                         </div>
                     </div>
@@ -2282,8 +2384,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=77"></script>
-    <script type="module" src="../modules/module-loader.js?v=2"></script>
-    <script src="library-mobile.js?v=1"></script>
+    <script src="library.js?v=81"></script>
+    <script type="module" src="../modules/module-loader.js?v=5"></script>
+    <script src="library-mobile.js?v=2"></script>
 </body>
 </html>

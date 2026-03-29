@@ -32,15 +32,15 @@ const {
     setSetting,
     fetchCharacters,
     fetchAndAddCharacter,
-    checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     deleteCharacter,
     getCharacterGalleryId,
     showImportSummaryModal,
-    getAllCharacters,
     formatRichText,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
+    getProviderExcludeTags,
 } = CoreAPI;
 
 // ========================================
@@ -87,11 +87,7 @@ let datacatFollowingLoading = false;
 let datacatFollowingSort = 'newest';
 let datacatFollowingGridRenderedCount = 0;
 
-// Local library lookup for "In Library" badges
-let localLibraryLookup = {
-    byNameAndCreator: new Set(),
-    byDatacatId: new Set()
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 const PAGE_SIZE = 80;
 
@@ -136,33 +132,13 @@ function isNsfw(hit) {
 // LOCAL LIBRARY LOOKUP
 // ========================================
 
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byDatacatId.clear();
-
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-
-        const dcData = char.data?.extensions?.datacat;
-        if (dcData?.id) localLibraryLookup.byDatacatId.add(String(dcData.id));
-    }
-
-    debugLog('[DatacatBrowse] Library lookup built:',
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'datacatIds:', localLibraryLookup.byDatacatId.size);
-}
-
 function isCharInLocalLibrary(dcChar) {
     const id = getCharId(dcChar);
-    if (id && localLibraryLookup.byDatacatId.has(String(id))) return true;
+    if (id && view._lookup.byProviderId.has(String(id))) return true;
 
     const name = (dcChar.name || '').toLowerCase().trim();
     const creator = getCreatorName(dcChar).toLowerCase().trim();
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
 
     return false;
 }
@@ -179,6 +155,7 @@ function createDatacatCard(hit) {
     const charId = getCharId(hit);
     const creatorName = getCreatorName(hit);
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', creatorName);
 
     // Tags are only present on creator endpoint items, not recent-public
     const tags = resolveTagNames(hit.tags || []).slice(0, 3);
@@ -186,6 +163,8 @@ function createDatacatCard(hit) {
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
     if (isNsfw(hit)) {
         badges.push('<span class="browse-nsfw-badge">NSFW</span>');
@@ -215,7 +194,7 @@ function createDatacatCard(hit) {
         statsHtml = '';
     }
 
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
 
     return `
         <div class="${cardClass}" data-datacat-id="${escapeHtml(String(charId))}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -263,6 +242,16 @@ function renderGrid(characters, append = false) {
     let filtered = datacatNsfwEnabled
         ? characters
         : characters.filter(c => !isNsfw(c));
+
+    // Client-side: persistent exclude tags from settings
+    const dcPersistentExclude = getProviderExcludeTags('datacat');
+    if (dcPersistentExclude.length > 0) {
+        const lowerExclude = dcPersistentExclude.map(t => t.toLowerCase());
+        filtered = filtered.filter(c => {
+            const names = resolveTagNames(c.tags || []).map(n => n.toLowerCase());
+            return !lowerExclude.some(et => names.includes(et));
+        });
+    }
 
     const startIdx = append ? datacatGridRenderedCount : 0;
     const html = filtered.slice(startIdx).map(c => createDatacatCard(c)).join('');
@@ -351,7 +340,11 @@ async function loadCharacters(append = false) {
             const activeLimit = freshParsed.window === '24h' ? datacatFreshLimit24 : datacatFreshLimitWeek;
             datacatHasMore = list.length >= activeLimit;
         } else if (append) {
-            datacatCharacters = datacatCharacters.concat(list);
+            const existingIds = new Set(datacatCharacters.map(c => getCharId(c)));
+            datacatCharacters = datacatCharacters.concat(list.filter(c => {
+                const id = getCharId(c);
+                return !id || !existingIds.has(id);
+            }));
             datacatHasMore = (datacatCurrentOffset + PAGE_SIZE) < total;
         } else {
             datacatCharacters = list;
@@ -962,6 +955,15 @@ function renderFollowing() {
         ? datacatFollowingCharacters
         : datacatFollowingCharacters.filter(c => !isNsfw(c));
 
+    const dcPersistentExclude = getProviderExcludeTags('datacat');
+    if (dcPersistentExclude.length > 0) {
+        const lowerExclude = dcPersistentExclude.map(t => t.toLowerCase());
+        filtered = filtered.filter(c => {
+            const names = resolveTagNames(c.tags || []).map(n => n.toLowerCase());
+            return !lowerExclude.some(et => names.includes(et));
+        });
+    }
+
     const sorted = sortFollowingCharacters(filtered);
 
     if (sorted.length === 0 && datacatFollowingCharacters.length > 0) {
@@ -1002,6 +1004,7 @@ function openPreviewModal(hit) {
     const tags = resolveTagNames(hit.tags || []);
     const creatorName = getCreatorName(hit) || 'Unknown';
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', creatorName);
 
     const chatCount = getChatCount(hit);
     const msgCount = getMsgCount(hit);
@@ -1070,11 +1073,15 @@ function openPreviewModal(hit) {
     if (inLibrary) {
         importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
         importBtn.classList.add('secondary');
-        importBtn.classList.remove('primary');
+        importBtn.classList.remove('primary', 'warning');
+    } else if (possibleMatch) {
+        importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+        importBtn.classList.add('warning');
+        importBtn.classList.remove('primary', 'secondary');
     } else {
         importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
         importBtn.classList.add('primary');
-        importBtn.classList.remove('secondary');
+        importBtn.classList.remove('secondary', 'warning');
     }
     importBtn.disabled = false;
 
@@ -1308,7 +1315,7 @@ async function importCharacter(charData) {
         const charName = character.chat_name || character.name || charData.name || '';
         const charCreator = character.creator_name || charData.creatorName || charData.creator_name || '';
 
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: charName,
             creator: charCreator,
             fullPath: String(charId),
@@ -1376,7 +1383,7 @@ async function importCharacter(charData) {
 
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markCardAsImported(charId);
 
     } catch (err) {
@@ -1396,6 +1403,7 @@ function markCardAsImported(charId) {
         const card = grid.querySelector(`[data-datacat-id="${charId}"]`);
         if (!card) continue;
         card.classList.add('in-library');
+        card.classList.remove('possible-library');
         let badgesEl = card.querySelector('.browse-feature-badges');
         if (!badgesEl) {
             const imgWrap = card.querySelector('.browse-card-image');
@@ -1404,8 +1412,11 @@ function markCardAsImported(charId) {
                 badgesEl = imgWrap.querySelector('.browse-feature-badges');
             }
         }
-        if (badgesEl && !badgesEl.querySelector('.in-library')) {
-            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        if (badgesEl) {
+            badgesEl.querySelector('.possible-library')?.remove();
+            if (!badgesEl.querySelector('.in-library')) {
+                badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+            }
         }
     }
 }
@@ -1688,6 +1699,16 @@ window.openDatacatCharPreview = function(char) {
 // ========================================
 
 const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
+
+    constructor(provider) {
+        super(provider);
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const dcData = char.data?.extensions?.datacat;
+        if (dcData?.id) idSet.add(String(dcData.id));
+    }
 
     get previewModalId() { return 'datacatCharModal'; }
 
@@ -1982,7 +2003,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     init() {
         super.init();
         loadFollowedCreators();
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
         initDatacatView();
         const grid = document.getElementById('datacatGrid');
         if (grid) this.observeImages(grid);
@@ -2046,6 +2067,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             datacatFreshLimit24 = 80;
             datacatFreshLimitWeek = 20;
             datacatHasMore = true;
+            datacatIsLoading = false;
+            datacatFollowingLoading = false;
             datacatGridRenderedCount = 0;
             datacatCreatorId = null;
             datacatCreatorName = '';
@@ -2060,30 +2083,20 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
 
         if (wasInitialized && this._initialized) {
             delegatesInitialized = true;
-            buildLocalLibraryLookup();
-            const grid = document.getElementById('datacatGrid');
-            if (grid) this.observeImages(grid);
+            this.buildLocalLibraryLookup();
+            this.reconnectImageObserver();
         }
     }
 
     // -- Library Lookup (BrowseView contract) --
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        for (const gridId of ['datacatGrid', 'datacatFollowingGrid']) {
-            const grid = document.getElementById(gridId);
-            if (!grid) continue;
-            for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
-                const id = card.dataset.datacatId;
-                const name = card.querySelector('.browse-card-name')?.textContent || '';
-                if (isCharInLocalLibrary({ characterId: id, name })) {
-                    markCardAsImported(id);
-                }
-            }
-        }
+        super.refreshInLibraryBadges(card => {
+            const id = card.dataset.datacatId;
+            const name = card.querySelector('.browse-card-name')?.textContent || '';
+            const creatorName = card.querySelector('.browse-card-creator-link')?.textContent || '';
+            return isCharInLocalLibrary({ characterId: id, name, creatorName });
+        });
     }
 
     deactivate() {

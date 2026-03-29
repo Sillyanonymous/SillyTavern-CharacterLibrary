@@ -9,6 +9,7 @@ const ENDPOINTS = {
     CHATS_GET: '/chats/get',
     CHATS_SAVE: '/chats/save',
     CHATS_DELETE: '/chats/delete',
+    CHATS_RECENT: '/chats/recent',
 };
 
 // ========================================
@@ -304,10 +305,10 @@ function initChatsView() {
         }
     });
 
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && !document.getElementById('chatPreviewModal')?.classList.contains('hidden')) {
-            CoreAPI.hideModal('chatPreviewModal');
-        }
+    window.registerOverlay?.({
+        id: 'chatPreviewModal',
+        tier: 4,
+        close: () => CoreAPI.hideModal('chatPreviewModal'),
     });
 
     // Search input should also filter chats when in chats view (debounced)
@@ -489,52 +490,53 @@ async function fetchFreshChats(isBackground = false) {
 
     const chatsGrid = document.getElementById('chatsGrid');
     const allCharacters = CoreAPI.getAllCharacters();
-    const BATCH_SIZE = 10;
 
     try {
+        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_RECENT, 'POST', {});
+        if (signal.aborted) return;
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+        const recentChats = await response.json();
+        if (signal.aborted) return;
+
+        const charMap = new Map();
+        for (const char of allCharacters) {
+            charMap.set(char.avatar, char);
+        }
+
         const newChats = [];
+        for (const chat of recentChats) {
+            if (!chat.avatar) continue;
+            const char = charMap.get(chat.avatar);
+            if (!char) continue;
 
-        for (let i = 0; i < allCharacters.length; i += BATCH_SIZE) {
-            if (signal.aborted) return;
-            const batch = allCharacters.slice(i, i + BATCH_SIZE);
+            const cachedChat = allChats.find(c =>
+                c.file_name === chat.file_name && c.charAvatar === chat.avatar
+            );
 
-            await Promise.all(batch.map(async (char) => {
-                try {
-                    const response = await CoreAPI.apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', {
-                        avatar_url: char.avatar,
-                        metadata: true
-                    });
+            const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
+            const newMsgCount = chat.chat_items || 0;
+            const canReuseCache = cachedChat && cachedMsgCount === newMsgCount;
 
-                    if (signal.aborted) return;
+            let preview = null;
+            if (canReuseCache && cachedChat.preview) {
+                preview = cachedChat.preview;
+            } else if (chat.mes && chat.mes !== '[The chat is empty]' && chat.mes !== '[The message is empty]') {
+                const truncated = chat.mes.substring(0, 150);
+                preview = truncated + (chat.mes.length > 150 ? '...' : '');
+            }
 
-                    if (response.ok) {
-                        const chats = await response.json();
-                        if (chats && chats.length && !chats.error) {
-                            chats.forEach(chat => {
-                                const cachedChat = allChats.find(c =>
-                                    c.file_name === chat.file_name && c.charAvatar === char.avatar
-                                );
-
-                                const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
-                                const newMsgCount = chat.chat_items || chat.mes_count || 0;
-                                const canReusePreview = cachedChat?.preview && cachedMsgCount === newMsgCount;
-
-                                newChats.push({
-                                    ...chat,
-                                    character: char,
-                                    charName: char.name,
-                                    charAvatar: char.avatar,
-                                    preview: canReusePreview ? cachedChat.preview : null,
-                                    models: canReusePreview ? (cachedChat.models || null) : null
-                                });
-                            });
-                        }
-                    }
-                } catch (e) {
-                    if (e.name === 'AbortError') return;
-                    console.warn(`Failed to load chats for ${char.name}:`, e);
-                }
-            }));
+            newChats.push({
+                file_name: chat.file_name,
+                last_mes: chat.last_mes,
+                chat_items: chat.chat_items || 0,
+                character: char,
+                charName: char.name,
+                charAvatar: chat.avatar,
+                preview: preview,
+                models: canReuseCache ? (cachedChat.models || null) : null,
+            });
         }
 
         if (signal.aborted) return;
@@ -1389,7 +1391,7 @@ async function editChatMessage(messageIndex) {
 
     const editModalHtml = `
         <div id="editMessageModal" class="modal-overlay">
-            <div class="modal-glass" style="max-width: 600px; width: 90%;">
+            <div class="modal-glass" style="max-width: calc(600px * var(--modal-scale, 1)); width: 90%;">
                 <div class="modal-header">
                     <h2><i class="fa-solid fa-pen"></i> Edit Message</h2>
                     <button class="close-btn" id="editMessageClose">&times;</button>

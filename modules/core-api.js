@@ -105,6 +105,14 @@ export function setSettings(settingsObj) {
     window.setSettings?.(settingsObj);
 }
 
+export function getProviderExcludeTags(providerId) {
+    return window.getProviderExcludeTags?.(providerId) || [];
+}
+
+export function setProviderExcludeTags(providerId, tags) {
+    window.setProviderExcludeTags?.(providerId, tags);
+}
+
 // ========================================
 // UI ACTIONS
 // ========================================
@@ -200,11 +208,7 @@ export function getGalleryFolderName(char) {
  * @returns {string} Sanitized folder name
  */
 export function sanitizeFolderName(name) {
-    if (window.sanitizeFolderName) {
-        return window.sanitizeFolderName(name);
-    }
-    // Fallback: remove illegal Windows path characters
-    return (name || '').replace(/[\\/:*?"<>|]/g, '').trim();
+    return window.sanitizeFolderName?.(name) ?? '';
 }
 
 /**
@@ -247,20 +251,7 @@ export function removeGalleryFolderOverride(avatar) {
  * @returns {Promise<Response>} Fetch response
  */
 export function apiRequest(endpoint, method = 'GET', data = null, options = {}) {
-    if (window.apiRequest) {
-        return window.apiRequest(endpoint, method, data, options);
-    }
-    
-    // Fallback implementation
-    return fetch(`/api${endpoint}`, {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': getCSRFToken()
-        },
-        body: data ? JSON.stringify(data) : undefined,
-        ...options
-    });
+    return window.apiRequest?.(endpoint, method, data, options);
 }
 
 /**
@@ -354,12 +345,7 @@ export function getModule(name) {
  * @returns {string} Escaped text
  */
 export function escapeHtml(text) {
-    if (window.escapeHtml) {
-        return window.escapeHtml(text);
-    }
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return window.escapeHtml?.(text) ?? '';
 }
 
 /**
@@ -439,10 +425,7 @@ export function hideElement(id) {
  * @param {string} modalId - Modal element ID
  */
 export function hideModal(modalId) {
-    if (window.hideModal) {
-        return window.hideModal(modalId);
-    }
-    document.getElementById(modalId)?.classList.add('hidden');
+    window.hideModal?.(modalId);
 }
 
 /**
@@ -480,12 +463,7 @@ export function initCustomSelect(selectEl) {
  * @param {string} className - CSS class name
  */
 export function renderLoadingState(container, message, className = 'loading-spinner') {
-    if (window.renderLoadingState) {
-        return window.renderLoadingState(container, message, className);
-    }
-    if (container) {
-        container.innerHTML = `<div class="${className}"><i class="fa-solid fa-spinner fa-spin"></i><p>${message}</p></div>`;
-    }
+    window.renderLoadingState?.(container, message, className);
 }
 
 /**
@@ -494,10 +472,7 @@ export function renderLoadingState(container, message, className = 'loading-spin
  * @returns {string} Avatar URL
  */
 export function getCharacterAvatarUrl(avatar) {
-    if (window.getCharacterAvatarUrl) {
-        return window.getCharacterAvatarUrl(avatar);
-    }
-    return avatar ? `/characters/${avatar}` : '/img/ai4.png';
+    return window.getCharacterAvatarUrl?.(avatar) ?? '';
 }
 
 /**
@@ -508,11 +483,7 @@ export function getCharacterAvatarUrl(avatar) {
  * @returns {string} Formatted HTML
  */
 export function formatRichText(text, charName = '', preserveHtml = false) {
-    if (window.formatRichText) {
-        return window.formatRichText(text, charName, preserveHtml);
-    }
-    // Minimal fallback
-    return escapeHtml(text);
+    return window.formatRichText?.(text, charName, preserveHtml) ?? '';
 }
 
 // ========================================
@@ -669,10 +640,19 @@ export function initContentExpandHandlers(container) {
 /**
  * Check if a character (by name/content) already exists in the local library
  * @param {Object} card - Character card to check
- * @returns {Object|null} Duplicate info or null
+ * @returns {Array} Duplicate info array
  */
 export function checkCharacterForDuplicates(card) {
-    return window.checkCharacterForDuplicates?.(card) || null;
+    return window.checkCharacterForDuplicates?.(card) || [];
+}
+
+/**
+ * Async duplicate check with hydration for cross-provider matching
+ * @param {Object} card - Character card to check
+ * @returns {Promise<Array>} Duplicate matches sorted by score
+ */
+export function checkCharacterForDuplicatesAsync(card) {
+    return window.checkCharacterForDuplicatesAsync?.(card) || Promise.resolve([]);
 }
 
 /**
@@ -935,6 +915,13 @@ export function getProviderForUrl(url) {
 }
 
 // ========================================
+// UPDATE LOCK
+// ========================================
+
+export function isUpdateLocked(char) { return window.isUpdateLocked?.(char) ?? false; }
+export function setUpdateLocked(...args) { return window.setUpdateLocked?.(...args); }
+
+// ========================================
 // PLAYLISTS
 // ========================================
 
@@ -974,6 +961,8 @@ export default {
     getSetting,
     setSetting,
     setSettings,
+    getProviderExcludeTags,
+    setProviderExcludeTags,
     
     // View management
     switchView,
@@ -1055,6 +1044,7 @@ export default {
     
     // Import / Download Pipeline
     checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     findCharacterMediaUrls,
     showImportSummaryModal,
@@ -1094,6 +1084,9 @@ export default {
     getProviderLinkInfo,
     getAllLinkedCharacters,
     getProviderForUrl,
+    // Update Lock
+    isUpdateLocked,
+    setUpdateLocked,
     // Playlists
     playlistsLoadPlaylists,
     playlistsCreatePlaylist,

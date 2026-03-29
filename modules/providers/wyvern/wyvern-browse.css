@@ -1,0 +1,46 @@
+/* ============================================
+   Wyvern Browse CSS
+   Extracted from library.css
+   ============================================ */
+
+
+[data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger {
+    min-width: 150px;
+    font-size: 0.85rem;
+    padding: 6px 10px;
+}
+
+
+#wyvernFollowCreatorBtn {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+#wyvernFollowCreatorBtn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#wyvernFollowCreatorBtn.following {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+#wyvernFollowCreatorBtn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+
+
+/* Mobile overrides */
+@media screen and (max-width: 768px) {
+
+    #wyvernCreatorSortSelect, [data-select-id="wyvernCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
+    #wyvernFollowCreatorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
+
+}

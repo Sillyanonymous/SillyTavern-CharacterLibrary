@@ -1,6 +1,7 @@
 // BrowseView — base class for provider browse views in the Online tab
 
 import CoreAPI from '../core-api.js';
+import { normalizeBrowseName } from './provider-utils.js';
 
 /**
  * Base class for Online tab browse views.
@@ -19,6 +20,12 @@ export class BrowseView {
         this._scrollHandler = null;
         this._scrollIndicator = null;
         this._prefetching = false;
+        this._preloadLimit = 48;
+        this._lookup = {
+            byNameAndCreator: new Set(),
+            byProviderId: new Set(),
+            byNormalizedName: new Map(), // normalized name → Set<normalized creator>
+        };
     }
 
     // ── HTML Rendering ──────────────────────────────────────
@@ -108,16 +115,216 @@ export class BrowseView {
     // ── Library Lookup ───────────────────────────────────────
 
     /**
+     * Populate _lookup Sets from the current allCharacters list.
+     * Handles byNameAndCreator + byNormalizedName universally;
+     * delegates provider-specific ID extraction to _extractProviderIds().
+     */
+    buildLocalLibraryLookup() {
+        const { byNameAndCreator, byProviderId, byNormalizedName } = this._lookup;
+        byNameAndCreator.clear();
+        byProviderId.clear();
+        byNormalizedName.clear();
+
+        for (const char of CoreAPI.getAllCharacters()) {
+            if (!char) continue;
+
+            const name = (char.name || '').toLowerCase().trim();
+            const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
+            if (name && creator) byNameAndCreator.add(`${name}|${creator}`);
+
+            this._extractProviderIds(char, byProviderId);
+
+            for (const variant of this._nameVariants(char.name || '')) {
+                let creatorSet = byNormalizedName.get(variant);
+                if (!creatorSet) {
+                    creatorSet = new Set();
+                    byNormalizedName.set(variant, creatorSet);
+                }
+                if (creator) creatorSet.add(creator);
+            }
+        }
+
+        CoreAPI.debugLog(`[${this.provider.name}] Library lookup built:`,
+            'nameCreators:', byNameAndCreator.size,
+            'providerIds:', byProviderId.size,
+            'normalizedNames:', byNormalizedName.size);
+    }
+
+    /**
+     * Extract provider-specific IDs from a local character into the Set.
+     * Subclasses override to read their extension key.
+     * @param {Object} char - local character from allCharacters
+     * @param {Set} idSet - the byProviderId Set to add to
+     */
+    _extractProviderIds(char, idSet) {}
+
+    /**
+     * Check if a browse card name+creator is a possible match (cross-provider).
+     * @param {string} name - resolved display name from the browse card
+     * @param {string} [creator] - creator/author name from the browse card
+     * @returns {boolean}
+     */
+    isCharPossibleMatch(name, creator) {
+        const browseCreator = (creator || '').toLowerCase().trim();
+        const variants = this._nameVariants(name);
+
+        for (const variant of variants) {
+            const creatorSet = this._lookup.byNormalizedName.get(variant);
+            if (!creatorSet) continue;
+
+            if (!browseCreator || creatorSet.size === 0) return true;
+
+            for (const libCreator of creatorSet) {
+                if (this._isCreatorMatch(browseCreator, libCreator)) return true;
+            }
+        }
+
+        // Prefix fallback: check all browse variants against all library names
+        for (const variant of variants) {
+            if (variant.length < 4) continue;
+            for (const [libName, creatorSet] of this._lookup.byNormalizedName) {
+                if (libName.length < 4) continue;
+                if (this._isNamePrefixMatch(variant, libName)) {
+                    if (!browseCreator || creatorSet.size === 0) return true;
+                    for (const libCreator of creatorSet) {
+                        if (this._isCreatorMatch(browseCreator, libCreator)) return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check if one name is a word-boundary prefix of the other.
+     * "scar" matches "scar - the dark king" but NOT "scarlett".
+     * @param {string} a - normalized name
+     * @param {string} b - normalized name
+     * @returns {boolean}
+     */
+    _isNamePrefixMatch(a, b) {
+        const shorter = a.length <= b.length ? a : b;
+        const longer = a.length <= b.length ? b : a;
+        if (shorter.length === longer.length) return false;
+        if (!longer.startsWith(shorter)) return false;
+        return /[\s\-|:,.]/.test(longer[shorter.length]);
+    }
+
+    /**
+     * Generate normalized name variants for cross-provider matching.
+     * Splits on || separators so "Scar || Dark King" matches "Scar".
+     * @param {string} rawName
+     * @returns {string[]} unique normalized variants with length >= 4
+     */
+    _nameVariants(rawName) {
+        const full = normalizeBrowseName(rawName);
+        const variants = new Set();
+        if (full.length >= 4) variants.add(full);
+
+        if (rawName.includes('||')) {
+            const primary = normalizeBrowseName(rawName.split('||')[0]);
+            if (primary.length >= 4) variants.add(primary);
+        }
+
+        return variants;
+    }
+
+    /**
+     * Lightweight fuzzy match for creator names across providers.
+     * Handles case differences, prefixes, and small edits.
+     * @param {string} a - normalized (lowered+trimmed) creator name
+     * @param {string} b - normalized (lowered+trimmed) creator name
+     * @returns {boolean}
+     */
+    _isCreatorMatch(a, b) {
+        if (a === b) return true;
+        if (a.includes(b) || b.includes(a)) return true;
+
+        const aCompact = a.replace(/[\s_-]/g, '');
+        const bCompact = b.replace(/[\s_-]/g, '');
+        if (aCompact && aCompact === bCompact) return true;
+
+        const maxLen = Math.max(a.length, b.length);
+        if (maxLen === 0) return false;
+        if (Math.abs(a.length - b.length) > maxLen * 0.4) return false;
+
+        let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+        for (let i = 1; i <= a.length; i++) {
+            const curr = [i];
+            for (let j = 1; j <= b.length; j++) {
+                curr[j] = Math.min(
+                    prev[j] + 1,
+                    curr[j - 1] + 1,
+                    prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+                );
+            }
+            prev = curr;
+        }
+
+        return (1 - prev[b.length] / maxLen) >= 0.75;
+    }
+
+    /**
      * Rebuild the In Library lookup from allCharacters.
      * Called after extensions recovery or character list changes.
      */
-    rebuildLocalLibraryLookup() {}
+    rebuildLocalLibraryLookup() {
+        this.buildLocalLibraryLookup();
+    }
 
     /**
      * Re-evaluate In Library badges on already-rendered browse cards.
      * Called after the lookup has been rebuilt to fix stale badges.
+     * @param {function(HTMLElement): boolean} checkCard - Returns true if the card is in the local library
+     * @param {string[]} [gridIds] - Grid element IDs to scan (defaults to _getImageGridIds())
      */
-    refreshInLibraryBadges() {}
+    refreshInLibraryBadges(checkCard, gridIds) {
+        if (!checkCard) return;
+        for (const gridId of (gridIds || this._getImageGridIds())) {
+            const grid = document.getElementById(gridId);
+            if (!grid) continue;
+
+            for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
+                if (!checkCard(card)) continue;
+                card.classList.add('in-library');
+                card.classList.remove('possible-library');
+                let badgesEl = card.querySelector('.browse-feature-badges');
+                if (!badgesEl) {
+                    const imgWrap = card.querySelector('.browse-card-image');
+                    if (imgWrap) {
+                        imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
+                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                    }
+                }
+                if (badgesEl) {
+                    badgesEl.querySelector('.possible-library')?.remove();
+                    if (!badgesEl.querySelector('.in-library')) {
+                        badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+                    }
+                }
+            }
+
+            for (const card of grid.querySelectorAll('.browse-card:not(.in-library):not(.possible-library)')) {
+                const name = card.querySelector('.browse-card-name')?.textContent || '';
+                const creatorEl = card.querySelector('.browse-card-creator-link');
+                const creator = creatorEl?.dataset.author || creatorEl?.dataset.creatorName || '';
+                if (!this.isCharPossibleMatch(name, creator)) continue;
+                card.classList.add('possible-library');
+                let badgesEl = card.querySelector('.browse-feature-badges');
+                if (!badgesEl) {
+                    const imgWrap = card.querySelector('.browse-card-image');
+                    if (imgWrap) {
+                        imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
+                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                    }
+                }
+                if (badgesEl && !badgesEl.querySelector('.possible-library')) {
+                    badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
+                }
+            }
+        }
+    }
 
     // ── Image Observer ──────────────────────────────────────
 
@@ -219,7 +426,7 @@ export class BrowseView {
         const images = container.querySelectorAll('.browse-card-image img[data-src]');
         let loaded = 0;
         for (const img of images) {
-            if (loaded >= 48) break;
+            if (loaded >= this._preloadLimit) break;
             if (img.dataset.failed) continue;
             const realSrc = img.dataset.src;
             if (realSrc && img.src !== realSrc) {
@@ -267,6 +474,17 @@ export class BrowseView {
      */
     loadMore() {}
 
+    _triggerLoadMore() {
+        this._prefetching = true;
+        this._setScrollIndicator('loading');
+        const result = this.loadMore();
+        if (result && typeof result.then === 'function') {
+            result.then(() => { this._prefetching = false; }, () => { this._prefetching = false; });
+        } else {
+            setTimeout(() => { this._prefetching = false; }, 300);
+        }
+    }
+
     /**
      * Whether infinite scroll is active for this provider.
      * Reads from the per-provider setting with global fallback.
@@ -285,6 +503,11 @@ export class BrowseView {
      * Attach the scroll listener for infinite loading + prefetch.
      * Listens on .gallery-content (the scrollable parent of #onlineView).
      */
+    _getScrollThreshold() {
+        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        return 1500 / zoom;
+    }
+
     _attachScrollListener() {
         this._detachScrollListener();
         const scrollContainer = document.querySelector('.gallery-content');
@@ -297,11 +520,8 @@ export class BrowseView {
             const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
             const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-            if (distanceFromBottom < 1500) {
-                this._prefetching = true;
-                this._setScrollIndicator('loading');
-                this.loadMore();
-                setTimeout(() => { this._prefetching = false; }, 300);
+            if (distanceFromBottom < this._getScrollThreshold()) {
+                this._triggerLoadMore();
             }
         };
 
@@ -334,9 +554,23 @@ export class BrowseView {
         if (this.isInfiniteScrollEnabled()) {
             el.style.display = 'none';
             this._setScrollIndicator(hasMore ? 'hidden' : 'end');
+            if (hasMore) this._deferredScrollCheck();
         } else {
             el.style.display = hasMore && hasResults ? 'flex' : 'none';
         }
+    }
+
+    _deferredScrollCheck() {
+        requestAnimationFrame(() => {
+            if (!this.isInfiniteScrollEnabled()) return;
+            if (this._prefetching || !this.canLoadMore()) return;
+            const sc = document.querySelector('.gallery-content');
+            if (!sc) return;
+            const distanceFromBottom = sc.scrollHeight - sc.scrollTop - sc.clientHeight;
+            if (distanceFromBottom < this._getScrollThreshold()) {
+                this._triggerLoadMore();
+            }
+        });
     }
 
     _ensureScrollIndicator() {
@@ -500,6 +734,7 @@ export class BrowseView {
         let currentIndex = images ? (startIndex ?? 0) : 0;
 
         const overlay = document.createElement('div');
+        overlay.id = 'browseAvatarViewer';
         overlay.className = 'browse-avatar-viewer';
         if (images) overlay.classList.add('has-gallery');
 
@@ -556,20 +791,20 @@ export class BrowseView {
             img.addEventListener('click', () => BrowseView.closeAvatarViewer());
         }
 
-        const onKey = (e) => {
-            if (e.key === 'Escape') { BrowseView.closeAvatarViewer(); return; }
-            if (!images) return;
-            if (e.key === 'ArrowLeft') { e.preventDefault(); showImage(currentIndex - 1); }
-            if (e.key === 'ArrowRight') { e.preventDefault(); showImage(currentIndex + 1); }
-        };
-        document.addEventListener('keydown', onKey);
-        overlay._onKey = onKey;
+        if (images) {
+            const onKey = (e) => {
+                if (e.key === 'ArrowLeft') { e.preventDefault(); showImage(currentIndex - 1); }
+                if (e.key === 'ArrowRight') { e.preventDefault(); showImage(currentIndex + 1); }
+            };
+            document.addEventListener('keydown', onKey);
+            overlay._onKey = onKey;
+        }
 
         document.body.appendChild(overlay);
     }
 
     static closeAvatarViewer() {
-        const viewer = document.querySelector('.browse-avatar-viewer');
+        const viewer = document.getElementById('browseAvatarViewer');
         if (!viewer) return;
         if (viewer._onKey) document.removeEventListener('keydown', viewer._onKey);
         viewer.remove();
@@ -595,5 +830,12 @@ export class BrowseView {
         }
     }
 }
+
+window.registerOverlay?.({
+    id: 'browseAvatarViewer',
+    tier: 0,
+    static: false,
+    close: () => BrowseView.closeAvatarViewer(),
+});
 
 export default BrowseView;

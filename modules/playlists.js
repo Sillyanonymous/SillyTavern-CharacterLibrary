@@ -295,7 +295,7 @@ function injectPickerModal() {
 
     const html = `
     <div id="playlistPickerModal" class="cl-modal">
-        <div class="cl-modal-content" style="max-width: 420px;">
+        <div class="cl-modal-content" style="max-width: calc(420px * var(--modal-scale, 1));">
             <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-list-ul"></i> Add to Playlist</h3>
                 <span id="playlistPickerCount" class="pl-picker-count"></span>
@@ -304,7 +304,7 @@ function injectPickerModal() {
             <div class="cl-modal-body" style="padding: 0;">
                 <div class="pl-picker-search-wrap">
                     <i class="fa-solid fa-magnifying-glass pl-picker-search-icon"></i>
-                    <input type="text" id="playlistPickerSearch" class="cl-input pl-picker-search" placeholder="Search or create..." maxlength="100" autocomplete="one-time-code">
+                    <input type="search" id="playlistPickerSearch" class="cl-input pl-picker-search" placeholder="Search or create..." maxlength="100" autocomplete="one-time-code">
                 </div>
                 <div id="playlistPickerList" class="pl-picker-list"></div>
                 <div id="playlistPickerEmpty" class="pl-picker-empty">No playlists yet. Type a name above to create one.</div>
@@ -517,7 +517,7 @@ function injectManageModal() {
 
     const html = `
     <div id="playlistManageModal" class="cl-modal">
-        <div class="cl-modal-content" style="max-width: 500px;">
+        <div class="cl-modal-content" style="max-width: calc(500px * var(--modal-scale, 1));">
             <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-list-ul"></i> Manage Playlists</h3>
                 <button id="playlistManageCloseBtn" class="cl-modal-close"><i class="fa-solid fa-xmark"></i></button>
@@ -665,10 +665,11 @@ function filterManageList() {
 }
 
 function positionPickerAtButton(btn, picker) {
+    const zoom = parseFloat(document.documentElement.style.zoom) || 1;
     const rect = btn.getBoundingClientRect();
     picker.style.position = 'fixed';
-    picker.style.left = `${rect.left}px`;
-    picker.style.top = `${rect.bottom + 4}px`;
+    picker.style.left = `${rect.left / zoom}px`;
+    picker.style.top = `${(rect.bottom / zoom) + 4}px`;
 }
 
 function toggleIconPicker(btn) {

@@ -25,10 +25,11 @@ import {
 const {
     onElement: on, showToast, escapeHtml, debugLog, getSetting, setSetting,
     fetchCharacters, fetchAndAddCharacter,
-    checkCharacterForDuplicates, showPreImportDuplicateWarning,
+    checkCharacterForDuplicatesAsync, showPreImportDuplicateWarning,
     deleteCharacter, getCharacterGalleryId, showImportSummaryModal,
-    getAllCharacters, formatRichText, debounce,
+    formatRichText, debounce,
     apiRequest, cleanupCreatorNotesContainer,
+    getProviderExcludeTags,
 } = CoreAPI;
 
 // ========================================
@@ -53,6 +54,7 @@ let pygIncludeTags = new Set();
 let pygExcludeTags = new Set();
 let pygKnownTags = new Set();
 let pygFilterHideOwned = false;
+let pygFilterHidePossible = false;
 
 // View mode: 'browse' or 'following'
 let pygViewMode = 'browse';
@@ -79,10 +81,7 @@ const SEED_TAGS = [
 ];
 for (const t of SEED_TAGS) pygKnownTags.add(t);
 
-const localLibraryLookup = {
-    byNameAndCreator: new Set(),
-    byPygId: new Set(),
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 // ========================================
 // PURIFY CONFIG (for formatRichText in modal)
@@ -97,33 +96,20 @@ const BROWSE_PURIFY_CONFIG = {
 // LIBRARY LOOKUP
 // ========================================
 
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byPygId.clear();
-
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-
-        const pygData = char.data?.extensions?.pygmalion;
-        if (pygData?.id) localLibraryLookup.byPygId.add(pygData.id);
-    }
-
-    debugLog('[PygBrowse] Library lookup built:',
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'pygIds:', localLibraryLookup.byPygId.size);
-}
-
 function isCharInLocalLibrary(hit) {
-    if (hit.id && localLibraryLookup.byPygId.has(hit.id)) return true;
+    if (hit.id && view._lookup.byProviderId.has(hit.id)) return true;
 
     const name = (hit.displayName || hit.name || '').toLowerCase().trim();
     const creator = (hit.owner?.username || hit.owner?.displayName || '').toLowerCase().trim();
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
 
     return false;
+}
+
+function isCharPossibleMatchObj(h) {
+    if (isCharInLocalLibrary(h)) return false;
+    const owner = h.owner || {};
+    return view.isCharPossibleMatch(h.displayName || h.name || '', owner.username || owner.displayName || '');
 }
 
 // ========================================
@@ -198,10 +184,13 @@ function createPygCard(hit) {
     const owner = hit.owner || {};
     const creator = owner.username || owner.displayName || '';
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.displayName || hit.name || '', creator);
 
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
 
     const galleryCount = (hit.altAvatars?.length || 0) + (hit.altImages?.length || 0);
@@ -214,7 +203,7 @@ function createPygCard(hit) {
         : '';
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
 
     return `
         <div class="${cardClass}" data-pyg-id="${escapeHtml(hit.id || '')}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -301,6 +290,11 @@ async function loadCharacters(append = false) {
     try {
         let data;
 
+        const mergedExclude = [...pygExcludeTags];
+        for (const t of getProviderExcludeTags('pygmalion')) {
+            if (!mergedExclude.includes(t)) mergedExclude.push(t);
+        }
+
         if (pygAuthorOwnerId) {
             // Dedicated owner API for author filter
             data = await fetchCharactersByOwner(pygAuthorOwnerId, pygAuthorSort, pygCurrentPage, pygToken || undefined);
@@ -314,7 +308,7 @@ async function loadCharacters(append = false) {
                 pageSize: PAGE_SIZE,
                 page: pygCurrentPage,
                 tagsNamesInclude: [...pygIncludeTags],
-                tagsNamesExclude: [...pygExcludeTags],
+                tagsNamesExclude: mergedExclude,
             });
         }
 
@@ -340,13 +334,16 @@ async function loadCharacters(append = false) {
         // Collect tags from results
         collectTagsFromResults(hits);
 
-        // Client-side: hide owned characters
+        // Client-side: hide owned / possible match characters
         if (pygFilterHideOwned) {
             hits = hits.filter(h => !isCharInLocalLibrary(h));
         }
+        if (pygFilterHidePossible) {
+            hits = hits.filter(h => !isCharPossibleMatchObj(h));
+        }
 
         // Auto-fetch when client-side filters remove too many results
-        const hasClientFilters = pygFilterHideOwned || strictTagFilter;
+        const hasClientFilters = pygFilterHideOwned || pygFilterHidePossible || strictTagFilter;
         if (hasClientFilters && pygCurrentPage < totalPages - 1) {
             let autoFetches = 0;
             while (hits.length < PAGE_SIZE && pygCurrentPage < totalPages - 1 && autoFetches < 3 && delegatesInitialized) {
@@ -365,7 +362,7 @@ async function loadCharacters(append = false) {
                         pageSize: PAGE_SIZE,
                         page: pygCurrentPage,
                         tagsNamesInclude: [...pygIncludeTags],
-                        tagsNamesExclude: [...pygExcludeTags],
+                        tagsNamesExclude: mergedExclude,
                     });
                 }
                 if (!delegatesInitialized) return;
@@ -381,6 +378,9 @@ async function loadCharacters(append = false) {
                 collectTagsFromResults(moreHits);
                 if (pygFilterHideOwned) {
                     moreHits = moreHits.filter(h => !isCharInLocalLibrary(h));
+                }
+                if (pygFilterHidePossible) {
+                    moreHits = moreHits.filter(h => !isCharPossibleMatchObj(h));
                 }
                 hits = hits.concat(moreHits);
             }
@@ -513,8 +513,12 @@ function renderPygTagsList(filter = '') {
             }
             cyclePygTagState(stateBtn, tagName);
             updatePygTagsButton();
-            pygCurrentPage = 0;
-            loadCharacters(false);
+            if (pygViewMode === 'following') {
+                renderPygFollowing();
+            } else {
+                pygCurrentPage = 0;
+                loadCharacters(false);
+            }
         });
     });
 }
@@ -554,7 +558,7 @@ function updatePygTagsButton() {
 function updatePygFiltersButton() {
     const btn = document.getElementById('pygFiltersBtn');
     if (!btn) return;
-    btn.classList.toggle('has-filters', pygFilterHideOwned || !pygSortDescending);
+    btn.classList.toggle('has-filters', pygFilterHideOwned || pygFilterHidePossible || !pygSortDescending);
 }
 
 // ========================================
@@ -575,6 +579,7 @@ function openPreviewModal(hit) {
     const avatarUrl = hit.avatarUrl ? getAvatarUrl(hit.avatarUrl) : '/img/ai4.png';
     const pygUrl = getCharacterPageUrl(hit.id);
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', creator);
 
     try {
         const tagline = stripHtml(hit.description || '');
@@ -692,11 +697,15 @@ function openPreviewModal(hit) {
             if (inLibrary) {
                 importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
                 importBtn.classList.add('secondary');
-                importBtn.classList.remove('primary');
+                importBtn.classList.remove('primary', 'warning');
+            } else if (possibleMatch) {
+                importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+                importBtn.classList.add('warning');
+                importBtn.classList.remove('primary', 'secondary');
             } else {
                 importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
                 importBtn.classList.add('primary');
-                importBtn.classList.remove('secondary');
+                importBtn.classList.remove('secondary', 'warning');
             }
             importBtn.disabled = false;
         }
@@ -938,7 +947,7 @@ async function importCharacter(charData) {
         const charCreator = charData.owner?.username || charData.owner?.displayName || '';
 
         // Pre-import duplicate check
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: charName,
             creator: charCreator,
             fullPath: charData.id,
@@ -1014,7 +1023,7 @@ async function importCharacter(charData) {
 
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markCardAsImported(charData.id);
 
     } catch (err) {
@@ -1034,6 +1043,7 @@ function markCardAsImported(charId) {
         const card = grid.querySelector(`[data-pyg-id="${charId}"]`);
         if (!card) continue;
         card.classList.add('in-library');
+        card.classList.remove('possible-library');
         let badgesEl = card.querySelector('.browse-feature-badges');
         if (!badgesEl) {
             const imgWrap = card.querySelector('.browse-card-image');
@@ -1042,8 +1052,11 @@ function markCardAsImported(charId) {
                 badgesEl = imgWrap.querySelector('.browse-feature-badges');
             }
         }
-        if (badgesEl && !badgesEl.querySelector('.in-library')) {
-            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        if (badgesEl) {
+            badgesEl.querySelector('.possible-library')?.remove();
+            if (!badgesEl.querySelector('.in-library')) {
+                badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+            }
         }
     }
 }
@@ -1211,6 +1224,7 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
         `;
     }
 
+    let shouldRetry = false;
     try {
         // Fetch all followed users (paginated)
         if (pygFollowedUsers.length === 0) {
@@ -1287,13 +1301,12 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
             const recovered = await attemptTokenRecovery();
             if (recovered) {
                 debugLog('[PygFollowing] Token recovered, retrying');
-                pygFollowingLoading = false;
-                loadPygFollowingTimeline(true);
-                return;
+                shouldRetry = true;
+            } else {
+                showToast('Pygmalion token expired \u2014 please re-authenticate.', 'warning', 5000);
+                openPygTokenModal();
+                renderPygFollowingEmpty('login');
             }
-            showToast('Pygmalion token expired — please re-authenticate.', 'warning', 5000);
-            openPygTokenModal();
-            renderPygFollowingEmpty('login');
         } else {
             if (grid) {
                 grid.innerHTML = `
@@ -1312,6 +1325,10 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
     } finally {
         pygFollowingLoading = false;
         pygmalionBrowseView.updateLoadMoreVisibility('pygFollowingLoadMore', false, true);
+    }
+
+    if (shouldRetry) {
+        loadPygFollowingTimeline(true);
     }
 }
 
@@ -1380,12 +1397,16 @@ function renderPygFollowing() {
     // Client-side tag + hide-owned filtering
     const includeTags = [...pygIncludeTags];
     const excludeTags = [...pygExcludeTags];
-    const anyFilterActive = pygFilterHideOwned || includeTags.length > 0 || excludeTags.length > 0;
+    for (const t of getProviderExcludeTags('pygmalion')) {
+        if (!excludeTags.includes(t)) excludeTags.push(t);
+    }
+    const anyFilterActive = pygFilterHideOwned || pygFilterHidePossible || includeTags.length > 0 || excludeTags.length > 0;
 
     let filtered;
     if (anyFilterActive) {
         filtered = pygFollowingCharacters.filter(c => {
             if (pygFilterHideOwned && isCharInLocalLibrary(c)) return false;
+            if (pygFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             if (includeTags.length > 0 || excludeTags.length > 0) {
                 const charTags = (c.tags || []).map(t => t.toLowerCase());
                 if (includeTags.length > 0 && !includeTags.every(t => charTags.includes(t.toLowerCase()))) return false;
@@ -1397,7 +1418,12 @@ function renderPygFollowing() {
         filtered = pygFollowingCharacters.slice();
     }
 
-    const sorted = sortPygFollowingCharacters(filtered);
+    let sorted = sortPygFollowingCharacters(filtered);
+
+    // NSFW filter
+    if (!pygNsfwEnabled) {
+        sorted = sorted.filter(c => !c.isSensitive);
+    }
 
     if (sorted.length === 0 && pygFollowingCharacters.length > 0) {
         grid.innerHTML = `
@@ -1987,8 +2013,12 @@ function initPygView() {
         pygNsfwEnabled = !pygNsfwEnabled;
         setSetting('pygmalionNsfw', pygNsfwEnabled);
         updateNsfwToggle();
-        pygCurrentPage = 0;
-        loadCharacters(false);
+        if (pygViewMode === 'following') {
+            renderPygFollowing();
+        } else {
+            pygCurrentPage = 0;
+            loadCharacters(false);
+        }
     });
 
     // Refresh
@@ -2027,8 +2057,12 @@ function initPygView() {
         pygExcludeTags.clear();
         renderPygTagsList(document.getElementById('pygTagsSearchInput')?.value || '');
         updatePygTagsButton();
-        pygCurrentPage = 0;
-        loadCharacters(false);
+        if (pygViewMode === 'following') {
+            renderPygFollowing();
+        } else {
+            pygCurrentPage = 0;
+            loadCharacters(false);
+        }
     });
 
     // ── Features dropdown ──
@@ -2045,16 +2079,36 @@ function initPygView() {
         const el = document.getElementById('pygFilterHideOwned');
         if (el) pygFilterHideOwned = el.checked;
         updatePygFiltersButton();
-        pygCurrentPage = 0;
-        loadCharacters(false);
+        if (pygViewMode === 'following') {
+            renderPygFollowing();
+        } else {
+            pygCurrentPage = 0;
+            loadCharacters(false);
+        }
+    });
+
+    on('pygFilterHidePossible', 'change', () => {
+        const el = document.getElementById('pygFilterHidePossible');
+        if (el) pygFilterHidePossible = el.checked;
+        updatePygFiltersButton();
+        if (pygViewMode === 'following') {
+            renderPygFollowing();
+        } else {
+            pygCurrentPage = 0;
+            loadCharacters(false);
+        }
     });
 
     on('pygFilterSortDir', 'change', () => {
         const el = document.getElementById('pygFilterSortDir');
         if (el) pygSortDescending = !el.checked;
         updatePygFiltersButton();
-        pygCurrentPage = 0;
-        loadCharacters(false);
+        if (pygViewMode === 'following') {
+            renderPygFollowing();
+        } else {
+            pygCurrentPage = 0;
+            loadCharacters(false);
+        }
     });
 
     // Close dropdowns when clicking outside
@@ -2216,6 +2270,16 @@ function initPygView() {
 
 class PygmalionBrowseView extends BrowseView {
 
+    constructor(provider) {
+        super(provider);
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const pygData = char.data?.extensions?.pygmalion;
+        if (pygData?.id) idSet.add(pygData.id);
+    }
+
     get previewModalId() { return 'pygCharModal'; }
     get hasModeToggle() { return true; }
 
@@ -2325,6 +2389,7 @@ class PygmalionBrowseView extends BrowseView {
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="pygFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="pygFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -2612,7 +2677,7 @@ class PygmalionBrowseView extends BrowseView {
 
     init() {
         super.init();
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
         loadPygToken();
 
         // Restore persisted NSFW preference (only if token exists)
@@ -2662,6 +2727,8 @@ class PygmalionBrowseView extends BrowseView {
             pygCharacters = [];
             pygCurrentPage = 0;
             pygHasMore = true;
+            pygIsLoading = false;
+            pygFollowingLoading = false;
             pygGridRenderedCount = 0;
             pygAuthorFilter = null;
             pygAuthorOwnerId = null;
@@ -2669,6 +2736,7 @@ class PygmalionBrowseView extends BrowseView {
             pygIncludeTags.clear();
             pygExcludeTags.clear();
             pygFilterHideOwned = false;
+            pygFilterHidePossible = false;
             pygSortDescending = true;
             pygViewMode = 'browse';
             pygFollowingCharacters = [];
@@ -2682,17 +2750,14 @@ class PygmalionBrowseView extends BrowseView {
 
         if (wasInitialized && this._initialized && !options.domRecreated) {
             delegatesInitialized = true;
-            buildLocalLibraryLookup();
+            this.buildLocalLibraryLookup();
+            this.reconnectImageObserver();
 
             if (pygViewMode === 'browse') {
-                const grid = document.getElementById('pygGrid');
-                if (grid) this.observeImages(grid);
                 if (pygCharacters.length === 0) {
                     loadCharacters(false);
                 }
             } else if (pygViewMode === 'following') {
-                const followingGrid = document.getElementById('pygFollowingGrid');
-                if (followingGrid) this.observeImages(followingGrid);
                 if (pygFollowingCharacters.length === 0) {
                     loadPygFollowingTimeline();
                 } else {
@@ -2708,24 +2773,13 @@ class PygmalionBrowseView extends BrowseView {
 
     // ── Library Lookup (BrowseView contract) ────────────────
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        for (const gridId of ['pygGrid', 'pygFollowingGrid']) {
-            const grid = document.getElementById(gridId);
-            if (!grid) continue;
-            const charPool = gridId === 'pygFollowingGrid' ? pygFollowingCharacters : pygCharacters;
-            for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
-                const charId = card.dataset.pygId;
-                if (!charId) continue;
-                const hit = charPool.find(c => c.id === charId);
-                if (hit ? isCharInLocalLibrary(hit) : isCharInLocalLibrary({ id: charId })) {
-                    markCardAsImported(charId);
-                }
-            }
-        }
+        super.refreshInLibraryBadges(card => {
+            const charId = card.dataset.pygId;
+            if (!charId) return false;
+            const hit = pygCharacters.find(c => c.id === charId) || pygFollowingCharacters.find(c => c.id === charId);
+            return hit ? isCharInLocalLibrary(hit) : isCharInLocalLibrary({ id: charId });
+        });
     }
 
     deactivate() {

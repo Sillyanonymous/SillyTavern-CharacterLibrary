@@ -38,10 +38,10 @@ const {
     deleteCharacter,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
-    checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     showImportSummaryModal,
-    getAllCharacters
+    getProviderExcludeTags,
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
 
@@ -96,6 +96,7 @@ let chubFilterExpressions = false;
 let chubFilterGreetings = false;
 let chubFilterFavorites = false;
 let chubFilterHideOwned = false;
+let chubFilterHidePossible = false;
 
 // Advanced ChubAI filters (Tags dropdown)
 let chubTagFilters = new Map(); // Map<tagName, 'include' | 'exclude'>
@@ -129,81 +130,38 @@ const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (st
 // Append-only rendering: track how many cards are already in DOM to avoid full re-render on Load More
 let chubGridRenderedCount = 0;
 
-// IntersectionObserver for lazy-loading chub card images
-let chubImageObserver = null;
-
 // Local library lookup for marking characters as "In Library"
-let localLibraryLookup = {
-    byNameAndCreator: new Set(), // "name|creator" combos
-    byChubPath: new Set()        // ChubAI fullPath if stored
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 // Build local library lookup from allCharacters
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byChubPath.clear();
-    
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-        
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) {
-            localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-        }
-        
-        // Check for ChubAI source in extensions data
-        const chubData = char.data?.extensions?.chub;
-        const chubPath = chubData?.fullPath || chubData?.full_path || '';
-        const chubUrl = chubData?.url || char.chub_url || char.source_url || '';
-        
-        // Direct fullPath from our link feature
-        if (chubPath) {
-            localLibraryLookup.byChubPath.add(chubPath.toLowerCase());
-        }
-        
-        // Also check URL-based sources
-        if (chubUrl) {
-            // Extract path from URL like "https://chub.ai/characters/username/slug"
-            const match = chubUrl.match(/characters\/([^\/]+\/[^\/\?]+)/);
-            if (match) {
-                localLibraryLookup.byChubPath.add(match[1].toLowerCase());
-            } else if (chubUrl.includes('/')) {
-                // Might be just "username/slug"
-                localLibraryLookup.byChubPath.add(chubUrl.toLowerCase());
-            }
-        }
-    }
-    
-    debugLog('[LocalLibrary] Built lookup:', 
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'chubPaths:', localLibraryLookup.byChubPath.size);
-}
-
 function isCharInLocalLibrary(chubChar) {
     const fullPath = (chubChar.fullPath || chubChar.full_path || '').toLowerCase();
     const name = (chubChar.name || '').toLowerCase().trim();
     const creator = fullPath.split('/')[0] || '';
-    
-    // Best match: exact ChubAI path
-    if (fullPath && localLibraryLookup.byChubPath.has(fullPath)) {
+
+    if (fullPath && view._lookup.byProviderId.has(fullPath)) {
         return true;
     }
-    
-    // Good match: name + creator combo
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) {
+
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) {
         return true;
     }
-    
+
     return false;
 }
-
+function isCharPossibleMatchObj(c) {
+    if (isCharInLocalLibrary(c)) return false;
+    const name = c.name || '';
+    const creator = (c.fullPath || c.full_path || '').split('/')[0] || '';
+    return view.isCharPossibleMatch(name, creator);
+}
 function markChubCardAsImported(fullPath) {
     const grid = document.getElementById('chubGrid');
     if (!grid || !fullPath) return;
     const card = grid.querySelector(`[data-full-path="${CSS.escape(fullPath)}"]`);
     if (!card) return;
     card.classList.add('in-library');
+    card.classList.remove('possible-library');
     let badgesEl = card.querySelector('.browse-feature-badges');
     if (!badgesEl) {
         const imgWrap = card.querySelector('.browse-card-image');
@@ -212,8 +170,11 @@ function markChubCardAsImported(fullPath) {
             badgesEl = imgWrap.querySelector('.browse-feature-badges');
         }
     }
-    if (badgesEl && !badgesEl.querySelector('.in-library')) {
-        badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    if (badgesEl) {
+        badgesEl.querySelector('.possible-library')?.remove();
+        if (!badgesEl.querySelector('.in-library')) {
+            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        }
     }
 }
 
@@ -236,7 +197,38 @@ let chubTagsLoaded = false;
 
 class ChubBrowseView extends BrowseView {
 
+    constructor(provider) {
+        super(provider);
+        this._preloadLimit = 90;
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const chubData = char.data?.extensions?.chub;
+        const chubPath = chubData?.fullPath || chubData?.full_path || '';
+        const chubUrl = chubData?.url || char.chub_url || char.source_url || '';
+
+        if (chubPath) {
+            idSet.add(chubPath.toLowerCase());
+        }
+
+        if (chubUrl) {
+            const match = chubUrl.match(/characters\/([^\/]+\/[^\/\?]+)/);
+            if (match) {
+                idSet.add(match[1].toLowerCase());
+            } else if (chubUrl.includes('/')) {
+                idSet.add(chubUrl.toLowerCase());
+            }
+        }
+    }
+
     get previewModalId() { return 'chubCharModal'; }
+
+    _getImageGridIds() {
+        return chubViewMode === 'timeline'
+            ? ['chubTimelineGrid']
+            : ['chubGrid'];
+    }
 
     closePreview() {
         abortChubDetailFetch();
@@ -305,11 +297,11 @@ class ChubBrowseView extends BrowseView {
             try {
                 if (chubTimelineCursor) {
                     chubTimelinePage++;
-                    await loadChubTimeline(false);
+                    await loadChubTimeline(false, false, true);
                 } else if (chubTimelineAuthorHasMore) {
                     chubTimelineAuthorPage++;
                     await supplementTimelineWithAuthorFetches(chubTimelineAuthorPage);
-                    renderChubTimeline();
+                    renderChubTimeline(true);
                     chubBrowseView.updateLoadMoreVisibility('chubTimelineLoadMore', chubTimelineAuthorHasMore, true);
                 }
             } finally {
@@ -420,6 +412,7 @@ class ChubBrowseView extends BrowseView {
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="chubFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="chubFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -767,6 +760,7 @@ class ChubBrowseView extends BrowseView {
             chubTimelineCharacters = [];
             chubCurrentPage = 1;
             chubHasMore = true;
+            chubIsLoading = false;
             chubTimelinePage = 1;
         }
         super.activate(container, options);
@@ -778,7 +772,7 @@ class ChubBrowseView extends BrowseView {
         }
 
         // Ensure grid is populated — covers fresh init, provider switch, and tab re-entry
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
         const browseGrid = document.getElementById('chubGrid');
         const timelineGrid = document.getElementById('chubTimelineGrid');
 
@@ -794,37 +788,18 @@ class ChubBrowseView extends BrowseView {
         } else if (chubViewMode === 'timeline' && timelineGrid && timelineGrid.children.length === 0 && chubTimelineCharacters.length > 0) {
             renderChubTimeline();
         } else {
-            reconnectBrowseImageObserver();
+            this.reconnectImageObserver();
         }
     }
 
     // ── Library Lookup (BrowseView contract) ────────────────
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        for (const grid of [document.getElementById('chubGrid'), document.getElementById('chubTimelineGrid')]) {
-            if (!grid) continue;
-            for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
-                const fullPath = card.dataset.fullPath;
-                const name = card.querySelector('.browse-card-name')?.textContent || '';
-                if (!isCharInLocalLibrary({ fullPath, name })) continue;
-                card.classList.add('in-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
-                if (!badgesEl) {
-                    const imgWrap = card.querySelector('.browse-card-image');
-                    if (imgWrap) {
-                        imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
-                    }
-                }
-                if (badgesEl && !badgesEl.querySelector('.in-library')) {
-                    badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
-                }
-            }
-        }
+        super.refreshInLibraryBadges(card => {
+            const fullPath = card.dataset.fullPath;
+            const name = card.querySelector('.browse-card-name')?.textContent || '';
+            return isCharInLocalLibrary({ fullPath, name });
+        }, ['chubGrid', 'chubTimelineGrid']);
     }
 
     deactivate() {
@@ -832,7 +807,7 @@ class ChubBrowseView extends BrowseView {
         chubDelegatesInitialized = false;
         // Increment render token to cancel in-flight chunked renders
         chubTimelineRenderToken++;
-        if (chubImageObserver) chubImageObserver.disconnect();
+        this.disconnectImageObserver();
         // Abort any in-flight detail fetch
         if (chubDetailFetchController) {
             try { chubDetailFetchController.abort(); } catch (e) { /* ignore */ }
@@ -847,16 +822,6 @@ class ChubBrowseView extends BrowseView {
     closeDropdowns() {
         document.getElementById('chubTagsDropdown')?.classList.add('hidden');
         document.getElementById('chubFiltersDropdown')?.classList.add('hidden');
-    }
-
-    // ── Image Observer (BrowseView contract) ────────────────
-
-    disconnectImageObserver() {
-        if (chubImageObserver) chubImageObserver.disconnect();
-    }
-
-    reconnectImageObserver() {
-        reconnectBrowseImageObserver();
     }
 }
 
@@ -1037,7 +1002,8 @@ function initChubView() {
         { id: 'chubFilterExpressions', setter: (v) => chubFilterExpressions = v, getter: () => chubFilterExpressions },
         { id: 'chubFilterGreetings', setter: (v) => chubFilterGreetings = v, getter: () => chubFilterGreetings },
         { id: 'chubFilterFavorites', setter: (v) => chubFilterFavorites = v, getter: () => chubFilterFavorites },
-        { id: 'chubFilterHideOwned', setter: (v) => chubFilterHideOwned = v, getter: () => chubFilterHideOwned }
+        { id: 'chubFilterHideOwned', setter: (v) => chubFilterHideOwned = v, getter: () => chubFilterHideOwned },
+        { id: 'chubFilterHidePossible', setter: (v) => chubFilterHidePossible = v, getter: () => chubFilterHidePossible }
     ];
     
     // Sync checkbox states with JS variables (browser may cache old form values)
@@ -1474,12 +1440,12 @@ function updateChubFiltersButtonState() {
     
     const hasActiveFilters = chubFilterImages || chubFilterLore || 
                              chubFilterExpressions || chubFilterGreetings || 
-                             chubFilterFavorites || chubFilterHideOwned;
+                             chubFilterFavorites || chubFilterHideOwned || chubFilterHidePossible;
     
     btn.classList.toggle('has-filters', hasActiveFilters);
     
     const count = [chubFilterImages, chubFilterLore, chubFilterExpressions, 
-                   chubFilterGreetings, chubFilterFavorites, chubFilterHideOwned].filter(Boolean).length;
+                   chubFilterGreetings, chubFilterFavorites, chubFilterHideOwned, chubFilterHidePossible].filter(Boolean).length;
     
     if (count > 0) {
         btn.innerHTML = `<i class="fa-solid fa-sliders"></i> Features (${count})`;
@@ -1879,7 +1845,7 @@ async function switchChubViewMode(mode) {
 // CHUBAI TIMELINE (New from followed authors)
 // ============================================================================
 
-async function loadChubTimeline(forceRefresh = false, _isAutoPage = false) {
+async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appendRender = false) {
     if (!chubToken) {
         renderTimelineEmpty('login');
         return;
@@ -2045,7 +2011,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false) {
         if (shouldAutoLoad && chubTimelinePage < autoLoadPageLimit) {
             debugLog('[ChubTimeline] Auto-loading next page... (have', chubTimelineCharacters.length, 'chars so far)');
             chubTimelinePage++;
-            await loadChubTimeline(false, true);
+            await loadChubTimeline(false, true, _appendRender);
             return;
         }
         
@@ -2059,7 +2025,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false) {
         if (chubTimelineCharacters.length === 0) {
             renderTimelineEmpty('empty');
         } else {
-            renderChubTimeline();
+            renderChubTimeline(_appendRender);
         }
         
         // Show/hide load more button (visible if timeline cursor OR author pages remain)
@@ -2277,7 +2243,7 @@ function sortTimelineCharacters(characters) {
     }
 }
 
-function renderChubTimeline() {
+function renderChubTimeline(appendOnly = false) {
     const grid = document.getElementById('chubTimelineGrid');
     
     // Build tag include/exclude sets for client-side filtering
@@ -2287,9 +2253,12 @@ function renderChubTimeline() {
         if (state === 'include') includeTags.push(tag.toLowerCase());
         else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
     }
+    for (const t of getProviderExcludeTags('chub')) {
+        if (!excludeTags.includes(t)) excludeTags.push(t);
+    }
     
     const anyFilterActive = chubFilterImages || chubFilterLore || chubFilterExpressions ||
-        chubFilterGreetings || chubFilterHideOwned || (chubFilterFavorites && chubUserFavoriteIds.size > 0) ||
+        chubFilterGreetings || chubFilterHideOwned || chubFilterHidePossible || (chubFilterFavorites && chubUserFavoriteIds.size > 0) ||
         includeTags.length > 0 || excludeTags.length > 0;
     
     let filteredCharacters;
@@ -2300,6 +2269,7 @@ function renderChubTimeline() {
             if (chubFilterExpressions && !c.has_expression_pack) return false;
             if (chubFilterGreetings && !(c.alternate_greetings?.length > 0 || c.n_greetings > 1)) return false;
             if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
+            if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             if (chubFilterFavorites && chubUserFavoriteIds.size > 0 && !chubUserFavoriteIds.has(c.id || c.project_id)) return false;
             // Tag filters (client-side — timeline data already has topics)
             if (includeTags.length > 0 || excludeTags.length > 0) {
@@ -2330,7 +2300,22 @@ function renderChubTimeline() {
     }
 
     buildChubLookup(chubTimelineLookup, sortedCharacters);
-    if (chubImageObserver) chubImageObserver.disconnect();
+
+    // Append-only: only add new cards without destroying existing DOM
+    if (appendOnly && grid.children.length > 0) {
+        const existingPaths = new Set();
+        for (const card of grid.querySelectorAll('.browse-card[data-full-path]')) {
+            existingPaths.add(card.dataset.fullPath);
+        }
+        const newChars = sortedCharacters.filter(c => !existingPaths.has(getChubFullPath(c)));
+        if (newChars.length > 0) {
+            grid.insertAdjacentHTML('beforeend', newChars.map(char => createChubCard(char, true)).join(''));
+            chubBrowseView.observeImages(grid);
+        }
+        return;
+    }
+
+    chubBrowseView.disconnectImageObserver();
 
     if (sortedCharacters.length > 180) {
         const token = ++chubTimelineRenderToken;
@@ -2346,8 +2331,7 @@ function renderChubTimeline() {
             if (index < sortedCharacters.length) {
                 requestAnimationFrame(appendNextChunk);
             } else {
-                eagerLoadVisibleChubImages(grid);
-                observeChubImages(grid);
+                chubBrowseView.observeImages(grid);
             }
         };
 
@@ -2357,115 +2341,7 @@ function renderChubTimeline() {
 
     chubTimelineRenderToken++;
     grid.innerHTML = sortedCharacters.map(char => createChubCard(char, true)).join('');
-    eagerLoadVisibleChubImages(grid);
-    observeChubImages(grid);
-}
-
-// ============================================================================
-// CHUB IMAGE LAZY LOADING (IntersectionObserver)
-// One-directional — loads images near the viewport, never unloads.
-// ============================================================================
-
-function initChubImageObserver() {
-    if (chubImageObserver) return;
-    chubImageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const img = entry.target;
-            const realSrc = img.dataset.src;
-            if (realSrc && !img.dataset.failed && img.src !== realSrc) {
-                img.src = realSrc;
-                BrowseView.adjustPortraitPosition(img);
-            }
-        }
-    }, {
-        rootMargin: '600px'
-    });
-}
-
-function observeChubImages(container) {
-    if (!chubImageObserver) initChubImageObserver();
-    // Defer observer hookup to the next frame so innerHTML paint isn't blocked
-    requestAnimationFrame(() => {
-        eagerLoadVisibleChubImages(container);
-        eagerPreloadChubImages(container);
-        const images = Array.from(container.querySelectorAll('.browse-card-image img')).filter(img => !img.dataset.observed);
-        if (images.length === 0) return;
-
-        if (images.length > 120) {
-            const batchSize = 80;
-            let index = 0;
-            const observeBatch = () => {
-                const end = Math.min(index + batchSize, images.length);
-                for (let i = index; i < end; i++) {
-                    const img = images[i];
-                    img.dataset.observed = '1';
-                    chubImageObserver.observe(img);
-                }
-                index = end;
-                if (index < images.length) {
-                    requestAnimationFrame(observeBatch);
-                }
-            };
-            observeBatch();
-            return;
-        }
-
-        for (const img of images) {
-            img.dataset.observed = '1';
-            chubImageObserver.observe(img);
-        }
-    });
-}
-
-function eagerLoadVisibleChubImages(container) {
-    if (!container) return;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const preloadBottom = viewportHeight + 700;
-    const images = container.querySelectorAll('.browse-card-image img[data-src]');
-    for (const img of images) {
-        if (img.dataset.failed) continue;
-        const rect = img.getBoundingClientRect();
-        if (rect.bottom > -160 && rect.top < preloadBottom) {
-            const realSrc = img.dataset.src;
-            if (realSrc && img.src !== realSrc) {
-                img.src = realSrc;
-                BrowseView.adjustPortraitPosition(img);
-            }
-        }
-    }
-}
-
-function eagerPreloadChubImages(container) {
-    if (!container) return;
-    const images = container.querySelectorAll('.browse-card-image img[data-src]');
-    let loaded = 0;
-    const MAX_PRELOAD = 90;
-    for (const img of images) {
-        if (loaded >= MAX_PRELOAD) break;
-        if (img.dataset.failed) continue;
-        const realSrc = img.dataset.src;
-        if (realSrc && img.src !== realSrc) {
-            img.src = realSrc;
-            BrowseView.adjustPortraitPosition(img);
-            loaded++;
-        }
-    }
-}
-
-/**
- * Reconnect the image observer to whichever chub grid is currently visible.
- * Clears data-observed flags first since disconnect() doesn't remove them.
- */
-function reconnectBrowseImageObserver() {
-    const gridId = chubViewMode === 'timeline' ? 'chubTimelineGrid' : 'chubGrid';
-    const grid = document.getElementById(gridId);
-    if (!grid) return;
-    eagerLoadVisibleChubImages(grid);
-    eagerPreloadChubImages(grid);
-    const imgs = grid.querySelectorAll('.browse-card-image img[data-observed]');
-    for (const img of imgs) delete img.dataset.observed;
-    observeChubImages(grid);
+    chubBrowseView.observeImages(grid);
 }
 
 // ============================================================================
@@ -2849,6 +2725,10 @@ async function loadChubCharacters(forceRefresh = false) {
             if (state === 'include') includeTags.push(tag);
             else if (state === 'exclude') excludeTags.push(tag);
         }
+        // Merge persistent exclude tags from settings
+        for (const t of getProviderExcludeTags('chub')) {
+            if (!excludeTags.includes(t)) excludeTags.push(t);
+        }
         if (includeTags.length > 0) {
             params.set('topics', includeTags.join(','));
         }
@@ -2930,8 +2810,14 @@ async function loadChubCharacters(forceRefresh = false) {
         // Cost: up to 3 additional lightweight search API calls (JSON-only, no
         // image data). The extra card objects in chubCharacters are ~1-2 KB each
         // and the bidirectional image observer already manages decoded-image memory.
-        if (chubFilterHideOwned && chubHasMore) {
-            let visibleNew = nodes.filter(c => !isCharInLocalLibrary(c)).length;
+        const chubHasClientFilters = chubFilterHideOwned || chubFilterHidePossible;
+        if (chubHasClientFilters && chubHasMore) {
+            const isFiltered = (c) => {
+                if (chubFilterHideOwned && isCharInLocalLibrary(c)) return true;
+                if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return true;
+                return false;
+            };
+            let visibleNew = nodes.filter(c => !isFiltered(c)).length;
             let autoFetches = 0;
             const existingPaths = new Set(chubCharacters.map(c => getChubFullPath(c)).filter(Boolean));
             
@@ -2961,11 +2847,11 @@ async function loadChubCharacters(forceRefresh = false) {
                     }
                 }
                 chubHasMore = (moreData.data?.cursor ?? moreData.cursor) != null && moreNodes.length > 0;
-                visibleNew += moreNodes.filter(c => !isCharInLocalLibrary(c)).length;
+                visibleNew += moreNodes.filter(c => !isFiltered(c)).length;
             }
             
             if (autoFetches > 0) {
-                debugLog(`[ChubAI] Auto-fetched ${autoFetches} extra page(s) to compensate for "hide owned" filter (${visibleNew} visible)`);
+                debugLog(`[ChubAI] Auto-fetched ${autoFetches} extra page(s) to compensate for client-side filters (${visibleNew} visible)`);
             }
         }
         
@@ -3092,28 +2978,32 @@ async function loadChubFavorites(forceRefresh = false) {
         if (chubFilterHideOwned) {
             nodes = nodes.filter(c => !isCharInLocalLibrary(c));
         }
+        if (chubFilterHidePossible) {
+            nodes = nodes.filter(c => !isCharPossibleMatchObj(c));
+        }
         
         // Apply NSFW filter
         if (!chubNsfwEnabled) {
             nodes = nodes.filter(c => !c.nsfw);
         }
         
-        // Apply tag filters client-side (favorites API doesn't support topics param)
-        if (chubTagFilters.size > 0) {
-            const includeTags = [];
-            const excludeTags = [];
-            for (const [tag, state] of chubTagFilters) {
-                if (state === 'include') includeTags.push(tag.toLowerCase());
-                else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
-            }
-            if (includeTags.length > 0 || excludeTags.length > 0) {
-                nodes = nodes.filter(c => {
-                    const charTopics = (c.topics || []).map(t => t.toLowerCase());
-                    if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
-                    if (excludeTags.length > 0 && excludeTags.some(t => charTopics.includes(t))) return false;
-                    return true;
-                });
-            }
+        // Apply tag filters + persistent excludes client-side (favorites API doesn't support topics param)
+        const includeTags = [];
+        const excludeTags = [];
+        for (const [tag, state] of chubTagFilters) {
+            if (state === 'include') includeTags.push(tag.toLowerCase());
+            else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
+        }
+        for (const t of getProviderExcludeTags('chub')) {
+            if (!excludeTags.includes(t)) excludeTags.push(t);
+        }
+        if (includeTags.length > 0 || excludeTags.length > 0) {
+            nodes = nodes.filter(c => {
+                const charTopics = (c.topics || []).map(t => t.toLowerCase());
+                if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
+                if (excludeTags.length > 0 && excludeTags.some(t => charTopics.includes(t))) return false;
+                return true;
+            });
         }
         
         // Apply search filter if any
@@ -3130,8 +3020,11 @@ async function loadChubFavorites(forceRefresh = false) {
         if (chubCurrentPage === 1) {
             chubCharacters = nodes;
         } else {
-            // Push new items instead of spread-copying the entire array
-            for (const node of nodes) chubCharacters.push(node);
+            const existingPaths = new Set(chubCharacters.map(c => (c.fullPath || c.full_path || '').toLowerCase()));
+            for (const node of nodes) {
+                const fp = (node.fullPath || node.full_path || '').toLowerCase();
+                if (!fp || !existingPaths.has(fp)) chubCharacters.push(node);
+            }
         }
         
         // Check if there's more data
@@ -3166,17 +3059,20 @@ async function loadChubFavorites(forceRefresh = false) {
 function renderChubGrid(appendOnly = false) {
     const grid = document.getElementById('chubGrid');
     
-    // Apply client-side "hide owned" filter (other filters are server-side)
+    // Apply client-side "hide owned" / "hide possible" filters (other filters are server-side)
     let displayCharacters = chubCharacters;
     if (chubFilterHideOwned) {
-        displayCharacters = chubCharacters.filter(c => !isCharInLocalLibrary(c));
+        displayCharacters = displayCharacters.filter(c => !isCharInLocalLibrary(c));
+    }
+    if (chubFilterHidePossible) {
+        displayCharacters = displayCharacters.filter(c => !isCharPossibleMatchObj(c));
     }
     
     if (displayCharacters.length === 0) {
         chubGridRenderedCount = 0;
         chubCardLookup.clear();
-        if (chubImageObserver) chubImageObserver.disconnect();
-        const message = chubCharacters.length > 0 && chubFilterHideOwned
+        chubBrowseView.disconnectImageObserver();
+        const message = chubCharacters.length > 0 && (chubFilterHideOwned || chubFilterHidePossible)
             ? 'All characters in this view are already in your library.'
             : 'Try a different search term or adjust your filters.';
         grid.innerHTML = `
@@ -3199,13 +3095,12 @@ function renderChubGrid(appendOnly = false) {
         }
     } else {
         // Full re-render: disconnect all tracked images before replacing DOM
-        if (chubImageObserver) chubImageObserver.disconnect();
+        chubBrowseView.disconnectImageObserver();
         grid.innerHTML = displayCharacters.map(char => createChubCard(char)).join('');
     }
 
     chubGridRenderedCount = displayCharacters.length;
-    eagerLoadVisibleChubImages(grid);
-    observeChubImages(grid);
+    chubBrowseView.observeImages(grid);
 }
 
 function setupChubGridDelegates() {
@@ -3270,6 +3165,7 @@ function createChubCard(char, isTimeline = false) {
     
     // Check if this character is in local library
     const inLibrary = isCharInLocalLibrary(char);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
     
     // Get up to 3 tags
     const tags = (char.topics || []).slice(0, 3);
@@ -3278,6 +3174,8 @@ function createChubCard(char, isTimeline = false) {
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
     if (char.hasGallery) {
         badges.push('<span class="browse-feature-badge gallery" title="Has Gallery"><i class="fa-solid fa-images"></i></span>');
@@ -3300,7 +3198,7 @@ function createChubCard(char, isTimeline = false) {
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
     
     // Add "in library" class to card for potential styling
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
     
     // Tagline for hover tooltip (escape for HTML attribute)
     const taglineTooltip = char.tagline ? escapeHtml(char.tagline) : '';
@@ -3445,6 +3343,8 @@ async function openChubCharPreview(char) {
     const fullPath = getChubFullPath(char);
     const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
     const creatorName = fullPath.split('/')[0] || 'Unknown';
+    const inLibrary = isCharInLocalLibrary(char);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
     
     avatarImg.src = avatarUrl;
     avatarImg.onerror = () => { avatarImg.src = '/img/ai4.png'; };
@@ -3536,14 +3436,18 @@ async function openChubCharPreview(char) {
     // Import button state — show "In Library" if already imported
     const downloadBtn = document.getElementById('chubDownloadBtn');
     if (downloadBtn) {
-        if (isCharInLocalLibrary(char)) {
+        if (inLibrary) {
             downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
             downloadBtn.classList.add('secondary');
-            downloadBtn.classList.remove('primary');
+            downloadBtn.classList.remove('primary', 'warning');
+        } else if (possibleMatch) {
+            downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+            downloadBtn.classList.add('warning');
+            downloadBtn.classList.remove('primary', 'secondary');
         } else {
             downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
             downloadBtn.classList.add('primary');
-            downloadBtn.classList.remove('secondary');
+            downloadBtn.classList.remove('secondary', 'warning');
         }
         downloadBtn.disabled = false;
     }
@@ -3994,7 +3898,7 @@ async function downloadChubCharacter() {
         const definition = cachedDetail?.definition;
 
         // === PRE-IMPORT DUPLICATE CHECK ===
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: characterName,
             creator: characterCreator,
             fullPath: fullPath,
@@ -4085,7 +3989,7 @@ async function downloadChubCharacter() {
             await new Promise(r => setTimeout(r, 500));
             await fetchCharacters(true);
         }
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markChubCardAsImported(fullPath);
         
         // Also refresh main ST window's character list (fire-and-forget)

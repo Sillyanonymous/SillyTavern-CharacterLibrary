@@ -174,16 +174,16 @@ function createModal() {
                             <h4 class="section-header"><i class="fa-solid fa-user"></i> Basic Information</h4>
                             <div class="form-group">
                                 <label>Character Name <span class="creator-required">*</span></label>
-                                <input type="text" id="creatorName" class="glass-input" placeholder="Give your character a name" autocomplete="one-time-code">
+                                <input type="search" id="creatorName" class="glass-input" placeholder="Give your character a name" autocomplete="one-time-code">
                             </div>
                             <div class="form-row">
                                 <div class="form-group half">
                                     <label>Creator / Author</label>
-                                    <input type="text" id="creatorAuthor" class="glass-input" placeholder="Your name" autocomplete="one-time-code">
+                                    <input type="search" id="creatorAuthor" class="glass-input" placeholder="Your name" autocomplete="one-time-code">
                                 </div>
                                 <div class="form-group half">
                                     <label>Version</label>
-                                    <input type="text" id="creatorVersion" class="glass-input" placeholder="1.0" autocomplete="one-time-code">
+                                    <input type="search" id="creatorVersion" class="glass-input" placeholder="1.0" autocomplete="one-time-code">
                                 </div>
                             </div>
                         </div>
@@ -363,7 +363,7 @@ function showUnsavedConfirm() {
             overlay.id = 'creatorDiscardConfirmOverlay';
             overlay.className = 'creator-saveas-diff-overlay';
             overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:380px">
+            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
                 <div class="confirm-modal-header">
                     <h3>Discard unsaved character?</h3>
                 </div>
@@ -1283,7 +1283,7 @@ function promptForName(label) {
             overlay.id = 'creatorNamePromptOverlay';
             overlay.className = 'creator-saveas-diff-overlay';
             overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:360px">
+            <div class="confirm-modal-content" style="max-width:calc(360px * var(--modal-scale, 1))">
                 <div class="confirm-modal-header">
                     <h3 id="creatorNamePromptLabel"></h3>
                 </div>
@@ -1312,12 +1312,6 @@ function promptForName(label) {
             });
             document.getElementById('creatorNamePromptInput').addEventListener('keydown', e => {
                 if (e.key === 'Enter') { e.preventDefault(); submit(); }
-                if (e.key === 'Escape') {
-                    overlay.classList.add('hidden');
-                    const res = _namePromptResolve;
-                    _namePromptResolve = null;
-                    res?.(null);
-                }
             });
         }
         document.getElementById('creatorNamePromptLabel').textContent = label;
@@ -2181,7 +2175,7 @@ function showStudioDiscardConfirm() {
             overlay.id = 'studioDiscardConfirmOverlay';
             overlay.className = 'creator-saveas-diff-overlay';
             overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:380px">
+            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
                 <div class="confirm-modal-header">
                     <h3>Discard AI Studio progress?</h3>
                 </div>

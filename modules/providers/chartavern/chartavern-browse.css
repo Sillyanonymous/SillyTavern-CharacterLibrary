@@ -1,0 +1,50 @@
+/* ============================================
+   CharacterTavern Browse CSS
+   Extracted from library.css
+   ============================================ */
+
+.ct-login-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.ct-cookie-instructions {
+    margin-top: 10px;
+}
+
+.ct-cookie-instructions details {
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.ct-cookie-instructions summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 0.85em;
+    user-select: none;
+}
+
+.ct-cookie-instructions ol {
+    margin: 8px 0 4px 20px;
+    padding: 0;
+    font-size: 0.85em;
+    color: var(--text-secondary, #aaa);
+    line-height: 1.7;
+}
+
+.ct-cookie-instructions code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.ct-cookie-note {
+    margin-top: 6px;
+    font-size: 0.8em;
+    color: var(--text-tertiary, #888);
+    font-style: italic;
+}
+
+

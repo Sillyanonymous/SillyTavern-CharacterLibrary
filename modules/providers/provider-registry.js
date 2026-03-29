@@ -325,6 +325,13 @@ function updateRecoveryBanner() {
     }
 }
 
+export function updateRecoveryProgress(done, total) {
+    const el = document.getElementById('browseRecoveryBanner');
+    if (!el) return;
+    const span = el.querySelector('.recovery-progress');
+    if (span) span.textContent = ` (${done}/${total})`;
+}
+
 export function hideRecoveryBanner() {
     const el = document.getElementById('browseRecoveryBanner');
     if (el) el.classList.add('hidden');
@@ -403,6 +410,7 @@ export default {
     rebuildAllBrowseLookups,
     refreshActiveBrowseBadges,
     hideRecoveryBanner,
+    updateRecoveryProgress,
     disconnectActiveBrowseImageObserver,
     reconnectActiveBrowseImageObserver,
     getPreviewModalIds,

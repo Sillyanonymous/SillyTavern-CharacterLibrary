@@ -1,4 +1,4 @@
-﻿// SillyTavern Character Library Logic
+// SillyTavern Character Library Logic
 
 const API_BASE = '/api'; 
 const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
@@ -224,9 +224,12 @@ function initCustomSelect(select) {
     }
 
     function positionMenu() {
-        const rect = trigger.getBoundingClientRect();
+        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        const rawRect = trigger.getBoundingClientRect();
+        const rect = { left: rawRect.left / zoom, top: rawRect.top / zoom, bottom: rawRect.bottom / zoom, width: rawRect.width / zoom };
+        const viewportH = window.innerHeight / zoom;
         const menuHeight = menu.scrollHeight || 200;
-        const spaceBelow = window.innerHeight - rect.bottom - 10;
+        const spaceBelow = viewportH - rect.bottom - 10;
         const spaceAbove = rect.top - 10;
 
         menu.style.left = rect.left + 'px';
@@ -237,7 +240,7 @@ function initCustomSelect(select) {
             menu.style.bottom = '';
             menu.style.maxHeight = Math.min(350, spaceBelow) + 'px';
         } else {
-            menu.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+            menu.style.bottom = (viewportH - rect.top + 4) + 'px';
             menu.style.top = '';
             menu.style.maxHeight = Math.min(350, spaceAbove) + 'px';
         }
@@ -397,74 +400,79 @@ function prepareCharacterKeys(chars) {
 
 const SETTINGS_KEY = 'SillyTavernCharacterGallery';
 const DEFAULT_SETTINGS = {
+    // ---- Credentials & Auth ----
     chubToken: null,
     chubRememberToken: true,
-    datacatToken: null,
     pygmalionEmail: null,
     pygmalionPassword: null,
+    pygmalionToken: null,
     pygmalionRememberCredentials: true,
+    wyvernEmail: null,
+    wyvernPassword: null,
+    wyvernToken: null,
+    wyvernRefreshToken: null,
+    wyvernUid: null,
     wyvernRememberCredentials: true,
+    datacatToken: null,
     ctCookie: null,
+
+    // ---- NSFW Toggles ----
     pygmalionNsfw: false,
+    wyvernNsfw: false,
     ctNsfw: false,
+
+    // ---- Search & Sort ----
     defaultSort: 'name_asc',
-    // Include provider gallery images in character galleries
-    includeProviderGallery: true,
     searchInName: true,
     searchInTags: true,
     searchInAuthor: false,
     searchInNotes: false,
-    // Duplicate detection minimum score (points-based, 0-100)
+    tagIncludeMode: 'any',
+    tagExcludeMode: 'all',
+
+    // ---- Duplicate Detection ----
     duplicateMinScore: 35,
-    // Rich creator notes rendering (experimental) - uses sandboxed iframe with full CSS/HTML support
+
+    // ---- Gallery & Media ----
+    includeProviderGallery: true,
     richCreatorNotes: true,
-    // Highlight/accent color (CSS color value)
     highlightColor: '#4a9eff',
-    // Media Localization: Replace remote URLs with local files on-the-fly
     mediaLocalizationEnabled: true,
-    // Fix filenames during localization (rename to localized_media_* format)
     fixFilenames: true,
-    // Per-character overrides for media localization (avatar -> boolean)
     mediaLocalizationPerChar: {},
-    // Show notification when imported chars have additional content (gallery/embedded media)
+    completedMediaLocalizations: [],
     notifyAdditionalContent: true,
-    // Replace {{user}} placeholder with active persona name
-    replaceUserPlaceholder: true,
-    // Animate tag pills on character cards (hidden by default, slide up on hover)
-    animateTagPills: false,
-    // Sub-option: always show card name even when animation is enabled
-    animateKeepName: false,
-    // Hide playlist badges on character cards
-    hidePlaylistBadges: false,
-    // Debug mode - enable console logging
-    debugMode: false,
-    // Unique Gallery Folders: Use gallery_id to create unique folder names, preventing shared galleries
-    // when multiple characters share the same name
-    uniqueGalleryFolders: false,
-    // Show Info tab in character modal (debugging/metadata info)
-    showInfoTab: false,
-    // Export copies provider links to clipboard instead of downloading PNGs
-    exportAsLinks: false,
-    // Show provider tagline in character modal
-    showProviderTagline: true,
-    // Allow rich HTML/CSS in tagline rendering (sanitized)
-    allowRichTagline: false,
-    // Snap-scroll to content sections in browse preview modals on mobile
-    browseSnapSections: true,
-    // Use V4 Git API for card update checks (more complete but slower)
-    chubUseV4Api: false,
-    // Fast filename-based skip for media localization (skips expensive hash verification)
     fastFilenameSkip: false,
-    // When fast skip is enabled, validate matched files via HEAD request (checks file size)
     fastSkipValidateHeaders: false,
-    // Provider display order in the Online tab (null = registration order)
+
+    // ---- UI & Display ----
+    uiScale: 3,
+    modalSize: 2,
+    replaceUserPlaceholder: true,
+    animateTagPills: false,
+    animateKeepName: false,
+    hidePlaylistBadges: false,
+    debugMode: false,
+    uniqueGalleryFolders: false,
+    showInfoTab: false,
+    themeCustomizer: false,
+    exportAsLinks: false,
+    showProviderTagline: true,
+    showWyvernTagline: true,
+    allowRichTagline: false,
+    browseSnapSections: false,
+
+    // ---- Provider Config ----
+    chubUseV4Api: false,
     providerOrder: null,
-    // Per-provider default view/sort (providerId → { view?, sort? })
     providerDefaults: {},
-    // Per-provider infinite scroll toggle (providerId → boolean, default true)
     infiniteScroll: {},
-    // Providers disabled by default on first run
     disabledProviders: ['datacat'],
+    datacatFollowedCreators: [],
+    providerExcludeTags: {},
+
+    // ---- Versions ----
+    maxAutoBackups: 10,
 };
 
 // Debug logging helper - only logs when debug mode is enabled
@@ -693,22 +701,97 @@ function setSettings(settings) {
     saveGallerySettings();
 }
 
+function getProviderExcludeTags(providerId) {
+    const map = getSetting('providerExcludeTags') || {};
+    const tags = map[providerId];
+    return Array.isArray(tags) ? tags : [];
+}
+
+function setProviderExcludeTags(providerId, tags) {
+    const map = { ...(getSetting('providerExcludeTags') || {}) };
+    map[providerId] = Array.isArray(tags) ? tags : [];
+    setSetting('providerExcludeTags', map);
+}
+
 /**
- * Apply the highlight color to CSS variables
- * Converts hex color to RGB for glow effect
+ * Apply the highlight color to CSS variables and derive accent palette
  * @param {string} color - CSS color value (hex)
  */
 function applyHighlightColor(color) {
     if (!color) color = DEFAULT_SETTINGS.highlightColor;
-    
-    document.documentElement.style.setProperty('--accent', color);
-    
-    // Convert hex to RGB for glow effect
+
+    const root = document.documentElement.style;
+    root.setProperty('--accent', color);
+
     const hex = color.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
-    document.documentElement.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+
+    root.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
+    root.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+
+    const toHex = n => Math.min(255, n).toString(16).padStart(2, '0');
+    const lighten = (v, f) => Math.round(v + (255 - v) * f);
+    root.setProperty('--accent-hover', `#${toHex(lighten(r, 0.2))}${toHex(lighten(g, 0.2))}${toHex(lighten(b, 0.2))}`);
+
+    // Secondary: hue-shift +30deg, desaturate slightly, darken slightly
+    const rn = r / 255, gn = g / 255, bn = b / 255;
+    const cMax = Math.max(rn, gn, bn), cMin = Math.min(rn, gn, bn);
+    const delta = cMax - cMin;
+    let h = 0, s = 0, l = (cMax + cMin) / 2;
+    if (delta > 0) {
+        s = l > 0.5 ? delta / (2 - cMax - cMin) : delta / (cMax + cMin);
+        if (cMax === rn) h = ((gn - bn) / delta + (gn < bn ? 6 : 0)) / 6;
+        else if (cMax === gn) h = ((bn - rn) / delta + 2) / 6;
+        else h = ((rn - gn) / delta + 4) / 6;
+    }
+    const sh = (h + 1 / 12) % 1;
+    const ss = Math.min(1, s * 0.9);
+    const sl = Math.max(0, l * 0.95);
+    let sr, sg, sb;
+    if (ss === 0) {
+        sr = sg = sb = Math.round(sl * 255);
+    } else {
+        const q = sl < 0.5 ? sl * (1 + ss) : sl + ss - sl * ss;
+        const p = 2 * sl - q;
+        const hue2rgb = (t) => {
+            if (t < 0) t += 1; if (t > 1) t -= 1;
+            if (t < 1 / 6) return p + (q - p) * 6 * t;
+            if (t < 1 / 2) return q;
+            if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+            return p;
+        };
+        sr = Math.round(hue2rgb(sh + 1 / 3) * 255);
+        sg = Math.round(hue2rgb(sh) * 255);
+        sb = Math.round(hue2rgb(sh - 1 / 3) * 255);
+    }
+    root.setProperty('--accent-secondary', `#${toHex(sr)}${toHex(sg)}${toHex(sb)}`);
+    root.setProperty('--accent-secondary-rgb', `${sr}, ${sg}, ${sb}`);
+
+    // WCAG relative luminance → pick white or dark text for readability on accent bg
+    const srgb = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    const lum = 0.2126 * srgb(rn) + 0.7152 * srgb(gn) + 0.0722 * srgb(bn);
+    root.setProperty('--accent-text', lum > 0.36 ? '#121212' : '#ffffff');
+}
+
+const UI_SCALE_MAP = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2 };
+
+function applyUiScale(level) {
+    const zoom = UI_SCALE_MAP[level] || 1;
+    document.documentElement.style.zoom = zoom;
+    // 100vh resolves in the zoomed coordinate space, so compensate body height
+    document.body.style.height = zoom !== 1 ? `calc(100vh / ${zoom})` : '';
+}
+
+const MODAL_SIZE_MAP = { 1: 0.8, 2: 1, 3: 1.25 };
+
+function applyModalSize(level) {
+    const scale = MODAL_SIZE_MAP[level] || 1;
+    document.body.style.setProperty('--modal-scale', scale);
+    document.body.classList.remove('modal-size-small', 'modal-size-large');
+    if (level === 1) document.body.classList.add('modal-size-small');
+    else if (level === 3) document.body.classList.add('modal-size-large');
 }
 
 function applyAnimateTagPills(enabled, keepName) {
@@ -822,6 +905,8 @@ function setupSettingsModal() {
     const browseSnapSectionsCheckbox = document.getElementById('settingsBrowseSnapSections');
     
     // Appearance
+    const uiScaleSelect = document.getElementById('settingsUiScale');
+    const modalSizeSelect = document.getElementById('settingsModalSize');
     const animateTagPillsCheckbox = document.getElementById('settingsAnimateTagPills');
     const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
     const animateKeepNameRow = document.getElementById('animateKeepNameRow');
@@ -869,7 +954,7 @@ function setupSettingsModal() {
                     const modal = document.createElement('div');
                     modal.className = 'confirm-modal';
                     modal.innerHTML = `
-                        <div class="confirm-modal-content" style="max-width: 450px;">
+                        <div class="confirm-modal-content" style="max-width: calc(450px * var(--modal-scale, 1));">
                             <div class="confirm-modal-header">
                                 <h3><i class="fa-solid fa-triangle-exclamation" style="color: var(--accent);"></i> Enable ${prov.name}?</h3>
                                 <button class="close-confirm-btn" data-action="cancel">&times;</button>
@@ -1236,6 +1321,68 @@ function setupSettingsModal() {
         return result;
     }
 
+    // ── Provider Exclude Tags ───────────────────────────────
+
+    const EXCLUDE_TAG_PROVIDERS = [
+        { id: 'chub', inputId: 'chubExcludeTagsInput', pillsId: 'chubExcludeTagsPills' },
+        { id: 'janny', inputId: 'jannyExcludeTagsInput', pillsId: 'jannyExcludeTagsPills' },
+        { id: 'pygmalion', inputId: 'pygmalionExcludeTagsInput', pillsId: 'pygmalionExcludeTagsPills' },
+        { id: 'chartavern', inputId: 'ctExcludeTagsInput', pillsId: 'ctExcludeTagsPills' },
+        { id: 'wyvern', inputId: 'wyvernExcludeTagsInput', pillsId: 'wyvernExcludeTagsPills' },
+        { id: 'datacat', inputId: 'datacatExcludeTagsInput', pillsId: 'datacatExcludeTagsPills' },
+    ];
+
+    function renderExcludeTagPills(providerId, pillsId) {
+        const container = document.getElementById(pillsId);
+        if (!container) return;
+        const tags = getProviderExcludeTags(providerId);
+        container.innerHTML = tags.map(tag =>
+            `<span class="provider-exclude-tag-pill" data-tag="${tag.replace(/"/g, '&quot;')}">${escapeHtml(tag)}<button class="provider-exclude-tag-remove" title="Remove">&times;</button></span>`
+        ).join('');
+    }
+
+    function populateAllExcludeTagPills() {
+        for (const { id, pillsId } of EXCLUDE_TAG_PROVIDERS) {
+            renderExcludeTagPills(id, pillsId);
+        }
+    }
+
+    function addExcludeTag(providerId, pillsId, tag) {
+        const trimmed = tag.trim().toLowerCase();
+        if (!trimmed) return;
+        const existing = getProviderExcludeTags(providerId);
+        if (existing.includes(trimmed)) return;
+        setProviderExcludeTags(providerId, [...existing, trimmed]);
+        renderExcludeTagPills(providerId, pillsId);
+    }
+
+    function removeExcludeTag(providerId, pillsId, tag) {
+        const existing = getProviderExcludeTags(providerId);
+        setProviderExcludeTags(providerId, existing.filter(t => t !== tag));
+        renderExcludeTagPills(providerId, pillsId);
+    }
+
+    for (const { id, inputId, pillsId } of EXCLUDE_TAG_PROVIDERS) {
+        const input = document.getElementById(inputId);
+        const pills = document.getElementById(pillsId);
+        if (!input || !pills) continue;
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addExcludeTag(id, pillsId, input.value);
+                input.value = '';
+            }
+        });
+
+        pills.addEventListener('click', (e) => {
+            const removeBtn = e.target.closest('.provider-exclude-tag-remove');
+            if (!removeBtn) return;
+            const pill = removeBtn.closest('.provider-exclude-tag-pill');
+            if (pill) removeExcludeTag(id, pillsId, pill.dataset.tag);
+        });
+    }
+
     // Open modal
     settingsBtn.onclick = () => {
         chubTokenInput.value = getSetting('chubToken') || '';
@@ -1289,7 +1436,7 @@ function setupSettingsModal() {
             fixFilenamesCheckbox.checked = getSetting('fixFilenames') !== false; // Default true
         }
         if (includeProviderGalleryCheckbox) {
-            includeProviderGalleryCheckbox.checked = getSetting('includeProviderGallery') || false;
+            includeProviderGalleryCheckbox.checked = getSetting('includeProviderGallery') !== false;
         }
         if (fastFilenameSkipCheckbox) {
             fastFilenameSkipCheckbox.checked = getSetting('fastFilenameSkip') || false;
@@ -1326,13 +1473,21 @@ function setupSettingsModal() {
             allowRichTaglineCheckbox.checked = getSetting('allowRichTagline') === true;
         }
         if (browseSnapSectionsCheckbox) {
-            browseSnapSectionsCheckbox.checked = getSetting('browseSnapSections') !== false;
+            browseSnapSectionsCheckbox.checked = getSetting('browseSnapSections') === true;
         }
         if (themeCustomizerCheckbox) {
             themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
         }
         
         // Appearance
+        if (uiScaleSelect) {
+            uiScaleSelect.value = String(getSetting('uiScale') ?? 3);
+            if (uiScaleSelect._customSelect) uiScaleSelect._customSelect.refresh();
+        }
+        if (modalSizeSelect) {
+            modalSizeSelect.value = String(getSetting('modalSize') ?? 2);
+            if (modalSizeSelect._customSelect) modalSizeSelect._customSelect.refresh();
+        }
         if (animateTagPillsCheckbox) {
             animateTagPillsCheckbox.checked = getSetting('animateTagPills') || false;
             if (animateKeepNameRow) animateKeepNameRow.style.display = animateTagPillsCheckbox.checked ? '' : 'none';
@@ -1371,6 +1526,7 @@ function setupSettingsModal() {
         // Provider Order & Defaults
         buildProviderOrderUI();
         buildInfiniteScrollUI();
+        populateAllExcludeTagPills();
         
         // Reset to first section
         switchSettingsSection('general');
@@ -1502,6 +1658,15 @@ function setupSettingsModal() {
             applyHighlightColor(highlightColorInput.value);
         };
     }
+
+    const resetAccentBtn = document.getElementById('resetAccentColor');
+    if (resetAccentBtn) {
+        resetAccentBtn.addEventListener('click', () => {
+            const def = DEFAULT_SETTINGS.highlightColor;
+            if (highlightColorInput) highlightColorInput.value = def;
+            applyHighlightColor(def);
+        });
+    }
     
     // Fast skip sub-option visibility
     if (fastFilenameSkipCheckbox && fastSkipValidateRow) {
@@ -1510,6 +1675,24 @@ function setupSettingsModal() {
         });
     }
     
+    // UI Scale: apply immediately on change
+    if (uiScaleSelect) {
+        uiScaleSelect.addEventListener('change', () => {
+            const level = parseInt(uiScaleSelect.value) || 3;
+            setSetting('uiScale', level);
+            applyUiScale(level);
+        });
+    }
+
+    // Modal Size: apply immediately on change
+    if (modalSizeSelect) {
+        modalSizeSelect.addEventListener('change', () => {
+            const level = parseInt(modalSizeSelect.value) || 2;
+            setSetting('modalSize', level);
+            applyModalSize(level);
+        });
+    }
+
     // Animate card info sub-option visibility
     if (animateTagPillsCheckbox && animateKeepNameRow) {
         animateTagPillsCheckbox.addEventListener('change', () => {
@@ -1560,7 +1743,9 @@ function setupSettingsModal() {
             exportAsLinks: exportAsLinksCheckbox ? exportAsLinksCheckbox.checked : false,
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
-            browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : true,
+            browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : false,
+            uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
+            modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
             animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
             hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
@@ -1725,6 +1910,9 @@ function setupSettingsModal() {
         if (isContainer) {
             isContainer.querySelectorAll('.infinite-scroll-toggle').forEach(cb => { cb.checked = true; });
         }
+
+        // Exclude Tags — clear pills
+        populateAllExcludeTagPills();
         
         // Apply default highlight color immediately
         applyHighlightColor(DEFAULT_SETTINGS.highlightColor);
@@ -1733,14 +1921,22 @@ function setupSettingsModal() {
         clearAllMediaLocalizationCache();
         
         // Save defaults to storage (preserving tokens/credentials)
-        const preserveToken = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
-        const preservePygToken = getSetting('pygmalionRememberToken') ? getSetting('pygmalionToken') : null;
-        const preserveDcToken = getSetting('datacatToken') || null;
+        const preserveChub = getSetting('chubRememberToken') ? getSetting('chubToken') : null;
+        const preservePyg = getSetting('pygmalionRememberCredentials');
+        const preserveWyv = getSetting('wyvernRememberCredentials');
         setSettings({
             ...DEFAULT_SETTINGS,
-            chubToken: preserveToken,
-            pygmalionToken: preservePygToken,
-            datacatToken: preserveDcToken,
+            chubToken: preserveChub,
+            pygmalionEmail: preservePyg ? getSetting('pygmalionEmail') : null,
+            pygmalionPassword: preservePyg ? getSetting('pygmalionPassword') : null,
+            pygmalionToken: preservePyg ? getSetting('pygmalionToken') : null,
+            wyvernEmail: preserveWyv ? getSetting('wyvernEmail') : null,
+            wyvernPassword: preserveWyv ? getSetting('wyvernPassword') : null,
+            wyvernToken: preserveWyv ? getSetting('wyvernToken') : null,
+            wyvernRefreshToken: preserveWyv ? getSetting('wyvernRefreshToken') : null,
+            wyvernUid: preserveWyv ? getSetting('wyvernUid') : null,
+            datacatToken: getSetting('datacatToken') || null,
+            ctCookie: getSetting('ctCookie') || null,
         });
         
         const searchName = document.getElementById('searchName');
@@ -3293,9 +3489,7 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
     
     const modalHtml = `
         <div id="disableGalleryFoldersModal" class="confirm-modal">
-            <div class="confirm-modal-content" style="max-width: 500px;">
-                <div class="confirm-modal-header">
-                    <h3><i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i> Disabling Unique Gallery Folders</h3>
+            <div class="confirm-modal-content" style="max-width: calc(500px * var(--modal-scale, 1));">
                     <button class="close-confirm-btn" id="closeDisableGalleryModal">&times;</button>
                 </div>
                 <div class="confirm-modal-body">
@@ -3643,7 +3837,7 @@ function showFolderMappingModal() {
     modal.className = 'confirm-modal';
     modal.id = 'folderMappingModal';
     modal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: 700px; max-height: 80vh;">
+        <div class="confirm-modal-content" style="max-width: calc(700px * var(--modal-scale, 1)); max-height: calc(80vh * var(--modal-scale, 1));">
             <div class="confirm-modal-header">
                 <h3 style="border: none; padding: 0; margin: 0;">
                     <i class="fa-solid fa-map"></i> Gallery Folder Mapping
@@ -5637,6 +5831,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Apply saved highlight color
     applyHighlightColor(getSetting('highlightColor'));
+
+    // Apply UI scale (desktop only)
+    if (!window.matchMedia('(max-width: 768px)').matches) {
+        applyUiScale(getSetting('uiScale'));
+        applyModalSize(getSetting('modalSize'));
+    }
     
     // Apply animated tag pills setting
     applyAnimateTagPills(getSetting('animateTagPills'), getSetting('animateKeepName'));
@@ -6135,38 +6335,42 @@ async function recoverShallowExtensions() {
 
     debugLog(`[ShallowRecovery] ST lazy loading detected — recovering extensions for ${chars.length} characters...`);
 
-    for (let i = 0; i < chars.length; i += BATCH_SIZE) {
-        const batch = chars.slice(i, i + BATCH_SIZE);
-        const results = await Promise.allSettled(
-            batch.map(async (char) => {
-                try {
-                    const response = await apiRequest(ENDPOINTS.CHARACTERS_GET, 'POST', { avatar_url: char.avatar });
-                    if (!response.ok) return;
-                    const full = await response.json();
-                    if (!full?.data?.extensions) return;
+    try {
+        for (let i = 0; i < chars.length; i += BATCH_SIZE) {
+            const batch = chars.slice(i, i + BATCH_SIZE);
+            await Promise.allSettled(
+                batch.map(async (char) => {
+                    try {
+                        const response = await apiRequest(ENDPOINTS.CHARACTERS_GET, 'POST', { avatar_url: char.avatar });
+                        if (!response.ok) return;
+                        const full = await response.json();
+                        if (!full?.data?.extensions) return;
 
-                    // Patch extensions onto the slim object
-                    if (!char.data) char.data = {};
-                    char.data.extensions = full.data.extensions;
-                    if (full.spec) char.spec = full.spec;
-                    if (full.spec_version) char.spec_version = full.spec_version;
-                    recovered++;
-                } catch { /* skip */ }
-            })
-        );
+                        if (!char.data) char.data = {};
+                        char.data.extensions = full.data.extensions;
+                        if (full.spec) char.spec = full.spec;
+                        if (full.spec_version) char.spec_version = full.spec_version;
+                        recovered++;
+                    } catch { /* skip */ }
+                })
+            );
 
-        // Yield to prevent blocking the UI
-        await new Promise(r => setTimeout(r, 0));
+            // Update banner progress
+            const done = Math.min(i + BATCH_SIZE, chars.length);
+            window.ProviderRegistry?.updateRecoveryProgress?.(done, chars.length);
+
+            await new Promise(r => setTimeout(r, 0));
+        }
+    } finally {
+        window.extensionsRecoveryInProgress = false;
+        window.ProviderRegistry?.hideRecoveryBanner?.();
     }
 
     debugLog(`[ShallowRecovery] Recovered extensions for ${recovered}/${chars.length} characters`);
 
-    window.extensionsRecoveryInProgress = false;
-
     // Rebuild browser "In Library" lookups now that provider links are available
     window.ProviderRegistry?.rebuildAllBrowseLookups?.();
     window.ProviderRegistry?.refreshActiveBrowseBadges?.();
-    window.ProviderRegistry?.hideRecoveryBanner?.();
 
     document.dispatchEvent(new CustomEvent('cl-extensions-recovered'));
 
@@ -7253,9 +7457,30 @@ async function fetchCharacterImages(charOrName) {
     }
 }
 
+let _galleryImageObserver = null;
+
+function getGalleryImageObserver() {
+    if (_galleryImageObserver) return _galleryImageObserver;
+    const root = document.querySelector('#charModal .modal-body');
+    _galleryImageObserver = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (!entry.isIntersecting) continue;
+            const img = entry.target;
+            _galleryImageObserver.unobserve(img);
+            const realSrc = img.dataset.src;
+            if (!realSrc) continue;
+            img.src = realSrc;
+            delete img.dataset.src;
+            img.decode().catch(() => {});
+        }
+    }, { root: root || null, rootMargin: '100px' });
+    return _galleryImageObserver;
+}
+
 function renderGalleryImages(files, folderName) {
     const grid = document.getElementById('spritesGrid');
     grid.innerHTML = '';
+    if (_galleryImageObserver) { _galleryImageObserver.disconnect(); }
     // Reset grid class - we'll manage layout with sections inside
     grid.className = 'gallery-media-container';
     
@@ -7398,14 +7623,17 @@ function renderGalleryImages(files, folderName) {
                     }
                 });
             } else {
-                // Image thumbnail
-                mediaContainer.innerHTML = `
-                    <img src="${mediaUrl}" loading="lazy" decoding="async" data-gif="${mediaIsGif ? '1' : '0'}" title="${escapeHtml(fileName)}">
-                `;
-
+                // Image thumbnail: GIFs load eagerly (need src for freeze), others lazy via observer
                 if (mediaIsGif) {
-                    const thumbImg = mediaContainer.querySelector('img');
-                    freezeGifThumbnailImage(thumbImg);
+                    mediaContainer.innerHTML = `
+                        <img src="${mediaUrl}" decoding="async" data-gif="1" title="${escapeHtml(fileName)}">
+                    `;
+                    freezeGifThumbnailImage(mediaContainer.querySelector('img'));
+                } else {
+                    mediaContainer.innerHTML = `
+                        <img data-src="${mediaUrl}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E" decoding="async" data-gif="0" title="${escapeHtml(fileName)}">
+                    `;
+                    getGalleryImageObserver().observe(mediaContainer.querySelector('img'));
                 }
                 
                 // Click handler to open gallery viewer at this image
@@ -7587,7 +7815,7 @@ async function showLegacyFolderModal(char) {
     const safeLegacyFolder = sanitizeFolderName(legacyInfo.legacyFolder);
     
     modal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: 800px; max-height: 90vh;">
+        <div class="confirm-modal-content" style="max-width: calc(800px * var(--modal-scale, 1)); max-height: calc(90vh * var(--modal-scale, 1));">
             <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(74, 158, 255, 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
                 <h3 style="border: none; padding: 0; margin: 0;">
                     <i class="fa-solid fa-folder-tree" style="color: var(--accent-color);"></i>
@@ -9215,7 +9443,7 @@ async function showDeleteConfirmation(char) {
     deleteModal.className = 'confirm-modal';
     deleteModal.id = 'deleteConfirmModal';
     deleteModal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: 450px;">
+        <div class="confirm-modal-content" style="max-width: calc(450px * var(--modal-scale, 1));">
             <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
                 <h3 style="border: none; padding: 0; margin: 0;">
                     <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>
@@ -14735,14 +14963,16 @@ function updateProviderLinkIndicator(char) {
     
     const result = window.ProviderRegistry?.getCharacterProvider(char) || null;
     const textSpan = indicator.querySelector('.provider-link-text');
+    const locked = isUpdateLocked(char);
     
     if (result) {
         const { provider, linkInfo } = result;
         indicator.classList.add('linked');
         indicator.title = `Linked to ${provider.name}: ${linkInfo.fullPath}`;
         indicator.dataset.providerId = provider.id;
+        const lockIcon = locked ? ' <i class="fa-solid fa-lock provider-link-lock-icon" title="Updates locked"></i>' : '';
         if (textSpan) {
-            textSpan.innerHTML = `<i class="provider-link-icon ${escapeHtml(provider.icon)}"></i><span class="provider-link-name">${escapeHtml(provider.name)}</span> <i class="fa-solid fa-check"></i>`;
+            textSpan.innerHTML = `<i class="provider-link-icon ${escapeHtml(provider.icon)}"></i><span class="provider-link-name">${escapeHtml(provider.name)}</span> <i class="fa-solid fa-check"></i>${lockIcon}`;
         }
     } else {
         indicator.classList.remove('linked');
@@ -14763,15 +14993,15 @@ let linkModalActiveProvider = null;
 function openProviderLinkModal() {
     if (!activeChar) return;
     
-    const modal = document.getElementById('chubLinkModal');
-    const linkedState = document.getElementById('chubLinkLinkedState');
-    const unlinkedState = document.getElementById('chubLinkUnlinkedState');
-    const titleEl = document.getElementById('chubLinkModalTitle');
-    const searchResults = document.getElementById('chubLinkSearchResults');
+    const modal = document.getElementById('providerLinkModal');
+    const linkedState = document.getElementById('providerLinkLinkedState');
+    const unlinkedState = document.getElementById('providerLinkUnlinkedState');
+    const titleEl = document.getElementById('providerLinkModalTitle');
+    const searchResults = document.getElementById('providerLinkSearchResults');
     
     // Populate sidebar with character info
-    const avatarEl = document.getElementById('chubLinkCharAvatar');
-    const charNameEl = document.getElementById('chubLinkCharName');
+    const avatarEl = document.getElementById('providerLinkCharAvatar');
+    const charNameEl = document.getElementById('providerLinkCharName');
     const charName = activeChar.name || activeChar.data?.name || 'Character';
     
     if (avatarEl) {
@@ -14798,12 +15028,12 @@ function openProviderLinkModal() {
         titleEl.textContent = `${provider.name} Link`;
         
         if (statusIcon) {
-            statusIcon.className = 'chub-link-status-icon linked';
+            statusIcon.className = 'provider-link-status-icon linked';
             statusIcon.innerHTML = '<i class="fa-solid fa-link"></i>';
         }
         
         // Link URL — use provider method if available, else build manually
-        const pathEl = document.getElementById('chubLinkCurrentPath');
+        const pathEl = document.getElementById('providerLinkCurrentPath');
         if (pathEl) {
             const charUrl = provider.getCharacterUrl?.(linkInfo) || '#';
             pathEl.href = charUrl;
@@ -14812,9 +15042,9 @@ function openProviderLinkModal() {
         }
         
         // Provider-specific button visibility
-        const viewBtn = document.getElementById('chubLinkViewInGalleryBtn');
-        const galleryBtn = document.getElementById('chubLinkGalleryBtn');
-        const versionsBtn = document.getElementById('chubLinkVersionsBtn');
+        const viewBtn = document.getElementById('providerLinkViewInGalleryBtn');
+        const galleryBtn = document.getElementById('providerLinkGalleryBtn');
+        const versionsBtn = document.getElementById('providerLinkVersionsBtn');
         const statsEl = document.getElementById('providerLinkStats');
         
         if (viewBtn) {
@@ -14845,6 +15075,8 @@ function openProviderLinkModal() {
         } else {
             if (statsEl) statsEl.classList.add('hidden');
         }
+
+        updateLockToggleUI(isUpdateLocked(activeChar));
         
     } else {
         // ── Unlinked state ──
@@ -14854,13 +15086,13 @@ function openProviderLinkModal() {
         linkModalActiveProvider = null;
         
         if (statusIcon) {
-            statusIcon.className = 'chub-link-status-icon unlinked';
+            statusIcon.className = 'provider-link-status-icon unlinked';
             statusIcon.innerHTML = '<i class="fa-solid fa-link-slash"></i>';
         }
         
-        const nameInput = document.getElementById('chubLinkSearchName');
-        const creatorInput = document.getElementById('chubLinkSearchCreator');
-        const urlInput = document.getElementById('chubLinkUrlInput');
+        const nameInput = document.getElementById('providerLinkSearchName');
+        const creatorInput = document.getElementById('providerLinkSearchCreator');
+        const urlInput = document.getElementById('providerLinkUrlInput');
         
         const creator = activeChar.creator || activeChar.data?.creator || '';
         
@@ -14878,22 +15110,22 @@ function openProviderLinkModal() {
  * Results are tagged with providerId so linkToSearchResult knows which provider to save with.
  */
 async function searchProvidersForLink(name, creator) {
-    const resultsContainer = document.getElementById('chubLinkSearchResults');
+    const resultsContainer = document.getElementById('providerLinkSearchResults');
     if (!resultsContainer) return;
     
     if (!name.trim()) {
-        resultsContainer.innerHTML = '<div class="chub-link-search-empty">Enter a character name to search</div>';
+        resultsContainer.innerHTML = '<div class="provider-link-search-empty">Enter a character name to search</div>';
         return;
     }
     
-    resultsContainer.innerHTML = '<div class="chub-link-search-loading"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
+    resultsContainer.innerHTML = '<div class="provider-link-search-loading"><i class="fa-solid fa-spinner fa-spin"></i> Searching...</div>';
     
     try {
         const registry = window.ProviderRegistry;
         const providers = registry ? registry.getAllProviders().filter(p => p.supportsBulkLink) : [];
         
         if (providers.length === 0) {
-            resultsContainer.innerHTML = '<div class="chub-link-search-empty"><i class="fa-solid fa-exclamation-triangle"></i> No providers available</div>';
+            resultsContainer.innerHTML = '<div class="provider-link-search-empty"><i class="fa-solid fa-exclamation-triangle"></i> No providers available</div>';
             return;
         }
         
@@ -14912,7 +15144,7 @@ async function searchProvidersForLink(name, creator) {
         let allResults = allProviderResults.flat();
         
         if (allResults.length === 0) {
-            resultsContainer.innerHTML = '<div class="chub-link-search-empty"><i class="fa-solid fa-search"></i> No characters found</div>';
+            resultsContainer.innerHTML = '<div class="provider-link-search-empty"><i class="fa-solid fa-search"></i> No characters found</div>';
             return;
         }
         
@@ -14935,14 +15167,14 @@ async function searchProvidersForLink(name, creator) {
             ].filter(Boolean).join('');
             
             return `
-                <div class="chub-link-search-result" data-fullpath="${escapeHtml(result.fullPath)}" data-id="${result.id || ''}" data-provider-id="${escapeHtml(result.providerId)}">
-                    <img class="chub-link-search-result-avatar" src="${avatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
-                    <div class="chub-link-search-result-info">
-                        <div class="chub-link-search-result-name">${escapeHtml(result.name || result.fullPath.split('/').pop())}</div>
-                        <div class="chub-link-search-result-creator">by ${escapeHtml(creator)} · ${escapeHtml(result.providerName)}</div>
-                        <div class="chub-link-search-result-stats">${statsHtml}</div>
+                <div class="provider-link-search-result" data-fullpath="${escapeHtml(result.fullPath)}" data-id="${result.id || ''}" data-provider-id="${escapeHtml(result.providerId)}">
+                    <img class="provider-link-search-result-avatar" src="${avatarUrl}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                    <div class="provider-link-search-result-info">
+                        <div class="provider-link-search-result-name">${escapeHtml(result.name || result.fullPath.split('/').pop())}</div>
+                        <div class="provider-link-search-result-creator">by ${escapeHtml(creator)} · ${escapeHtml(result.providerName)}</div>
+                        <div class="provider-link-search-result-stats">${statsHtml}</div>
                     </div>
-                    <button class="action-btn primary small chub-link-search-result-btn">
+                    <button class="action-btn primary small provider-link-search-result-btn">
                         <i class="fa-solid fa-link"></i> Link
                     </button>
                 </div>
@@ -14951,7 +15183,7 @@ async function searchProvidersForLink(name, creator) {
         
     } catch (error) {
         console.error('[LinkSearch] Search error:', error);
-        resultsContainer.innerHTML = `<div class="chub-link-search-empty"><i class="fa-solid fa-exclamation-triangle"></i> Search failed: ${error.message}</div>`;
+        resultsContainer.innerHTML = `<div class="provider-link-search-empty"><i class="fa-solid fa-exclamation-triangle"></i> Search failed: ${error.message}</div>`;
     }
 }
 
@@ -14959,7 +15191,7 @@ async function searchProvidersForLink(name, creator) {
  * Link to a character from search results (multi-provider aware)
  */
 async function linkToSearchResult(btn) {
-    const resultEl = btn.closest('.chub-link-search-result');
+    const resultEl = btn.closest('.provider-link-search-result');
     if (!resultEl || !activeChar) return;
     
     const fullPath = resultEl.dataset.fullpath;
@@ -14989,7 +15221,7 @@ async function linkToSearchResult(btn) {
         showToast(`Linked to ${fullPath} (${provider.name})`, 'success');
         
         updateProviderLinkIndicator(activeChar);
-        hideModal('chubLinkModal');
+        hideModal('providerLinkModal');
         
     } catch (error) {
         console.error('[LinkSearch] Link error:', error);
@@ -15007,7 +15239,7 @@ async function linkToSearchResult(btn) {
 async function linkToProviderUrl(url) {
     if (!activeChar) return;
     
-    const btn = document.getElementById('chubLinkUrlBtn');
+    const btn = document.getElementById('providerLinkUrlBtn');
     
     const registry = window.ProviderRegistry;
     const providers = registry ? registry.getAllProviders() : [];
@@ -15049,7 +15281,7 @@ async function linkToProviderUrl(url) {
         showToast(`Linked to ${parsedPath} (${matchedProvider.name})`, 'success');
         
         updateProviderLinkIndicator(activeChar);
-        hideModal('chubLinkModal');
+        hideModal('providerLinkModal');
         
     } catch (error) {
         console.error('[LinkSearch] URL link error:', error);
@@ -15068,7 +15300,7 @@ async function linkToProviderUrl(url) {
 async function unlinkFromProvider() {
     if (!activeChar) return;
     
-    const btn = document.getElementById('chubLinkUnlinkBtn');
+    const btn = document.getElementById('providerLinkUnlinkBtn');
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
@@ -15137,7 +15369,7 @@ async function viewOnLinkedProvider() {
         return;
     }
     
-    hideModal('chubLinkModal');
+    hideModal('providerLinkModal');
     hideModal('charModal');
     showToast(`Loading character from ${provider.name}...`, 'info');
     
@@ -15190,7 +15422,7 @@ async function downloadLinkedGallery() {
         return;
     }
     
-    const btn = document.getElementById('chubLinkGalleryBtn');
+    const btn = document.getElementById('providerLinkGalleryBtn');
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Downloading...';
@@ -15242,39 +15474,39 @@ on('providerLinkIndicator', 'click', () => {
     // Not linked — default to Chub link modal (primary provider)
     openProviderLinkModal();
 });
-on('closeChubLinkModal', 'click', () => {
+on('closeProviderLinkModal', 'click', () => {
     linkModalActiveProvider?.provider?.clearCachedLinkNode?.();
-    hideModal('chubLinkModal');
+    hideModal('providerLinkModal');
 });
 
-on('chubLinkSearchBtn', 'click', () => {
-    const name = document.getElementById('chubLinkSearchName')?.value || '';
-    const creator = document.getElementById('chubLinkSearchCreator')?.value || '';
+on('providerLinkSearchBtn', 'click', () => {
+    const name = document.getElementById('providerLinkSearchName')?.value || '';
+    const creator = document.getElementById('providerLinkSearchCreator')?.value || '';
     searchProvidersForLink(name, creator);
 });
 
-document.getElementById('chubLinkSearchResults')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('.chub-link-search-result-btn');
+document.getElementById('providerLinkSearchResults')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('.provider-link-search-result-btn');
     if (btn) linkToSearchResult(btn);
 });
 
 // Allow Enter key to search
-document.getElementById('chubLinkSearchName')?.addEventListener('keydown', (e) => {
+document.getElementById('providerLinkSearchName')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
-        document.getElementById('chubLinkSearchBtn')?.click();
+        document.getElementById('providerLinkSearchBtn')?.click();
     }
 });
 
-document.getElementById('chubLinkSearchCreator')?.addEventListener('keydown', (e) => {
+document.getElementById('providerLinkSearchCreator')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
-        document.getElementById('chubLinkSearchBtn')?.click();
+        document.getElementById('providerLinkSearchBtn')?.click();
     }
 });
 
-on('chubLinkUrlBtn', 'click', () => {
-    const url = document.getElementById('chubLinkUrlInput')?.value || '';
+on('providerLinkUrlBtn', 'click', () => {
+    const url = document.getElementById('providerLinkUrlInput')?.value || '';
     if (url.trim()) {
         linkToProviderUrl(url.trim());
     } else {
@@ -15282,22 +15514,51 @@ on('chubLinkUrlBtn', 'click', () => {
     }
 });
 
-document.getElementById('chubLinkUrlInput')?.addEventListener('keydown', (e) => {
+document.getElementById('providerLinkUrlInput')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
         e.preventDefault();
-        document.getElementById('chubLinkUrlBtn')?.click();
+        document.getElementById('providerLinkUrlBtn')?.click();
     }
 });
 
-on('chubLinkViewInGalleryBtn', 'click', viewOnLinkedProvider);
-on('chubLinkGalleryBtn', 'click', downloadLinkedGallery);
-on('chubLinkUnlinkBtn', 'click', unlinkFromProvider);
+on('providerLinkViewInGalleryBtn', 'click', viewOnLinkedProvider);
+on('providerLinkGalleryBtn', 'click', downloadLinkedGallery);
+on('providerLinkUnlinkBtn', 'click', unlinkFromProvider);
 
-// Version History button in ChubAI Link modal
-on('chubLinkVersionsBtn', 'click', () => {
+// Update Lock toggle in provider link modal
+function updateLockToggleUI(locked) {
+    const btn = document.getElementById('providerLinkUpdateLockBtn');
+    if (!btn) return;
+    const statusSpan = btn.querySelector('.update-lock-status');
+    const toggleIcon = btn.querySelector('.update-lock-toggle-icon');
+    if (statusSpan) statusSpan.textContent = locked ? 'Locked' : 'Unlocked';
+    if (toggleIcon) {
+        toggleIcon.className = locked
+            ? 'fa-solid fa-toggle-on update-lock-toggle-icon'
+            : 'fa-solid fa-toggle-off update-lock-toggle-icon';
+    }
+    btn.classList.toggle('active', locked);
+}
+
+on('providerLinkUpdateLockBtn', 'click', async () => {
+    if (!activeChar) return;
+    const newState = !isUpdateLocked(activeChar);
+    try {
+        await setUpdateLocked(activeChar.avatar, newState);
+        updateLockToggleUI(newState);
+        updateProviderLinkIndicator(activeChar);
+        showToast(newState ? 'Updates locked for this character' : 'Updates unlocked', newState ? 'info' : 'success');
+    } catch (err) {
+        console.error('[UpdateLock] Failed to toggle:', err);
+        showToast('Failed to save update lock', 'error');
+    }
+});
+
+// Version History button in provider link modal
+on('providerLinkVersionsBtn', 'click', () => {
     if (activeChar) {
-        // Close the ChubAI Link modal, then switch to the Versions tab
-        const linkModal = document.getElementById('chubLinkModal');
+        // Close the link modal, then switch to the Versions tab
+        const linkModal = document.getElementById('providerLinkModal');
         if (linkModal) linkModal.classList.add('hidden');
         const editVBtn = document.getElementById('editPaneVersionsBtn');
         if (editVBtn) editVBtn.click();
@@ -16110,6 +16371,34 @@ async function saveProviderLink(char, provider, linkInfo) {
         const mainChar = context?.characters?.find(c => c.avatar === char.avatar);
         if (mainChar) provider.setLinkInfo(mainChar, linkInfo);
     } catch (_) { /* non-critical */ }
+}
+
+// ========================================
+// UPDATE LOCK
+// ========================================
+
+function isUpdateLocked(char) {
+    return !!char?.data?.extensions?.update_locked;
+}
+
+async function setUpdateLocked(avatar, locked) {
+    const char = allCharacters.find(c => c.avatar === avatar);
+    if (!char) return;
+
+    if (!char.data) char.data = {};
+    if (!char.data.extensions) char.data.extensions = {};
+    char.data.extensions.update_locked = !!locked;
+
+    const existingData = char.data;
+    const response = await apiRequest('/characters/merge-attributes', 'POST', {
+        avatar: char.avatar,
+        create_date: char.create_date,
+        data: { ...existingData, create_date: char.create_date }
+    });
+    if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        throw new Error(`Failed to save update lock: ${response.status} ${errorText}`);
+    }
 }
 
 /**
@@ -17952,7 +18241,7 @@ async function runBulkLocalization() {
     bulkLocalizeResults = [];
     
     // Include provider gallery downloads for linked characters
-    const includeProviderGallery = getSetting('includeProviderGallery') || false;
+    const includeProviderGallery = getSetting('includeProviderGallery') !== false;
     
     // Get previously completed characters
     const completedAvatars = getCompletedMediaLocalizations();
@@ -18704,12 +18993,13 @@ function buildNormalizedCharacterData(fullDataMap) {
             name: name,
             nameLower: name.toLowerCase().trim(),
             normalizedName: normalizedName,
+            nameVariants: nameVariantsForDupe(name),
             creator: creator,
+            creatorCompact: creator.replace(/[\s_-]/g, ''),
             description: description,
             firstMes: firstMes,
             personality: personality,
             scenario: scenario,
-            // Pre-computed word sets for Jaccard similarity
             descWords: getWords(description),
             firstMesWords: getWords(firstMes),
             persWords: getWords(personality),
@@ -18742,35 +19032,55 @@ function calculateFastSimilarity(normA, normB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON (fast path) ===
-    if (normA.nameLower === normB.nameLower && normA.nameLower) {
-        score += 25;
-        breakdown.name = 25;
-        matchReasons.push('Exact name match');
-    } else if (normA.normalizedName === normB.normalizedName && normA.normalizedName.length > 2) {
-        score += 20;
-        breakdown.name = 20;
-        matchReasons.push('Name variant match');
-    } else if (normA.normalizedName.length > 2 && normB.normalizedName.length > 2) {
-        const nameSim = stringSimilarity(normA.normalizedName, normB.normalizedName);
-        if (nameSim >= 0.7) {
-            const nameScore = Math.round(nameSim * 15);
-            score += nameScore;
-            breakdown.name = nameScore;
-            if (nameSim >= 0.85) {
-                matchReasons.push(`${Math.round(nameSim * 100)}% name similarity`);
+    // === NAME COMPARISON (variant-aware, aligned with full scorer) ===
+    let bestNameScore = 0;
+    let bestNameReason = '';
+
+    for (const va of normA.nameVariants) {
+        if (va.length < 3) continue;
+        for (const vb of normB.nameVariants) {
+            if (vb.length < 3) continue;
+            if (va === vb) {
+                if (20 > bestNameScore) { bestNameScore = 20; bestNameReason = 'Exact name match'; }
+            } else if (isNamePrefixMatch(va, vb)) {
+                if (18 > bestNameScore) { bestNameScore = 18; bestNameReason = 'Name prefix match'; }
+            } else {
+                const sim = stringSimilarity(va, vb);
+                if (sim >= 0.7) {
+                    const s = Math.round(sim * 12);
+                    if (s > bestNameScore) {
+                        bestNameScore = s;
+                        bestNameReason = sim >= 0.85 ? `${Math.round(sim * 100)}% name similarity` : '';
+                    }
+                }
             }
         }
+    }
+
+    if (bestNameScore > 0) {
+        score += bestNameScore;
+        breakdown.name = bestNameScore;
+        if (bestNameReason) matchReasons.push(bestNameReason);
     }
     
     // Early exit if names don't match at all (no point comparing content)
     if (!breakdown.name) return { score: 0, breakdown: {}, confidence: null, matchReason: '', matchReasons: [] };
     
-    // === CREATOR COMPARISON ===
-    if (normA.creator && normB.creator && normA.creator === normB.creator) {
-        score += 20;
-        breakdown.creator = 20;
-        matchReasons.push('Same creator');
+    // === CREATOR COMPARISON (fuzzy, aligned with full scorer) ===
+    if (normA.creator && normB.creator) {
+        if (normA.creatorCompact && normA.creatorCompact === normB.creatorCompact) {
+            score += 20;
+            breakdown.creator = 20;
+            matchReasons.push('Same creator');
+        } else {
+            const creatorSim = stringSimilarity(normA.creator, normB.creator);
+            if (creatorSim >= 0.75) {
+                const creatorScore = Math.round(creatorSim * 20);
+                score += creatorScore;
+                breakdown.creator = creatorScore;
+                matchReasons.push(creatorSim >= 0.95 ? 'Same creator' : 'Similar creator');
+            }
+        }
     }
     
     // === CONTENT COMPARISONS (using pre-computed word sets) ===
@@ -18855,10 +19165,29 @@ function normalizeCharName(name) {
         .replace(/\s*[\(\[\{]?\s*v(?:er(?:sion)?)?\.?\s*\d+[\)\]\}]?\s*$/i, '')
         .replace(/\s*-?\s*v\d+(\.\d+)*$/i, '')
         // Remove common suffixes
-        .replace(/\s*[\(\[\{]?(?:updated?|fixed?|new|old|alt(?:ernate)?|edit(?:ed)?|copy|backup)[\)\]\}]?\s*$/i, '')
+        .replace(/\s*[\(\[\{]?(?:updated?|fixed?|new|old|alt(?:ernate)?|edit(?:ed)?|copy|backup|nsfw)[\)\]\}]?\s*$/i, '')
         // Normalize whitespace
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function nameVariantsForDupe(rawName) {
+    const full = normalizeCharName(rawName);
+    const variants = new Set();
+    if (full) variants.add(full);
+    if (rawName.includes('||')) {
+        const primary = normalizeCharName(rawName.split('||')[0]);
+        if (primary) variants.add(primary);
+    }
+    return [...variants];
+}
+
+function isNamePrefixMatch(a, b) {
+    if (!a || !b || a.length === b.length) return false;
+    const shorter = a.length < b.length ? a : b;
+    const longer = a.length < b.length ? b : a;
+    if (shorter.length < 4) return false;
+    return longer.startsWith(shorter) && /[\s\-|:,.]/.test(longer[shorter.length]);
 }
 
 /**
@@ -18980,17 +19309,19 @@ function estimateTokens(char) {
  * Returns { score, breakdown, confidence, matchReasons }
  * 
  * Scoring weights:
- * - Name exact match: 25 pts
- * - Name normalized match: 20 pts  
- * - Name similarity (scaled): up to 15 pts
+ * - Name exact variant match: 20 pts
+ * - Name prefix match: 18 pts
+ * - Name similarity (scaled): up to 12 pts
  * - Same creator (non-empty): 20 pts
- * - Description similarity: up to 20 pts
+ * - Creator notes similarity: up to 25 pts
+ * - Description similarity: up to 25 pts
  * - First message similarity: up to 15 pts
  * - Personality similarity: up to 10 pts
  * - Scenario similarity: up to 5 pts
+ * - Content divergence penalty: up to -15 pts
  * 
  * Confidence thresholds:
- * - High: 60+ points (requires multiple strong matches)
+ * - High: 60+ points
  * - Medium: 40-59 points
  * - Low: configurable minimum (default 35) - 39 points
  * - No match: below minimum threshold
@@ -19003,37 +19334,62 @@ function calculateCharacterSimilarity(charA, charB) {
     // === NAME COMPARISON (reduced weight - some creators use taglines) ===
     const nameA = getCharField(charA, 'name') || '';
     const nameB = getCharField(charB, 'name') || '';
-    const normalizedNameA = normalizeCharName(nameA);
-    const normalizedNameB = normalizeCharName(nameB);
-    
-    if (nameA.toLowerCase().trim() === nameB.toLowerCase().trim() && nameA) {
-        score += 20;
-        breakdown.name = 20;
-        matchReasons.push('Exact name match');
-    } else if (normalizedNameA === normalizedNameB && normalizedNameA.length > 2) {
-        score += 15;
-        breakdown.name = 15;
-        matchReasons.push('Name variant match');
-    } else if (normalizedNameA.length > 2 && normalizedNameB.length > 2) {
-        const nameSim = stringSimilarity(normalizedNameA, normalizedNameB);
-        if (nameSim >= 0.7) {
-            const nameScore = Math.round(nameSim * 12);
-            score += nameScore;
-            breakdown.name = nameScore;
-            if (nameSim >= 0.85) {
-                matchReasons.push(`${Math.round(nameSim * 100)}% name similarity`);
+
+    let bestNameScore = 0;
+    let bestNameReason = '';
+
+    const variantsA = nameVariantsForDupe(nameA);
+    const variantsB = nameVariantsForDupe(nameB);
+
+    for (const va of variantsA) {
+        if (va.length < 3) continue;
+        for (const vb of variantsB) {
+            if (vb.length < 3) continue;
+            if (va === vb) {
+                if (20 > bestNameScore) { bestNameScore = 20; bestNameReason = 'Exact name match'; }
+            } else if (isNamePrefixMatch(va, vb)) {
+                if (18 > bestNameScore) { bestNameScore = 18; bestNameReason = 'Name prefix match'; }
+            } else {
+                const sim = stringSimilarity(va, vb);
+                if (sim >= 0.7) {
+                    const s = Math.round(sim * 12);
+                    if (s > bestNameScore) {
+                        bestNameScore = s;
+                        bestNameReason = sim >= 0.85 ? `${Math.round(sim * 100)}% name similarity` : '';
+                    }
+                }
             }
         }
     }
+
+    if (bestNameScore > 0) {
+        score += bestNameScore;
+        breakdown.name = bestNameScore;
+        if (bestNameReason) matchReasons.push(bestNameReason);
+    }
     
-    // === CREATOR COMPARISON ===
+    // === CREATOR COMPARISON (fuzzy — handles cross-provider name variations) ===
     const creatorA = getCharField(charA, 'creator') || '';
     const creatorB = getCharField(charB, 'creator') || '';
     
-    if (creatorA && creatorB && creatorA.toLowerCase().trim() === creatorB.toLowerCase().trim()) {
-        score += 20;
-        breakdown.creator = 20;
-        matchReasons.push('Same creator');
+    if (creatorA && creatorB) {
+        const caLower = creatorA.toLowerCase().trim();
+        const cbLower = creatorB.toLowerCase().trim();
+        const caCompact = caLower.replace(/[\s_-]/g, '');
+        const cbCompact = cbLower.replace(/[\s_-]/g, '');
+        if (caCompact === cbCompact) {
+            score += 20;
+            breakdown.creator = 20;
+            matchReasons.push('Same creator');
+        } else {
+            const creatorSim = stringSimilarity(creatorA, creatorB);
+            if (creatorSim >= 0.75) {
+                const creatorScore = Math.round(creatorSim * 20);
+                score += creatorScore;
+                breakdown.creator = creatorScore;
+                matchReasons.push(creatorSim >= 0.95 ? 'Same creator' : 'Similar creator');
+            }
+        }
     }
     
     // === CREATOR NOTES COMPARISON (weighted heavily - often unique identifier) ===
@@ -19110,6 +19466,20 @@ function calculateCharacterSimilarity(charA, charB) {
             const scenScore = Math.round(scenSim * 5);
             score += scenScore;
             breakdown.scenario = scenScore;
+        }
+    }
+
+    // === CONTENT DIVERGENCE PENALTY ===
+    // When name+creator match but card content clearly differs,
+    // reduce score to avoid false positives (e.g. male/female variants)
+    if (score >= 35 && !breakdown.description && !breakdown.first_mes) {
+        if (descA && descB && descA.length > 50 && descB.length > 50) {
+            const descDiv = contentSimilarity(descA, descB);
+            if (descDiv < 0.25) {
+                const penalty = Math.min(score - 25, 15);
+                score -= penalty;
+                breakdown.divergence = -penalty;
+            }
         }
     }
     
@@ -19419,6 +19789,122 @@ function checkCharacterForDuplicates(newChar) {
     return matches;
 }
 
+async function checkCharacterForDuplicatesAsync(newChar) {
+    const syncMatches = checkCharacterForDuplicates(newChar);
+
+    if (syncMatches.length > 0 && syncMatches[0].score >= 60) {
+        return syncMatches;
+    }
+
+    const newName = normalizeCharName(newChar.name || newChar.definition?.name || '');
+    const newCreator = (newChar.creator || newChar.definition?.creator || '').toLowerCase().trim();
+    const newNameRaw = newChar.name || newChar.definition?.name || '';
+    const newNameVariants = nameVariantsForDupe(newNameRaw);
+
+    if (newName.length < 4 && newCreator.length < 3) return syncMatches;
+
+    const candidateSet = new Set();
+
+    // Slim chars from sync matches already scored on partial data; hydrating may push them above threshold
+    for (const match of syncMatches) {
+        if (match.char?._slim) candidateSet.add(match.char);
+    }
+
+    // Name match: exact variant or word-boundary prefix (including || splits)
+    const newPrefixVariants = newNameVariants.filter(v => v.length >= 4);
+    if (newPrefixVariants.length > 0) {
+        for (const existing of allCharacters) {
+            if (!existing?._slim || candidateSet.has(existing)) continue;
+            const existingVariants = nameVariantsForDupe(existing.name || '');
+            let matched = false;
+
+            for (const nv of newPrefixVariants) {
+                for (const ev of existingVariants) {
+                    if (ev.length < 4) continue;
+                    if (ev === nv || isNamePrefixMatch(nv, ev)) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (matched) break;
+            }
+
+            if (matched) {
+                candidateSet.add(existing);
+                if (candidateSet.size >= 15) break;
+            }
+        }
+    }
+
+    // Same creator (fuzzy) with different name: catches cross-provider clones
+    if (newCreator.length >= 3 && candidateSet.size < 15) {
+        const newCreatorCompact = newCreator.replace(/[\s_-]/g, '');
+        const creatorCandidates = [];
+        for (const existing of allCharacters) {
+            if (!existing?._slim || candidateSet.has(existing)) continue;
+            const existingCreator = (existing.data?.creator || '').toLowerCase().trim();
+            if (existingCreator.length < 3) continue;
+            const existingCompact = existingCreator.replace(/[\s_-]/g, '');
+            if (newCreatorCompact === existingCompact || stringSimilarity(newCreator, existingCreator) >= 0.75) {
+                const nameScore = newName.length >= 4
+                    ? stringSimilarity(newName, normalizeCharName(existing.name || ''))
+                    : 0;
+                creatorCandidates.push({ char: existing, nameScore });
+            }
+        }
+        creatorCandidates.sort((a, b) => b.nameScore - a.nameScore);
+        const slots = Math.min(5, 15 - candidateSet.size);
+        for (let i = 0; i < Math.min(slots, creatorCandidates.length); i++) {
+            candidateSet.add(creatorCandidates[i].char);
+        }
+    }
+
+    if (candidateSet.size === 0) return syncMatches;
+
+    const toHydrate = [...candidateSet].slice(0, 15);
+    await Promise.all(toHydrate.map(c => hydrateCharacter(c)));
+
+    const newCharObj = {
+        name: newChar.name || newChar.definition?.name || '',
+        creator: newChar.creator || newChar.definition?.creator || '',
+        description: newChar.description || newChar.definition?.description || '',
+        first_mes: newChar.first_mes || newChar.definition?.first_mes || '',
+        personality: newChar.personality || newChar.definition?.personality || '',
+        scenario: newChar.scenario || newChar.definition?.scenario || '',
+        creator_notes: newChar.creator_notes || newChar.definition?.creator_notes || ''
+    };
+
+    for (const existing of toHydrate) {
+        const similarity = calculateCharacterSimilarity(newCharObj, existing);
+        const existingMatch = syncMatches.find(m => m.char === existing);
+        if (existingMatch) {
+            // Hydrated re-score always wins: it has more data (descriptions, first_mes)
+            // and can apply divergence penalties that slim scoring can't
+            existingMatch.score = similarity.score;
+            existingMatch.confidence = similarity.confidence;
+            existingMatch.matchReason = similarity.matchReason;
+            existingMatch.breakdown = similarity.breakdown;
+        } else if (similarity.confidence) {
+            syncMatches.push({
+                char: existing,
+                confidence: similarity.confidence,
+                matchReason: similarity.matchReason,
+                score: similarity.score,
+                breakdown: similarity.breakdown
+            });
+        }
+    }
+
+    // Remove matches that fell below threshold after hydrated re-scoring
+    const minScore = getSetting('duplicateMinScore') || 35;
+    for (let i = syncMatches.length - 1; i >= 0; i--) {
+        if (!syncMatches[i].confidence) syncMatches.splice(i, 1);
+    }
+
+    syncMatches.sort((a, b) => b.score - a.score);
+    return syncMatches;
+}
+
 /**
  * Render a field diff between two characters - side by side comparison
  */
@@ -19644,6 +20130,14 @@ function compareCharacterDifferences(refChar, dupChar) {
     };
 }
 
+function getDuplicateScoreLabel(score, isContentIdentical = false) {
+    if (isContentIdentical) return 'Identical';
+    if (score >= 90) return 'Near-Identical';
+    if (score >= 60) return 'Very Similar';
+    if (score >= 40) return 'Similar';
+    return 'Possible Match';
+}
+
 function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const name = getCharField(char, 'name') || 'Unknown';
     const creator = getCharField(char, 'creator') || 'Unknown creator';
@@ -19698,6 +20192,7 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const tokenClass = diffs && diffs.tokens ? 'diff-highlight' : '';
     
     const galleryCountId = `gallery-count-${char.avatar.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const chatCountId = `chat-count-${char.avatar.replace(/[^a-zA-Z0-9]/g, '_')}`;
     
     return `
         <div class="char-dup-card ${type}" data-avatar="${escapeHtml(char.avatar)}">
@@ -19714,10 +20209,14 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
                 <div class="char-dup-card-meta-item ${dateClass}"><i class="fa-solid fa-calendar"></i> ${dateStr}</div>
                 <div class="char-dup-card-meta-item ${tokenClass}"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
                 <div class="char-dup-card-meta-item gallery-count-item" id="${galleryCountId}" data-avatar="${escapeHtml(char.avatar)}" title="Gallery images"><i class="fa-solid fa-images"></i> <span class="gallery-count-value">...</span></div>
+                <div class="char-dup-card-meta-item chat-count-item" id="${chatCountId}" data-avatar="${escapeHtml(char.avatar)}" title="Chat sessions"><i class="fa-solid fa-comments"></i> <span class="chat-count-value">...</span></div>
             </div>
             <div class="char-dup-card-actions">
                 <button class="action-btn secondary small dup-view-btn">
                     <i class="fa-solid fa-eye"></i> View
+                </button>
+                <button class="action-btn secondary small dup-playlist-btn" title="Add to Playlist">
+                    <i class="fa-solid fa-list"></i> Playlist
                 </button>
                 <button class="action-btn danger-hover small dup-delete-btn" data-group-idx="${groupIdx}">
                     <i class="fa-solid fa-trash"></i> Delete
@@ -19761,47 +20260,14 @@ async function renderDuplicateGroups(groups) {
         const refAvatar = getCharacterAvatarUrl(ref.avatar);
         const maxScore = Math.max(...group.duplicates.map(d => d.score || 0));
         
-        html += `
-            <div class="char-dup-group" id="dup-group-${idx}">
-                <div class="char-dup-group-header">
-                    <i class="fa-solid fa-chevron-right char-dup-group-toggle"></i>
-                    <img class="char-dup-group-avatar" src="${refAvatar}" alt="${escapeHtml(refName)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
-                    <div class="char-dup-group-info">
-                        <div class="char-dup-group-name">${escapeHtml(refName)}</div>
-                        <div class="char-dup-group-meta">
-                            <span>${group.duplicates.length} potential duplicate(s)</span>
-                            <span style="opacity: 0.7;">\u2022 Score: ${maxScore} pts</span>
-                        </div>
-                    </div>
-                    <div class="char-dup-group-confidence ${group.confidence}">${group.confidence}</div>
-                </div>
-                <div class="char-dup-group-content">
-        `;
-        
-        // Render comparison for each duplicate
+        // Pre-compute content identity for each duplicate to inform the header
+        const dupResults = [];
+        let allContentIdentical = true;
+
         group.duplicates.forEach((dup, dupIdx) => {
             const dupChar = dup.char;
-            
-            // Calculate differences between reference and duplicate
             const diffs = compareCharacterDifferences(ref, dupChar);
-            
-            // Build score breakdown display
-            let scoreBreakdown = '';
-            if (dup.breakdown) {
-                const parts = [];
-                if (dup.breakdown.name) parts.push(`Name: ${dup.breakdown.name}`);
-                if (dup.breakdown.creator) parts.push(`Creator: ${dup.breakdown.creator}`);
-                if (dup.breakdown.description) parts.push(`Desc: ${dup.breakdown.description}`);
-                if (dup.breakdown.first_mes) parts.push(`1st Msg: ${dup.breakdown.first_mes}`);
-                if (dup.breakdown.personality) parts.push(`Pers: ${dup.breakdown.personality}`);
-                if (dup.breakdown.scenario) parts.push(`Scen: ${dup.breakdown.scenario}`);
-                if (parts.length > 0) {
-                    scoreBreakdown = `<div class="match-breakdown">${parts.join(' • ')}</div>`;
-                }
-            }
-            
-            // Build diff sections - now returns objects with html and isSame
-            // Compare more fields for better coverage
+
             const descDiff = renderFieldDiff('Description', 
                 getCharField(ref, 'description'), 
                 getCharField(dupChar, 'description'));
@@ -19826,17 +20292,60 @@ async function renderDuplicateGroups(groups) {
             const tagsDiff = renderTagsDiff(
                 getTags(ref), 
                 getTags(dupChar));
-            
-            // Separate into identical and different fields
+
             const allDiffs = [descDiff, persDiff, scenarioDiff, firstMesDiff, mesExampleDiff, systemPromptDiff, creatorNotesDiff, tagsDiff];
-            const identicalFields = allDiffs.filter(d => d.isSame && !d.isEmpty).map(d => d.html).join('');
-            const differentFields = allDiffs.filter(d => !d.isSame && !d.isEmpty).map(d => d.html).join('');
-            
-            // Count fields
             const identicalCount = allDiffs.filter(d => d.isSame && !d.isEmpty).length;
             const differentCount = allDiffs.filter(d => !d.isSame && !d.isEmpty).length;
+            const isContentIdentical = differentCount === 0 && identicalCount > 0;
+
+            if (!isContentIdentical) allContentIdentical = false;
+
+            dupResults.push({ dup, dupIdx, dupChar, diffs, allDiffs, identicalCount, differentCount, isContentIdentical });
+        });
+
+        const headerLabel = getDuplicateScoreLabel(maxScore, allContentIdentical);
+        
+        html += `
+            <div class="char-dup-group" id="dup-group-${idx}">
+                <div class="char-dup-group-header">
+                    <i class="fa-solid fa-chevron-right char-dup-group-toggle"></i>
+                    <img class="char-dup-group-avatar" src="${refAvatar}" alt="${escapeHtml(refName)}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                    <div class="char-dup-group-info">
+                        <div class="char-dup-group-name">${escapeHtml(refName)}</div>
+                        <div class="char-dup-group-meta">
+                            <span>${group.duplicates.length} potential duplicate(s)</span>
+                            <span style="opacity: 0.7;">\u2022 ${headerLabel}</span>
+                        </div>
+                    </div>
+                    <div class="char-dup-group-confidence ${group.confidence}">${group.confidence}</div>
+                </div>
+                <div class="char-dup-group-content">
+        `;
+        
+        // Render comparison for each duplicate
+        for (const { dup, dupIdx, dupChar, diffs, allDiffs, identicalCount, differentCount, isContentIdentical } of dupResults) {
+            const identicalFields = allDiffs.filter(d => d.isSame && !d.isEmpty).map(d => d.html).join('');
+            const differentFields = allDiffs.filter(d => !d.isSame && !d.isEmpty).map(d => d.html).join('');
+
+            // Build score breakdown display
+            let scoreBreakdown = '';
+            if (dup.breakdown) {
+                const parts = [];
+                if (dup.breakdown.name) parts.push(`Name: ${dup.breakdown.name}`);
+                if (dup.breakdown.creator) parts.push(`Creator: ${dup.breakdown.creator}`);
+                if (dup.breakdown.creator_notes) parts.push(`Notes: ${dup.breakdown.creator_notes}`);
+                if (dup.breakdown.description) parts.push(`Desc: ${dup.breakdown.description}`);
+                if (dup.breakdown.first_mes) parts.push(`1st Msg: ${dup.breakdown.first_mes}`);
+                if (dup.breakdown.personality) parts.push(`Pers: ${dup.breakdown.personality}`);
+                if (dup.breakdown.scenario) parts.push(`Scen: ${dup.breakdown.scenario}`);
+                if (dup.breakdown.divergence) parts.push(`Divergence: ${dup.breakdown.divergence}`);
+                if (parts.length > 0) {
+                    scoreBreakdown = `<div class="match-breakdown">${parts.join(' \u2022 ')}</div>`;
+                }
+            }
+
+            const scoreLabel = getDuplicateScoreLabel(dup.score || 0, isContentIdentical);
             
-            // Check if any fields had whitespace-only differences that were normalized away
             const wsNormalizedCount = allDiffs.filter(d => d.normalizedAway).length;
             
             // Build the diff summary message when all content is identical
@@ -19872,7 +20381,7 @@ async function renderDuplicateGroups(groups) {
                         ${metaDiffs.length > 0 ? `<div class="meta-diffs">${metaDiffs.join('')}</div>` : ''}
                         <div class="identical-notice-hint">
                             <i class="fa-solid fa-lightbulb"></i>
-                            You can safely delete one. Check gallery images before deciding which to keep.
+                            You can safely delete one. Check chat sessions and gallery images before deciding which to keep.
                         </div>
                     </div>
                 `;
@@ -19883,8 +20392,8 @@ async function renderDuplicateGroups(groups) {
                     ${renderCharDupCard(ref, 'reference', idx)}
                     <div class="char-dup-divider">
                         <i class="fa-solid fa-arrows-left-right"></i>
-                        <div class="char-dup-group-confidence ${dup.confidence} match-score">
-                            ${dup.score || 0} pts
+                        <div class="char-dup-group-confidence ${dup.confidence} match-score" title="${dup.score || 0} pts">
+                            ${scoreLabel}
                         </div>
                         <div class="match-reason">
                             ${dup.matchReason}
@@ -19923,7 +20432,7 @@ async function renderDuplicateGroups(groups) {
                     </div>
                 ` : ''}
             `;
-        });
+        }
         
         html += `
                 </div>
@@ -19933,8 +20442,9 @@ async function renderDuplicateGroups(groups) {
     
     resultsEl.innerHTML = html;
     
-    // Load gallery counts asynchronously after rendering
+    // Load gallery and chat counts asynchronously after rendering
     loadDuplicateGalleryCounts(groups);
+    loadDuplicateChatCounts(groups);
 }
 
 /**
@@ -20022,6 +20532,43 @@ async function loadDuplicateGalleryCounts(groups) {
                 }
             } catch (e) {
                 debugLog(`[Gallery] Error loading count for ${avatar}:`, e);
+            }
+        }));
+    }
+}
+
+async function loadDuplicateChatCounts(groups) {
+    const avatars = new Set();
+    for (const group of groups) {
+        avatars.add(group.reference.avatar);
+        for (const dup of group.duplicates) avatars.add(dup.char.avatar);
+    }
+
+    const BATCH_SIZE = 5;
+    const avatarList = [...avatars];
+
+    for (let i = 0; i < avatarList.length; i += BATCH_SIZE) {
+        const batch = avatarList.slice(i, i + BATCH_SIZE);
+        await Promise.all(batch.map(async (avatar) => {
+            try {
+                const response = await apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { avatar_url: avatar });
+                const chats = response.ok ? await response.json() : [];
+                const count = Array.isArray(chats) ? chats.length : 0;
+                const countEl = document.getElementById(`chat-count-${avatar.replace(/[^a-zA-Z0-9]/g, '_')}`);
+                if (countEl) {
+                    const countValue = countEl.querySelector('.chat-count-value');
+                    if (countValue) {
+                        countValue.textContent = count.toString();
+                        if (count > 0) {
+                            countEl.classList.add('has-chats');
+                            countEl.title = `${count} chat session${count !== 1 ? 's' : ''} tied to this card`;
+                        } else {
+                            countEl.title = 'No chat sessions';
+                        }
+                    }
+                }
+            } catch (e) {
+                debugLog(`[Chats] Error loading count for ${avatar}:`, e);
             }
         }));
     }
@@ -20497,6 +21044,11 @@ document.getElementById('charDuplicatesResults')?.addEventListener('click', (e) 
 
     if (e.target.closest('.dup-view-btn')) { viewCharFromDuplicates(avatar); return; }
 
+    if (e.target.closest('.dup-playlist-btn')) {
+        if (window.openPlaylistPicker) window.openPlaylistPicker([avatar]);
+        return;
+    }
+
     const deleteBtn = e.target.closest('.dup-delete-btn');
     if (deleteBtn) {
         const groupIdx = parseInt(deleteBtn.dataset.groupIdx);
@@ -20537,17 +21089,21 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
         const name = newCharInfo.name || newCharInfo.definition?.name || 'Unknown';
         const creator = newCharInfo.creator || newCharInfo.definition?.creator || 'Unknown';
         const avatarUrl = newCharInfo.avatarUrl || `https://avatars.charhub.io/avatars/${newCharInfo.fullPath}/avatar.webp`;
+        const bestScore = matches.length > 0 ? matches[0].score : 0;
+        const headerSubtext = bestScore >= 60
+            ? 'This character likely already exists in your library'
+            : 'This character may already exist in your library';
         
         infoEl.innerHTML = `
             <img class="pre-import-info-avatar" src="${avatarUrl}" alt="${escapeHtml(name)}" onerror="this.style.display='none'">
             <div class="pre-import-info-text">
                 <h4><i class="fa-solid fa-download"></i> Importing: ${escapeHtml(name)}</h4>
-                <p>by ${escapeHtml(creator)} &bull; This character may already exist in your library</p>
+                <p>by ${escapeHtml(creator)} &bull; ${headerSubtext}</p>
             </div>
         `;
         
         // Render existing matches
-        let matchesHtml = `<div class="pre-import-matches-header">Found ${matches.length} potential match(es):</div>`;
+        let matchesHtml = `<div class="pre-import-matches-header">Found ${matches.length} potential match${matches.length === 1 ? '' : 'es'}:</div>`;
         
         matches.forEach((match, idx) => {
             const existingChar = match.char;
@@ -20555,21 +21111,22 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
             const existingCreator = getCharField(existingChar, 'creator');
             const existingAvatar = getCharacterAvatarUrl(existingChar.avatar);
             const tokens = estimateTokens(existingChar);
+            const provInfo = window.ProviderRegistry?.getCharacterProvider(existingChar);
+            const sourceName = provInfo?.provider?.name || 'Local';
             
             matchesHtml += `
-                <div class="char-dup-card" style="margin-bottom: 10px; border-color: var(--glass-border);">
+                <div class="char-dup-card pre-import-match-card" data-avatar="${escapeHtml(existingChar.avatar)}" style="margin-bottom: 10px; border-color: var(--glass-border);">
                     <div class="char-dup-card-header">
                         <img class="char-dup-card-avatar" src="${existingAvatar}" alt="${escapeHtml(existingName)}" loading="lazy">
                         <div class="char-dup-card-title">
                             <div class="char-dup-card-name">${escapeHtml(existingName)}</div>
-                            <div class="char-dup-card-creator">by ${escapeHtml(existingCreator)}</div>
-                        </div>
-                        <div class="char-dup-group-confidence ${match.confidence}" style="font-size: 0.7rem;">
-                            ${match.matchReason}
+                            <div class="char-dup-card-creator">by ${escapeHtml(existingCreator)} &bull; ${escapeHtml(sourceName)}</div>
                         </div>
                     </div>
                     <div class="char-dup-card-meta">
-                        <div class="char-dup-card-meta-item"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
+                        <div class="char-dup-group-confidence ${match.confidence}">${match.matchReason}</div>
+                        <div class="char-dup-card-meta-item" style="margin-left: auto;"><i class="fa-solid fa-code"></i> ~${tokens} tokens</div>
+                        <div class="char-dup-card-meta-item" style="opacity: 0.5;"><i class="fa-solid fa-eye"></i> View</div>
                     </div>
                 </div>
             `;
@@ -20609,6 +21166,18 @@ on('preImportSkipBtn', 'click', () => resolvePreImportChoice('skip'));
 on('preImportAnyway', 'click', () => resolvePreImportChoice('import'));
 
 on('preImportReplaceBtn', 'click', () => resolvePreImportChoice('replace'));
+
+document.getElementById('preImportDuplicateMatches')?.addEventListener('click', (e) => {
+    const card = e.target.closest('.pre-import-match-card[data-avatar]');
+    if (!card) return;
+    const avatar = card.dataset.avatar;
+    const match = preImportMatches.find(m => m.char.avatar === avatar);
+    if (!match) return;
+    document.querySelectorAll('.modal-overlay:not(.hidden)').forEach(m => {
+        if (m.querySelector('.browse-char-modal')) m.classList.add('hidden');
+    });
+    openCharModalElevated(match.char);
+});
 
 
 /**
@@ -20769,7 +21338,7 @@ function getCreatorNotesBaseStyles() {
                 line-height: 1.5;
                 overflow-wrap: break-word;
                 word-wrap: break-word;
-                font-size: 14px;
+                font-size: 0.95rem;
             }
             #content-wrapper {
                 display: block;
@@ -20887,7 +21456,7 @@ function getCreatorNotesBaseStyles() {
                 z-index: auto !important;
             }
             @media (max-width: 768px) {
-                body { font-size: 13px; padding: 3px; }
+                body { font-size: 0.88rem; padding: 3px; }
             }
         </style>
     `;
@@ -21931,6 +22500,7 @@ window.closeModal = closeModal;
 window.openProviderLinkModal = openProviderLinkModal;
 window.hideModal = hideModal;
 window.checkCharacterForDuplicates = checkCharacterForDuplicates;
+window.checkCharacterForDuplicatesAsync = checkCharacterForDuplicatesAsync;
 window.showPreImportDuplicateWarning = showPreImportDuplicateWarning;
 window.showImportSummaryModal = showImportSummaryModal;
 
@@ -21964,6 +22534,8 @@ window.closeEmbeddedPanel = closeEmbeddedPanel;
 window.getSetting = getSetting;
 window.setSetting = setSetting;
 window.setSettings = setSettings;
+window.getProviderExcludeTags = getProviderExcludeTags;
+window.setProviderExcludeTags = setProviderExcludeTags;
 window.openThemeCustomizer = openThemeCustomizer;
 
 // Import pipeline utilities — PNG manipulation, media download, etc.
@@ -21989,6 +22561,8 @@ window.initContentExpandHandlers = initContentExpandHandlers;
 
 // Provider System — hooks set by provider modules at load time
 // (openChubTokenModal, etc. are set by provider modules)
+window.isUpdateLocked = isUpdateLocked;
+window.setUpdateLocked = setUpdateLocked;
 
 // ========================================
 // WORLD INFO API

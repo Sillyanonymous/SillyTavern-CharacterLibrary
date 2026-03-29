@@ -1,0 +1,586 @@
+/* --- Playlist Picker Modal --- */
+
+.pl-picker-count {
+    font-size: 0.85em;
+    color: var(--cl-text-secondary);
+    margin-left: auto;
+    margin-right: 8px;
+    white-space: nowrap;
+}
+
+.pl-picker-search-wrap {
+    position: relative;
+    padding: 8px 12px 0;
+}
+
+.pl-picker-search-icon {
+    position: absolute;
+    left: 28px;
+    top: 50%;
+    transform: translateY(-25%);
+    color: var(--cl-text-secondary);
+    font-size: 0.85em;
+    pointer-events: none;
+}
+
+.pl-picker-search {
+    padding-left: 32px !important;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.pl-picker-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.pl-picker-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.pl-picker-row:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pl-picker-check {
+    font-size: 1.15em;
+    color: var(--cl-text-secondary);
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.pl-picker-row.checked .pl-picker-check,
+.pl-picker-row.partial .pl-picker-check {
+    color: var(--cl-accent);
+}
+
+.pl-picker-name {
+    flex: 1;
+    color: var(--cl-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.pl-picker-badge {
+    font-size: 0.8em;
+    color: var(--cl-text-secondary);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.pl-picker-empty {
+    text-align: center;
+    color: var(--cl-text-secondary);
+    padding: 18px 16px;
+    font-size: 0.85em;
+}
+
+/* Shared create-row (used in picker + manager lists) */
+
+.pl-create-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s;
+    color: var(--cl-accent);
+    border-top: 1px solid var(--cl-border);
+    margin-top: 2px;
+}
+
+.pl-create-row:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pl-create-row-icon {
+    font-size: 1em;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.pl-create-row-text {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+/* --- Playlist Filter Dropdown --- */
+
+.playlist-filter-btn.active {
+    background: rgba(74, 158, 255, 0.15);
+    border-color: var(--cl-accent);
+    color: var(--cl-accent);
+}
+
+.playlist-filter-popup {
+    width: 240px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    max-height: 420px;
+}
+
+.pl-filter-search-wrap {
+    position: relative;
+    padding: 8px 8px 0;
+    flex-shrink: 0;
+}
+
+.pl-filter-search-icon {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-25%);
+    color: var(--cl-text-secondary);
+    font-size: 0.85rem;
+    pointer-events: none;
+}
+
+.pl-filter-search {
+    padding-left: 30px !important;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.85rem;
+}
+
+#playlistFilterContent {
+    overflow-y: auto;
+    padding: 6px;
+    flex: 1;
+    min-height: 0;
+}
+
+.pl-filter-footer {
+    flex-shrink: 0;
+    border-top: 1px solid var(--cl-border);
+    padding: 6px;
+}
+
+.pl-filter-manage-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--cl-text-secondary);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.pl-filter-manage-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--cl-text-primary);
+}
+
+.pl-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.15s;
+    color: var(--cl-text-primary);
+}
+
+.pl-filter-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.pl-filter-item.active {
+    background: rgba(74, 158, 255, 0.12);
+    color: var(--cl-accent);
+}
+
+.pl-filter-item i {
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+    opacity: 0.7;
+}
+
+.pl-filter-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.pl-filter-count {
+    font-size: 0.8rem;
+    color: var(--cl-text-secondary);
+    flex-shrink: 0;
+}
+
+.pl-filter-separator {
+    height: 1px;
+    background: var(--cl-border);
+    margin: 4px 8px;
+}
+
+/* --- Playlist Sidebar Chips --- */
+
+.playlists-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.pl-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--cl-text-primary);
+    cursor: pointer;
+    transition: background 0.15s;
+    border: 1px solid transparent;
+}
+
+.pl-chip:hover {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.pl-chip-add {
+    background: none;
+    border: 1px dashed var(--cl-border);
+    color: var(--cl-text-secondary);
+    font-size: 0.8em;
+    padding: 4px 8px;
+}
+
+.pl-chip-add:hover {
+    border-color: var(--cl-accent);
+    color: var(--cl-accent);
+}
+
+/* --- Playlist Management Modal --- */
+
+.pl-manage-search-wrap {
+    position: relative;
+    padding: 8px 12px 0;
+}
+
+.pl-manage-search-icon {
+    position: absolute;
+    left: 28px;
+    top: 50%;
+    transform: translateY(-25%);
+    color: var(--cl-text-secondary);
+    font-size: 0.85em;
+    pointer-events: none;
+}
+
+.pl-manage-search {
+    padding-left: 32px !important;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.pl-manage-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 16px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.pl-manage-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    position: relative;
+}
+
+.pl-manage-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.pl-manage-icon-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: border-color 0.15s;
+    padding: 0;
+    color: var(--cl-text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pl-manage-icon-btn:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.pl-color-swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    transition: transform 0.1s;
+    padding: 0;
+}
+
+.pl-color-swatch:hover {
+    transform: scale(1.2);
+}
+
+.pl-manage-icon-picker {
+    position: fixed;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    background: var(--cl-glass-bg);
+    border: 1px solid var(--cl-border);
+    border-radius: 8px;
+    box-shadow: var(--cl-shadow-xl);
+    backdrop-filter: blur(12px);
+    max-width: 260px;
+}
+
+.pl-icon-picker-icons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.pl-icon-picker-colors {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-top: 4px;
+    border-top: 1px solid var(--cl-border);
+}
+
+.pl-icon-picker-label {
+    font-size: 0.75em;
+    color: var(--cl-text-secondary);
+    margin-right: 2px;
+    flex-shrink: 0;
+}
+
+.pl-manage-icon-picker.hidden {
+    display: none;
+}
+
+.pl-icon-option {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: var(--cl-text-primary);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+    padding: 0;
+}
+
+.pl-icon-option:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.pl-picker-icon {
+    font-size: 0.85em;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.pl-filter-icon {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.pl-chip-icon {
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.pl-manage-name {
+    flex: 1;
+    min-width: 0;
+    padding: 5px 8px;
+    font-size: 0.85em;
+}
+
+.pl-manage-count {
+    font-size: 0.8em;
+    color: var(--cl-text-secondary);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 2px 8px;
+    border-radius: 10px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.pl-manage-delete {
+    background: none;
+    border: none;
+    color: var(--cl-text-secondary);
+    cursor: pointer;
+    padding: 6px;
+    font-size: 0.85em;
+    opacity: 0.5;
+    transition: opacity 0.15s, color 0.15s;
+    flex-shrink: 0;
+}
+
+.pl-manage-delete:hover {
+    opacity: 1;
+    color: #ff6b7a;
+}
+
+/* =========================================================
+   Mobile overrides (max-width: 768px)
+   ========================================================= */
+@media (max-width: 768px) {
+
+    /* Playlist Picker → bottom sheet */
+    #playlistPickerModal {
+        align-items: flex-end;
+    }
+
+    #playlistPickerModal .cl-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: auto !important;
+        max-height: 75vh !important;
+        border-radius: 16px 16px 0 0 !important;
+        border: 1px solid var(--glass-border) !important;
+        border-bottom: none !important;
+        transform: translateY(100%) !important;
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+    }
+
+    #playlistPickerModal.visible .cl-modal-content {
+        transform: translateY(0) !important;
+    }
+
+    .pl-picker-search {
+        font-size: 16px;
+    }
+
+    .pl-picker-row {
+        min-height: 44px;
+        padding: 10px 14px;
+    }
+
+    .pl-picker-list {
+        max-height: none;
+    }
+
+    .pl-create-row {
+        min-height: 44px;
+        padding: 10px 14px;
+    }
+
+    /* Playlist filter popup – fixed overlay (moved to body via JS) */
+    #playlistFilterPopup {
+        position: fixed !important;
+        left: 0 !important;
+        right: 0 !important;
+        top: auto !important;
+        bottom: 0 !important;
+        width: 100% !important;
+        max-height: 70vh !important;
+        border-radius: 16px 16px 0 0 !important;
+        z-index: 1100 !important;
+        background: var(--bg-secondary) !important;
+        border: 1px solid var(--glass-border) !important;
+        border-bottom: none !important;
+        backdrop-filter: blur(12px) !important;
+        box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
+        flex-direction: column !important;
+        padding: 0 !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+    }
+    #playlistFilterPopup .pl-filter-search-wrap {
+        padding: 14px 14px 10px;
+        border-bottom: 1px solid var(--glass-border);
+        position: sticky;
+        top: 0;
+        background: var(--bg-secondary);
+        z-index: 1;
+    }
+    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
+    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
+    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: 0.9rem; }
+    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    #playlistFilterContent { padding: 4px 0; }
+
+    /* Scrim behind playlist popup */
+    .mobile-playlist-scrim {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 1099;
+    }
+
+    /* Playlist picker & manage modals: fill viewport, list uses all available space */
+    #playlistPickerModal .cl-modal-body,
+    #playlistManageModal .cl-modal-body {
+        display: flex;
+        flex-direction: column;
+        flex: 1 !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: hidden;
+    }
+    .pl-picker-list,
+    .pl-manage-list {
+        flex: 1;
+        min-height: 0;
+        max-height: none !important;
+    }
+    .pl-manage-search-wrap,
+    .pl-picker-search-wrap {
+        flex-shrink: 0;
+    }
+}

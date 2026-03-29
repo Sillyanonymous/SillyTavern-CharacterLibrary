@@ -31,9 +31,15 @@ const DRAG_DEAD_ZONE = 5;
 export function init() {
     if (isInitialized) return;
     
-    injectStyles();
     injectModal();
     setupEventListeners();
+
+    window.registerOverlay?.({
+        id: 'galleryViewerModal',
+        tier: 2,
+        close: () => closeViewer(),
+        visible: (el) => el.classList.contains('visible'),
+    });
     
     isInitialized = true;
     debugLog('[GalleryViewer] Module initialized');
@@ -141,6 +147,8 @@ export function closeViewer() {
     }
     
     modal?.classList.remove('visible');
+    _preloadedUrls.clear();
+    _gvThumbObserver?.disconnect();
     currentImages = [];
     currentIndex = 0;
     currentCharacter = null;
@@ -308,6 +316,7 @@ function showImage(index) {
             imgEl.classList.toggle('is-gif', currentMediaIsGif);
             imgEl.src = media.url;
             imgEl.alt = media.name;
+            imgEl.decode().catch(() => {});
             // Reset zoom when changing images
             resetZoom();
         }
@@ -320,6 +329,7 @@ function showImage(index) {
     updateCounter();
     updateNavButtons();
     updateThumbnailSelection();
+    preloadAdjacent(index);
 }
 
 function resetZoom() {
@@ -332,6 +342,22 @@ function resetZoom() {
         imgEl.style.cursor = '';
     }
     updateZoomIndicator();
+}
+
+const _preloadedUrls = new Set();
+
+function preloadAdjacent(index) {
+    const offsets = [1, -1, 2, -2];
+    for (const off of offsets) {
+        const i = (index + off + currentImages.length) % currentImages.length;
+        if (i === index) continue;
+        const m = currentImages[i];
+        if (!m || isVideo(m) || _preloadedUrls.has(m.url)) continue;
+        _preloadedUrls.add(m.url);
+        const img = new Image();
+        img.decoding = 'async';
+        img.src = m.url;
+    }
 }
 
 // Zoom indicator timeout
@@ -431,16 +457,45 @@ function renderThumbnails() {
                     <div class="gv-thumb-video-icon"><i class="fa-solid fa-play"></i></div>
                 </div>
             `;
+        } else if (mediaIsGif) {
+            return `
+                <div class="gv-thumb ${idx === currentIndex ? 'active' : ''} gif-thumb" data-index="${idx}">
+                    <img src="${esc(media.url)}" alt="${esc(media.name)}" decoding="async" data-gif="1">
+                </div>
+            `;
         } else {
             return `
-                <div class="gv-thumb ${idx === currentIndex ? 'active' : ''} ${mediaIsGif ? 'gif-thumb' : ''}" data-index="${idx}">
-                    <img src="${esc(media.url)}" alt="${esc(media.name)}" loading="lazy" decoding="async" data-gif="${mediaIsGif ? '1' : '0'}">
+                <div class="gv-thumb ${idx === currentIndex ? 'active' : ''}" data-index="${idx}">
+                    <img data-src="${esc(media.url)}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E" alt="${esc(media.name)}" decoding="async" data-gif="0">
                 </div>
             `;
         }
     }).join('');
 
     strip.querySelectorAll('img[data-gif="1"]').forEach((img) => freezeGifThumbnail(img));
+    observeGvThumbnails(strip);
+}
+
+let _gvThumbObserver = null;
+
+function observeGvThumbnails(strip) {
+    if (!_gvThumbObserver) {
+        _gvThumbObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const img = entry.target;
+                if (img.dataset.src) {
+                    img.src = img.dataset.src;
+                    delete img.dataset.src;
+                    img.decode().catch(() => {});
+                }
+                _gvThumbObserver.unobserve(img);
+            }
+        }, { root: strip, rootMargin: '200px' });
+    } else {
+        _gvThumbObserver.disconnect();
+    }
+    strip.querySelectorAll('img[data-src]').forEach(img => _gvThumbObserver.observe(img));
 }
 
 function updateThumbnailSelection() {
@@ -606,10 +661,6 @@ function setupEventListeners() {
         if (!modal?.classList.contains('visible')) return;
         
         switch (e.key) {
-            case 'Escape':
-                closeViewer();
-                e.preventDefault();
-                break;
             case 'ArrowLeft':
                 prevImage();
                 e.preventDefault();
@@ -694,376 +745,6 @@ function injectModal() {
     </div>`;
     
     document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-function injectStyles() {
-    if (document.getElementById('gallery-viewer-styles')) return;
-    
-    const styles = `
-    <style id="gallery-viewer-styles">
-        /* Gallery Viewer Modal */
-        .gv-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.95);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 10001;
-            opacity: 0;
-            visibility: hidden;
-            transition: opacity 0.2s, visibility 0.2s;
-        }
-        
-        .gv-modal.visible {
-            opacity: 1;
-            visibility: visible;
-        }
-        
-        .gv-container {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* Header */
-        .gv-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px 20px;
-            background: rgba(0, 0, 0, 0.5);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-        
-        .gv-header-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: #fff;
-            font-size: 0.95em;
-        }
-        
-        .gv-header-left i {
-            color: var(--SmartThemeQuoteColor, #4a9eff);
-        }
-        
-        .gv-separator {
-            opacity: 0.5;
-        }
-        
-        .gv-header-right {
-            display: flex;
-            gap: 8px;
-        }
-        
-        .gv-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: none;
-            color: #fff;
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-        }
-        
-        .gv-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
-        }
-        
-        .gv-close-btn:hover {
-            background: rgba(239, 68, 68, 0.5);
-        }
-        
-        /* Body */
-        .gv-body {
-            flex: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-        }
-        
-        /* Loading state */
-        .gv-loader {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            color: rgba(255, 255, 255, 0.7);
-        }
-        
-        .gv-loader i {
-            font-size: 2em;
-            color: var(--SmartThemeQuoteColor, #4a9eff);
-        }
-        
-        /* Empty state */
-        .gv-empty {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            color: rgba(255, 255, 255, 0.5);
-        }
-        
-        .gv-empty i {
-            font-size: 3em;
-            opacity: 0.5;
-        }
-        
-        .gv-empty.hidden,
-        .gv-loader.hidden,
-        .gv-content.hidden {
-            display: none;
-        }
-        
-        /* Image content */
-        .gv-content {
-            width: 100%;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer; /* Indicates clickable to close */
-            position: relative;
-            overflow: hidden; /* Contain zoomed image */
-        }
-        
-        .gv-image-container {
-            flex: 1;
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            cursor: pointer; /* Click outside image to close */
-        }
-        
-        .gv-image {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            border-radius: 8px;
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
-            transition: transform 0.1s ease-out;
-            cursor: pointer; /* Click left/right halves to navigate */
-        }
-        
-        /* Video player styles */
-        .gv-video {
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            border-radius: 8px;
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
-            outline: none;
-        }
-        
-        .gv-video::-webkit-media-controls-panel {
-            background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
-        }
-        
-        /* Zoom hint cursor */
-        .gv-content {
-            cursor: zoom-in;
-        }
-        
-        /* Navigation */
-        .gv-nav {
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            background: rgba(0, 0, 0, 0.5);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: #fff;
-            width: 50px;
-            height: 80px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s;
-            z-index: 10;
-        }
-        
-        .gv-nav:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.1);
-        }
-        
-        .gv-nav:disabled {
-            opacity: 0.3;
-            cursor: not-allowed;
-        }
-        
-        .gv-nav i {
-            font-size: 1.5em;
-        }
-        
-        .gv-nav-prev {
-            left: 0;
-            border-radius: 0 8px 8px 0;
-        }
-        
-        .gv-nav-next {
-            right: 0;
-            border-radius: 8px 0 0 8px;
-        }
-        
-        /* Footer */
-        .gv-footer {
-            padding: 10px 20px;
-            background: rgba(0, 0, 0, 0.5);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            text-align: center;
-        }
-        
-        .gv-filename {
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 0.85em;
-            font-family: monospace;
-        }
-        
-        /* Thumbnail strip */
-        .gv-thumbnails {
-            display: flex;
-            gap: 8px;
-            padding: 12px 20px;
-            background: rgba(0, 0, 0, 0.7);
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
-            overflow-x: auto;
-            scrollbar-width: thin;
-            scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
-            scroll-behavior: smooth;
-        }
-        
-        .gv-thumbnails::-webkit-scrollbar {
-            height: 6px;
-        }
-        
-        .gv-thumbnails::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        
-        .gv-thumbnails::-webkit-scrollbar-thumb {
-            background: rgba(255, 255, 255, 0.3);
-            border-radius: 3px;
-        }
-        
-        .gv-thumb {
-            flex-shrink: 0;
-            width: 60px;
-            height: 60px;
-            border-radius: 6px;
-            overflow: hidden;
-            cursor: pointer;
-            border: 2px solid transparent;
-            opacity: 0.6;
-            transition: all 0.2s;
-        }
-        
-        .gv-thumb:hover {
-            opacity: 0.9;
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-        
-        .gv-thumb.active {
-            opacity: 1;
-            border-color: var(--SmartThemeQuoteColor, #4a9eff);
-            box-shadow: 0 0 10px rgba(74, 158, 255, 0.4);
-        }
-        
-        .gv-thumb img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
-        
-        .gv-thumb video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            pointer-events: none;
-        }
-        
-        /* Video thumbnail play icon */
-        .gv-thumb-video-icon {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(0, 0, 0, 0.5);
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        
-        .gv-thumb-video-icon i {
-            font-size: 0.6rem;
-            color: #fff;
-            margin-left: 2px;
-        }
-        
-        .gv-thumb {
-            position: relative;
-        }
-
-        .gv-thumb.gif-thumb::after {
-            content: 'GIF';
-            position: absolute;
-            right: 4px;
-            bottom: 4px;
-            font-size: 10px;
-            font-weight: 700;
-            line-height: 1;
-            letter-spacing: 0.02em;
-            color: #fff;
-            background: rgba(0, 0, 0, 0.55);
-            border-radius: 3px;
-            padding: 2px 4px;
-            pointer-events: none;
-        }
-
-        .gv-image.is-gif {
-            transition: none;
-            transform: none !important;
-            will-change: auto;
-        }
-        
-        /* Zoom indicator */
-        .gv-zoom-indicator {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.7);
-            color: #fff;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 0.85em;
-            pointer-events: none;
-            opacity: 0;
-            transition: opacity 0.2s;
-        }
-        
-        .gv-zoom-indicator.visible {
-            opacity: 1;
-        }
-    </style>`;
-    
-    document.head.insertAdjacentHTML('beforeend', styles);
 }
 
 // Export for module registration

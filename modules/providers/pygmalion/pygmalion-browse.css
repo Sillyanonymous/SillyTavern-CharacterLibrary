@@ -1,0 +1,87 @@
+/* ============================================
+   Pygmalion Browse CSS
+   Extracted from library.css
+   ============================================ */
+
+
+#pygFollowAuthorBtn {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
+    border: 1px solid rgba(231, 76, 60, 0.4);
+    color: #e74c3c;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+}
+
+#pygFollowAuthorBtn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#pygFollowAuthorBtn.following {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+#pygFollowAuthorBtn:disabled {
+    opacity: 0.6;
+    cursor: wait;
+}
+
+/* Pygmalion Login — plugin status & auth status */
+
+.pyg-plugin-status {
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    line-height: 1.5;
+}
+
+.pyg-plugin-status a {
+    color: var(--accent);
+}
+
+.pyg-auth-status {
+    background: rgba(46, 204, 113, 0.1);
+    border: 1px solid rgba(46, 204, 113, 0.2);
+    border-radius: 8px;
+    padding: 12px 15px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
+.pyg-login-disabled {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.pyg-manual-token-section {
+    margin-top: 15px;
+    background: rgba(255, 255, 255, 0.03);
+    padding: 10px;
+    border-radius: 8px;
+}
+
+.pyg-manual-token-section > summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.pyg-manual-token-section > summary:hover {
+    color: var(--accent);
+}
+
+.pyg-manual-token-body {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--glass-border);
+}
+
+
+/* Mobile overrides */
+@media screen and (max-width: 768px) {
+
+    .pyg-plugin-status { font-size: 0.8rem; }
+    .pyg-manual-token-body .glass-input { font-size: 16px; }
+
+}

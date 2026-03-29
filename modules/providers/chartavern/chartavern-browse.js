@@ -28,16 +28,16 @@ const {
     setSetting,
     fetchCharacters,
     fetchAndAddCharacter,
-    checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     deleteCharacter,
     getCharacterGalleryId,
     showImportSummaryModal,
-    getAllCharacters,
     formatRichText,
     debounce,
     apiRequest,
     cleanupCreatorNotesContainer,
+    getProviderExcludeTags,
 } = CoreAPI;
 
 // ========================================
@@ -84,6 +84,7 @@ let ctLoginInProgress = false;
 let ctMinTokens = 0;
 let ctMaxTokens = 0;
 let ctFilterHideOwned = false;
+let ctFilterHidePossible = false;
 let ctFilterHasLorebook = false;
 let ctFilterIsOC = false;
 
@@ -97,44 +98,25 @@ let ctExcludeTags = new Set();
 let ctTopTags = [];
 let ctTopTagsFetched = false;
 
-// Local library lookup for "In Library" badges
-let localLibraryLookup = {
-    byNameAndCreator: new Set(),
-    byCtPath: new Set()
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 // ========================================
 // LOCAL LIBRARY LOOKUP
 // ========================================
 
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byCtPath.clear();
-
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-
-        const ctData = char.data?.extensions?.chartavern;
-        if (ctData?.path) localLibraryLookup.byCtPath.add(ctData.path);
-    }
-
-    debugLog('[CTBrowse] Library lookup built:',
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'ctPaths:', localLibraryLookup.byCtPath.size);
-}
-
 function isCharInLocalLibrary(hit) {
-    if (hit.path && localLibraryLookup.byCtPath.has(hit.path)) return true;
+    if (hit.path && view._lookup.byProviderId.has(hit.path)) return true;
 
     const name = (hit.name || '').toLowerCase().trim();
     const creator = (hit.author_username || hit.author || '').toLowerCase().trim();
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
 
     return false;
+}
+
+function isCharPossibleMatchObj(h) {
+    if (isCharInLocalLibrary(h)) return false;
+    return view.isCharPossibleMatch(h.name || '', h.author_username || h.author || h.path?.split('/')[0] || '');
 }
 
 // ========================================
@@ -213,10 +195,13 @@ function createCtCard(hit) {
     const tokens = formatNumber(hit.totalTokens || 0);
     const author = hit.author || hit.path?.split('/')[0] || '';
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', author);
 
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
     if (hit.hasLorebook) {
         badges.push('<span class="browse-feature-badge" title="Has Lorebook"><i class="fa-solid fa-book"></i></span>');
@@ -230,7 +215,7 @@ function createCtCard(hit) {
         : '';
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
 
     return `
         <div class="${cardClass}" data-ct-path="${escapeHtml(hit.path || '')}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -326,7 +311,11 @@ async function loadCharacters(append = false) {
         };
 
         if (ctIncludeTags.size > 0) opts.tags = [...ctIncludeTags].join(',');
-        if (ctExcludeTags.size > 0) opts.excludeTags = [...ctExcludeTags].join(',');
+        const ctMergedExclude = [...ctExcludeTags];
+        for (const t of getProviderExcludeTags('chartavern')) {
+            if (!ctMergedExclude.includes(t)) ctMergedExclude.push(t);
+        }
+        if (ctMergedExclude.length > 0) opts.excludeTags = ctMergedExclude.join(',');
         if (ctMinTokens > 0) opts.minimumTokens = ctMinTokens;
         if (ctMaxTokens > 0) opts.maximumTokens = ctMaxTokens;
         if (ctFilterHasLorebook) opts.hasLorebook = true;
@@ -348,13 +337,16 @@ async function loadCharacters(append = false) {
             hits = hits.filter(h => !h.isNSFW);
         }
 
-        // Client-side: hide owned characters
+        // Client-side: hide owned / possible match characters
         if (ctFilterHideOwned) {
             hits = hits.filter(h => !isCharInLocalLibrary(h));
         }
+        if (ctFilterHidePossible) {
+            hits = hits.filter(h => !isCharPossibleMatchObj(h));
+        }
 
         // Auto-fetch when client-side filters remove too many results
-        const hasClientFilters = ctFilterHideOwned || !ctNsfwEnabled;
+        const hasClientFilters = ctFilterHideOwned || ctFilterHidePossible || !ctNsfwEnabled;
         if (hasClientFilters && ctCurrentPage < ctTotalPages) {
             let autoFetches = 0;
             while (hits.length < 60 && ctCurrentPage < ctTotalPages && autoFetches < 3 && delegatesInitialized) {
@@ -366,6 +358,7 @@ async function loadCharacters(append = false) {
                 let moreHits = moreData?.hits || [];
                 if (!ctNsfwEnabled) moreHits = moreHits.filter(h => !h.isNSFW);
                 if (ctFilterHideOwned) moreHits = moreHits.filter(h => !isCharInLocalLibrary(h));
+                if (ctFilterHidePossible) moreHits = moreHits.filter(h => !isCharPossibleMatchObj(h));
                 hits = hits.concat(moreHits);
             }
             if (autoFetches > 0) {
@@ -374,7 +367,8 @@ async function loadCharacters(append = false) {
         }
 
         if (append) {
-            ctCharacters = ctCharacters.concat(hits);
+            const existingPaths = new Set(ctCharacters.map(c => c.path));
+            ctCharacters = ctCharacters.concat(hits.filter(h => !h.path || !existingPaths.has(h.path)));
         } else {
             ctCharacters = hits;
         }
@@ -440,6 +434,7 @@ function openPreviewModal(hit) {
     const avatarUrl = hit.path ? getAvatarUrl(hit.path) : '/img/ai4.png';
     const ctUrl = hit.path ? getCharacterPageUrl(hit.path) : '#';
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', author);
 
     let charDef = '';
 
@@ -641,11 +636,15 @@ function openPreviewModal(hit) {
             if (inLibrary) {
                 importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
                 importBtn.classList.add('secondary');
-                importBtn.classList.remove('primary');
+                importBtn.classList.remove('primary', 'warning');
+            } else if (possibleMatch) {
+                importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+                importBtn.classList.add('warning');
+                importBtn.classList.remove('primary', 'secondary');
             } else {
                 importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
                 importBtn.classList.add('primary');
-                importBtn.classList.remove('secondary');
+                importBtn.classList.remove('secondary', 'warning');
             }
             importBtn.disabled = false;
         }
@@ -794,7 +793,7 @@ async function importCharacter(charData) {
         const charCreator = charData.author || charData.path?.split('/')[0] || '';
 
         // === PRE-IMPORT DUPLICATE CHECK ===
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: charName,
             creator: charCreator,
             fullPath: charData.path,
@@ -863,7 +862,7 @@ async function importCharacter(charData) {
         // Lightweight single-character add (avoids OOM from full list reload on mobile)
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markCardAsImported(charData.path);
 
     } catch (err) {
@@ -882,6 +881,7 @@ function markCardAsImported(path) {
     const card = grid.querySelector(`[data-ct-path="${path}"]`);
     if (!card) return;
     card.classList.add('in-library');
+    card.classList.remove('possible-library');
     let badgesEl = card.querySelector('.browse-feature-badges');
     if (!badgesEl) {
         const imgWrap = card.querySelector('.browse-card-image');
@@ -890,8 +890,11 @@ function markCardAsImported(path) {
             badgesEl = imgWrap.querySelector('.browse-feature-badges');
         }
     }
-    if (badgesEl && !badgesEl.querySelector('.in-library')) {
-        badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    if (badgesEl) {
+        badgesEl.querySelector('.possible-library')?.remove();
+        if (!badgesEl.querySelector('.in-library')) {
+            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        }
     }
 }
 
@@ -1015,7 +1018,7 @@ function updateCtFiltersButton() {
     const btn = document.getElementById('ctFiltersBtn');
     if (!btn) return;
 
-    const active = ctFilterHideOwned || ctFilterHasLorebook || ctFilterIsOC;
+    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -1202,6 +1205,14 @@ function initCtView() {
         loadCharacters(false);
     });
 
+    on('ctFilterHidePossible', 'change', () => {
+        const el = document.getElementById('ctFilterHidePossible');
+        if (el) ctFilterHidePossible = el.checked;
+        updateCtFiltersButton();
+        ctCurrentPage = 1;
+        loadCharacters(false);
+    });
+
     // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
     chartavernBrowseView._registerDropdownDismiss([
         { dropdownId: 'ctTagsDropdown', buttonId: 'ctTagsBtn' },
@@ -1307,12 +1318,7 @@ function filterByAuthor(authorName) {
         banner.classList.remove('hidden');
     }
 
-    // Close preview modal if open
-    const modal = document.getElementById('ctCharModal');
-    if (modal && !modal.classList.contains('hidden')) {
-        modal.classList.add('hidden');
-        ctSelectedChar = null;
-    }
+    closePreviewModal();
 
     loadCharacters(false);
 }
@@ -1527,6 +1533,16 @@ async function tryCheckSession() {
 
 class ChartavernBrowseView extends BrowseView {
 
+    constructor(provider) {
+        super(provider);
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const ctData = char.data?.extensions?.chartavern;
+        if (ctData?.path) idSet.add(ctData.path);
+    }
+
     get previewModalId() { return 'ctCharModal'; }
 
     getSettingsConfig() {
@@ -1612,6 +1628,7 @@ class ChartavernBrowseView extends BrowseView {
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="ctFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="ctFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -1877,7 +1894,7 @@ class ChartavernBrowseView extends BrowseView {
 
     init() {
         super.init();
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
         initCtView();
         const grid = document.getElementById('ctGrid');
         if (grid) this.observeImages(grid);
@@ -1899,35 +1916,39 @@ class ChartavernBrowseView extends BrowseView {
             ctCharacters = [];
             ctCurrentPage = 1;
             ctHasMore = true;
+            ctIsLoading = false;
             ctGridRenderedCount = 0;
+            ctFilterHideOwned = false;
+            ctFilterHidePossible = false;
+            ctFilterHasLorebook = false;
+            ctFilterIsOC = false;
+            ctIncludeTags = new Set();
+            ctExcludeTags = new Set();
+            ctMinTokens = 0;
+            ctMaxTokens = 0;
+            ctSortMode = 'rating';
+            ctNsfwEnabled = false;
+            ctSelectedChar = null;
         }
         const wasInitialized = this._initialized;
         super.activate(container, options);
 
         if (wasInitialized && this._initialized) {
             delegatesInitialized = true;
-            buildLocalLibraryLookup();
-            const grid = document.getElementById('ctGrid');
-            if (grid) this.observeImages(grid);
+            this.buildLocalLibraryLookup();
+            this.reconnectImageObserver();
         }
     }
 
     // ── Library Lookup (BrowseView contract) ────────────────
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        const grid = document.getElementById('ctGrid');
-        if (!grid) return;
-        for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
+        super.refreshInLibraryBadges(card => {
             const path = card.dataset.ctPath;
             const name = card.querySelector('.browse-card-name')?.textContent || '';
-            if (isCharInLocalLibrary({ path, name })) {
-                markCardAsImported(path || name);
-            }
-        }
+            const author = card.querySelector('.browse-card-creator-link')?.textContent || '';
+            return isCharInLocalLibrary({ path, name, author });
+        });
     }
 
     deactivate() {

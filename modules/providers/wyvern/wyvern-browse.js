@@ -41,10 +41,10 @@ const {
     deleteCharacter,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
-    checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     showImportSummaryModal,
-    getAllCharacters
+    getProviderExcludeTags,
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
 
@@ -70,6 +70,7 @@ let wyvernCharacters = [];
 let wyvernCurrentPage = 1;
 let wyvernHasMore = true;
 let wyvernIsLoading = false;
+let wyvernLoadGeneration = 0;
 let wyvernCurrentSort = 'popular';
 let wyvernCurrentSearch = '';
 let wyvernSelectedChar = null;
@@ -80,6 +81,7 @@ let wyvernLoginInProgress = false;
 
 let wyvernTagFilters = new Map(); // Map<tagName, 'include' | 'exclude'>
 let wyvernFilterHideOwned = false;
+let wyvernFilterHidePossible = false;
 let wyvernFilterHasLorebook = false;
 let wyvernFilterHasAltGreetings = false;
 
@@ -99,12 +101,7 @@ const WYVERN_DETAIL_CACHE_MAX = 5;
 
 let wyvernGridRenderedCount = 0;
 
-let wyvernImageObserver = null;
-
-let localLibraryLookup = {
-    byNameAndCreator: new Set(),
-    byWyvernId: new Set()
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 function getCharStats(char) {
     const sr = char.statistics_record || char.entity_statistics || {};
@@ -115,52 +112,34 @@ function getCharStats(char) {
     };
 }
 
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byWyvernId.clear();
-
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) {
-            localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-        }
-
-        const wyvernData = char.data?.extensions?.wyvern;
-        if (wyvernData?.id) {
-            localLibraryLookup.byWyvernId.add(wyvernData.id);
-        }
-    }
-
-    debugLog('[WyvernLibrary] Built lookup:',
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'wyvernIds:', localLibraryLookup.byWyvernId.size);
-}
-
 function isCharInLocalLibrary(wyvernChar) {
     const charId = wyvernChar.id || '';
     const name = (wyvernChar.name || '').toLowerCase().trim();
     const creator = (wyvernChar.creator?.displayName || wyvernChar.creator?.username || '').toLowerCase().trim();
 
-    if (charId && localLibraryLookup.byWyvernId.has(charId)) {
+    if (charId && view._lookup.byProviderId.has(charId)) {
         return true;
     }
 
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) {
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) {
         return true;
     }
 
     return false;
 }
 
+function isCharPossibleMatchObj(c) {
+    if (isCharInLocalLibrary(c)) return false;
+    const creator = c.creator?.displayName || c.creator?.username || '';
+    return view.isCharPossibleMatch(c.name || '', creator);
+}
 function markWyvernCardAsImported(charId) {
     const grid = document.getElementById('wyvernGrid');
     if (!grid || !charId) return;
     const card = grid.querySelector(`[data-char-id="${CSS.escape(charId)}"]`);
     if (!card) return;
     card.classList.add('in-library');
+    card.classList.remove('possible-library');
     let badgesEl = card.querySelector('.browse-feature-badges');
     if (!badgesEl) {
         const imgWrap = card.querySelector('.browse-card-image');
@@ -169,8 +148,11 @@ function markWyvernCardAsImported(charId) {
             badgesEl = imgWrap.querySelector('.browse-feature-badges');
         }
     }
-    if (badgesEl && !badgesEl.querySelector('.in-library')) {
-        badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    if (badgesEl) {
+        badgesEl.querySelector('.possible-library')?.remove();
+        if (!badgesEl.querySelector('.in-library')) {
+            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        }
     }
 }
 
@@ -247,7 +229,21 @@ let wyvernTagsLoaded = false;
 
 class WyvernBrowseView extends BrowseView {
 
+    constructor(provider) {
+        super(provider);
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const wyvernData = char.data?.extensions?.wyvern;
+        if (wyvernData?.id) idSet.add(wyvernData.id);
+    }
+
     get previewModalId() { return 'wyvernCharModal'; }
+
+    _getImageGridIds() {
+        return ['wyvernGrid', 'wyvernFollowingGrid'];
+    }
 
     closePreview() {
         abortWyvernDetailFetch();
@@ -269,6 +265,11 @@ class WyvernBrowseView extends BrowseView {
     }
 
     get hasModeToggle() { return true; }
+
+    _getScrollThreshold() {
+        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        return 3000 / zoom;
+    }
 
     getSettingsConfig() {
         return {
@@ -350,6 +351,7 @@ class WyvernBrowseView extends BrowseView {
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="wyvernFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="wyvernFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -647,17 +649,30 @@ class WyvernBrowseView extends BrowseView {
             wyvernCharacters = [];
             wyvernCurrentPage = 1;
             wyvernHasMore = true;
+            wyvernGridRenderedCount = 0;
+            wyvernIsLoading = false;
+            wyvernFollowingLoading = false;
+            wyvernTagFilters = new Map();
+            wyvernFilterHideOwned = false;
+            wyvernFilterHidePossible = false;
+            wyvernFilterHasLorebook = false;
+            wyvernFilterHasAltGreetings = false;
+            wyvernNsfwEnabled = false;
+            wyvernCurrentSort = 'popular';
+            wyvernViewMode = 'browse';
+            wyvernCreatorFilter = null;
+            wyvernSelectedChar = null;
         }
         super.activate(container, options);
-        wyvernDelegatesInitialized = true;
 
         if (!_wyvernDropdownCloseHandler) {
             initWyvernDropdownDismiss();
         }
 
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
 
         await tryWyvernAutoLogin();
+        wyvernDelegatesInitialized = true;
 
         if (wyvernViewMode === 'browse') {
             const grid = document.getElementById('wyvernGrid');
@@ -667,7 +682,7 @@ class WyvernBrowseView extends BrowseView {
                 wyvernGridRenderedCount = 0;
                 renderWyvernGrid();
             } else {
-                reconnectWyvernImageObserver();
+                this.reconnectImageObserver();
             }
         } else if (wyvernViewMode === 'following') {
             switchWyvernViewMode('following');
@@ -676,38 +691,19 @@ class WyvernBrowseView extends BrowseView {
 
     // ── Library Lookup (BrowseView contract) ────────────────
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        for (const gridId of ['wyvernGrid', 'wyvernFollowingGrid']) {
-            const grid = document.getElementById(gridId);
-            if (!grid) continue;
-            for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
-                const charId = card.dataset.charId;
-                const name = card.querySelector('.browse-card-name')?.textContent || '';
-                if (!isCharInLocalLibrary({ id: charId, name })) continue;
-                card.classList.add('in-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
-                if (!badgesEl) {
-                    const imgWrap = card.querySelector('.browse-card-image');
-                    if (imgWrap) {
-                        imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
-                    }
-                }
-                if (badgesEl && !badgesEl.querySelector('.in-library')) {
-                    badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
-                }
-            }
-        }
+        super.refreshInLibraryBadges(card => {
+            const charId = card.dataset.charId;
+            const name = card.querySelector('.browse-card-name')?.textContent || '';
+            const creatorName = card.querySelector('.browse-card-creator-link')?.textContent || '';
+            return isCharInLocalLibrary({ id: charId, name, creator: { displayName: creatorName } });
+        });
     }
 
     deactivate() {
         super.deactivate();
         wyvernDelegatesInitialized = false;
-        if (wyvernImageObserver) wyvernImageObserver.disconnect();
+        this.disconnectImageObserver();
         if (wyvernDetailFetchController) {
             try { wyvernDetailFetchController.abort(); } catch (e) { /* ignore */ }
             wyvernDetailFetchController = null;
@@ -721,16 +717,6 @@ class WyvernBrowseView extends BrowseView {
     closeDropdowns() {
         document.getElementById('wyvernTagsDropdown')?.classList.add('hidden');
         document.getElementById('wyvernFiltersDropdown')?.classList.add('hidden');
-    }
-
-    // ── Image Observer (BrowseView contract) ────────────────
-
-    disconnectImageObserver() {
-        if (wyvernImageObserver) wyvernImageObserver.disconnect();
-    }
-
-    reconnectImageObserver() {
-        reconnectWyvernImageObserver();
     }
 }
 
@@ -805,6 +791,14 @@ function initWyvernView() {
     // Hide owned checkbox
     document.getElementById('wyvernFilterHideOwned')?.addEventListener('change', (e) => {
         wyvernFilterHideOwned = e.target.checked;
+        updateWyvernFiltersButtonState();
+        if (wyvernViewMode === 'browse') renderWyvernGrid();
+        else renderWyvernFollowing();
+    });
+
+    // Hide possible matches checkbox
+    document.getElementById('wyvernFilterHidePossible')?.addEventListener('change', (e) => {
+        wyvernFilterHidePossible = e.target.checked;
         updateWyvernFiltersButtonState();
         if (wyvernViewMode === 'browse') renderWyvernGrid();
         else renderWyvernFollowing();
@@ -1423,7 +1417,7 @@ function updateWyvernTagsButtonState() {
 function updateWyvernFiltersButtonState() {
     const btn = document.getElementById('wyvernFiltersBtn');
     if (!btn) return;
-    const count = (wyvernFilterHideOwned ? 1 : 0) + (wyvernFilterHasLorebook ? 1 : 0) + (wyvernFilterHasAltGreetings ? 1 : 0);
+    const count = (wyvernFilterHideOwned ? 1 : 0) + (wyvernFilterHidePossible ? 1 : 0) + (wyvernFilterHasLorebook ? 1 : 0) + (wyvernFilterHasAltGreetings ? 1 : 0);
     btn.classList.toggle('has-filters', count > 0);
     btn.innerHTML = count > 0
         ? `<i class="fa-solid fa-sliders"></i> Features (${count})`
@@ -1523,6 +1517,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
     }
 
     wyvernIsLoading = true;
+    const gen = ++wyvernLoadGeneration;
 
     if (loadMoreBtn) {
         loadMoreBtn.disabled = true;
@@ -1546,7 +1541,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
 
             if (!response.ok) throw new Error(`API error: ${response.status}`);
             const data = await response.json();
-            if (!wyvernDelegatesInitialized) return;
+            if (!wyvernDelegatesInitialized || gen !== wyvernLoadGeneration) return;
 
             wyvernCharacters = data.results || [];
             extractWyvernTagsFromResults(wyvernCharacters);
@@ -1603,7 +1598,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
 
         const data = await response.json();
 
-        if (!wyvernDelegatesInitialized) return;
+        if (!wyvernDelegatesInitialized || gen !== wyvernLoadGeneration) return;
 
         const nodes = data.results || [];
 
@@ -1611,7 +1606,10 @@ async function loadWyvernCharacters(forceRefresh = false) {
             wyvernCharacters = nodes;
             extractWyvernTagsFromResults(nodes);
         } else {
-            for (const node of nodes) wyvernCharacters.push(node);
+            const existingIds = new Set(wyvernCharacters.map(c => c.id));
+            for (const node of nodes) {
+                if (node.id && !existingIds.has(node.id)) wyvernCharacters.push(node);
+            }
         }
 
         wyvernHasMore = data.hasMore === true;
@@ -1622,10 +1620,14 @@ async function loadWyvernCharacters(forceRefresh = false) {
         for (const [tag, state] of wyvernTagFilters) {
             if (state === 'exclude') autoFetchExcludeTags.push(tag);
         }
-        const hasClientFilters = wyvernFilterHideOwned || autoFetchExcludeTags.length > 0 || wyvernFilterHasLorebook || wyvernFilterHasAltGreetings;
+        for (const t of getProviderExcludeTags('wyvern')) {
+            if (!autoFetchExcludeTags.includes(t)) autoFetchExcludeTags.push(t);
+        }
+        const hasClientFilters = wyvernFilterHideOwned || wyvernFilterHidePossible || autoFetchExcludeTags.length > 0 || wyvernFilterHasLorebook || wyvernFilterHasAltGreetings;
 
         const isVisible = (c) => {
             if (wyvernFilterHideOwned && isCharInLocalLibrary(c)) return false;
+            if (wyvernFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             if (autoFetchExcludeTags.length > 0) {
                 const charTags = (c.tags || []).map(t => t.toLowerCase());
                 if (autoFetchExcludeTags.some(et => charTags.includes(et))) return false;
@@ -1640,7 +1642,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
             let visibleNew = nodes.filter(isVisible).length;
             let autoFetches = 0;
 
-            while (visibleNew < 48 && wyvernHasMore && autoFetches < 3 && wyvernDelegatesInitialized) {
+            while (visibleNew < 48 && wyvernHasMore && autoFetches < 3 && wyvernDelegatesInitialized && gen === wyvernLoadGeneration) {
                 autoFetches++;
                 wyvernCurrentPage++;
                 params.set('page', wyvernCurrentPage.toString());
@@ -1652,7 +1654,13 @@ async function loadWyvernCharacters(forceRefresh = false) {
 
                 const moreData = await moreRes.json();
                 const moreNodes = moreData.results || [];
-                for (const node of moreNodes) wyvernCharacters.push(node);
+                const existingAutoIds = new Set(wyvernCharacters.map(c => c.id));
+                for (const node of moreNodes) {
+                    if (node.id && !existingAutoIds.has(node.id)) {
+                        existingAutoIds.add(node.id);
+                        wyvernCharacters.push(node);
+                    }
+                }
                 wyvernHasMore = moreData.hasMore === true;
                 visibleNew += moreNodes.filter(isVisible).length;
             }
@@ -1749,7 +1757,6 @@ async function loadWyvernFollowing(forceRefresh = false) {
     if (forceRefresh) {
         wyvernFollowingCharacters = [];
         wyvernFollowingPage = 1;
-        wyvernFollowingHasMore = false;
     }
 
     if (grid) {
@@ -1870,11 +1877,22 @@ function renderWyvernFollowing() {
     if (wyvernFilterHideOwned) {
         filtered = filtered.filter(c => !isCharInLocalLibrary(c));
     }
+    if (wyvernFilterHidePossible) {
+        filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
+    }
     if (wyvernFilterHasLorebook) {
         filtered = filtered.filter(c => c.lorebooks?.length > 0);
     }
     if (wyvernFilterHasAltGreetings) {
         filtered = filtered.filter(c => c.alternate_greetings?.length > 0);
+    }
+    const wyvernPersistentExclude = getProviderExcludeTags('wyvern');
+    if (wyvernPersistentExclude.length > 0) {
+        const lowerExclude = wyvernPersistentExclude.map(t => t.toLowerCase());
+        filtered = filtered.filter(c => {
+            const charTags = (c.tags || []).map(t => t.toLowerCase());
+            return !lowerExclude.some(et => charTags.includes(et));
+        });
     }
 
     const sorted = sortWyvernFollowingCharacters(filtered);
@@ -1891,8 +1909,7 @@ function renderWyvernFollowing() {
     }
 
     grid.innerHTML = sorted.map(c => createWyvernCard(c)).join('');
-    eagerLoadVisibleWyvernImages(grid);
-    observeWyvernImages(grid);
+    wyvernBrowseView.observeImages(grid);
 }
 
 // ========================================
@@ -1902,6 +1919,8 @@ function renderWyvernFollowing() {
 async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     wyvernCreatorFilter = { uid, displayName, vanityUrl };
     wyvernCreatorSort = 'created_at';
+    ++wyvernLoadGeneration;
+    wyvernIsLoading = false;
     const sortSelect = document.getElementById('wyvernCreatorSortSelect');
     if (sortSelect) sortSelect.value = 'created_at';
     wyvernCharacters = [];
@@ -2043,6 +2062,8 @@ async function toggleWyvernFollowCreator() {
 function clearWyvernCreatorFilter() {
     wyvernCreatorFilter = null;
     wyvernCreatorSort = 'created_at';
+    ++wyvernLoadGeneration;
+    wyvernIsLoading = false;
     const sortSelect = document.getElementById('wyvernCreatorSortSelect');
     if (sortSelect) sortSelect.value = 'created_at';
     const banner = document.getElementById('wyvernCreatorBanner');
@@ -2076,10 +2097,16 @@ function renderWyvernGrid(appendOnly = false) {
     if (wyvernFilterHideOwned) {
         displayCharacters = displayCharacters.filter(c => !isCharInLocalLibrary(c));
     }
+    if (wyvernFilterHidePossible) {
+        displayCharacters = displayCharacters.filter(c => !isCharPossibleMatchObj(c));
+    }
     // Exclude tags — client-side filter (Wyvern API has no server-side exclude)
     const excludeTags = [];
     for (const [tag, state] of wyvernTagFilters) {
         if (state === 'exclude') excludeTags.push(tag);
+    }
+    for (const t of getProviderExcludeTags('wyvern')) {
+        if (!excludeTags.includes(t)) excludeTags.push(t);
     }
     if (excludeTags.length > 0) {
         displayCharacters = displayCharacters.filter(c => {
@@ -2097,8 +2124,8 @@ function renderWyvernGrid(appendOnly = false) {
     if (displayCharacters.length === 0) {
         wyvernGridRenderedCount = 0;
         wyvernCardLookup.clear();
-        if (wyvernImageObserver) wyvernImageObserver.disconnect();
-        const message = wyvernCharacters.length > 0 && (wyvernFilterHideOwned || excludeTags.length > 0)
+        wyvernBrowseView.disconnectImageObserver();
+        const message = wyvernCharacters.length > 0 && (wyvernFilterHideOwned || wyvernFilterHidePossible || excludeTags.length > 0)
             ? 'All characters in this view were filtered out by your current filters.'
             : 'Try a different search term or adjust your filters.';
         grid.innerHTML = `
@@ -2119,13 +2146,12 @@ function renderWyvernGrid(appendOnly = false) {
             grid.insertAdjacentHTML('beforeend', newChars.map(char => createWyvernCard(char)).join(''));
         }
     } else {
-        if (wyvernImageObserver) wyvernImageObserver.disconnect();
+        wyvernBrowseView.disconnectImageObserver();
         grid.innerHTML = displayCharacters.map(char => createWyvernCard(char)).join('');
     }
 
     wyvernGridRenderedCount = displayCharacters.length;
-    eagerLoadVisibleWyvernImages(grid);
-    observeWyvernImages(grid);
+    wyvernBrowseView.observeImages(grid);
 }
 
 function setupWyvernGridDelegates() {
@@ -2179,12 +2205,15 @@ function createWyvernCard(char) {
     const avatarUrl = getAvatarUrl(char);
 
     const inLibrary = isCharInLocalLibrary(char);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
 
     const tags = (char.tags || []).slice(0, 3);
 
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
     if (char.lorebooks?.length > 0) {
         badges.push('<span class="browse-feature-badge" title="Has Lorebook"><i class="fa-solid fa-book"></i></span>');
@@ -2197,7 +2226,7 @@ function createWyvernCard(char) {
     const createdDate = char.created_at ? new Date(char.created_at).toLocaleDateString() : '';
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
     const taglineTooltip = char.tagline ? escapeHtml(char.tagline) : '';
 
     return `
@@ -2221,65 +2250,6 @@ function createWyvernCard(char) {
             </div>
         </div>
     `;
-}
-
-// ========================================
-// WYVERN IMAGE LAZY LOADING
-// ========================================
-
-function initWyvernImageObserver() {
-    if (wyvernImageObserver) return;
-    wyvernImageObserver = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-            if (!entry.isIntersecting) continue;
-            const img = entry.target;
-            const realSrc = img.dataset.src;
-            if (realSrc && !img.dataset.failed && img.src !== realSrc) {
-                img.src = realSrc;
-                BrowseView.adjustPortraitPosition(img);
-            }
-        }
-    }, { rootMargin: '600px' });
-}
-
-function observeWyvernImages(container) {
-    if (!wyvernImageObserver) initWyvernImageObserver();
-    requestAnimationFrame(() => {
-        eagerLoadVisibleWyvernImages(container);
-        const images = Array.from(container.querySelectorAll('.browse-card-image img')).filter(img => !img.dataset.observed);
-        if (images.length === 0) return;
-        for (const img of images) {
-            img.dataset.observed = '1';
-            wyvernImageObserver.observe(img);
-        }
-    });
-}
-
-function eagerLoadVisibleWyvernImages(container) {
-    if (!container) return;
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-    const preloadBottom = viewportHeight + 700;
-    const images = container.querySelectorAll('.browse-card-image img[data-src]');
-    for (const img of images) {
-        if (img.dataset.failed) continue;
-        const rect = img.getBoundingClientRect();
-        if (rect.bottom > -160 && rect.top < preloadBottom) {
-            const realSrc = img.dataset.src;
-            if (realSrc && img.src !== realSrc) {
-                img.src = realSrc;
-                BrowseView.adjustPortraitPosition(img);
-            }
-        }
-    }
-}
-
-function reconnectWyvernImageObserver() {
-    const grid = document.getElementById('wyvernGrid');
-    if (!grid) return;
-    eagerLoadVisibleWyvernImages(grid);
-    const imgs = grid.querySelectorAll('.browse-card-image img[data-observed]');
-    for (const img of imgs) delete img.dataset.observed;
-    observeWyvernImages(grid);
 }
 
 // ========================================
@@ -2334,6 +2304,8 @@ async function openWyvernCharPreview(char) {
     const charId = char.id || '';
     const avatarUrl = getAvatarUrl(char);
     const creatorName = char.creator?.displayName || char.creator?.username || 'Unknown';
+    const inLibrary = isCharInLocalLibrary(char);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
 
     avatarImg.src = avatarUrl;
     avatarImg.onerror = () => { avatarImg.src = '/img/ai4.png'; };
@@ -2407,14 +2379,18 @@ async function openWyvernCharPreview(char) {
     // Import button state
     const downloadBtn = document.getElementById('wyvernDownloadBtn');
     if (downloadBtn) {
-        if (isCharInLocalLibrary(char)) {
+        if (inLibrary) {
             downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
             downloadBtn.classList.add('secondary');
-            downloadBtn.classList.remove('primary');
+            downloadBtn.classList.remove('primary', 'warning');
+        } else if (possibleMatch) {
+            downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+            downloadBtn.classList.add('warning');
+            downloadBtn.classList.remove('primary', 'secondary');
         } else {
             downloadBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
             downloadBtn.classList.add('primary');
-            downloadBtn.classList.remove('secondary');
+            downloadBtn.classList.remove('secondary', 'warning');
         }
         downloadBtn.disabled = false;
     }
@@ -2676,7 +2652,7 @@ async function downloadWyvernCharacter() {
         const cachedDetail = wyvernDetailCache.get(charId);
 
         // Pre-import duplicate check
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: characterName,
             creator: characterCreator,
             fullPath: charId,
@@ -2759,7 +2735,7 @@ async function downloadWyvernCharacter() {
 
         await new Promise(r => setTimeout(r, 200));
 
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markWyvernCardAsImported(charId);
 
         await fetchCharacters(true);

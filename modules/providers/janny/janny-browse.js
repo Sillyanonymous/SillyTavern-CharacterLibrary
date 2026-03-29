@@ -23,16 +23,16 @@ const {
     getSetting,
     fetchCharacters,
     fetchAndAddCharacter,
-    checkCharacterForDuplicates,
+    checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     deleteCharacter,
     getCharacterGalleryId,
     showImportSummaryModal,
-    getAllCharacters,
     formatRichText,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
-    debounce
+    debounce,
+    getProviderExcludeTags,
 } = CoreAPI;
 
 // ========================================
@@ -60,15 +60,12 @@ let jannyShowLowQuality = false;
 let jannyMinTokens = 29;
 let jannyMaxTokens = 100000;
 let jannyFilterHideOwned = false;
+let jannyFilterHidePossible = false;
 /** @type {Set<number>} Active include tag IDs */
 let jannyIncludeTags = new Set();
 let jannyAuthorFilter = null;
 
-// Local library lookup for "In Library" badges
-let localLibraryLookup = {
-    byNameAndCreator: new Set(),
-    byJannyId: new Set()
-};
+let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 // ========================================
 // SEARCH API
@@ -147,34 +144,19 @@ async function searchJanny(opts = {}) {
 // LOCAL LIBRARY LOOKUP
 // ========================================
 
-function buildLocalLibraryLookup() {
-    localLibraryLookup.byNameAndCreator.clear();
-    localLibraryLookup.byJannyId.clear();
-
-    for (const char of getAllCharacters()) {
-        if (!char) continue;
-
-        const name = (char.name || '').toLowerCase().trim();
-        const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
-        if (name && creator) localLibraryLookup.byNameAndCreator.add(`${name}|${creator}`);
-
-        const jannyData = char.data?.extensions?.jannyai;
-        if (jannyData?.id) localLibraryLookup.byJannyId.add(String(jannyData.id));
-    }
-
-    debugLog('[JannyBrowse] Library lookup built:',
-        'nameCreators:', localLibraryLookup.byNameAndCreator.size,
-        'jannyIds:', localLibraryLookup.byJannyId.size);
-}
-
 function isCharInLocalLibrary(jannyChar) {
-    if (jannyChar.id && localLibraryLookup.byJannyId.has(String(jannyChar.id))) return true;
+    if (jannyChar.id && view._lookup.byProviderId.has(String(jannyChar.id))) return true;
 
     const name = (jannyChar.name || '').toLowerCase().trim();
     const creator = (jannyChar.creatorUsername || '').toLowerCase().trim();
-    if (name && creator && localLibraryLookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
+    if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
 
     return false;
+}
+
+function isCharPossibleMatchObj(h) {
+    if (isCharInLocalLibrary(h)) return false;
+    return view.isCharPossibleMatch(h.name || '', h.creatorUsername || '');
 }
 
 // ========================================
@@ -251,10 +233,13 @@ function createJannyCard(hit) {
     const slug = slugify(name);
     const creatorName = hit.creatorUsername || '';
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', creatorName);
 
     const badges = [];
     if (inLibrary) {
         badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possibleMatch) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
 
     const createdDate = hit.createdAt
@@ -262,7 +247,7 @@ function createJannyCard(hit) {
         : (hit.createdAtStamp ? new Date(hit.createdAtStamp * 1000).toLocaleDateString() : '');
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
-    const cardClass = inLibrary ? 'browse-card in-library' : 'browse-card';
+    const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
 
     return `
         <div class="${cardClass}" data-janny-id="${escapeHtml(String(charId))}" data-slug="${escapeHtml(slug)}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -361,13 +346,27 @@ async function loadCharacters(append = false) {
         let hits = result?.hits || [];
         const totalPages = result?.totalPages || 1;
 
-        // Client-side: hide owned characters
+        // Client-side: persistent exclude tags from settings
+        const jannyPersistentExclude = getProviderExcludeTags('janny');
+        if (jannyPersistentExclude.length > 0) {
+            const lowerExclude = jannyPersistentExclude.map(t => t.toLowerCase());
+            hits = hits.filter(h => {
+                const names = resolveTagNames(h.tagIds).map(n => n.toLowerCase());
+                return !lowerExclude.some(et => names.includes(et));
+            });
+        }
+
+        // Client-side: hide owned / possible match characters
         if (jannyFilterHideOwned) {
             hits = hits.filter(h => !isCharInLocalLibrary(h));
         }
+        if (jannyFilterHidePossible) {
+            hits = hits.filter(h => !isCharPossibleMatchObj(h));
+        }
 
         // Auto-fetch when client-side filters remove too many results
-        if (jannyFilterHideOwned && jannyCurrentPage < totalPages) {
+        const hasClientFilters = jannyFilterHideOwned || jannyFilterHidePossible || jannyPersistentExclude.length > 0;
+        if (hasClientFilters && jannyCurrentPage < totalPages) {
             let autoFetches = 0;
             while (hits.length < 80 && jannyCurrentPage < totalPages && autoFetches < 3 && delegatesInitialized) {
                 autoFetches++;
@@ -381,7 +380,15 @@ async function loadCharacters(append = false) {
                 if (!delegatesInitialized) return;
                 const moreResult = moreData?.results?.[0];
                 let moreHits = moreResult?.hits || [];
-                moreHits = moreHits.filter(h => !isCharInLocalLibrary(h));
+                if (jannyPersistentExclude.length > 0) {
+                    const lowerExclude = jannyPersistentExclude.map(t => t.toLowerCase());
+                    moreHits = moreHits.filter(h => {
+                        const names = resolveTagNames(h.tagIds).map(n => n.toLowerCase());
+                        return !lowerExclude.some(et => names.includes(et));
+                    });
+                }
+                if (jannyFilterHideOwned) moreHits = moreHits.filter(h => !isCharInLocalLibrary(h));
+                if (jannyFilterHidePossible) moreHits = moreHits.filter(h => !isCharPossibleMatchObj(h));
                 hits = hits.concat(moreHits);
             }
             if (autoFetches > 0) {
@@ -390,7 +397,8 @@ async function loadCharacters(append = false) {
         }
 
         if (append) {
-            jannyCharacters = jannyCharacters.concat(hits);
+            const existingIds = new Set(jannyCharacters.map(c => c.id));
+            jannyCharacters = jannyCharacters.concat(hits.filter(h => !h.id || !existingIds.has(h.id)));
         } else {
             jannyCharacters = hits;
         }
@@ -457,6 +465,7 @@ function openPreviewModal(hit) {
     const slug = slugify(name);
     const jannyUrl = `${JANNY_SITE_BASE}/characters/${charId}_character-${slug}`;
     const inLibrary = isCharInLocalLibrary(hit);
+    const possibleMatch = !inLibrary && view.isCharPossibleMatch(hit.name || '', hit.creatorUsername || '');
 
     const createdDate = hit.createdAt
         ? new Date(hit.createdAt).toLocaleDateString()
@@ -509,11 +518,15 @@ function openPreviewModal(hit) {
     if (inLibrary) {
         importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
         importBtn.classList.add('secondary');
-        importBtn.classList.remove('primary');
+        importBtn.classList.remove('primary', 'warning');
+    } else if (possibleMatch) {
+        importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+        importBtn.classList.add('warning');
+        importBtn.classList.remove('primary', 'secondary');
     } else {
         importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
         importBtn.classList.add('primary');
-        importBtn.classList.remove('secondary');
+        importBtn.classList.remove('secondary', 'warning');
     }
     importBtn.disabled = false;
 
@@ -685,7 +698,7 @@ async function importCharacter(charData) {
         const charCreator = charData.creatorUsername || fallbackData.creatorUsername || '';
 
         // === PRE-IMPORT DUPLICATE CHECK ===
-        const duplicateMatches = checkCharacterForDuplicates({
+        const duplicateMatches = await checkCharacterForDuplicatesAsync({
             name: charName,
             creator: charCreator,
             fullPath: identifier,
@@ -754,7 +767,7 @@ async function importCharacter(charData) {
         // Lightweight single-character add (avoids OOM from full list reload on mobile)
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
-        buildLocalLibraryLookup();
+        view.buildLocalLibraryLookup();
         markCardAsImported(charId);
 
     } catch (err) {
@@ -773,6 +786,7 @@ function markCardAsImported(charId) {
     const card = grid.querySelector(`[data-janny-id="${charId}"]`);
     if (!card) return;
     card.classList.add('in-library');
+    card.classList.remove('possible-library');
     let badgesEl = card.querySelector('.browse-feature-badges');
     if (!badgesEl) {
         const imgWrap = card.querySelector('.browse-card-image');
@@ -781,8 +795,11 @@ function markCardAsImported(charId) {
             badgesEl = imgWrap.querySelector('.browse-feature-badges');
         }
     }
-    if (badgesEl && !badgesEl.querySelector('.in-library')) {
-        badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    if (badgesEl) {
+        badgesEl.querySelector('.possible-library')?.remove();
+        if (!badgesEl.querySelector('.in-library')) {
+            badgesEl.insertAdjacentHTML('afterbegin', '<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+        }
     }
 }
 
@@ -871,7 +888,7 @@ function updateJannyFiltersButton() {
     const btn = document.getElementById('jannyFiltersBtn');
     if (!btn) return;
 
-    const active = jannyShowLowQuality || jannyFilterHideOwned;
+    const active = jannyShowLowQuality || jannyFilterHideOwned || jannyFilterHidePossible;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -1046,6 +1063,14 @@ function initJannyView() {
         loadCharacters(false);
     });
 
+    on('jannyFilterHidePossible', 'change', () => {
+        const el = document.getElementById('jannyFilterHidePossible');
+        if (el) jannyFilterHidePossible = el.checked;
+        updateJannyFiltersButton();
+        jannyCurrentPage = 1;
+        loadCharacters(false);
+    });
+
     // Close dropdowns when clicking outside
     jannyBrowseView._registerDropdownDismiss([
         { dropdownId: 'jannyTagsDropdown', buttonId: 'jannyTagsBtn' },
@@ -1177,6 +1202,16 @@ function updateNsfwToggle() {
 
 class JannyBrowseView extends BrowseView {
 
+    constructor(provider) {
+        super(provider);
+        view = this;
+    }
+
+    _extractProviderIds(char, idSet) {
+        const jannyData = char.data?.extensions?.jannyai;
+        if (jannyData?.id) idSet.add(String(jannyData.id));
+    }
+
     get previewModalId() { return 'jannyCharModal'; }
 
     getSettingsConfig() {
@@ -1264,6 +1299,7 @@ class JannyBrowseView extends BrowseView {
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="jannyFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="jannyFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -1422,7 +1458,7 @@ class JannyBrowseView extends BrowseView {
 
     init() {
         super.init();
-        buildLocalLibraryLookup();
+        this.buildLocalLibraryLookup();
         initJannyView();
         const grid = document.getElementById('jannyGrid');
         if (grid) this.observeImages(grid);
@@ -1444,6 +1480,7 @@ class JannyBrowseView extends BrowseView {
             jannyCharacters = [];
             jannyCurrentPage = 1;
             jannyHasMore = true;
+            jannyIsLoading = false;
             jannyGridRenderedCount = 0;
         }
         const wasInitialized = this._initialized;
@@ -1451,28 +1488,20 @@ class JannyBrowseView extends BrowseView {
 
         if (wasInitialized && this._initialized) {
             delegatesInitialized = true;
-            buildLocalLibraryLookup();
-            const grid = document.getElementById('jannyGrid');
-            if (grid) this.observeImages(grid);
+            this.buildLocalLibraryLookup();
+            this.reconnectImageObserver();
         }
     }
 
     // ── Library Lookup (BrowseView contract) ────────────────
 
-    rebuildLocalLibraryLookup() {
-        buildLocalLibraryLookup();
-    }
-
     refreshInLibraryBadges() {
-        const grid = document.getElementById('jannyGrid');
-        if (!grid) return;
-        for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
+        super.refreshInLibraryBadges(card => {
             const id = card.dataset.jannyId;
             const name = card.querySelector('.browse-card-name')?.textContent || '';
-            if (isCharInLocalLibrary({ id, name })) {
-                markCardAsImported(id);
-            }
-        }
+            const creatorUsername = card.querySelector('.browse-card-creator-link')?.textContent || '';
+            return isCharInLocalLibrary({ id, name, creatorUsername });
+        });
     }
 
     deactivate() {
