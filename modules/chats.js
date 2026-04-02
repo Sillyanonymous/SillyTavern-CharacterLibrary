@@ -260,6 +260,10 @@ function initChatsView() {
         }
     });
 
+    CoreAPI.onViewExit('chats', () => {
+        disconnectObservers();
+    });
+
     // Chats Sort Select
     CoreAPI.onElement('chatsSortSelect', 'change', (e) => {
         currentChatSort = e.target.value;
@@ -311,10 +315,17 @@ function initChatsView() {
         close: () => CoreAPI.hideModal('chatPreviewModal'),
     });
 
+    window.registerOverlay?.({
+        id: 'editMessageModal',
+        tier: 3,
+        static: false,
+        close: (el) => el.remove(),
+    });
+
     // Search input should also filter chats when in chats view (debounced)
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
-        searchInput.addEventListener('input', debounce(() => {
+        searchInput.addEventListener('input', CoreAPI.debounce(() => {
             if (CoreAPI.getCurrentView() === 'chats') {
                 renderChats();
             }
@@ -620,6 +631,11 @@ function renderChats() {
         });
     }
 
+    const chatRules = CoreAPI.getAdvFilterRulesForChats();
+    if (chatRules.length > 0) {
+        filteredChats = filteredChats.filter(chat => CoreAPI.evaluateChatAdvancedFilters(chat));
+    }
+
     filteredChats = sortChats(filteredChats);
 
     if (currentGrouping === 'flat') {
@@ -894,7 +910,7 @@ async function lazyLoadPreview(el) {
     saveChatCacheDebounced();
 }
 
-const saveChatCacheDebounced = debounce(() => saveChatCache(allChats), 2000);
+const saveChatCacheDebounced = CoreAPI.debounce(() => saveChatCache(allChats), 2000);
 
 function disconnectObservers() {
     if (_previewObserver) { _previewObserver.disconnect(); _previewObserver = null; }
@@ -1531,21 +1547,7 @@ async function saveChatToServer(chat, messages) {
     }
 }
 
-// ========================================
-// UTILITY (local debounce)
-// ========================================
 
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
 
 // ========================================
 // PUBLIC API

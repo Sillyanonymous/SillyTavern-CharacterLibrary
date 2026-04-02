@@ -504,7 +504,7 @@ export class BrowseView {
      * Listens on .gallery-content (the scrollable parent of #onlineView).
      */
     _getScrollThreshold() {
-        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        const zoom = parseFloat(document.body.style.zoom) || 1;
         return 1500 / zoom;
     }
 

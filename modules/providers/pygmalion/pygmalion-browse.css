@@ -9,7 +9,7 @@
     border: 1px solid rgba(231, 76, 60, 0.4);
     color: #e74c3c;
     padding: 6px 12px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 #pygFollowAuthorBtn:hover:not(:disabled) {
@@ -30,7 +30,7 @@
 /* Pygmalion Login — plugin status & auth status */
 
 .pyg-plugin-status {
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     margin-bottom: 12px;
     line-height: 1.5;
 }
@@ -45,7 +45,7 @@
     border-radius: 8px;
     padding: 12px 15px;
     margin-bottom: 16px;
-    font-size: 0.9rem;
+    font-size: var(--font-md);
     line-height: 1.5;
 }
 
@@ -64,7 +64,7 @@
 .pyg-manual-token-section > summary {
     cursor: pointer;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: var(--font-md);
 }
 
 .pyg-manual-token-section > summary:hover {
@@ -81,7 +81,7 @@
 /* Mobile overrides */
 @media screen and (max-width: 768px) {
 
-    .pyg-plugin-status { font-size: 0.8rem; }
+    .pyg-plugin-status { font-size: var(--font-sm); }
     .pyg-manual-token-body .glass-input { font-size: 16px; }
 
 }

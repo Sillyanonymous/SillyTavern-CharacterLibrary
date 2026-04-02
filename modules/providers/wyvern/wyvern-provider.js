@@ -127,6 +127,7 @@ class WyvernProvider extends ProviderBase {
                 return null;
             }
             if (!metadata) return null;
+            _cachedLinkNode = metadata;
         } else {
             this.clearCachedLinkNode();
         }

@@ -30,15 +30,15 @@
 .recommender-header-title {
     display: flex;
     align-items: center;
-    gap: 10px;
-    font-size: 0.88rem;
+    gap: var(--space-sm-md);
+    font-size: var(--font-md);
     font-weight: 700;
     color: var(--text-primary);
     letter-spacing: -0.01em;
 }
 
 .recommender-header-title i {
-    font-size: 0.82rem;
+    font-size: var(--font-sm);
     background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -57,7 +57,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.15s ease;
-    font-size: 0.78rem;
+    font-size: var(--font-xs);
 }
 
 .recommender-close-btn:hover {
@@ -101,7 +101,7 @@
 .recommender-input-area {
     display: flex;
     align-items: flex-end;
-    gap: 8px;
+    gap: var(--space-sm);
     margin-bottom: 10px;
 }
 
@@ -112,7 +112,7 @@
     border-radius: 12px;
     padding: 10px 14px;
     color: var(--text-primary);
-    font-size: 0.88rem;
+    font-size: var(--font-md);
     line-height: 1.45;
     resize: none;
     outline: none;
@@ -141,7 +141,7 @@
     background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
     color: var(--accent-text);
     cursor: pointer;
-    font-size: 0.92rem;
+    font-size: var(--font-md);
     flex-shrink: 0;
     transition: all 0.2s ease;
     box-shadow: 0 2px 10px var(--accent-glow);
@@ -177,7 +177,7 @@
 .recommender-toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     margin-bottom: 10px;
 }
 
@@ -185,7 +185,7 @@
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     min-width: 0;
     overflow: hidden;
 }
@@ -209,7 +209,7 @@
 .recommender-profile-status {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     min-width: 0;
 }
 
@@ -237,7 +237,7 @@
 }
 
 .recommender-connection-text {
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -255,7 +255,7 @@
     background: rgba(255, 255, 255, 0.02);
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     flex-shrink: 0;
     transition: all 0.15s ease;
 }
@@ -294,7 +294,7 @@
     padding: 12px 14px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--space-md);
     overflow-y: auto;
     flex: 1 1 auto;
     min-height: 0;
@@ -303,7 +303,7 @@
 .recommender-setting-section {
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: var(--space-xs-sm);
 }
 
 .recommender-setting-section + .recommender-setting-section {
@@ -312,7 +312,7 @@
 }
 
 .recommender-setting-section-title {
-    font-size: 0.62rem;
+    font-size: var(--font-3xs);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -322,7 +322,7 @@
 
 .recommender-setting-section-title i {
     margin-right: 4px;
-    font-size: 0.58rem;
+    font-size: var(--font-4xs);
     opacity: 0.65;
 }
 
@@ -332,7 +332,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .recommender-filter-row-col {
@@ -341,7 +341,7 @@
 }
 
 .recommender-filter-label {
-    font-size: 0.74rem;
+    font-size: var(--font-xs);
     color: var(--text-secondary);
     white-space: nowrap;
 }
@@ -350,7 +350,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 /* --- Tristate toggle (Yes / Any / No) --- */
@@ -369,7 +369,7 @@
     border-radius: 5px;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -391,25 +391,25 @@
 .recommender-date-range {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     margin-top: 4px;
 }
 
 .recommender-date-sep {
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     opacity: 0.5;
 }
 
 .recommender-field-sm {
     padding: 4px 8px;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
 }
 
 /* --- Small toggle chip (enable toggle) --- */
 
 .recommender-toggle-chip-sm span {
-    font-size: 0.65rem;
+    font-size: var(--font-3xs);
     padding: 2px 8px;
 }
 
@@ -418,7 +418,7 @@
 .recommender-tag-input-wrap {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-xs);
     position: relative;
 }
 
@@ -449,7 +449,7 @@
 .recommender-tag-ac-item {
     padding: 6px 10px;
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     color: var(--text-primary);
     transition: background 0.1s ease;
 }
@@ -463,16 +463,16 @@
 .recommender-tag-pills {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--space-xs);
 }
 
 .recommender-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-xs);
     padding: 2px 8px;
     border-radius: 100px;
-    font-size: 0.65rem;
+    font-size: var(--font-3xs);
     font-weight: 500;
     background: rgba(74, 158, 255, 0.08);
     border: 1px solid rgba(74, 158, 255, 0.25);
@@ -488,14 +488,14 @@
 }
 
 .recommender-pill i {
-    font-size: 0.5rem;
+    font-size: var(--font-4xs);
     opacity: 0.6;
 }
 
 /* --- Pool count --- */
 
 .recommender-pool-count {
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     opacity: 0.55;
     text-align: center;
@@ -512,7 +512,7 @@
 .recommender-toggles-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: var(--space-xs);
 }
 
 .recommender-toggle-chip {
@@ -527,10 +527,10 @@
 .recommender-toggle-chip span {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
     padding: 3px 9px;
     border-radius: 100px;
-    font-size: 0.7rem;
+    font-size: var(--font-2xs);
     font-weight: 500;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.07);
@@ -539,7 +539,7 @@
 }
 
 .recommender-toggle-chip span i {
-    font-size: 0.6rem;
+    font-size: var(--font-3xs);
 }
 
 .recommender-toggle-chip input:checked + span {
@@ -553,7 +553,7 @@
 }
 
 .recommender-token-estimate {
-    font-size: 0.64rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     opacity: 0.6;
     margin-top: 2px;
@@ -566,7 +566,7 @@
 }
 
 .recommender-batch-hint {
-    font-size: 0.55rem;
+    font-size: var(--font-4xs);
     opacity: 0.5;
     font-weight: 400;
     margin-left: 2px;
@@ -578,7 +578,7 @@
     display: grid;
     grid-template-columns: 52px 1fr 24px;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding-left: 10px;
     border-left: 2px solid rgba(74, 158, 255, 0.15);
     margin-top: 4px;
@@ -586,7 +586,7 @@
 }
 
 .recommender-batch-slider-row label {
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     white-space: nowrap;
 }
@@ -598,7 +598,7 @@
 }
 
 .recommender-batch-slider-row .recommender-slider-val {
-    font-size: 0.68rem;
+    font-size: var(--font-3xs);
 }
 
 /* --- Sliders --- */
@@ -606,18 +606,18 @@
 .recommender-sliders {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-xs-sm);
 }
 
 .recommender-slider-row {
     display: grid;
     grid-template-columns: 48px 1fr 36px;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .recommender-slider-row label {
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     color: var(--text-secondary);
     white-space: nowrap;
 }
@@ -629,7 +629,7 @@
 }
 
 .recommender-slider-val {
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--text-primary);
     text-align: right;
@@ -653,7 +653,7 @@
     border-radius: 5px;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 0.65rem;
+    font-size: var(--font-3xs);
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s ease;
@@ -674,7 +674,7 @@
 .recommender-custom-api {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--space-xs);
     margin-bottom: 10px;
 }
 
@@ -684,7 +684,7 @@
     border-radius: 8px;
     padding: 6px 10px;
     color: var(--text-primary);
-    font-size: 0.78rem;
+    font-size: var(--font-xs);
     outline: none;
     transition: border-color 0.15s ease;
 }
@@ -703,7 +703,7 @@
 .recommender-status {
     padding: 10px 12px;
     border-radius: 10px;
-    font-size: 0.78rem;
+    font-size: var(--font-xs);
     line-height: 1.5;
     margin-bottom: 6px;
 }
@@ -729,7 +729,7 @@
 .recommender-status-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
 }
 
 .recommender-status-message {
@@ -753,7 +753,7 @@
     background: rgba(244, 67, 54, 0.06);
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     transition: all 0.15s ease;
 }
 
@@ -764,7 +764,7 @@
 
 .recommender-error-detail {
     margin-top: 5px;
-    font-size: 0.7rem;
+    font-size: var(--font-2xs);
     color: var(--text-secondary);
     opacity: 0.8;
     line-height: 1.4;
@@ -774,13 +774,13 @@
 /* --- Results --- */
 
 .recommender-results-header {
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     font-weight: 600;
     color: var(--text-secondary);
     padding-bottom: 10px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .recommender-results-header > i {
@@ -788,12 +788,12 @@
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    font-size: 0.78rem;
+    font-size: var(--font-xs);
 }
 
 .recommender-results-badge {
     margin-left: auto;
-    font-size: 0.6rem;
+    font-size: var(--font-3xs);
     font-weight: 500;
     padding: 2px 7px;
     border-radius: 100px;
@@ -808,7 +808,7 @@
     border: none;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     padding: 2px 4px;
     opacity: 0.6;
     transition: opacity 0.15s, color 0.15s;
@@ -822,13 +822,13 @@
 .recommender-results-grid {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-xs);
 }
 
 .recommender-result-card {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding: 10px 12px;
     background: rgba(255, 255, 255, 0.015);
     border: 1px solid rgba(255, 255, 255, 0.04);
@@ -855,7 +855,7 @@
     border-radius: 5px;
     background: rgba(0, 0, 0, 0.5);
     color: var(--text-secondary);
-    font-size: 0.55rem;
+    font-size: var(--font-4xs);
     font-weight: 700;
     display: flex;
     align-items: center;
@@ -907,18 +907,18 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-2xs);
 }
 
 .recommender-result-header {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     flex-wrap: wrap;
 }
 
 .recommender-result-name-link {
-    font-size: 0.82rem;
+    font-size: var(--font-sm);
     font-weight: 700;
     color: var(--text-primary);
     text-decoration: none;
@@ -933,7 +933,7 @@
 }
 
 .recommender-result-creator {
-    font-size: 0.62rem;
+    font-size: var(--font-3xs);
     color: var(--text-secondary);
     opacity: 0.6;
     white-space: nowrap;
@@ -945,7 +945,7 @@
     color: var(--text-secondary);
     cursor: pointer;
     padding: 2px 4px;
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     opacity: 0;
     transition: opacity 0.15s, color 0.15s;
     margin-left: auto;
@@ -961,7 +961,7 @@
 }
 
 .recommender-result-reason {
-    font-size: 0.72rem;
+    font-size: var(--font-2xs);
     color: var(--text-secondary);
     line-height: 1.45;
     display: -webkit-box;
@@ -984,12 +984,12 @@
 .recommender-result-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 3px;
+    gap: var(--space-2xs);
     margin-top: 3px;
 }
 
 .recommender-tag {
-    font-size: 0.58rem;
+    font-size: var(--font-4xs);
     padding: 1px 6px;
     border-radius: 100px;
     background: rgba(255, 255, 255, 0.03);
@@ -1002,7 +1002,7 @@
 
 .recommender-raw-response {
     white-space: pre-wrap;
-    font-size: 0.76rem;
+    font-size: var(--font-xs);
     color: var(--text-primary);
     background: rgba(0, 0, 0, 0.2);
     padding: 12px;
@@ -1053,7 +1053,7 @@
     }
 
     .recommender-header-title {
-        font-size: 0.85rem;
+        font-size: var(--font-md);
     }
 
     .recommender-body {
@@ -1072,17 +1072,17 @@
     .recommender-input-area {
         flex-direction: column;
         align-items: stretch;
-        gap: 8px;
+        gap: var(--space-sm);
         margin-bottom: 10px;
     }
 
     .recommender-prompt {
-        font-size: 0.85rem;
+        font-size: var(--font-md);
         min-height: 80px;
         padding: 12px 14px;
         border-radius: 10px;
     }
-    .recommender-prompt::placeholder { font-size: 0.78rem; }
+    .recommender-prompt::placeholder { font-size: var(--font-xs); }
 
     .recommender-submit-btn {
         width: 100%;
@@ -1092,8 +1092,8 @@
         border-radius: 10px;
         flex-shrink: 0;
         touch-action: manipulation;
-        gap: 8px;
-        font-size: 0.82rem;
+        gap: var(--space-sm);
+        font-size: var(--font-sm);
         font-weight: 600;
     }
 
@@ -1111,7 +1111,7 @@
 
     .recommender-toolbar {
         margin-bottom: 10px;
-        gap: 6px;
+        gap: var(--space-xs-sm);
         overflow: hidden;
     }
 
@@ -1141,7 +1141,7 @@
     }
 
     .recommender-connection-text {
-        font-size: 0.65rem;
+        font-size: var(--font-3xs);
     }
 
     .recommender-toolbar-btn {
@@ -1162,25 +1162,25 @@
 
     .recommender-settings-inner {
         padding: 12px;
-        gap: 14px;
+        gap: var(--space-md);
     }
 
     .recommender-setting-section {
-        gap: 10px;
+        gap: var(--space-sm-md);
     }
 
     .recommender-setting-section-title {
-        font-size: 0.65rem;
+        font-size: var(--font-3xs);
     }
 
     /* --- Filter rows --- */
 
     .recommender-filter-row {
-        gap: 8px;
+        gap: var(--space-sm);
     }
 
     .recommender-filter-label {
-        font-size: 0.76rem;
+        font-size: var(--font-xs);
     }
 
     .recommender-tristate {
@@ -1190,12 +1190,12 @@
     .recommender-tristate-btn {
         min-height: 38px;
         padding: 6px 12px;
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         touch-action: manipulation;
     }
 
     .recommender-date-range {
-        gap: 6px;
+        gap: var(--space-xs-sm);
     }
 
     .recommender-date-range input[type="date"] {
@@ -1206,13 +1206,13 @@
     /* --- LLM Context chips --- */
 
     .recommender-toggles-row {
-        gap: 5px;
+        gap: var(--space-xs);
     }
 
     .recommender-toggle-chip span {
         min-height: 38px;
         padding: 6px 10px;
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         touch-action: manipulation;
     }
 
@@ -1220,12 +1220,12 @@
 
     .recommender-slider-row {
         grid-template-columns: 48px 1fr 36px;
-        gap: 8px;
+        gap: var(--space-sm);
         min-height: 36px;
     }
 
     .recommender-slider-row label {
-        font-size: 0.76rem;
+        font-size: var(--font-xs);
     }
 
     .recommender-slider-row input[type="range"] {
@@ -1245,13 +1245,13 @@
 
     .recommender-batch-slider-row {
         grid-template-columns: 52px 1fr 28px;
-        gap: 8px;
+        gap: var(--space-sm);
         min-height: 36px;
         padding-left: 10px;
     }
 
     .recommender-batch-slider-row label {
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
     }
 
     .recommender-batch-slider-row input[type="range"] {
@@ -1267,7 +1267,7 @@
     .recommender-api-mode-btn {
         min-height: 32px;
         padding: 4px 8px;
-        font-size: 0.65rem;
+        font-size: var(--font-3xs);
         touch-action: manipulation;
     }
 
@@ -1292,7 +1292,7 @@
     .recommender-pill {
         min-height: 32px;
         padding: 4px 10px;
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         touch-action: manipulation;
     }
 
@@ -1305,18 +1305,18 @@
         display: flex;
         align-items: center;
         padding: 10px 14px;
-        font-size: 0.85rem;
+        font-size: var(--font-md);
         touch-action: manipulation;
     }
 
     /* --- Result cards --- */
 
     .recommender-results-grid {
-        gap: 6px;
+        gap: var(--space-xs-sm);
     }
 
     .recommender-result-card {
-        gap: 10px;
+        gap: var(--space-sm-md);
         padding: 10px 12px;
         border-radius: 10px;
         transform: none !important;
@@ -1331,7 +1331,7 @@
     .recommender-result-rank {
         width: 14px;
         height: 14px;
-        font-size: 0.5rem;
+        font-size: var(--font-4xs);
         top: 5px;
         left: 5px;
     }
@@ -1358,7 +1358,7 @@
     }
 
     .recommender-result-name-link {
-        font-size: 0.82rem;
+        font-size: var(--font-sm);
         white-space: normal;
         overflow: visible;
         text-overflow: unset;
@@ -1366,11 +1366,11 @@
     }
 
     .recommender-result-creator {
-        font-size: 0.6rem;
+        font-size: var(--font-3xs);
     }
 
     .recommender-result-reason {
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         -webkit-line-clamp: unset;
         -webkit-box-orient: unset;
         display: block;
@@ -1379,25 +1379,25 @@
     }
 
     .recommender-result-tags {
-        gap: 3px;
+        gap: var(--space-2xs);
         margin-top: 4px;
     }
 
     .recommender-tag {
-        font-size: 0.56rem;
+        font-size: var(--font-4xs);
         padding: 1px 5px;
     }
 
     /* --- Status & raw response --- */
 
     .recommender-status {
-        font-size: 0.76rem;
+        font-size: var(--font-xs);
         padding: 10px 12px;
         border-radius: 8px;
     }
 
     .recommender-status-row {
-        gap: 8px;
+        gap: var(--space-sm);
     }
 
     .recommender-status-message {
@@ -1405,7 +1405,7 @@
     }
 
     .recommender-error-detail {
-        font-size: 0.68rem;
+        font-size: var(--font-3xs);
     }
 
     .recommender-copy-debug {
@@ -1417,7 +1417,7 @@
     }
 
     .recommender-raw-response {
-        font-size: 0.74rem;
+        font-size: var(--font-xs);
         padding: 12px;
         max-height: none;
         border-radius: 8px;

@@ -1,6 +1,11 @@
 // Shared DataCat API utilities — used by datacat-provider.js and datacat-browse.js
 //
-// Contains constants, metadata fetch, V2 card builder, and network helpers.
+// Sections: Network, Metadata, Browse/Search, Tags, V2 Card Builder, Extraction, MeiliSearch
+
+import { CL_HELPER_PLUGIN_BASE, slugify, stripHtml, fetchWithProxy } from '../provider-utils.js';
+import { getSearchToken, JANNY_SEARCH_URL, JANNY_SITE_BASE, TAG_MAP as JANNY_TAG_MAP } from '../janny/janny-api.js';
+
+export { slugify, stripHtml, JANNY_TAG_MAP };
 
 // ========================================
 // CONSTANTS
@@ -15,9 +20,6 @@ export const MIN_TOTAL_TOKENS = 889;
 // ========================================
 // NETWORK
 // ========================================
-
-import { CL_HELPER_PLUGIN_BASE, slugify, stripHtml } from '../provider-utils.js';
-export { slugify, stripHtml };
 
 const DC_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/dc-proxy`;
 
@@ -423,5 +425,210 @@ export function buildV2FromDownload(downloadData, character) {
             },
             character_book: d.character_book || undefined
         }
+    };
+}
+
+// ========================================
+// EXTRACTION
+// ========================================
+
+/**
+ * Submit a JanitorAI character URL for extraction via DataCat's cloud browser.
+ * @param {string} janitorUrl - Full JanitorAI character URL
+ * @returns {Promise<{success: boolean, queued?: boolean, started?: boolean, queuePosition?: number, error?: string, errorCode?: string}>}
+ */
+export async function submitExtraction(janitorUrl, { publicFeed = true } = {}) {
+    if (!_apiRequest) throw new Error('DataCat: apiRequest not bound');
+    try {
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed });
+        const text = await resp.text();
+        try {
+            return JSON.parse(text);
+        } catch {
+            console.error('[DataCat] dc-extract returned non-JSON:', resp.status, text.substring(0, 200));
+            return { success: false, error: `Server returned ${resp.status}: ${text.substring(0, 100)}` };
+        }
+    } catch (e) {
+        console.error('[DataCat] submitExtraction failed:', e);
+        return { success: false, error: e.message };
+    }
+}
+
+/**
+ * Poll extraction status from DataCat.
+ * @returns {Promise<{inProgress: Object|null, queueLength: number, queue: Array, history: Array}|null>}
+ */
+export async function fetchExtractionStatus() {
+    try {
+        const resp = await dcFetch('/api/extraction/status');
+        if (!resp.ok) return null;
+        return await resp.json();
+    } catch (e) {
+        console.error('[DataCat] fetchExtractionStatus failed:', e);
+        return null;
+    }
+}
+
+// ========================================
+// MEILISEARCH (JanitorAI index)
+// ========================================
+
+const MEILI_SORT_MAP = {
+    janny_newest: ['createdAtStamp:desc'],
+    janny_oldest: ['createdAtStamp:asc'],
+    janny_tokens_desc: ['totalToken:desc'],
+    janny_tokens_asc: ['totalToken:asc'],
+    janny_relevant: [],
+};
+
+/**
+ * Search JanitorAI characters via MeiliSearch.
+ * Returns results normalized to DataCat-compatible shape.
+ * @param {Object} opts
+ * @param {string} [opts.search='']
+ * @param {number} [opts.page=1]
+ * @param {number} [opts.limit=80]
+ * @param {string} [opts.sort='janny_newest']
+ * @param {boolean} [opts.nsfw=true]
+ * @param {Set<number>} [opts.includeTags] - JanitorAI tag IDs to require
+ * @returns {Promise<{characters: Object[], totalHits: number, totalPages: number}>}
+ */
+export async function searchMeiliJanny(opts = {}) {
+    const { search = '', page = 1, limit = 80, sort = 'janny_newest', nsfw = true, includeTags = new Set() } = opts;
+
+    const filters = [];
+    if (!nsfw) filters.push('isNsfw = false');
+    if (includeTags.size > 0) {
+        const tagClauses = [...includeTags].map(id => `tagIds = ${id}`);
+        filters.push(tagClauses.join(' AND '));
+    }
+
+    const sortArr = MEILI_SORT_MAP[sort] || MEILI_SORT_MAP.janny_newest;
+
+    const body = {
+        queries: [{
+            indexUid: 'janny-characters',
+            q: search,
+            facets: ['isNsfw', 'tagIds'],
+            filter: filters,
+            hitsPerPage: limit,
+            page,
+        }]
+    };
+
+    if (sortArr.length > 0) body.queries[0].sort = sortArr;
+
+    const token = await getSearchToken();
+    const headers = {
+        'Accept': '*/*',
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'Origin': JANNY_SITE_BASE,
+        'Referer': `${JANNY_SITE_BASE}/`,
+        'x-meilisearch-client': 'Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)',
+    };
+
+    let response;
+    try {
+        response = await fetch(JANNY_SEARCH_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+    } catch (_) {
+        response = await fetchWithProxy(JANNY_SEARCH_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+    }
+
+    if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`MeiliSearch error ${response.status}: ${text.slice(0, 200)}`);
+    }
+
+    const data = await response.json();
+    const result = data?.results?.[0] || {};
+    const hits = result.hits || [];
+
+    const characters = hits.map(normalizeMeiliHit);
+
+    return {
+        characters,
+        totalHits: result.totalHits || 0,
+        totalPages: result.totalPages || 0,
+    };
+}
+
+// ========================================
+// HAMPTER (JanitorAI internal API)
+// ========================================
+
+const HAMPTER_API_BASE = 'https://janitorai.com/hampter/characters';
+
+/**
+ * Fetch characters from JanitorAI's Hampter API (trending/popular sort).
+ * @param {Object} opts
+ * @param {string} [opts.sort='trending'] - 'trending' or 'popular'
+ * @param {number} [opts.page=1]
+ * @param {string} [opts.search='']
+ * @param {boolean} [opts.nsfw=true] - false adds mode=sfw
+ * @returns {Promise<{characters: Object[], total: number, page: number, pageSize: number}>}
+ */
+export async function fetchHampterCharacters(opts = {}) {
+    const { sort = 'trending', page = 1, search = '', nsfw = true } = opts;
+    const params = new URLSearchParams({ sort, page: String(page) });
+    if (search) params.set('search', search);
+    if (!nsfw) params.set('mode', 'sfw');
+
+    const url = `${HAMPTER_API_BASE}?${params}`;
+    const response = await fetchWithProxy(url);
+    const data = await response.json();
+
+    return {
+        characters: (data.data || []).map(normalizeHampterHit),
+        total: data.total || 0,
+        page: data.page || page,
+        pageSize: data.size || 34,
+    };
+}
+
+function normalizeHampterHit(hit) {
+    const tagNames = [
+        ...(hit.tags || []).map(t => ({ name: t.name, slug: t.slug || t.name?.toLowerCase() })),
+        ...(hit.custom_tags || []).map(t => typeof t === 'string' ? { name: t, slug: t.toLowerCase() } : { name: t.name || '', slug: t.slug || '' }),
+    ];
+
+    return {
+        character_id: hit.id,
+        name: hit.name || 'Unknown',
+        avatar: hit.avatar || '',
+        description: hit.description || '',
+        tags: tagNames,
+        creator_name: hit.creator_name || '',
+        creator_id: hit.creator_id || '',
+        created_at: hit.created_at || hit.first_published_at || '',
+        is_nsfw: hit.is_nsfw || false,
+        chat_count: hit.stats?.chat || 0,
+        message_count: hit.stats?.message || 0,
+        total_tokens: hit.total_tokens || 0,
+        _source: 'hampter',
+    };
+}
+
+/**
+ * Normalize a MeiliSearch hit to match the shape expected by DataCat card rendering.
+ */
+function normalizeMeiliHit(hit) {
+    const tagNames = (hit.tagIds || []).map(id => {
+        const name = JANNY_TAG_MAP[id];
+        return name ? { name, slug: name.toLowerCase() } : { name: `Tag ${id}`, slug: `tag-${id}` };
+    });
+
+    return {
+        character_id: hit.id,
+        name: hit.name || 'Unknown',
+        avatar: hit.avatar || '',
+        description: hit.description || '',
+        tags: tagNames,
+        creator_name: hit.creatorUsername || '',
+        creator_id: hit.creatorId || '',
+        createdAt: hit.createdAt || (hit.createdAtStamp ? new Date(hit.createdAtStamp * 1000).toISOString() : ''),
+        isNsfw: hit.isNsfw || false,
+        totalTokens: hit.totalToken || 0,
+        _source: 'meilisearch',
     };
 }

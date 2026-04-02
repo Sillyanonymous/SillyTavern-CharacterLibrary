@@ -44,9 +44,9 @@
 .gv-header-left {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     color: #fff;
-    font-size: 0.95em;
+    font-size: var(--font-base);
 }
 
 .gv-header-left i {
@@ -59,7 +59,7 @@
 
 .gv-header-right {
     display: flex;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .gv-btn {
@@ -99,7 +99,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-md);
     color: rgba(255, 255, 255, 0.7);
 }
 
@@ -113,7 +113,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-md);
     color: rgba(255, 255, 255, 0.5);
 }
 
@@ -202,7 +202,7 @@
 }
 
 .gv-nav i {
-    font-size: 1.5em;
+    font-size: var(--font-2xl);
 }
 
 .gv-nav-prev {
@@ -225,14 +225,14 @@
 
 .gv-filename {
     color: rgba(255, 255, 255, 0.6);
-    font-size: 0.85em;
+    font-size: var(--font-md);
     font-family: monospace;
 }
 
 /* Thumbnail strip */
 .gv-thumbnails {
     display: flex;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 12px 20px;
     background: rgba(0, 0, 0, 0.7);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
@@ -309,7 +309,7 @@
 }
 
 .gv-thumb-video-icon i {
-    font-size: 0.6rem;
+    font-size: var(--font-3xs);
     color: #fff;
     margin-left: 2px;
 }
@@ -346,7 +346,7 @@
     color: #fff;
     padding: 4px 12px;
     border-radius: 4px;
-    font-size: 0.85em;
+    font-size: var(--font-md);
     pointer-events: none;
     opacity: 0;
     transition: opacity 0.2s;
@@ -366,13 +366,13 @@ body.char-modal-above .gv-modal.visible {
    ========================================================= */
 @media (max-width: 768px) {
     .gv-header { padding: 10px 12px; }
-    .gv-header-left { font-size: 0.85em; gap: 6px; }
+    .gv-header-left { font-size: var(--font-md); gap: var(--space-xs-sm); }
     .gv-btn { width: 40px; height: 40px; }
     .gv-nav { display: none !important; }
-    .gv-thumbnails { padding: 8px 12px; gap: 6px; }
+    .gv-thumbnails { padding: 8px 12px; gap: var(--space-xs-sm); }
     .gv-thumb { width: 50px; height: 50px; }
     .gv-footer { padding: 8px 12px; }
-    .gv-filename { font-size: 0.75em; }
+    .gv-filename { font-size: var(--font-xs); }
     .gv-image-container {
         padding: 0;
         touch-action: none;

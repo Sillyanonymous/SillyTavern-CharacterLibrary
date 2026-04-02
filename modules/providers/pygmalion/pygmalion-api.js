@@ -88,6 +88,7 @@ export async function searchCharacters(opts = {}) {
                 },
                 body: JSON.stringify(message)
             });
+            if (!resp.ok) throw new Error(`Search failed (${resp.status})`);
             return resp.json();
         } catch (e) {
             const err = new Error(e.message);
@@ -100,6 +101,7 @@ export async function searchCharacters(opts = {}) {
     const resp = await fetchWithProxy(url, {
         headers: { 'Accept': 'application/json' }
     });
+    if (!resp.ok) throw new Error(`Search failed (${resp.status})`);
     return resp.json();
 }
 
@@ -124,6 +126,7 @@ export async function fetchCharacterDetail(characterMetaId, characterVersionId, 
             },
             body: JSON.stringify(message)
         });
+        if (!resp.ok) throw new Error(`Character fetch failed (${resp.status})`);
         return resp.json();
     }
 
@@ -131,6 +134,7 @@ export async function fetchCharacterDetail(characterMetaId, characterVersionId, 
     const resp = await fetchWithProxy(url, {
         headers: { 'Accept': 'application/json' }
     });
+    if (!resp.ok) throw new Error(`Character fetch failed (${resp.status})`);
     return resp.json();
 }
 
@@ -155,6 +159,7 @@ export async function fetchCharactersByOwner(userId, orderBy = 'approved_at', pa
             },
             body: JSON.stringify(message)
         });
+        if (!resp.ok) throw new Error(`Owner characters fetch failed (${resp.status})`);
         return resp.json();
     }
 
@@ -162,6 +167,7 @@ export async function fetchCharactersByOwner(userId, orderBy = 'approved_at', pa
     const resp = await fetchWithProxy(url, {
         headers: { 'Accept': 'application/json' }
     });
+    if (!resp.ok) throw new Error(`Owner characters fetch failed (${resp.status})`);
     return resp.json();
 }
 

@@ -80,6 +80,11 @@ function debounce(func, wait) {
     };
 }
 
+function truncate(str, max) {
+    if (!str) return '';
+    return str.length <= max ? str : str.slice(0, max - 3) + '...';
+}
+
 
 
 // Simple cache for expensive computations
@@ -224,7 +229,7 @@ function initCustomSelect(select) {
     }
 
     function positionMenu() {
-        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        const zoom = parseFloat(document.body.style.zoom) || 1;
         const rawRect = trigger.getBoundingClientRect();
         const rect = { left: rawRect.left / zoom, top: rawRect.top / zoom, bottom: rawRect.bottom / zoom, width: rawRect.width / zoom };
         const viewportH = window.innerHeight / zoom;
@@ -389,6 +394,8 @@ function prepareCharacterKeys(chars) {
         // Pre-compute numeric timestamps for date sorting
         c._dateAdded = getCharacterDateAdded(c);
         c._createDate = getCharacterCreateDate(c);
+        const lastChat = c.date_last_chat;
+        c._dateLastChat = lastChat ? (parseDateValue(lastChat)?.getTime() || 0) : 0;
     }
 }
 
@@ -414,6 +421,7 @@ const DEFAULT_SETTINGS = {
     wyvernUid: null,
     wyvernRememberCredentials: true,
     datacatToken: null,
+    datacatPublicFeed: false,
     ctCookie: null,
 
     // ---- NSFW Toggles ----
@@ -461,6 +469,7 @@ const DEFAULT_SETTINGS = {
     showWyvernTagline: true,
     allowRichTagline: false,
     browseSnapSections: false,
+    mobileProviderQuickSwitch: true,
 
     // ---- Provider Config ----
     chubUseV4Api: false,
@@ -615,7 +624,7 @@ async function loadGallerySettings() {
             // (ST's context API uses camelCase "extensionSettings", but the raw file doesn't)
             if (parsedSettings?.extension_settings?.[SETTINGS_KEY]) {
                 gallerySettings = { ...DEFAULT_SETTINGS, ...parsedSettings.extension_settings[SETTINGS_KEY] };
-                console.log('[Settings] Loaded fresh from disk via /api/settings/get', gallerySettings);
+                debugLog('[Settings] Loaded fresh from disk via /api/settings/get', gallerySettings);
                 // Also sync to opener's in-memory state so saves work correctly
                 const context = getSTContext();
                 if (context && context.extensionSettings) {
@@ -623,7 +632,7 @@ async function loadGallerySettings() {
                 }
                 return;
             }
-            console.log('[Settings] No extension settings found on disk for key:', SETTINGS_KEY, 'keys found:', Object.keys(parsedSettings?.extension_settings || {}));
+            debugLog('[Settings] No extension settings found on disk for key:', SETTINGS_KEY, 'keys found:', Object.keys(parsedSettings?.extension_settings || {}));
         }
     } catch (e) {
         console.warn('[Settings] Failed to load from API, trying fallbacks:', e);
@@ -779,8 +788,7 @@ const UI_SCALE_MAP = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2 };
 
 function applyUiScale(level) {
     const zoom = UI_SCALE_MAP[level] || 1;
-    document.documentElement.style.zoom = zoom;
-    // 100vh resolves in the zoomed coordinate space, so compensate body height
+    document.body.style.zoom = zoom;
     document.body.style.height = zoom !== 1 ? `calc(100vh / ${zoom})` : '';
 }
 
@@ -903,6 +911,7 @@ function setupSettingsModal() {
     const showProviderTaglineCheckbox = document.getElementById('settingsShowProviderTagline');
     const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
     const browseSnapSectionsCheckbox = document.getElementById('settingsBrowseSnapSections');
+    const mobileProviderQuickSwitchCheckbox = document.getElementById('settingsMobileProviderQuickSwitch');
     
     // Appearance
     const uiScaleSelect = document.getElementById('settingsUiScale');
@@ -1395,6 +1404,13 @@ function setupSettingsModal() {
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
+        const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
+        if (datacatPublicFeedCheckbox) {
+            datacatPublicFeedCheckbox.checked = getSetting('datacatPublicFeed') === true;
+            datacatPublicFeedCheckbox.addEventListener('change', () => {
+                setSetting('datacatPublicFeed', datacatPublicFeedCheckbox.checked);
+            });
+        }
         
         // Check cl-helper plugin availability for provider sections
         checkClHelperPlugin(
@@ -1474,6 +1490,9 @@ function setupSettingsModal() {
         }
         if (browseSnapSectionsCheckbox) {
             browseSnapSectionsCheckbox.checked = getSetting('browseSnapSections') === true;
+        }
+        if (mobileProviderQuickSwitchCheckbox) {
+            mobileProviderQuickSwitchCheckbox.checked = getSetting('mobileProviderQuickSwitch') !== false;
         }
         if (themeCustomizerCheckbox) {
             themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
@@ -1744,6 +1763,7 @@ function setupSettingsModal() {
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : false,
+            mobileProviderQuickSwitch: mobileProviderQuickSwitchCheckbox ? mobileProviderQuickSwitchCheckbox.checked : true,
             uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
             modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
@@ -1900,6 +1920,9 @@ function setupSettingsModal() {
         }
         if (browseSnapSectionsCheckbox) {
             browseSnapSectionsCheckbox.checked = DEFAULT_SETTINGS.browseSnapSections;
+        }
+        if (mobileProviderQuickSwitchCheckbox) {
+            mobileProviderQuickSwitchCheckbox.checked = DEFAULT_SETTINGS.mobileProviderQuickSwitch;
         }
 
         // Provider Order & Defaults — reset to registration order
@@ -2539,7 +2562,7 @@ function setupSettingsModal() {
                 showToast(message, 'error');
             }
             
-            console.log('[ImageRelocation] Summary:', { totalMoved, totalUnmatched, totalErrors, groupsProcessed });
+            debugLog('[ImageRelocation] Summary:', { totalMoved, totalUnmatched, totalErrors, groupsProcessed });
         };
     }
     
@@ -2623,7 +2646,7 @@ function setupSettingsModal() {
                 (totalErrors > 0 ? ` (${totalErrors} errors)` : '');
             showToast(message, totalErrors === 0 ? 'success' : 'error');
             
-            console.log('[MigrateAll] Summary:', { totalMoved, totalErrors, charsProcessed, charsWithImages });
+            debugLog('[MigrateAll] Summary:', { totalMoved, totalErrors, charsProcessed, charsWithImages });
         };
     }
     
@@ -2979,6 +3002,18 @@ function hide(id) {
     document.getElementById(id)?.classList.add('hidden');
 }
 
+function findCardElement(avatar) {
+    return document.querySelector(`.char-card[data-avatar="${avatar}"]`);
+}
+
+function getCharacterByAvatar(avatar) {
+    return allCharacters.find(c => c.avatar === avatar);
+}
+
+function isMultiSelectEnabled() {
+    return window.MultiSelect?.enabled || false;
+}
+
 // ========================================
 // VIEW MANAGEMENT
 // Top-level view switching (characters, chats, online)
@@ -2987,6 +3022,7 @@ function hide(id) {
 
 let currentView = 'characters';
 const viewEnterCallbacks = {}; // view → callback[]
+const viewExitCallbacks = {}; // view → callback[]
 let lastOnlineProviderId = null;
 let providerSelectorInitialized = false;
 
@@ -3033,11 +3069,20 @@ function activateOnlineProvider(requestedId) {
  * @param {string} view - 'characters' | 'chats' | 'online'
  */
 function switchView(view) {
-    // Backward compat: 'chub' → 'online'
-    if (view === 'chub') view = 'online';
-
     debugLog('[View] Switching to:', view);
+
+    // Fire exit callbacks for the view we're leaving
+    const exitCallbacks = viewExitCallbacks[currentView];
+    if (exitCallbacks) {
+        for (const cb of exitCallbacks) cb();
+    }
+
     currentView = view;
+
+    // Re-render advanced filter panel for new view's field set
+    closeAdvFilterPanel();
+    rerenderAdvFilterRows();
+    updateAdvFilterIndicator();
 
     // Update toggle buttons
     document.querySelectorAll('.view-toggle-btn').forEach(b => {
@@ -3138,10 +3183,6 @@ function switchView(view) {
     if (callbacks) {
         for (const cb of callbacks) cb();
     }
-    // Backward compat: also fire 'chub' callbacks when entering 'online'
-    if (view === 'online' && viewEnterCallbacks['chub']) {
-        for (const cb of viewEnterCallbacks['chub']) cb();
-    }
 }
 
 function getCurrentView() {
@@ -3149,10 +3190,13 @@ function getCurrentView() {
 }
 
 function onViewEnter(view, callback) {
-    // Normalize 'chub' → 'online' for backward compat
-    const normalizedView = view === 'chub' ? 'online' : view;
-    if (!viewEnterCallbacks[normalizedView]) viewEnterCallbacks[normalizedView] = [];
-    viewEnterCallbacks[normalizedView].push(callback);
+    if (!viewEnterCallbacks[view]) viewEnterCallbacks[view] = [];
+    viewEnterCallbacks[view].push(callback);
+}
+
+function onViewExit(view, callback) {
+    if (!viewExitCallbacks[view]) viewExitCallbacks[view] = [];
+    viewExitCallbacks[view].push(callback);
 }
 
 /**
@@ -5100,6 +5144,7 @@ async function assignGalleryIdToCharacter(char) {
         if (!char.data) char.data = {};
         if (!char.data.extensions) char.data.extensions = {};
         char.data.extensions.gallery_id = galleryId;
+        _extensionsCache.set(char.avatar, char.data.extensions);
         
         // Also update in allCharacters array
         const charIndex = allCharacters.findIndex(c => c.avatar === char.avatar);
@@ -6188,6 +6233,10 @@ async function fetchAndAddCharacter(avatarFileName) {
         const char = await response.json();
         if (!char || !char.avatar) return false;
 
+        if (char.data?.extensions) {
+            _extensionsCache.set(char.avatar, char.data.extensions);
+        }
+
         prepareCharacterKeys([char]);
         const slim = slimCharacter(char);
         allCharacters.push(slim);
@@ -6258,6 +6307,7 @@ function slimCharacter(char) {
         _tagsLower: char._tagsLower,
         _dateAdded: char._dateAdded,
         _createDate: char._createDate,
+        _dateLastChat: char._dateLastChat,
         _slim: true
     };
 
@@ -6309,6 +6359,7 @@ async function hydrateCharacter(char) {
         if (full.data?.extensions) {
             if (!char.data) char.data = {};
             char.data.extensions = full.data.extensions;
+            _extensionsCache.set(char.avatar, full.data.extensions);
         }
 
         if (full.spec) char.spec = full.spec;
@@ -6322,21 +6373,48 @@ async function hydrateCharacter(char) {
     }
 }
 
+let _recoveryGeneration = 0;
+let _extensionsCache = new Map();
+
 /**
  * Recover data.extensions for characters received with ST lazy loading (shallow mode).
  * ST's toShallow() strips all extensions except fav, breaking provider links,
  * gallery IDs, and version UIDs. This fetches individual characters in parallel
  * batches and patches their extensions onto our slim objects.
+ *
+ * Uses a persistent cache so that subsequent processAndRender calls (e.g. after import)
+ * transfer known extensions instantly and only fetch new/unknown characters.
+ * A generation counter prevents concurrent recoveries from interfering.
  */
-async function recoverShallowExtensions() {
+async function recoverShallowExtensions(generation) {
     const BATCH_SIZE = 50;
-    const chars = [...allCharacters];
+    const chars = allCharacters.filter(c => !_extensionsCache.has(c.avatar));
     let recovered = 0;
 
-    debugLog(`[ShallowRecovery] ST lazy loading detected — recovering extensions for ${chars.length} characters...`);
+    if (chars.length === 0) {
+        debugLog('[ShallowRecovery] All extensions already cached, skipping recovery');
+        window.extensionsRecoveryInProgress = false;
+        window.ProviderRegistry?.hideRecoveryBanner?.();
+        window.ProviderRegistry?.rebuildAllBrowseLookups?.();
+        window.ProviderRegistry?.refreshActiveBrowseBadges?.();
+        if (getSetting('uniqueGalleryFolders')) {
+            try { syncAllGalleryFolderOverrides(); } catch { /* ignore */ }
+        }
+        runGallerySyncAudit();
+        return;
+    }
+
+    debugLog(`[ShallowRecovery] Recovering extensions for ${chars.length} characters (${_extensionsCache.size} already cached)...`);
+    const cachedBefore = _extensionsCache.size;
+    const totalForProgress = chars.length + cachedBefore;
 
     try {
         for (let i = 0; i < chars.length; i += BATCH_SIZE) {
+            if (generation !== _recoveryGeneration) {
+                debugLog('[ShallowRecovery] Superseded by newer recovery, aborting');
+                return;
+            }
+
             const batch = chars.slice(i, i + BATCH_SIZE);
             await Promise.allSettled(
                 batch.map(async (char) => {
@@ -6350,32 +6428,33 @@ async function recoverShallowExtensions() {
                         char.data.extensions = full.data.extensions;
                         if (full.spec) char.spec = full.spec;
                         if (full.spec_version) char.spec_version = full.spec_version;
+                        _extensionsCache.set(char.avatar, full.data.extensions);
                         recovered++;
                     } catch { /* skip */ }
                 })
             );
 
-            // Update banner progress
-            const done = Math.min(i + BATCH_SIZE, chars.length);
-            window.ProviderRegistry?.updateRecoveryProgress?.(done, chars.length);
+            const done = cachedBefore + Math.min(i + BATCH_SIZE, chars.length);
+            window.ProviderRegistry?.updateRecoveryProgress?.(Math.min(done, totalForProgress), totalForProgress);
 
             await new Promise(r => setTimeout(r, 0));
         }
     } finally {
-        window.extensionsRecoveryInProgress = false;
-        window.ProviderRegistry?.hideRecoveryBanner?.();
+        if (generation === _recoveryGeneration) {
+            window.extensionsRecoveryInProgress = false;
+            window.ProviderRegistry?.hideRecoveryBanner?.();
+        }
     }
 
-    debugLog(`[ShallowRecovery] Recovered extensions for ${recovered}/${chars.length} characters`);
+    if (generation !== _recoveryGeneration) return;
 
-    // Rebuild browser "In Library" lookups now that provider links are available
+    debugLog(`[ShallowRecovery] Recovered extensions for ${recovered} new characters (${_extensionsCache.size} total cached)`);
+
     window.ProviderRegistry?.rebuildAllBrowseLookups?.();
     window.ProviderRegistry?.refreshActiveBrowseBadges?.();
 
     document.dispatchEvent(new CustomEvent('cl-extensions-recovered'));
 
-    // Re-run gallery sync + audit now that gallery_ids are available.
-    // processAndRender() skipped this when it detected shallow data.
     if (recovered > 0 && getSetting('uniqueGalleryFolders')) {
         try {
             syncAllGalleryFolderOverrides();
@@ -6401,6 +6480,24 @@ function processAndRender(data) {
     // data.extensions.* (except fav), which breaks provider links, gallery IDs, etc.
     const isSTShallow = allCharacters.length > 0 && allCharacters[0].shallow === true;
     
+    // Restore previously recovered extensions from cache before slimming.
+    // Without this, every processAndRender call would discard recovered extensions
+    // and trigger a full re-recovery of all characters.
+    if (isSTShallow && _extensionsCache.size > 0) {
+        let transferred = 0;
+        for (const char of allCharacters) {
+            const cached = _extensionsCache.get(char.avatar);
+            if (cached) {
+                if (!char.data) char.data = {};
+                char.data.extensions = cached;
+                transferred++;
+            }
+        }
+        if (transferred > 0) {
+            debugLog(`[processAndRender] Restored ${transferred}/${allCharacters.length} cached extensions`);
+        }
+    }
+    
     // Pre-compute sort/search keys once (avoids repeated toLowerCase, date parsing, etc.)
     prepareCharacterKeys(allCharacters);
     
@@ -6418,10 +6515,12 @@ function processAndRender(data) {
     
     // If ST lazy loading stripped extensions, recover them in the background.
     // Provider links, gallery IDs, version UIDs all live in data.extensions.
+    // The generation counter ensures only the latest recovery runs to completion.
     if (isSTShallow) {
+        _recoveryGeneration++;
         window.extensionsRecoveryInProgress = true;
         window.updateGallerySyncWarning?.();
-        recoverShallowExtensions();
+        recoverShallowExtensions(_recoveryGeneration);
     }
     
     // Populate Tags set for the filter dropdown
@@ -6510,9 +6609,11 @@ function runGallerySyncAudit(retries = 10) {
         } else {
             window.updateGallerySyncWarning(freshAudit);
         }
-        window._gallerySyncAuditDone = true;
+        gallerySyncAuditDone = true;
     } catch { /* ignore */ }
 }
+
+let gallerySyncAuditDone = false;
 
 // Tag filter states: Map<tagName, 'include' | 'exclude'>
 // undefined/not in map = neutral (unchecked)
@@ -9638,6 +9739,9 @@ async function deleteCharacter(char, deleteChats = false) {
         if (avatar && window.playlistsOnCharDeleted) {
             window.playlistsOnCharDeleted(avatar);
         }
+
+        // Evict from extensions cache (ST lazy loading)
+        if (avatar) _extensionsCache.delete(avatar);
         
         // CRITICAL: Trigger character refresh in main SillyTavern window
         // This updates ST's in-memory character array and cleans up related data.
@@ -11180,15 +11284,6 @@ function openGreetingsModal() {
     document.getElementById('greetingsModalClose').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
     
-    // Escape key handler
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', handleKeydown);
-        }
-    };
-    document.addEventListener('keydown', handleKeydown);
-    
     // Add greeting handler
     document.getElementById('addExpandedGreetingBtn').onclick = () => {
         const container = document.getElementById('expandedAltGreetingsContainer');
@@ -11445,15 +11540,6 @@ function openLorebookModal() {
     
     document.getElementById('lorebookModalClose').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
-    
-    // Escape key handler
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', handleKeydown);
-        }
-    };
-    document.addEventListener('keydown', handleKeydown);
     
     // Collapse/Expand All handlers
     document.getElementById('collapseAllLorebookBtn').onclick = () => {
@@ -11785,15 +11871,6 @@ function openExpandedFieldEditor(fieldId, fieldLabel) {
     document.getElementById('expandFieldClose').onclick = closeExpandModal;
     expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
     
-    // Handle Escape key
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') {
-            closeExpandModal();
-            document.removeEventListener('keydown', handleKeydown);
-        }
-    };
-    document.addEventListener('keydown', handleKeydown);
-    
     // Save/Apply handler
     document.getElementById('expandFieldSave').onclick = () => {
         const newValue = expandTextarea.value;
@@ -11962,15 +12039,6 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
     
     document.getElementById('chubExpandClose').onclick = closeExpandModal;
     expandModal.onclick = (e) => { if (e.target === expandModal) closeExpandModal(); };
-    
-    // Handle Escape key
-    const handleKeydown = (e) => {
-        if (e.key === 'Escape') {
-            closeExpandModal();
-            document.removeEventListener('keydown', handleKeydown);
-        }
-    };
-    document.addEventListener('keydown', handleKeydown);
 }
 
 /**
@@ -12005,6 +12073,374 @@ function initBrowseExpandButtons() {
         }
         openBrowseExpandedView(sectionId, label, iconClass);
     });
+}
+
+// ========================================
+// ADVANCED FILTER
+// ========================================
+
+const ADV_FILTER_FIELDS = {
+    name: { label: 'Name', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with', 'is_empty', 'is_not_empty'] },
+    creator: { label: 'Creator', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with', 'is_empty', 'is_not_empty'] },
+    tags: { label: 'Tags', type: 'tag', operators: ['includes', 'excludes'] },
+    creatorNotes: { label: 'Creator Notes', type: 'text', operators: ['contains', 'not_contains', 'is_empty', 'is_not_empty'] },
+    favorite: { label: 'Favorite', type: 'boolean', operators: ['is_true', 'is_false'] },
+    providerLink: { label: 'Provider Link', type: 'provider', operators: ['is_linked', 'is_not_linked', 'linked_to', 'not_linked_to'] },
+    dateAdded: { label: 'Date Added', type: 'date', operators: ['before', 'after', 'in_the_last'] },
+    dateCreated: { label: 'Date Created', type: 'date', operators: ['before', 'after', 'in_the_last'] },
+    lastChat: { label: 'Last Chat', type: 'date', operators: ['before', 'after', 'in_the_last', 'never'] },
+    version: { label: 'Version', type: 'text', operators: ['contains', 'is_empty', 'is_not_empty'] },
+    playlist: { label: 'Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
+};
+
+const CHAT_ADV_FILTER_FIELDS = {
+    charName: { label: 'Character', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with'] },
+    chatName: { label: 'Chat Name', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with'] },
+    messageCount: { label: 'Messages', type: 'number', operators: ['more_than', 'less_than', 'equals'] },
+    lastMessage: { label: 'Last Message', type: 'date', operators: ['before', 'after', 'in_the_last'] },
+    isActive: { label: 'Active Chat', type: 'boolean', operators: ['is_true', 'is_false'] },
+    charFavorite: { label: 'Char Favorite', type: 'boolean', operators: ['is_true', 'is_false'] },
+    charTags: { label: 'Char Tags', type: 'tag', operators: ['includes', 'excludes'] },
+    charProviderLink: { label: 'Char Provider Link', type: 'provider', operators: ['is_linked', 'is_not_linked', 'linked_to', 'not_linked_to'] },
+    charPlaylist: { label: 'Char Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
+};
+
+const ADV_FILTER_OP_LABELS = {
+    contains: 'contains',
+    not_contains: 'does not contain',
+    equals: 'equals',
+    starts_with: 'starts with',
+    is_empty: 'is empty',
+    is_not_empty: 'is not empty',
+    includes: 'includes',
+    excludes: 'excludes',
+    is_true: 'yes',
+    is_false: 'no',
+    is_linked: 'is linked',
+    is_not_linked: 'is not linked',
+    linked_to: 'linked to',
+    not_linked_to: 'not linked to',
+    before: 'before',
+    after: 'after',
+    in_the_last: 'in the last',
+    never: 'never',
+    more_than: 'more than',
+    less_than: 'less than',
+    in: 'in',
+    not_in: 'not in',
+    in_any: 'in any',
+    not_in_any: 'not in any',
+};
+
+const ADV_FILTER_NO_VALUE_OPS = new Set([
+    'is_empty', 'is_not_empty', 'is_true', 'is_false', 'is_linked', 'is_not_linked', 'never', 'in_any', 'not_in_any',
+]);
+
+const ADV_FILTER_PROVIDERS = [
+    { value: 'chub', label: 'ChubAI' },
+    { value: 'jannyai', label: 'JanitorAI' },
+    { value: 'chartavern', label: 'CharacterTavern' },
+    { value: 'pygmalion', label: 'Pygmalion' },
+    { value: 'wyvern', label: 'Wyvern' },
+    { value: 'datacat', label: 'DataCat' },
+];
+
+let charAdvFilterRules = [];
+let chatAdvFilterRules = [];
+let advFilterNextId = 1;
+
+function getAdvFilterRules() {
+    return currentView === 'chats' ? chatAdvFilterRules : charAdvFilterRules;
+}
+
+function setAdvFilterRules(rules) {
+    if (currentView === 'chats') chatAdvFilterRules = rules;
+    else charAdvFilterRules = rules;
+}
+
+function getActiveAdvFilterFields() {
+    return currentView === 'chats' ? CHAT_ADV_FILTER_FIELDS : ADV_FILTER_FIELDS;
+}
+
+function triggerAdvFilterSearch() {
+    if (currentView === 'chats') window.chatsModule?.renderChats?.();
+    else performSearch();
+}
+
+const debouncedAdvFilterSearch = debounce(triggerAdvFilterSearch, 150);
+
+function toggleAdvFilterPanel() {
+    const panel = document.getElementById('advFilterPanel');
+    if (!panel) return;
+    const isHidden = panel.classList.contains('hidden');
+    closeAllTopbarDropdowns('advFilterPanel');
+    if (isHidden) {
+        panel.classList.remove('hidden');
+        if (getAdvFilterRules().length === 0) addAdvFilterRule();
+    } else {
+        panel.classList.add('hidden');
+    }
+}
+
+function closeAdvFilterPanel() {
+    document.getElementById('advFilterPanel')?.classList.add('hidden');
+}
+
+function addAdvFilterRule() {
+    const fields = getActiveAdvFilterFields();
+    const firstField = Object.keys(fields)[0];
+    const rule = {
+        id: advFilterNextId++,
+        field: firstField,
+        operator: fields[firstField].operators[0],
+        value: '',
+    };
+    getAdvFilterRules().push(rule);
+    rerenderAdvFilterRows();
+    updateAdvFilterIndicator();
+}
+
+function removeAdvFilterRule(id) {
+    setAdvFilterRules(getAdvFilterRules().filter(r => r.id !== id));
+    updateAdvFilterIndicator();
+    rerenderAdvFilterRows();
+    triggerAdvFilterSearch();
+}
+
+function clearAllAdvFilters() {
+    setAdvFilterRules([]);
+    updateAdvFilterIndicator();
+    rerenderAdvFilterRows();
+    triggerAdvFilterSearch();
+}
+
+function updateAdvFilterIndicator() {
+    const btn = document.getElementById('advFilterBtn');
+    if (!btn) return;
+    const hasActive = getAdvFilterRules().some(r =>
+        ADV_FILTER_NO_VALUE_OPS.has(r.operator) ? true : !!r.value
+    );
+    btn.classList.toggle('has-filters', hasActive);
+}
+
+function rerenderAdvFilterRows() {
+    const container = document.getElementById('advFilterRows');
+    if (!container) return;
+    const rules = getAdvFilterRules();
+    if (rules.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = rules.map((rule, idx) => buildAdvFilterRowHtml(rule, idx)).join('');
+}
+
+function buildAdvFilterRowHtml(rule, idx) {
+    const fields = getActiveAdvFilterFields();
+    const fieldDef = fields[rule.field];
+    const connector = idx === 0 ? 'Where' : 'and';
+
+    const fieldOptions = Object.entries(fields)
+        .map(([k, f]) => `<option value="${k}"${k === rule.field ? ' selected' : ''}>${escapeHtml(f.label)}</option>`)
+        .join('');
+
+    const opOptions = fieldDef.operators
+        .map(op => `<option value="${op}"${op === rule.operator ? ' selected' : ''}>${escapeHtml(ADV_FILTER_OP_LABELS[op] || op)}</option>`)
+        .join('');
+
+    const valueHtml = buildAdvFilterValueHtml(rule, fieldDef);
+
+    return `<div class="adv-filter-row" data-rule-id="${rule.id}">
+        <span class="adv-filter-connector">${connector}</span>
+        <select class="adv-filter-field" data-rule-id="${rule.id}">${fieldOptions}</select>
+        <select class="adv-filter-operator" data-rule-id="${rule.id}">${opOptions}</select>
+        ${valueHtml}
+        <button class="adv-filter-remove" data-rule-id="${rule.id}" title="Remove"><i class="fa-solid fa-xmark"></i></button>
+    </div>`;
+}
+
+function buildAdvFilterValueHtml(rule, fieldDef) {
+    if (ADV_FILTER_NO_VALUE_OPS.has(rule.operator)) return '';
+
+    if (rule.operator === 'in_the_last') {
+        return `<div class="adv-filter-value">
+            <input type="number" class="adv-filter-input" data-rule-id="${rule.id}" min="1" value="${escapeHtml(rule.value || '7')}">
+            <span class="adv-filter-unit">days</span>
+        </div>`;
+    }
+
+    if (rule.operator === 'before' || rule.operator === 'after') {
+        return `<div class="adv-filter-value">
+            <input type="date" class="adv-filter-input" data-rule-id="${rule.id}" value="${escapeHtml(rule.value || '')}">
+        </div>`;
+    }
+
+    if (fieldDef.type === 'number') {
+        return `<div class="adv-filter-value">
+            <input type="number" class="adv-filter-input" data-rule-id="${rule.id}" min="0" value="${escapeHtml(rule.value || '')}" placeholder="0">
+        </div>`;
+    }
+
+    if (fieldDef.type === 'provider') {
+        const opts = ADV_FILTER_PROVIDERS
+            .map(p => `<option value="${p.value}"${p.value === (rule.value || ADV_FILTER_PROVIDERS[0]?.value) ? ' selected' : ''}>${escapeHtml(p.label)}</option>`)
+            .join('');
+        return `<div class="adv-filter-value"><select class="adv-filter-input" data-rule-id="${rule.id}">${opts}</select></div>`;
+    }
+
+    if (fieldDef.type === 'playlist') {
+        const playlists = window.playlistsGetAll?.() || [];
+        const opts = playlists
+            .map(pl => `<option value="${escapeHtml(pl.uid)}"${pl.uid === rule.value ? ' selected' : ''}>${escapeHtml(pl.name)}</option>`)
+            .join('');
+        return `<div class="adv-filter-value"><select class="adv-filter-input" data-rule-id="${rule.id}">${opts}</select></div>`;
+    }
+
+    return `<div class="adv-filter-value">
+        <input type="search" class="adv-filter-input" data-rule-id="${rule.id}" value="${escapeHtml(rule.value || '')}" placeholder="Value..." autocomplete="off">
+    </div>`;
+}
+
+function evaluateAdvancedFilters(c) {
+    for (const rule of charAdvFilterRules) {
+        const needsValue = !ADV_FILTER_NO_VALUE_OPS.has(rule.operator);
+        if (needsValue && !rule.value) continue;
+        if (!evaluateAdvFilterRule(c, rule)) return false;
+    }
+    return true;
+}
+
+function evaluateAdvFilterRule(c, rule) {
+    const op = rule.operator;
+    const val = (rule.value || '').toLowerCase();
+
+    switch (rule.field) {
+        case 'name': return evalTextOp(c._lowerName, op, val);
+        case 'creator': return evalTextOp(c._lowerCreator, op, val);
+        case 'tags': return evalTagOp(c, op, val);
+        case 'creatorNotes': {
+            const notes = (c.creator_notes || c.data?.creator_notes || '').toLowerCase();
+            return evalTextOp(notes, op, val);
+        }
+        case 'favorite':
+            return op === 'is_true' ? isCharacterFavorite(c) : !isCharacterFavorite(c);
+        case 'providerLink': return evalProviderOp(c, op, rule.value);
+        case 'dateAdded': return evalDateOp(c._dateAdded, op, rule.value);
+        case 'dateCreated': return evalDateOp(c._createDate, op, rule.value);
+        case 'lastChat': return evalLastChatOp(c, op, rule.value);
+        case 'version': {
+            const ver = (c.character_version || c.data?.character_version || '').toLowerCase();
+            return evalTextOp(ver, op, val);
+        }
+        case 'playlist': return evalPlaylistOp(c, op, rule.value);
+    }
+    return true;
+}
+
+function evalTextOp(text, op, val) {
+    switch (op) {
+        case 'contains': return text.includes(val);
+        case 'not_contains': return !text.includes(val);
+        case 'equals': return text === val;
+        case 'starts_with': return text.startsWith(val);
+        case 'is_empty': return !text;
+        case 'is_not_empty': return !!text;
+    }
+    return true;
+}
+
+function evalTagOp(c, op, val) {
+    const tags = getTags(c);
+    const hasTag = tags.some(t => t.toLowerCase() === val);
+    return op === 'includes' ? hasTag : !hasTag;
+}
+
+function evalProviderOp(c, op, val) {
+    if (op === 'is_linked') return !!window.ProviderRegistry?.getLinkInfo(c);
+    if (op === 'is_not_linked') return !window.ProviderRegistry?.getLinkInfo(c);
+    const prov = val ? window.ProviderRegistry?.getProvider(val) : null;
+    const isLinked = prov ? !!prov.getLinkInfo(c) : false;
+    return op === 'linked_to' ? isLinked : !isLinked;
+}
+
+function evalDateOp(timestamp, op, rawVal) {
+    if (!timestamp) return false;
+    if (op === 'in_the_last') {
+        const days = parseInt(rawVal, 10);
+        if (isNaN(days) || days <= 0) return true;
+        return timestamp >= Date.now() - days * 86400000;
+    }
+    const target = new Date(rawVal).getTime();
+    if (isNaN(target)) return true;
+    if (op === 'before') return timestamp < target;
+    if (op === 'after') return timestamp > target;
+    return true;
+}
+
+function evalLastChatOp(c, op, rawVal) {
+    if (op === 'never') return !c._dateLastChat;
+    if (!c._dateLastChat) return false;
+    return evalDateOp(c._dateLastChat, op, rawVal);
+}
+
+function evalPlaylistOp(c, op, val) {
+    if (op === 'in_any') return !!(window.playlistsIsCharInAny?.(c.avatar));
+    if (op === 'not_in_any') return !(window.playlistsIsCharInAny?.(c.avatar));
+    const avatarSet = window.playlistsGetAvatarSet?.(val);
+    const inPlaylist = avatarSet ? avatarSet.has(c.avatar) : false;
+    return op === 'in' ? inPlaylist : !inPlaylist;
+}
+
+function evaluateChatAdvancedFilters(chat) {
+    for (const rule of chatAdvFilterRules) {
+        const needsValue = !ADV_FILTER_NO_VALUE_OPS.has(rule.operator);
+        if (needsValue && !rule.value) continue;
+        if (!evaluateChatAdvFilterRule(chat, rule)) return false;
+    }
+    return true;
+}
+
+function evaluateChatAdvFilterRule(chat, rule) {
+    const op = rule.operator;
+    const val = (rule.value || '').toLowerCase();
+
+    switch (rule.field) {
+        case 'charName': return evalTextOp((chat.charName || '').toLowerCase(), op, val);
+        case 'chatName': {
+            const name = (chat.file_name || '').replace('.jsonl', '').toLowerCase();
+            return evalTextOp(name, op, val);
+        }
+        case 'messageCount': return evalNumberOp(chat.chat_items || chat.mes_count || 0, op, rule.value);
+        case 'lastMessage': {
+            const ts = chat.last_mes ? new Date(chat.last_mes).getTime() : 0;
+            return ts ? evalDateOp(ts, op, rule.value) : false;
+        }
+        case 'isActive': {
+            const chatName = (chat.file_name || '').replace('.jsonl', '');
+            const isActive = chat.character?.chat === chatName;
+            return op === 'is_true' ? isActive : !isActive;
+        }
+        case 'charFavorite':
+            return op === 'is_true' ? isCharacterFavorite(chat.character) : !isCharacterFavorite(chat.character);
+        case 'charTags': return chat.character ? evalTagOp(chat.character, op, val) : false;
+        case 'charProviderLink': return chat.character ? evalProviderOp(chat.character, op, rule.value) : false;
+        case 'charPlaylist': return chat.character ? evalPlaylistOp(chat.character, op, rule.value) : false;
+    }
+    return true;
+}
+
+function evalNumberOp(num, op, rawVal) {
+    const target = parseInt(rawVal, 10);
+    if (isNaN(target)) return true;
+    switch (op) {
+        case 'more_than': return num > target;
+        case 'less_than': return num < target;
+        case 'equals': return num === target;
+    }
+    return true;
+}
+
+function getAdvFilterRulesForChats() {
+    return chatAdvFilterRules;
 }
 
 // Search and Filter Functionality (Global so it can be called from view switching)
@@ -12151,6 +12587,11 @@ function performSearch() {
             if (!isCharacterFavorite(c)) return false;
         }
 
+        // Advanced filter rules (AND with all other constraints)
+        if (charAdvFilterRules.length > 0) {
+            if (!evaluateAdvancedFilters(c)) return false;
+        }
+
         // 1. Text Search Logic
         let matchesSearch = false;
         if (!query) {
@@ -12267,7 +12708,7 @@ function filterLocalByCreator(creatorName) {
 // Debounced search for better performance (150ms delay)
 const debouncedSearch = debounce(performSearch, 150);
 
-const TOPBAR_DROPDOWN_IDS = ['tagFilterPopup', 'playlistFilterPopup', 'searchSettingsMenu', 'moreOptionsMenu', 'gallerySyncDropdown'];
+const TOPBAR_DROPDOWN_IDS = ['tagFilterPopup', 'playlistFilterPopup', 'searchSettingsMenu', 'moreOptionsMenu', 'gallerySyncDropdown', 'advFilterPanel'];
 
 function closeAllTopbarDropdowns(exceptId) {
     for (const id of TOPBAR_DROPDOWN_IDS) {
@@ -12399,6 +12840,90 @@ function setupEventListeners() {
         });
     }
     
+    // Advanced Filter Panel
+    const advFilterBtn = document.getElementById('advFilterBtn');
+    const advFilterPanel = document.getElementById('advFilterPanel');
+    const advFilterRows = document.getElementById('advFilterRows');
+
+    if (advFilterBtn && advFilterPanel) {
+        advFilterBtn.onclick = (e) => {
+            e.stopPropagation();
+            toggleAdvFilterPanel();
+        };
+
+        on('advFilterAddBtn', 'click', (e) => {
+            e.stopPropagation();
+            addAdvFilterRule();
+        });
+
+        on('advFilterClearAll', 'click', (e) => {
+            e.stopPropagation();
+            clearAllAdvFilters();
+        });
+
+        advFilterPanel.addEventListener('click', (e) => e.stopPropagation());
+
+        if (advFilterRows) {
+            advFilterRows.addEventListener('change', (e) => {
+                const ruleId = parseInt(e.target.dataset.ruleId);
+                const rule = getAdvFilterRules().find(r => r.id === ruleId);
+                if (!rule) return;
+
+                if (e.target.classList.contains('adv-filter-field')) {
+                    rule.field = e.target.value;
+                    const newField = getActiveAdvFilterFields()[rule.field];
+                    rule.operator = newField.operators[0];
+                    rule.value = '';
+                    rerenderAdvFilterRows();
+                    updateAdvFilterIndicator();
+                    triggerAdvFilterSearch();
+                } else if (e.target.classList.contains('adv-filter-operator')) {
+                    rule.operator = e.target.value;
+                    rule.value = '';
+                    rerenderAdvFilterRows();
+                    updateAdvFilterIndicator();
+                    triggerAdvFilterSearch();
+                } else if (e.target.classList.contains('adv-filter-input')) {
+                    rule.value = e.target.value;
+                    updateAdvFilterIndicator();
+                    triggerAdvFilterSearch();
+                }
+            });
+
+            advFilterRows.addEventListener('input', (e) => {
+                if (!e.target.classList.contains('adv-filter-input')) return;
+                const ruleId = parseInt(e.target.dataset.ruleId);
+                const rule = getAdvFilterRules().find(r => r.id === ruleId);
+                if (!rule) return;
+                rule.value = e.target.value;
+                updateAdvFilterIndicator();
+                debouncedAdvFilterSearch();
+            });
+
+            advFilterRows.addEventListener('click', (e) => {
+                const removeBtn = e.target.closest('.adv-filter-remove');
+                if (!removeBtn) return;
+                const ruleId = parseInt(removeBtn.dataset.ruleId);
+                removeAdvFilterRule(ruleId);
+            });
+        }
+
+        window.addEventListener('click', (e) => {
+            if (!advFilterPanel.classList.contains('hidden') &&
+                !advFilterPanel.contains(e.target) &&
+                e.target !== advFilterBtn &&
+                !advFilterBtn.contains(e.target)) {
+                advFilterPanel.classList.add('hidden');
+            }
+        });
+
+        window.registerOverlay?.({
+            id: 'advFilterPanel',
+            tier: 10,
+            close: () => closeAdvFilterPanel(),
+        });
+    }
+
     // More Options Dropdown Toggle
     const moreOptionsBtn = document.getElementById('moreOptionsBtn');
     const moreOptionsMenu = document.getElementById('moreOptionsMenu');
@@ -12879,6 +13404,7 @@ function addLorebookEntryField(container, entry = null, index = null) {
         </div>
     `;
     
+    wrapper._originalEntry = entry || null;
     container.appendChild(wrapper);
     
     // Set input values directly (not via innerHTML) to ensure .value properties are set correctly
@@ -12949,7 +13475,14 @@ function getLorebookFromEditor() {
         const keys = keysStr.split(',').map(k => k.trim()).filter(k => k);
         const secondaryKeys = secondaryKeysStr.split(',').map(k => k.trim()).filter(k => k);
         
+        const base = el._originalEntry ? { ...el._originalEntry } : {
+            position: 'before_char',
+            case_sensitive: false,
+            use_regex: false,
+            extensions: {}
+        };
         entries.push({
+            ...base,
             keys: keys,
             secondary_keys: secondaryKeys,
             content: content,
@@ -12960,12 +13493,7 @@ function getLorebookFromEditor() {
             insertion_order: order,
             order: order,
             priority: priority,
-            // Standard fields expected by SillyTavern
             id: idx,
-            position: 'before_char',
-            case_sensitive: false,
-            use_regex: false,
-            extensions: {}
         });
     });
     
@@ -14344,6 +14872,8 @@ startImportBtn?.addEventListener('click', async () => {
     // Helper to check if we should stop
     const shouldStop = () => importAbortState.abort;
     
+    const linkIndex = skipDuplicates ? buildProviderLinkIndex() : null;
+
     for (let i = 0; i < importItems.length; i++) {
         // === ABORT CHECK: top of each iteration ===
         if (shouldStop()) {
@@ -14363,13 +14893,15 @@ startImportBtn?.addEventListener('click', async () => {
                 
                 if (importSourceMode === 'url') {
                     // URL mode: check if any existing character is linked to same provider+identifier
-                    const existingMatch = allCharacters.find(char => {
-                        const linkInfo = item.provider.getLinkInfo(char);
-                        if (!linkInfo) return false;
-                        const linkPath = (linkInfo.fullPath || '').toLowerCase();
-                        const importId = String(item.identifier).toLowerCase();
-                        return linkPath === importId || String(linkInfo.id) === String(item.identifier);
-                    });
+                    const importId = String(item.identifier).toLowerCase();
+                    const existingMatch = linkIndex
+                        ? (linkIndex.providerIndex.get(`${item.provider.id}:${importId}`) || null)
+                        : allCharacters.find(char => {
+                            const linkInfo = item.provider.getLinkInfo(char);
+                            if (!linkInfo) return false;
+                            const linkPath = (linkInfo.fullPath || '').toLowerCase();
+                            return linkPath === importId || String(linkInfo.id).toLowerCase() === importId;
+                        });
                     
                     if (existingMatch) {
                         const existingName = getCharField(existingMatch, 'name');
@@ -14416,7 +14948,7 @@ startImportBtn?.addEventListener('click', async () => {
                                 first_mes: cardData.data.first_mes || '',
                                 scenario: cardData.data.scenario || ''
                             }
-                        });
+                        }, linkIndex);
                         
                         if (duplicateMatches.length > 0) {
                             const bestMatch = duplicateMatches[0];
@@ -14989,8 +15521,10 @@ let linkModalActiveProvider = null;
 
 /**
  * Open the provider link modal (works for any provider, not just ChubAI)
+ * @param {Object} [char] - Character to link (sets activeChar if provided)
  */
-function openProviderLinkModal() {
+function openProviderLinkModal(char) {
+    if (char) activeChar = char;
     if (!activeChar) return;
     
     const modal = document.getElementById('providerLinkModal');
@@ -15198,8 +15732,13 @@ async function linkToSearchResult(btn) {
     let resultId = resultEl.dataset.id;
     const providerId = resultEl.dataset.providerId;
     
+    if (!providerId) {
+        showToast('No provider specified for this result', 'error');
+        return;
+    }
+    
     const registry = window.ProviderRegistry;
-    const provider = providerId ? registry?.getProvider(providerId) : registry?.getProvider('chub');
+    const provider = registry?.getProvider(providerId);
     
     if (!provider) {
         showToast('Provider not found', 'error');
@@ -16365,6 +16904,10 @@ async function saveProviderLink(char, provider, linkInfo) {
         throw new Error(`Failed to save character: ${response.status} ${errorText}`);
     }
 
+    if (char.data?.extensions) {
+        _extensionsCache.set(char.avatar, char.data.extensions);
+    }
+
     // Sync to ST main window
     try {
         const context = getSTContext();
@@ -16398,6 +16941,10 @@ async function setUpdateLocked(avatar, locked) {
     if (!response.ok) {
         const errorText = await response.text().catch(() => 'Unknown error');
         throw new Error(`Failed to save update lock: ${response.status} ${errorText}`);
+    }
+
+    if (char.data?.extensions) {
+        _extensionsCache.set(char.avatar, char.data.extensions);
     }
 }
 
@@ -19138,12 +19685,13 @@ function calculateFastSimilarity(normA, normB) {
     }
     
     // === DETERMINE CONFIDENCE ===
-    // Use configurable minimum score threshold
-    const minScore = getSetting('duplicateMinScore') || 35;
+    // Fast scan uses a low fixed floor to cast a wide net for candidates.
+    // The user's minScore threshold is applied in calculateCharacterSimilarity
+    // (the full scorer) and in the post-rescore filter.
     let confidence = null;
     if (score >= 60) confidence = 'high';
     else if (score >= 40) confidence = 'medium';
-    else if (score >= minScore) confidence = 'low';
+    else if (score >= 25) confidence = 'low';
     
     let matchReason = matchReasons.length > 0 
         ? matchReasons.slice(0, 3).join(', ')
@@ -19484,15 +20032,12 @@ function calculateCharacterSimilarity(charA, charB) {
     }
     
     // === DETERMINE CONFIDENCE ===
-    // Use configurable minimum score threshold
     const minScore = getSetting('duplicateMinScore') || 35;
     let confidence = null;
-    if (score >= 60) {
-        confidence = 'high';
-    } else if (score >= 40) {
-        confidence = 'medium';
-    } else if (score >= minScore) {
-        confidence = 'low';
+    if (score >= minScore) {
+        if (score >= 60) confidence = 'high';
+        else if (score >= 40) confidence = 'medium';
+        else confidence = 'low';
     }
     
     // Build match reason string
@@ -19525,7 +20070,7 @@ async function findCharacterDuplicates(forceRefresh = false) {
         duplicateScanCache.charCount === allCharacters.length &&
         (now - duplicateScanCache.timestamp) < DUPLICATE_CACHE_TTL) {
         debugLog('[Duplicates] Using cached results');
-        return duplicateScanCache.groups;
+        return applyDuplicateMinScoreFilter(duplicateScanCache.groups);
     }
     
     const statusEl = document.getElementById('charDuplicatesScanStatus');
@@ -19697,14 +20242,73 @@ async function findCharacterDuplicates(forceRefresh = false) {
     
     debugLog('[Duplicates] Found', groups.length, 'potential duplicate groups');
     
-    return groups;
+    return applyDuplicateMinScoreFilter(groups);
+}
+
+function applyDuplicateMinScoreFilter(groups) {
+    const minScore = getSetting('duplicateMinScore') || 35;
+    const filtered = [];
+    for (const group of groups) {
+        const dupes = group.duplicates.filter(d => d.score >= minScore);
+        if (dupes.length > 0) {
+            filtered.push({ ...group, duplicates: dupes });
+        }
+    }
+    return filtered;
+}
+
+/**
+ * Build a lookup index of all provider links across allCharacters.
+ * Called once before batch operations to avoid O(N*P) getLinkInfo calls per item.
+ * @returns {{ pathIndex: Map<string, {char, providerName}>, providerIndex: Map<string, Object> }}
+ */
+function buildProviderLinkIndex() {
+    const pathIndex = new Map();
+    const providerIndex = new Map();
+    const allProviders = window.ProviderRegistry?.getAllProviders() || [];
+
+    for (const existing of allCharacters) {
+        if (!existing) continue;
+
+        for (const provider of allProviders) {
+            const linkInfo = provider.getLinkInfo(existing);
+            if (!linkInfo) continue;
+
+            if (linkInfo.fullPath) {
+                const path = linkInfo.fullPath.toLowerCase();
+                if (!pathIndex.has(path)) {
+                    pathIndex.set(path, { char: existing, providerName: provider.name });
+                }
+                providerIndex.set(`${provider.id}:${path}`, existing);
+            }
+            if (linkInfo.id != null) {
+                providerIndex.set(`${provider.id}:${String(linkInfo.id).toLowerCase()}`, existing);
+            }
+        }
+
+        // Legacy chub fields (pre-provider-system characters)
+        const chubUrl = existing.data?.extensions?.chub?.url ||
+                       existing.data?.extensions?.chub?.full_path ||
+                       existing.chub_url || existing.source_url || '';
+        if (chubUrl) {
+            const urlMatch = chubUrl.match(/characters\/([^\/]+\/[^\/\?]+)/);
+            const chubPath = urlMatch ? urlMatch[1].toLowerCase() : chubUrl.toLowerCase();
+            if (!pathIndex.has(chubPath)) {
+                pathIndex.set(chubPath, { char: existing, providerName: null });
+            }
+        }
+    }
+
+    return { pathIndex, providerIndex };
 }
 
 /**
  * Check if a new character has potential duplicates in library
- * Returns array of potential matches
+ * @param {Object} newChar
+ * @param {{ pathIndex: Map, providerIndex: Map }|null} linkIndex - Pre-built index from buildProviderLinkIndex()
+ * @returns {Array}
  */
-function checkCharacterForDuplicates(newChar) {
+function checkCharacterForDuplicates(newChar, linkIndex) {
     const matches = [];
     
     const newFullPath = (newChar.fullPath || newChar.full_path || '').toLowerCase();
@@ -19720,13 +20324,49 @@ function checkCharacterForDuplicates(newChar) {
         creator_notes: newChar.creator_notes || newChar.definition?.creator_notes || ''
     };
     
+    const pathMatchedAvatars = new Set();
+
+    if (linkIndex && newFullPath) {
+        // Fast path: use pre-built index for provider path matching
+        const exactHit = linkIndex.pathIndex.get(newFullPath);
+        if (exactHit) {
+            matches.push({
+                char: exactHit.char,
+                confidence: 'high',
+                matchReason: exactHit.providerName
+                    ? `Same ${exactHit.providerName} character (exact path match)`
+                    : 'Same character (exact path match)',
+                score: 100,
+                breakdown: { providerPath: 100 }
+            });
+            pathMatchedAvatars.add(exactHit.char.avatar);
+        } else {
+            // Substring fallback: scan index entries (still no getLinkInfo calls)
+            for (const [indexedPath, entry] of linkIndex.pathIndex) {
+                if (indexedPath.includes(newFullPath) || newFullPath.includes(indexedPath)) {
+                    matches.push({
+                        char: entry.char,
+                        confidence: 'high',
+                        matchReason: entry.providerName
+                            ? `Same ${entry.providerName} character (exact path match)`
+                            : 'Same character (exact path match)',
+                        score: 100,
+                        breakdown: { providerPath: 100 }
+                    });
+                    pathMatchedAvatars.add(entry.char.avatar);
+                    break;
+                }
+            }
+        }
+    }
+
     for (const existing of allCharacters) {
         if (!existing) continue;
+        if (pathMatchedAvatars.has(existing.avatar)) continue;
         
-        // Check for provider path match first (definitive match)
-        // Uses ProviderRegistry if available, falls back to Chub-specific check
+        // Inline provider path matching when no pre-built index is available
         let providerPathMatched = false;
-        if (newFullPath) {
+        if (!linkIndex && newFullPath) {
             const allProviders = window.ProviderRegistry?.getAllProviders() || [];
             for (const provider of allProviders) {
                 const linkInfo = provider.getLinkInfo(existing);
@@ -19745,7 +20385,6 @@ function checkCharacterForDuplicates(newChar) {
                 }
             }
             
-            // Fallback: check legacy chub extension fields directly
             if (!providerPathMatched) {
                 const existingChubUrl = existing.data?.extensions?.chub?.url || 
                                        existing.data?.extensions?.chub?.full_path ||
@@ -22404,6 +23043,17 @@ function initThemeCustomizer() {
     window.registerOverlay({ id: 'themeCustomizerOverlay', tier: 5, close: () => closeThemeCustomizer() });
 }
 
+// Overlay registrations for library.js modals
+window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => closeModal() });
+window.registerOverlay?.({ id: 'disableGalleryFoldersModal', tier: 6, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'greetingsExpandModal', tier: 5, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'lorebookExpandModal', tier: 5, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'expandFieldModal', tier: 5, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'chubExpandModal', tier: 5, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'creatorNotesFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'contentFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'altGreetingsFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
+
 function openThemeCustomizer() {
     initThemeCustomizer();
     syncCustomizerSliders();
@@ -22473,6 +23123,7 @@ window.sanitizeFolderName = sanitizeFolderName;
 window.initCustomSelect = initCustomSelect;
 window.closeAllTopbarDropdowns = closeAllTopbarDropdowns;
 window.debounce = debounce;
+window.truncate = truncate;
 window.sanitizeTaglineHtml = sanitizeTaglineHtml;
 
 // Character Data
@@ -22492,6 +23143,9 @@ window.getCharacterGalleryId = getCharacterGalleryId;
 window.removeGalleryFolderOverride = removeGalleryFolderOverride;
 window.deleteCharacter = deleteCharacter;
 window.generateGalleryId = generateGalleryId;
+window.getCharacterByAvatar = getCharacterByAvatar;
+window.getGallerySyncAuditDone = function() { return gallerySyncAuditDone; };
+window.setGallerySyncAuditDone = function(v) { gallerySyncAuditDone = v; };
 
 // UI / Modals
 window.openModal = openModal;
@@ -22508,6 +23162,7 @@ window.showImportSummaryModal = showImportSummaryModal;
 window.switchView = switchView;
 window.getCurrentView = getCurrentView;
 window.onViewEnter = onViewEnter;
+window.onViewExit = onViewExit;
 
 // DOM / Rendering helpers
 window.renderLoadingState = renderLoadingState;
@@ -22518,11 +23173,20 @@ window.registerGalleryFolderOverride = registerGalleryFolderOverride;
 window.debugLog = debugLog;
 window.performSearch = performSearch;
 window.toggleFavoritesFilter = toggleFavoritesFilter;
+window.toggleAdvFilterPanel = toggleAdvFilterPanel;
+window.closeAdvFilterPanel = closeAdvFilterPanel;
+window.evaluateChatAdvancedFilters = evaluateChatAdvancedFilters;
+window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
 window.setPlaylistFilter = setPlaylistFilter;
 window.clearPlaylistFilter = clearPlaylistFilter;
 window.populatePlaylistDropdown = populatePlaylistDropdown;
 window.renderSidebarPlaylists = renderSidebarPlaylists;
 window.refreshPlaylistBadges = refreshPlaylistBadges;
+window.showElement = show;
+window.hideElement = hide;
+window.onElement = on;
+window.findCardElement = findCardElement;
+window.isMultiSelectEnabled = isMultiSelectEnabled;
 
 // Host window / ST context access
 window.getHostWindow = getHostWindow;
@@ -22883,6 +23547,10 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
             if (charIndex !== -1) {
                 allCharacters[charIndex].data = updatedData;
                 
+                if (updatedData.extensions) {
+                    _extensionsCache.set(avatar, updatedData.extensions);
+                }
+
                 // Also update root-level fields for compatibility
                 for (const [field, value] of Object.entries(fieldUpdates)) {
                     if (!field.includes('.')) {
@@ -22898,7 +23566,7 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
                 await handleGalleryFolderRename(char, oldName, newName, galleryId);
             }
             
-            console.log('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
+            debugLog('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
             return true;
         } else {
             console.error('[applyCardFieldUpdates] API error:', response.status);

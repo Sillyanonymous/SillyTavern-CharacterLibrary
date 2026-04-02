@@ -14,14 +14,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--space-sm);
     color: var(--text-muted);
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     height: 56px;
 }
 
 .gallery-sync-status-box .sync-status-placeholder i {
-    font-size: 1.2rem;
+    font-size: var(--font-lg);
     opacity: 0.6;
 }
 
@@ -29,22 +29,22 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     color: var(--accent);
-    font-size: 0.9rem;
+    font-size: var(--font-md);
     height: 56px;
 }
 
 .gallery-sync-status-box .sync-result {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .gallery-sync-status-box .sync-result-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
 }
 
 .gallery-sync-status-box .sync-result-header.healthy {
@@ -56,26 +56,26 @@
 }
 
 .gallery-sync-status-box .sync-result-header i {
-    font-size: 1.3rem;
+    font-size: var(--font-xl);
 }
 
 .gallery-sync-status-box .sync-result-header span {
     font-weight: 600;
-    font-size: 0.95rem;
+    font-size: var(--font-base);
 }
 
 .gallery-sync-status-box .sync-issues-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-xs);
     padding-left: 28px;
 }
 
 .gallery-sync-status-box .sync-issue-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.8rem;
+    gap: var(--space-sm);
+    font-size: var(--font-sm);
     color: var(--text-muted);
 }
 
@@ -88,18 +88,18 @@
 
 .gallery-sync-status-box .sync-stats {
     display: flex;
-    gap: 15px;
+    gap: var(--space-lg);
     padding-top: 8px;
     border-top: 1px solid var(--glass-border);
     margin-top: 4px;
 }
 
 .gallery-sync-status-box .sync-stats span {
-    font-size: 0.75rem;
+    font-size: var(--font-xs);
     color: var(--text-muted);
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
 }
 
 .gallery-sync-status-box .sync-stats span i {
@@ -109,11 +109,11 @@
 .gallery-sync-status-box .sync-progress {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-xs-sm);
 }
 
 .gallery-sync-status-box .sync-progress-text {
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     color: var(--accent);
 }
 
@@ -133,7 +133,7 @@
 /* Gallery Sync Buttons Row */
 .gallery-sync-buttons {
     display: flex;
-    gap: 10px;
+    gap: var(--space-sm-md);
     flex-wrap: wrap;
 }
 
@@ -178,7 +178,7 @@
     height: 16px;
     background: #e74c3c;
     color: white;
-    font-size: 0.65rem;
+    font-size: var(--font-3xs);
     font-weight: 600;
     border-radius: 8px;
     display: flex;
@@ -217,7 +217,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: var(--space-sm);
     color: var(--text-muted);
     padding: 15px;
 }
@@ -225,7 +225,7 @@
 .sync-dropdown-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding-bottom: 10px;
     border-bottom: 1px solid var(--glass-border);
     margin-bottom: 10px;
@@ -240,27 +240,27 @@
 }
 
 .sync-dropdown-header i {
-    font-size: 1.2rem;
+    font-size: var(--font-lg);
 }
 
 .sync-dropdown-header span {
     font-weight: 600;
-    font-size: 0.9rem;
+    font-size: var(--font-md);
 }
 
 .sync-dropdown-stats {
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: var(--space-sm-md);
     margin-bottom: 10px;
-    font-size: 0.8rem;
+    font-size: var(--font-sm);
     color: var(--text-muted);
 }
 
 .sync-dropdown-stats span {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
 }
 
 .sync-dropdown-issues {
@@ -270,8 +270,8 @@
 .sync-dropdown-issue {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.8rem;
+    gap: var(--space-sm);
+    font-size: var(--font-sm);
     color: var(--text-muted);
     padding: 4px 0;
 }
@@ -285,14 +285,14 @@
 
 .sync-dropdown-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--space-sm);
     padding-top: 10px;
     border-top: 1px solid var(--glass-border);
 }
 
 .sync-dropdown-actions .action-btn {
     flex: 1;
-    font-size: 0.8rem;
+    font-size: var(--font-sm);
     padding: 6px 10px;
 }
 
@@ -318,7 +318,7 @@
 .sync-issue-details .sync-issue-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 6px 8px;
     border-radius: 4px;
     transition: background 0.2s ease;
@@ -330,7 +330,7 @@
 
 .sync-issue-details .sync-expand-icon {
     margin-left: auto;
-    font-size: 0.7rem;
+    font-size: var(--font-2xs);
     opacity: 0.5;
     transition: transform 0.2s ease;
 }
@@ -347,13 +347,13 @@
     border-radius: 6px;
     max-height: 150px;
     overflow-y: auto;
-    font-size: 0.8rem;
+    font-size: var(--font-sm);
 }
 
 .sync-detail-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 4px 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
@@ -375,7 +375,7 @@
 .sync-detail-avatar {
     color: var(--text-muted);
     font-family: monospace;
-    font-size: 0.75rem;
+    font-size: var(--font-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -384,13 +384,13 @@
 .sync-detail-id {
     color: #3498db;
     font-family: monospace;
-    font-size: 0.75rem;
+    font-size: var(--font-xs);
 }
 
 .sync-detail-folder {
     color: #2ecc71;
     font-family: monospace;
-    font-size: 0.75rem;
+    font-size: var(--font-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

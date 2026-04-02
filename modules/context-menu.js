@@ -231,7 +231,7 @@ function buildSingleMenuItems(char, cardElement) {
     
     items.push({
         type: 'header',
-        label: truncateName(char.name || 'Character', 25)
+        label: CoreAPI.truncate(char.name || 'Character', 25)
     });
     
     items.push({
@@ -379,7 +379,7 @@ function renderMenu(items) {
 }
 
 function positionMenu(x, y) {
-    const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+    const zoom = parseFloat(document.body.style.zoom) || 1;
     x /= zoom;
     y /= zoom;
 
@@ -865,11 +865,6 @@ async function deleteCharacter(char) {
 
 function escapeHtml(text) {
     return CoreAPI.escapeHtml(text);
-}
-
-function truncateName(name, maxLength) {
-    if (name.length <= maxLength) return name;
-    return name.substring(0, maxLength - 1) + '…';
 }
 
 export function attachToCard(cardElement, char) {

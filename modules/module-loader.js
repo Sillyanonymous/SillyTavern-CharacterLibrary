@@ -302,29 +302,31 @@ async function initModuleSystem() {
     loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
     loadModuleCSS('./providers/wyvern/wyvern-browse.css');
     loadModuleCSS('./providers/datacat/datacat-browse.css');
-    try {
-        const [chubMod, jannyMod, chartavernMod, pygmalionMod, wyvernMod, datacatMod] = await Promise.all([
-            import('./providers/chub/chub-provider.js'),
-            import('./providers/janny/janny-provider.js'),
-            import('./providers/chartavern/chartavern-provider.js'),
-            import('./providers/pygmalion/pygmalion-provider.js'),
-            import('./providers/wyvern/wyvern-provider.js'),
-            import('./providers/datacat/datacat-provider.js'),
-        ]);
-
-        ProviderRegistry.registerProvider(chubMod.default);
-        ProviderRegistry.registerProvider(jannyMod.default);
-        ProviderRegistry.registerProvider(chartavernMod.default);
-        ProviderRegistry.registerProvider(pygmalionMod.default);
-        ProviderRegistry.registerProvider(wyvernMod.default);
-        ProviderRegistry.registerProvider(datacatMod.default);
-
-        await ProviderRegistry.initProviders(CoreAPI);
+    {
+        const providerImports = [
+            { name: 'chub', load: () => import('./providers/chub/chub-provider.js') },
+            { name: 'janny', load: () => import('./providers/janny/janny-provider.js') },
+            { name: 'chartavern', load: () => import('./providers/chartavern/chartavern-provider.js') },
+            { name: 'pygmalion', load: () => import('./providers/pygmalion/pygmalion-provider.js') },
+            { name: 'wyvern', load: () => import('./providers/wyvern/wyvern-provider.js') },
+            { name: 'datacat', load: () => import('./providers/datacat/datacat-provider.js') },
+        ];
+        const results = await Promise.allSettled(providerImports.map(p => p.load()));
+        for (let i = 0; i < results.length; i++) {
+            if (results[i].status === 'fulfilled') {
+                ProviderRegistry.registerProvider(results[i].value.default);
+            } else {
+                console.warn(`[ModuleLoader] Failed to load ${providerImports[i].name} provider:`, results[i].reason);
+            }
+        }
+        try {
+            await ProviderRegistry.initProviders(CoreAPI);
+        } catch (err) {
+            console.warn('[ModuleLoader] Provider initialization error:', err);
+        }
         window.ProviderRegistry = ProviderRegistry;
         window.closeActiveBrowseDropdowns = ProviderRegistry.closeActiveBrowseDropdowns;
-        console.log('[ModuleLoader] Providers registered and initialized');
-    } catch (err) {
-        console.warn('[ModuleLoader] Could not load providers:', err);
+        console.log(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
     }
 
     // ============================

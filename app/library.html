@@ -41,6 +41,19 @@
                     <button id="clearSearchBtn" class="clear-search-btn hidden" title="Clear search">
                         <i class="fa-solid fa-times"></i>
                     </button>
+                    <button id="advFilterBtn" class="adv-filter-btn" title="Advanced Filters">
+                        <i class="fa-solid fa-filter"></i>
+                    </button>
+                </div>
+                <div id="advFilterPanel" class="adv-filter-panel hidden">
+                    <div class="adv-filter-header">
+                        <span class="adv-filter-title">Filters</span>
+                        <button id="advFilterClearAll" class="adv-filter-clear">Clear all</button>
+                    </div>
+                    <div id="advFilterRows" class="adv-filter-rows"></div>
+                    <button id="advFilterAddBtn" class="adv-filter-add">
+                        <i class="fa-solid fa-plus"></i> Add filter
+                    </button>
                 </div>
                 <div class="search-settings-container">
                     <button id="searchSettingsBtn" class="glass-btn icon-only" title="Search Settings">
@@ -1283,6 +1296,39 @@ https://jannyai.com/characters/uuid_slug
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure provider order and NSFW defaults in Settings → Online.</p>
                         </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-cat"></i> DataCat / JanitorAI</h4>
+                            <p>The DataCat provider combines multiple data sources to give you the best coverage for JanitorAI characters. Each sort order pulls from a different source:</p>
+                            <p><strong>DataCat sort orders</strong> (Recent, Fresh 24h/7d):</p>
+                            <ul>
+                                <li>Characters come from <strong>DataCat's own database</strong>, which mirrors JanitorAI</li>
+                                <li>Full character definitions are available (personality, scenario, first message, etc.)</li>
+                                <li>Tags use DataCat's own category system</li>
+                                <li>Creator names are always available</li>
+                                <li>One-click import with complete card data</li>
+                                <li>The search bar only accepts <strong>DataCat or JanitorAI URLs</strong> and <strong>creator UUIDs</strong>. No text search</li>
+                            </ul>
+                            <p><strong>JanitorAI (MeiliSearch)</strong> sort orders (Newest, Oldest, Most/Least Tokens, Relevant):</p>
+                            <ul>
+                                <li>Searches JanitorAI's full-text search index directly</li>
+                                <li>Covers <strong>all published characters</strong> on JanitorAI</li>
+                                <li>The search bar supports <strong>text search</strong> (searches character names and descriptions) as well as <strong>JanitorAI URLs</strong> for direct lookup</li>
+                                <li>Tags use JanitorAI's own tag system (Male, Female, Anime, etc.)</li>
+                                <li>Creator names may be missing on grid cards (MeiliSearch doesn't always include them), but will appear in the preview modal if the character exists on DataCat</li>
+                                <li>Characters not yet on DataCat can be <strong>extracted</strong> on demand</li>
+                            </ul>
+                            <p><strong>JanitorAI (Hampter)</strong> sort orders (Trending, Popular):</p>
+                            <ul>
+                                <li>Pulls from JanitorAI's curated <strong>trending/popular feed</strong></li>
+                                <li>Only surfaces characters with significant engagement, not a complete index</li>
+                                <li>The search bar supports <strong>text search</strong> (filters within the trending/popular pool only) as well as <strong>JanitorAI URLs</strong></li>
+                                <li>Tag filtering is not available in this mode</li>
+                                <li>Creator names are always available</li>
+                            </ul>
+                            <p><strong>Across all modes:</strong> Pasting a <strong>JanitorAI character URL</strong> into the search bar will look up the character on DataCat. If it's found, the preview opens directly. If not, an extraction panel appears letting you request the character from DataCat's cloud service.</p>
+                            <p><strong>Extraction:</strong> When a character only exists on JanitorAI and hasn't been indexed by DataCat yet, the Import button changes to <strong>Extract</strong>. This sends a request to DataCat's cloud service, which visits the JanitorAI page and retrieves the full character definition. You can also paste a JanitorAI URL directly into the search bar to look up and extract specific characters.</p>
+                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
+                        </div>
                     </div>
 
                     <!-- Card Management -->
@@ -1798,6 +1844,12 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
                             </div>
+                            <div class="settings-row" data-platform="mobile">
+                                <label>
+                                    <input type="checkbox" id="settingsMobileProviderQuickSwitch" checked> Provider quick switch <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
+                                </label>
+                                <span class="settings-hint">Show a provider icon button next to the view tabs for quick provider switching in the Online view</span>
+                            </div>
                         </div>
                         
                         <div class="settings-group">
@@ -2112,6 +2164,18 @@ https://jannyai.com/characters/uuid_slug
                                         </button>
                                     </div>
                                 </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-cloud-arrow-down"></i> Extraction</div>
+                                    <div class="settings-row">
+                                        <label class="settings-checkbox-label">
+                                            <input type="checkbox" id="datacatPublicFeedCheckbox">
+                                            <span>Publish extracted characters on DataCat</span>
+                                        </label>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">When enabled, extracted characters appear on the public DataCat feed and are accessible via URL. Disable to keep extractions private (API-only access).</span>
+                                    </div>
+                                </div>
                                 <div class="settings-group" style="opacity: 0.45; pointer-events: none;">
                                     <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
                                     <div class="settings-row">
@@ -2367,7 +2431,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.5</span>
                             </div>
                         </div>
                     </div>

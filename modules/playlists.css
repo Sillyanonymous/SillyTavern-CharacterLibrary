@@ -1,7 +1,7 @@
 /* --- Playlist Picker Modal --- */
 
 .pl-picker-count {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     color: var(--cl-text-secondary);
     margin-left: auto;
     margin-right: 8px;
@@ -19,7 +19,7 @@
     top: 50%;
     transform: translateY(-25%);
     color: var(--cl-text-secondary);
-    font-size: 0.85em;
+    font-size: var(--font-md);
     pointer-events: none;
 }
 
@@ -32,7 +32,7 @@
 .pl-picker-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-2xs);
     padding: 6px 10px;
     max-height: 320px;
     overflow-y: auto;
@@ -41,7 +41,7 @@
 .pl-picker-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 7px 10px;
     border-radius: 6px;
     cursor: pointer;
@@ -53,7 +53,7 @@
 }
 
 .pl-picker-check {
-    font-size: 1.15em;
+    font-size: var(--font-lg);
     color: var(--cl-text-secondary);
     width: 20px;
     text-align: center;
@@ -75,7 +75,7 @@
 }
 
 .pl-picker-badge {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
@@ -87,7 +87,7 @@
     text-align: center;
     color: var(--cl-text-secondary);
     padding: 18px 16px;
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 /* Shared create-row (used in picker + manager lists) */
@@ -95,7 +95,7 @@
 .pl-create-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 7px 10px;
     border-radius: 6px;
     cursor: pointer;
@@ -110,7 +110,7 @@
 }
 
 .pl-create-row-icon {
-    font-size: 1em;
+    font-size: var(--font-base);
     width: 20px;
     text-align: center;
     flex-shrink: 0;
@@ -152,7 +152,7 @@
     top: 50%;
     transform: translateY(-25%);
     color: var(--cl-text-secondary);
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     pointer-events: none;
 }
 
@@ -160,7 +160,7 @@
     padding-left: 30px !important;
     width: 100%;
     box-sizing: border-box;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 #playlistFilterContent {
@@ -179,14 +179,14 @@
 .pl-filter-manage-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     width: 100%;
     padding: 6px 10px;
     border: none;
     border-radius: 5px;
     background: transparent;
     color: var(--cl-text-secondary);
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
 }
@@ -199,7 +199,7 @@
 .pl-filter-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 6px 10px;
     border-radius: 5px;
     cursor: pointer;
@@ -229,11 +229,11 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 .pl-filter-count {
-    font-size: 0.8rem;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary);
     flex-shrink: 0;
 }
@@ -249,16 +249,16 @@
 .playlists-container {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-xs-sm);
 }
 
 .pl-chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
     padding: 4px 10px;
     border-radius: 12px;
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     background: rgba(255, 255, 255, 0.08);
     color: var(--cl-text-primary);
     cursor: pointer;
@@ -274,7 +274,7 @@
     background: none;
     border: 1px dashed var(--cl-border);
     color: var(--cl-text-secondary);
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     padding: 4px 8px;
 }
 
@@ -296,7 +296,7 @@
     top: 50%;
     transform: translateY(-25%);
     color: var(--cl-text-secondary);
-    font-size: 0.85em;
+    font-size: var(--font-md);
     pointer-events: none;
 }
 
@@ -309,7 +309,7 @@
 .pl-manage-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-xs);
     padding: 6px 16px;
     max-height: 400px;
     overflow-y: auto;
@@ -318,7 +318,7 @@
 .pl-manage-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 5px 6px;
     border-radius: 6px;
     position: relative;
@@ -339,7 +339,7 @@
     transition: border-color 0.15s;
     padding: 0;
     color: var(--cl-text-primary);
-    font-size: 13px;
+    font-size: var(--font-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -368,7 +368,7 @@
     z-index: 10000;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     padding: 8px;
     background: var(--cl-glass-bg);
     border: 1px solid var(--cl-border);
@@ -381,7 +381,7 @@
 .pl-icon-picker-icons {
     display: flex;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: var(--space-2xs);
     max-height: 240px;
     overflow-y: auto;
 }
@@ -389,13 +389,13 @@
 .pl-icon-picker-colors {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-xs);
     padding-top: 4px;
     border-top: 1px solid var(--cl-border);
 }
 
 .pl-icon-picker-label {
-    font-size: 0.75em;
+    font-size: var(--font-xs);
     color: var(--cl-text-secondary);
     margin-right: 2px;
     flex-shrink: 0;
@@ -413,7 +413,7 @@
     background: transparent;
     cursor: pointer;
     color: var(--cl-text-primary);
-    font-size: 13px;
+    font-size: var(--font-sm);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -426,19 +426,19 @@
 }
 
 .pl-picker-icon {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     opacity: 0.7;
     flex-shrink: 0;
 }
 
 .pl-filter-icon {
-    font-size: 0.8rem;
+    font-size: var(--font-sm);
     opacity: 0.7;
     flex-shrink: 0;
 }
 
 .pl-chip-icon {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     opacity: 0.8;
 }
 
@@ -446,11 +446,11 @@
     flex: 1;
     min-width: 0;
     padding: 5px 8px;
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 .pl-manage-count {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
@@ -465,7 +465,7 @@
     color: var(--cl-text-secondary);
     cursor: pointer;
     padding: 6px;
-    font-size: 0.85em;
+    font-size: var(--font-md);
     opacity: 0.5;
     transition: opacity 0.15s, color 0.15s;
     flex-shrink: 0;
@@ -551,7 +551,7 @@
     }
     #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
     #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
-    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: 0.9rem; }
+    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: var(--font-md); }
     #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
     #playlistFilterContent { padding: 4px 0; }
 

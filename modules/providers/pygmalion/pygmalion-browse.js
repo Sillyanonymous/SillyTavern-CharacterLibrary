@@ -45,6 +45,7 @@ let pygCurrentPage = 0;
 let pygTotalItems = 0;
 let pygHasMore = true;
 let pygIsLoading = false;
+let pygLoadToken = 0;
 let pygGridRenderedCount = 0;
 
 let pygSelectedChar = null;
@@ -267,7 +268,8 @@ function updateLoadMore() {
 // ========================================
 
 async function loadCharacters(append = false) {
-    if (pygIsLoading) return;
+    if (append && pygIsLoading) return;
+    const thisToken = ++pygLoadToken;
     pygIsLoading = true;
 
     const grid = document.getElementById('pygGrid');
@@ -312,6 +314,7 @@ async function loadCharacters(append = false) {
             });
         }
 
+        if (thisToken !== pygLoadToken) return;
         if (!delegatesInitialized) return;
 
         let hits = data?.characters || [];
@@ -365,7 +368,7 @@ async function loadCharacters(append = false) {
                         tagsNamesExclude: mergedExclude,
                     });
                 }
-                if (!delegatesInitialized) return;
+                if (thisToken !== pygLoadToken || !delegatesInitialized) return;
                 let moreHits = moreData?.characters || [];
                 if (strictTagFilter) {
                     const requiredTags = Array.from(pygIncludeTags).map(t => t.toLowerCase());
@@ -412,6 +415,7 @@ async function loadCharacters(append = false) {
         debugLog('[PygBrowse] Loaded', hits.length, 'characters, page', pygCurrentPage, '/', totalPages, 'total:', pygTotalItems);
 
     } catch (err) {
+        if (thisToken !== pygLoadToken) return;
         if (err.authFailed && pygNsfwEnabled) {
             console.warn('[PygBrowse] Auth failed during NSFW search, attempting re-login:', err.message);
             // Try auto-login before falling back to SFW
@@ -445,10 +449,12 @@ async function loadCharacters(append = false) {
             }
         }
     } finally {
-        pygIsLoading = false;
-        if (loadMoreBtn) {
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+        if (thisToken === pygLoadToken) {
+            pygIsLoading = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     }
 }
@@ -2261,6 +2267,8 @@ function initPygView() {
             }
         }
 
+        window.registerOverlay?.({ id: 'pygCharModal', tier: 7, close: () => closePreviewModal() });
+        window.registerOverlay?.({ id: 'pygLoginModal', tier: 6, close: () => closePygTokenModal() });
     }
 }
 

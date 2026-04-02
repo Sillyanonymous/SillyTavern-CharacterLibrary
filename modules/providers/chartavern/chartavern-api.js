@@ -224,6 +224,7 @@ export async function fetchCharacterDetail(author, slug, apiRequest) {
 export async function fetchTopTags() {
     const url = `${CT_API_BASE}/catalog/top-tags`;
     const resp = await fetchWithProxy(url);
+    if (!resp.ok) throw new Error(`Top tags fetch failed (${resp.status})`);
     return resp.json();
 }
 

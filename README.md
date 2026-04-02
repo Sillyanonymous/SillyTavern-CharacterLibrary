@@ -45,7 +45,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 2. Refresh SillyTavern's page
 3. Click SillyTavern's native "Character Management" button. A dropdown appears where you can select Character Library
 4. *(Optional)* Switch to **Embedded Panel** mode in the extension settings for an integrated experience (see [Display Modes](#-display-modes))
-5. *(Optional)* For Pygmalion and CharacterTavern login (required for NSFW browsing), install the [cl-helper plugin](#cl-helper-plugin-not-detected)
+5. *(Optional)* For Pygmalion login, CharacterTavern NSFW access, and DataCat browsing, install the [cl-helper plugin](#cl-helper-plugin-not-detected)
 
 
 
@@ -403,16 +403,17 @@ All providers share a common set of capabilities:
 
 ### Provider Feature Matrix
 
-| Feature | ChubAI | JanitorAI | CharacterTavern | Pygmalion | Wyvern |
-|---------|--------|-----------|-----------------|-----------|--------|
-| Browse & Search | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Card Updates | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Character Linking | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Gallery Downloads | ✅ | -- | -- | ✅ | ✅ |
-| Remote Version History | ✅ | -- | -- | -- | -- |
-| Following / Timeline | ✅ | -- | -- | ✅ | ✅ |
-| Favorites | ✅ | -- | -- | -- | -- |
-| Auth Required | Optional | None | Optional | Optional | Optional |
+| Feature | ChubAI | JanitorAI | CharacterTavern | Pygmalion | Wyvern | DataCat |
+|---------|--------|-----------|-----------------|-----------|--------|----------|
+| Browse & Search | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Card Updates | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Character Linking | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Gallery Downloads | ✅ | -- | -- | ✅ | ✅ | -- |
+| Remote Version History | ✅ | -- | -- | -- | -- | -- |
+| Following / Timeline | ✅ | -- | -- | ✅ | ✅ | -- |
+| Favorites | ✅ | -- | -- | -- | -- | -- |
+| JanitorAI Extraction | -- | -- | -- | -- | -- | ✅ |
+| Auth Required | Optional | None | Optional | Optional | Optional | None |
 
 <details>
 <summary><h3>ChubAI</h3></summary>
@@ -531,6 +532,42 @@ CharacterTavern requires a session cookie for NSFW content. To set it up:
 
 </details>
 
+<details>
+<summary><h3>DataCat (Experimental)</h3></summary>
+
+**Auth:** None required. An anonymous session is created automatically via the [cl-helper plugin](#cl-helper-plugin-not-detected).
+
+> **This provider is experimental and disabled by default.** Enable it in Settings > Online > Providers. Expect rough edges: the API is barebones and some features may return incomplete results.
+
+DataCat aggregates JanitorAI characters with its own REST API and AI-powered character scoring.
+
+- Browse recent and popular characters
+- Sort by newest, trending, popular, and Hampter algorithm modes
+- Filter by tags and NSFW toggle
+- In-app character preview with card details
+- Character linking and card updates
+- **Creator search** to find characters by a specific creator
+- **JanitorAI search** via MeiliSearch integration (searches JanitorAI's full catalog through DataCat)
+
+#### JanitorAI Extraction
+
+DataCat can extract character definitions from JanitorAI URLs, including private/hidden definitions that aren't available via JanitorAI's public API:
+
+1. Paste a JanitorAI character URL in the DataCat search bar
+2. If the character is already on DataCat, the preview opens directly
+3. If not, an extraction panel appears. Click **Extract** to queue the request
+4. DataCat runs a cloud browser instance to retrieve the character definition
+5. Once complete, the character is available for preview and import
+
+Extraction is handled entirely by DataCat's servers. The `appearOnPublicFeed` option in Settings controls whether extracted characters appear on DataCat's public feed.
+
+#### Setup
+1. Ensure the [cl-helper plugin](#cl-helper-plugin-not-detected) is installed and detected (required for session proxying)
+2. Enable DataCat in Settings > Online > Providers
+3. The session initializes automatically on first browse
+
+</details>
+
 ### Character Linking
 
 Link your local characters to their online source for updates, gallery downloads, and version history:
@@ -564,6 +601,7 @@ Type these prefixes in the search bar for targeted filtering:
 | `ct:` | `ct:yes` or `ct:no` | CharacterTavern link specifically |
 | `pygmalion:` | `pygmalion:yes` or `pygmalion:no` | Pygmalion link specifically |
 | `wyvern:` | `wyvern:yes` or `wyvern:no` | Wyvern link specifically |
+| `datacat:` | `datacat:yes` or `datacat:no` | DataCat link specifically (also `dc:`) |
 | `version:` | `version:1.0` | Match character version string |
 | `gallery:` | `gallery:aB3x` or `gallery:none` | Match gallery ID (or `none` for unassigned) |
 | `uid:` | `uid:abc123` or `uid:none` | Match version UID (or `none` for unassigned) |
@@ -609,7 +647,7 @@ The full app is optimized for mobile with:
 
 ### cl-helper plugin not detected
 
-The **cl-helper** plugin is required for Pygmalion and CharacterTavern login, which unlocks NSFW browsing on both providers. It ships with Character Library in the `extras/cl-helper/` folder but needs to be placed in SillyTavern's plugins directory:
+The **cl-helper** plugin is required for Pygmalion login, CharacterTavern NSFW access, and DataCat session proxying. It ships with Character Library in the `extras/cl-helper/` folder but needs to be placed in SillyTavern's plugins directory:
 
 1. Copy (or symlink) the `extras/cl-helper` folder into your SillyTavern **plugins** directory:
    ```
@@ -622,7 +660,7 @@ The **cl-helper** plugin is required for Pygmalion and CharacterTavern login, wh
 3. **Restart SillyTavern** (plugins only load at startup)
 4. Verify in the login/auth modal (appears when enabling NSFW). You should see "cl-helper plugin detected"
 
-> The plugin runs server-side to handle auth flows that browsers can't do directly (e.g. Origin headers for Pygmalion, cookie proxying for CharacterTavern). It only communicates with the specific provider APIs. See the [plugin source](extras/cl-helper/index.js) for details.
+> The plugin runs server-side to handle auth flows that browsers can't do directly (e.g. Origin headers for Pygmalion, cookie proxying for CharacterTavern, session token management for DataCat). It only communicates with the specific provider APIs and only forwards GET requests through its read-only proxies. See the [plugin source](extras/cl-helper/index.js) for details.
 
 ### Media downloads fail with CORS errors
 

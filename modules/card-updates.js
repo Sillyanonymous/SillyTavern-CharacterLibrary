@@ -130,6 +130,9 @@ export function init(deps) {
     injectModals();
     setupEventListeners();
     rebuildEffectiveFields();
+
+    window.registerOverlay?.({ id: 'cardUpdateSingleModal', tier: 7, close: () => closeSingleModal(), visible: (el) => el.classList.contains('visible') });
+    window.registerOverlay?.({ id: 'cardUpdateBatchModal', tier: 8, close: () => closeBatchModal(), visible: (el) => el.classList.contains('visible') });
     
     isInitialized = true;
     CoreAPI.debugLog('[CardUpdates] Module initialized');
@@ -754,9 +757,9 @@ function renderDiffItem(diff, idx) {
                 <span class="card-update-diff-label">${CoreAPI.escapeHtml(diff.label)}</span>
             </label>
             <div class="card-update-diff-values">
-                <span class="local-value" title="${CoreAPI.escapeHtml(localDisplay)}">${CoreAPI.escapeHtml(truncate(localDisplay, 50))}</span>
+                <span class="local-value" title="${CoreAPI.escapeHtml(localDisplay)}">${CoreAPI.escapeHtml(CoreAPI.truncate(localDisplay, 50))}</span>
                 <i class="fa-solid fa-arrow-right"></i>
-                <span class="remote-value" title="${CoreAPI.escapeHtml(remoteDisplay)}">${CoreAPI.escapeHtml(truncate(remoteDisplay, 50))}</span>
+                <span class="remote-value" title="${CoreAPI.escapeHtml(remoteDisplay)}">${CoreAPI.escapeHtml(CoreAPI.truncate(remoteDisplay, 50))}</span>
             </div>
         </div>
     `;
@@ -1120,10 +1123,28 @@ function lorebookEntryMatchScore(a, b) {
     return 0;
 }
 
+function normalizeKeysForComparison(arr) {
+    if (!Array.isArray(arr) || arr.length === 0) return [];
+    const expanded = [];
+    for (const k of arr) {
+        for (const part of String(k).split(',')) {
+            const trimmed = part.trim();
+            if (trimmed) expanded.push(trimmed);
+        }
+    }
+    return expanded.sort();
+}
+
 function compareLorebookEntryFields(local, remote) {
     const changed = [];
     for (const f of LOREBOOK_ENTRY_FIELDS) {
         if (f === 'id' || f === 'name' || f === 'comment') continue;
+        if (f === 'keys' || f === 'secondary_keys') {
+            if (JSON.stringify(normalizeKeysForComparison(local[f])) !== JSON.stringify(normalizeKeysForComparison(remote[f]))) {
+                changed.push(f);
+            }
+            continue;
+        }
         if (JSON.stringify(local[f] ?? null) !== JSON.stringify(remote[f] ?? null)) {
             changed.push(f);
         }
@@ -1149,7 +1170,9 @@ const LOREBOOK_ENTRY_FIELDS = [
 function normalizeLorebookEntry(entry) {
     const out = {};
     for (const f of LOREBOOK_ENTRY_FIELDS) {
-        if (entry[f] !== undefined) out[f] = entry[f];
+        if (entry[f] !== undefined) {
+            out[f] = (f === 'keys' || f === 'secondary_keys') ? normalizeKeysForComparison(entry[f]) : entry[f];
+        }
     }
     return out;
 }
@@ -1253,11 +1276,6 @@ function formatValueForDisplay(value) {
     if (typeof value === 'object') return JSON.stringify(value, null, 2);
     if (typeof value === 'string' && value.trim() === '') return '(empty)';
     return String(value);
-}
-
-function truncate(str, max) {
-    if (str.length <= max) return str;
-    return str.slice(0, max - 3) + '...';
 }
 
 // ========================================

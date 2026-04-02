@@ -1,5 +1,7 @@
 import CoreAPI from './core-api.js';
 
+const esc = (s) => CoreAPI.escapeHtml(s);
+
 // ========================================
 // PLAYLISTS MODULE
 // ========================================
@@ -283,11 +285,7 @@ async function onCharacterDeleted(avatar) {
 let pickerInjected = false;
 let pickerAvatars = [];
 
-function esc(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-}
+
 
 function injectPickerModal() {
     if (pickerInjected) return;
@@ -326,6 +324,8 @@ function injectPickerModal() {
             if (createRow && createRow.style.display !== 'none') handlePickerCreate();
         }
     });
+
+    window.registerOverlay?.({ id: 'playlistPickerModal', tier: 7, close: () => closePlaylistPicker(), visible: (el) => el.classList.contains('visible') });
 }
 
 function filterPickerList() {
@@ -589,6 +589,8 @@ function injectManageModal() {
             activeIconPickerUid = null;
         }
     });
+
+    window.registerOverlay?.({ id: 'playlistManageModal', tier: 7, close: () => closePlaylistManager(), visible: (el) => el.classList.contains('visible') });
 }
 
 async function openPlaylistManager() {
@@ -665,7 +667,7 @@ function filterManageList() {
 }
 
 function positionPickerAtButton(btn, picker) {
-    const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+    const zoom = parseFloat(document.body.style.zoom) || 1;
     const rect = btn.getBoundingClientRect();
     picker.style.position = 'fixed';
     picker.style.left = `${rect.left / zoom}px`;

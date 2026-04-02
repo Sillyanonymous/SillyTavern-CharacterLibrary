@@ -669,7 +669,7 @@ export async function init(dependencies = {}) {
     // Skips if extensions recovery is still in progress (ST lazy loading) — the recovery
     // completion handler in library.js calls runGallerySyncAudit() when it finishes.
     setTimeout(() => {
-        if (window._gallerySyncAuditDone) return;
+        if (CoreAPI.getGallerySyncAuditDone()) return;
         if (CoreAPI.isExtensionsRecoveryInProgress()) return;
         try {
             if (CoreAPI.getSetting('uniqueGalleryFolders')) {
@@ -689,7 +689,7 @@ export async function init(dependencies = {}) {
             } else {
                 updateWarningIndicator(audit);
             }
-            window._gallerySyncAuditDone = true;
+            CoreAPI.setGallerySyncAuditDone(true);
         } catch (err) {
             console.error('[GallerySync] Deferred audit failed:', err);
         }

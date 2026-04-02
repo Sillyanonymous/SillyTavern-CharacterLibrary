@@ -6,7 +6,7 @@
 
 [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger {
     min-width: 150px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     padding: 6px 10px;
 }
 
@@ -16,7 +16,7 @@
     border: 1px solid rgba(231, 76, 60, 0.4);
     color: #e74c3c;
     padding: 6px 12px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 #wyvernFollowCreatorBtn:hover:not(:disabled) {
@@ -39,8 +39,8 @@
 /* Mobile overrides */
 @media screen and (max-width: 768px) {
 
-    #wyvernCreatorSortSelect, [data-select-id="wyvernCreatorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    #wyvernCreatorSortSelect, [data-select-id="wyvernCreatorSortSelect"] { min-width: 0; flex: 1; font-size: var(--font-sm); }
     [data-select-id="wyvernCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
-    #wyvernFollowCreatorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
+    #wyvernFollowCreatorBtn { font-size: var(--font-sm); padding: 6px 10px; flex-shrink: 0; }
 
 }

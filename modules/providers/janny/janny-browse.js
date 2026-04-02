@@ -49,6 +49,7 @@ let jannyCharacters = [];
 let jannyCurrentPage = 1;
 let jannyHasMore = true;
 let jannyIsLoading = false;
+let jannyLoadToken = 0;
 let jannyCurrentSearch = '';
 let jannyNsfwEnabled = true;
 let jannySortMode = 'newest';
@@ -310,7 +311,8 @@ function updateLoadMore() {
 // ========================================
 
 async function loadCharacters(append = false) {
-    if (jannyIsLoading) return;
+    if (append && jannyIsLoading) return;
+    const thisToken = ++jannyLoadToken;
     jannyIsLoading = true;
 
     const grid = document.getElementById('jannyGrid');
@@ -339,7 +341,7 @@ async function loadCharacters(append = false) {
             sort: jannySortMode
         });
 
-        // Provider was deactivated during the fetch
+        if (thisToken !== jannyLoadToken) return;
         if (!delegatesInitialized) return;
 
         const result = data?.results?.[0];
@@ -377,7 +379,7 @@ async function loadCharacters(append = false) {
                     limit: 80,
                     sort: jannySortMode
                 });
-                if (!delegatesInitialized) return;
+                if (thisToken !== jannyLoadToken || !delegatesInitialized) return;
                 const moreResult = moreData?.results?.[0];
                 let moreHits = moreResult?.hits || [];
                 if (jannyPersistentExclude.length > 0) {
@@ -419,6 +421,7 @@ async function loadCharacters(append = false) {
         debugLog('[JannyBrowse] Loaded', hits.length, 'characters, page', jannyCurrentPage, '/', totalPages);
 
     } catch (err) {
+        if (thisToken !== jannyLoadToken) return;
         console.error('[JannyBrowse] Search error:', err);
         showToast(`JannyAI search failed: ${err.message}`, 'error');
         if (!append && grid) {
@@ -435,10 +438,12 @@ async function loadCharacters(append = false) {
             if (retryBtn) retryBtn.addEventListener('click', () => loadCharacters(false));
         }
     } finally {
-        jannyIsLoading = false;
-        if (loadMoreBtn) {
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+        if (thisToken === jannyLoadToken) {
+            jannyIsLoading = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     }
 }
@@ -1115,6 +1120,8 @@ function initJannyView() {
                 if (e.target === modalOverlay) closePreviewModal();
             });
         }
+
+        window.registerOverlay?.({ id: 'jannyCharModal', tier: 7, close: () => closePreviewModal() });
     }
 }
 

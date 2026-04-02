@@ -13,7 +13,7 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding: 10px 0;
 }
 
@@ -21,7 +21,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 15px;
+    gap: var(--space-lg);
     padding: 12px 15px;
     background: rgba(0, 0, 0, 0.3);
     border-radius: 8px;
@@ -40,14 +40,14 @@
 .chub-gallery-item-info {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: var(--space-2xs);
     flex: 1;
     min-width: 0;
 }
 
 .chub-gallery-item-info i {
     color: var(--accent-primary);
-    font-size: 1.1rem;
+    font-size: var(--font-lg);
 }
 
 .chub-gallery-item-name {
@@ -59,7 +59,7 @@
 }
 
 .chub-gallery-item-creator {
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -68,7 +68,7 @@
 
 .chub-gallery-link {
     padding: 6px 12px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     white-space: nowrap;
 }
 
@@ -97,11 +97,11 @@
 .chub-timeline-header-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
 }
 
 .chub-timeline-header h3 {
-    font-size: 1.4rem;
+    font-size: var(--font-xl);
     margin: 0 0 4px 0;
     color: var(--text-primary);
 }
@@ -114,12 +114,12 @@
 .chub-timeline-header p {
     margin: 0;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: var(--font-md);
 }
 
 #chubTimelineSortSelect {
     min-width: 150px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 /* Timeline Empty/Login Required State */
@@ -175,13 +175,13 @@
 .chub-author-banner-content {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     color: var(--text-primary);
 }
 
 .chub-author-banner-content i {
     color: var(--accent);
-    font-size: 1.1rem;
+    font-size: var(--font-lg);
 }
 
 .chub-author-banner-content strong {
@@ -192,13 +192,13 @@
 .chub-author-banner-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 
 [data-select-id="chubAuthorSortSelect"] .custom-select-trigger {
     min-width: 150px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     padding: 6px 10px;
 }
 
@@ -208,7 +208,7 @@
     border: 1px solid rgba(231, 76, 60, 0.4);
     color: #e74c3c;
     padding: 6px 12px;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 #chubFollowAuthorBtn:hover:not(:disabled) {
@@ -317,7 +317,7 @@
     border-radius: 8px;
     line-height: 1.8;
     margin-bottom: 20px;
-    font-size: 0.9rem;
+    font-size: var(--font-md);
     color: var(--text-secondary);
 }
 
@@ -326,7 +326,7 @@
     padding: 2px 6px;
     border-radius: 4px;
     font-family: monospace;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     color: var(--accent);
 }
 
@@ -342,36 +342,36 @@
 .chub-login-form {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-sm-md);
     margin-bottom: 20px;
 }
 
 .chub-login-form label {
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: var(--font-md);
 }
 
 .chub-login-form input[type="password"] {
     font-family: monospace;
-    font-size: 0.85rem;
+    font-size: var(--font-md);
 }
 
 .chub-login-remember {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .chub-login-remember label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     cursor: pointer;
 }
 
 .chub-login-actions {
     display: flex;
-    gap: 10px;
+    gap: var(--space-sm-md);
     justify-content: flex-end;
 }
 
@@ -427,25 +427,25 @@
         border-radius: 0 !important;
     }
     .chub-login-body { padding: 14px; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-    .chub-login-info { font-size: 0.85rem; padding: 12px; }
+    .chub-login-info { font-size: var(--font-md); padding: 12px; }
     .chub-login-actions { flex-wrap: wrap; }
     .chub-login-form .glass-input { font-size: 16px; }
 
-    .chub-author-banner { flex-direction: column; gap: 10px; padding: 10px 12px; }
-    .chub-author-banner-content { font-size: 0.85rem; }
-    .chub-author-banner-actions { width: 100%; gap: 6px; flex-wrap: wrap; }
-    #chubAuthorSortSelect, [data-select-id="chubAuthorSortSelect"] { min-width: 0; flex: 1; font-size: 0.8rem; }
+    .chub-author-banner { flex-direction: column; gap: var(--space-sm-md); padding: 10px 12px; }
+    .chub-author-banner-content { font-size: var(--font-md); }
+    .chub-author-banner-actions { width: 100%; gap: var(--space-xs-sm); flex-wrap: wrap; }
+    #chubAuthorSortSelect, [data-select-id="chubAuthorSortSelect"] { min-width: 0; flex: 1; font-size: var(--font-sm); }
     [data-select-id="chubAuthorSortSelect"] .custom-select-trigger { min-width: 0; }
-    #chubFollowAuthorBtn { font-size: 0.8rem; padding: 6px 10px; flex-shrink: 0; }
+    #chubFollowAuthorBtn { font-size: var(--font-sm); padding: 6px 10px; flex-shrink: 0; }
 
     /* Timeline header */
     .chub-timeline-header { padding: 12px 14px; border-radius: 10px; margin-bottom: 10px; }
-    .chub-timeline-header h3 { font-size: 1rem; }
-    .chub-timeline-header p { font-size: 0.8rem; }
+    .chub-timeline-header h3 { font-size: var(--font-base); }
+    .chub-timeline-header p { font-size: var(--font-sm); }
 
     /* Timeline empty */
     .chub-timeline-empty { padding: 40px 16px; }
-    .chub-timeline-empty i { font-size: 2rem; }
-    .chub-timeline-empty h3 { font-size: 1rem; }
+    .chub-timeline-empty i { font-size: var(--font-3xl); }
+    .chub-timeline-empty h3 { font-size: var(--font-base); }
 
 }

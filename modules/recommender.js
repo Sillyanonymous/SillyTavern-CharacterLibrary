@@ -979,12 +979,14 @@ async function loadProfiles() {
     const text = document.getElementById('recommenderStConnectionText');
     const container = document.getElementById('recommenderStConnection');
     const selectEl = document.getElementById('recommenderStProfile');
+    const submitBtn = document.getElementById('recommenderSubmitBtn');
     if (!dot || !text || !container || !selectEl) return;
 
     const mode = document.querySelector('.recommender-api-mode-btn.active')?.dataset.mode;
     container.classList.toggle('hidden', mode !== 'sillytavern');
     if (mode !== 'sillytavern') return;
 
+    if (submitBtn) submitBtn.disabled = true;
     dot.className = 'recommender-connection-dot checking';
     text.textContent = 'Loading profiles...';
     const selectContainer = selectEl._customSelect?.container;
@@ -1065,6 +1067,8 @@ async function loadProfiles() {
         dot.className = 'recommender-connection-dot disconnected';
         text.textContent = 'Could not reach SillyTavern server';
         loadedProfiles = [];
+    } finally {
+        if (submitBtn) submitBtn.disabled = false;
     }
 }
 

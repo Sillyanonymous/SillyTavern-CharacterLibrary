@@ -1,8 +1,9 @@
 ﻿// DatacatBrowseView -- DataCat browse/search UI for the Online tab
 //
-// Supports two modes:
-//   1. Recent browsing (default) -- fetchRecentPublic + faceted tag filtering
-//   2. Creator browsing -- fetchDatacatCreatorCharacters after URL/UUID input
+// Data sources:
+//   - DataCat API: recent browse, creator browse, faceted tag filtering
+//   - JanitorAI MeiliSearch: text search + sort (activated via janny_* sort modes)
+//   - Extraction: cloud-browser extraction for JanitorAI-only characters
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
@@ -21,6 +22,11 @@ import {
     fetchRecentPublic,
     fetchFreshCharacters,
     fetchFacetedTags,
+    submitExtraction,
+    fetchExtractionStatus,
+    searchMeiliJanny,
+    fetchHampterCharacters,
+    JANNY_TAG_MAP,
 } from './datacat-api.js';
 
 const {
@@ -51,6 +57,7 @@ let datacatCharacters = [];
 let datacatCurrentOffset = 0;
 let datacatHasMore = true;
 let datacatIsLoading = false;
+let datacatLoadToken = 0;
 let datacatSelectedChar = null;
 let datacatGridRenderedCount = 0;
 
@@ -90,6 +97,25 @@ let datacatFollowingGridRenderedCount = 0;
 let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 const PAGE_SIZE = 80;
+
+// MeiliSearch (JanitorAI) state
+let meiliCurrentPage = 1;
+let meiliTotalPages = 0;
+let meiliSearchQuery = '';
+
+// Shared JanitorAI tag filter state (used by both MeiliSearch and Hampter modes)
+let jannyActiveTagIds = new Set();
+
+// Hampter (JanitorAI) state
+let hampterCurrentPage = 1;
+let hampterTotalPages = 0;
+let hampterSearchQuery = '';
+
+// Extraction state
+let extractionPollTimer = null;
+let extractionTargetUrl = null;
+let extractionTargetId = null;
+let extractionStartTime = null;
 
 // ========================================
 // FIELD HELPERS (handle camelCase/snake_case from different endpoints)
@@ -253,6 +279,8 @@ function renderGrid(characters, append = false) {
         });
     }
 
+
+
     const startIdx = append ? datacatGridRenderedCount : 0;
     const html = filtered.slice(startIdx).map(c => createDatacatCard(c)).join('');
     grid.insertAdjacentHTML('beforeend', html);
@@ -271,17 +299,20 @@ function updateLoadMore() {
 // ========================================
 
 async function loadCharacters(append = false) {
-    if (datacatIsLoading) return;
+    if (append && datacatIsLoading) return;
+    const thisToken = ++datacatLoadToken;
     datacatIsLoading = true;
 
     const grid = document.getElementById('datacatGrid');
     const loadMoreBtn = document.getElementById('datacatLoadMoreBtn');
 
     if (!append && grid) {
+        const loadingSource = isHampterSortMode(datacatSortMode) ? 'JanitorAI (Hampter)'
+            : isJannySortMode(datacatSortMode) ? 'JanitorAI (MeiliSearch)' : 'DataCat';
         grid.innerHTML = `
             <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
                 <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Loading from DataCat...</p>
+                <p style="margin-top: 12px; color: var(--text-muted);">Loading from ${loadingSource}...</p>
             </div>
         `;
     }
@@ -304,6 +335,31 @@ async function loadCharacters(append = false) {
             list = data?.list || [];
             total = data?.total || 0;
             sortCreatorResults(list, datacatCreatorSortMode);
+        } else if (isJannySortMode(datacatSortMode)) {
+            if (!append) meiliCurrentPage = 1;
+            const data = await searchMeiliJanny({
+                search: meiliSearchQuery,
+                page: meiliCurrentPage,
+                limit: PAGE_SIZE,
+                sort: datacatSortMode,
+                nsfw: datacatNsfwEnabled,
+                includeTags: jannyActiveTagIds,
+            });
+            list = data?.characters || [];
+            total = data?.totalHits || 0;
+            meiliTotalPages = data?.totalPages || 0;
+        } else if (isHampterSortMode(datacatSortMode)) {
+            if (!append) hampterCurrentPage = 1;
+            const hampterSort = datacatSortMode.replace('hampter_', '');
+            const data = await fetchHampterCharacters({
+                sort: hampterSort,
+                page: hampterCurrentPage,
+                search: hampterSearchQuery,
+                nsfw: datacatNsfwEnabled,
+            });
+            list = data?.characters || [];
+            total = data?.total || 0;
+            hampterTotalPages = total > 0 ? Math.ceil(total / (data?.pageSize || 34)) : 0;
         } else {
             const tagIds = [...datacatActiveTagIds];
             const parsed = parseSortMode(datacatSortMode);
@@ -330,12 +386,37 @@ async function loadCharacters(append = false) {
             }
         }
 
+        if (thisToken !== datacatLoadToken) return;
         if (!delegatesInitialized) return;
 
         const freshParsed = parseSortMode(datacatSortMode);
         const isFreshMode = datacatBrowseMode !== 'creator' && freshParsed && datacatActiveTagIds.size === 0;
+        const isMeili = isJannySortMode(datacatSortMode);
+        const isHampter = isHampterSortMode(datacatSortMode);
 
-        if (isFreshMode) {
+        if (isMeili) {
+            if (append) {
+                const existingIds = new Set(datacatCharacters.map(c => getCharId(c)));
+                datacatCharacters = datacatCharacters.concat(list.filter(c => {
+                    const id = getCharId(c);
+                    return !id || !existingIds.has(id);
+                }));
+            } else {
+                datacatCharacters = list;
+            }
+            datacatHasMore = meiliCurrentPage < meiliTotalPages;
+        } else if (isHampter) {
+            if (append) {
+                const existingIds = new Set(datacatCharacters.map(c => getCharId(c)));
+                datacatCharacters = datacatCharacters.concat(list.filter(c => {
+                    const id = getCharId(c);
+                    return !id || !existingIds.has(id);
+                }));
+            } else {
+                datacatCharacters = list;
+            }
+            datacatHasMore = hampterCurrentPage < hampterTotalPages;
+        } else if (isFreshMode) {
             datacatCharacters = list;
             const activeLimit = freshParsed.window === '24h' ? datacatFreshLimit24 : datacatFreshLimitWeek;
             datacatHasMore = list.length >= activeLimit;
@@ -368,6 +449,7 @@ async function loadCharacters(append = false) {
         debugLog('[DatacatBrowse] Loaded', list.length, 'characters, offset', datacatCurrentOffset, '/', total, 'mode:', datacatBrowseMode);
 
     } catch (err) {
+        if (thisToken !== datacatLoadToken) return;
         console.error('[DatacatBrowse] Load error:', err);
         showToast(`DataCat load failed: ${err.message}`, 'error');
         if (!append && grid) {
@@ -384,10 +466,12 @@ async function loadCharacters(append = false) {
             if (retryBtn) retryBtn.addEventListener('click', () => loadCharacters(false));
         }
     } finally {
-        datacatIsLoading = false;
-        if (loadMoreBtn) {
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+        if (thisToken === datacatLoadToken) {
+            datacatIsLoading = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     }
 }
@@ -504,7 +588,7 @@ function updateTagsButton() {
     const label = document.getElementById('datacatTagsBtnLabel');
     if (!btn) return;
 
-    const count = datacatActiveTagIds.size;
+    const count = isJannyTagMode() ? jannyActiveTagIds.size : datacatActiveTagIds.size;
     if (count > 0) {
         btn.classList.add('has-filters');
         if (label) label.innerHTML = `Tags <span class="tag-count">(${count})</span>`;
@@ -512,6 +596,74 @@ function updateTagsButton() {
         btn.classList.remove('has-filters');
         if (label) label.textContent = 'Tags';
     }
+}
+
+// ========================================
+// JANITORAI TAG SYSTEM (MeiliSearch + Hampter modes)
+// ========================================
+
+function isJannyTagMode() {
+    return isJannySortMode(datacatSortMode);
+}
+
+function updateTagsVisibility() {
+    const btn = document.getElementById('datacatTagsBtn');
+    if (!btn) return;
+    const hide = isHampterSortMode(datacatSortMode);
+    btn.style.display = hide ? 'none' : '';
+    if (hide) {
+        const dropdown = document.getElementById('datacatTagsDropdown');
+        if (dropdown) dropdown.classList.add('hidden');
+    }
+}
+
+const JANNY_ALL_TAGS = Object.entries(JANNY_TAG_MAP)
+    .map(([id, name]) => ({ id: Number(id), name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+function renderJannyTagsList(filter = '') {
+    const container = document.getElementById('datacatTagsList');
+    if (!container) return;
+
+    const filtered = filter
+        ? JANNY_ALL_TAGS.filter(t => t.name.toLowerCase().includes(filter.toLowerCase()))
+        : JANNY_ALL_TAGS;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="browse-tags-empty">No matching tags</div>';
+        return;
+    }
+
+    container.innerHTML = filtered.map(tag => {
+        const included = jannyActiveTagIds.has(tag.id);
+        const stateClass = included ? 'state-include' : 'state-neutral';
+        const stateIcon = included ? '<i class="fa-solid fa-plus"></i>' : '';
+        const stateTitle = included ? 'Included: click to remove' : 'Click to include';
+        return `
+            <div class="browse-tag-filter-item" data-tag-id="${tag.id}">
+                <button class="browse-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
+                <span class="tag-label">${escapeHtml(tag.name)}</span>
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.browse-tag-filter-item').forEach(item => {
+        const tagId = Number(item.dataset.tagId);
+        item.addEventListener('click', () => {
+            if (jannyActiveTagIds.has(tagId)) {
+                jannyActiveTagIds.delete(tagId);
+            } else {
+                jannyActiveTagIds.add(tagId);
+            }
+            const btn = item.querySelector('.browse-tag-state-btn');
+            cycleTagState(btn, jannyActiveTagIds.has(tagId));
+            updateTagsButton();
+            if (isHampterSortMode(datacatSortMode)) hampterCurrentPage = 1;
+            if (isJannySortMode(datacatSortMode)) meiliCurrentPage = 1;
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        });
+    });
 }
 
 // ========================================
@@ -532,12 +684,35 @@ const CREATOR_SORT_OPTIONS = [
     { value: 'oldest', label: 'Oldest' },
 ];
 
+function isJannySortMode(mode) {
+    return mode?.startsWith('janny_');
+}
+
+function isHampterSortMode(mode) {
+    return mode?.startsWith('hampter_');
+}
+
 function parseSortMode(mode) {
     if (mode === 'recent') return null;
+    if (isJannySortMode(mode)) return null;
+    if (isHampterSortMode(mode)) return null;
     if (mode.endsWith('_week')) return { sortBy: mode.slice(0, -5), window: 'week' };
     if (mode.endsWith('_24h')) return { sortBy: mode.slice(0, -4), window: '24h' };
     return { sortBy: mode, window: '24h' };
 }
+
+const JANNY_SORT_OPTIONS = [
+    { value: 'janny_newest', label: 'Newest' },
+    { value: 'janny_oldest', label: 'Oldest' },
+    { value: 'janny_tokens_desc', label: 'Most Tokens' },
+    { value: 'janny_tokens_asc', label: 'Least Tokens' },
+    { value: 'janny_relevant', label: 'Relevance' },
+];
+
+const HAMPTER_SORT_OPTIONS = [
+    { value: 'hampter_trending', label: 'Trending' },
+    { value: 'hampter_popular', label: 'Popular' },
+];
 
 function buildSortOptionsHtml(selected) {
     let html = `<option value="recent" ${selected === 'recent' ? 'selected' : ''}>Recent</option>`;
@@ -550,6 +725,16 @@ function buildSortOptionsHtml(selected) {
     for (const o of FRESH_SORT_LABELS) {
         const val = `${o.value}_week`;
         html += `<option value="${val}" ${val === selected ? 'selected' : ''}>${o.label}</option>`;
+    }
+    html += '</optgroup>';
+    html += '<optgroup label="JanitorAI (Hampter)">';
+    for (const o of HAMPTER_SORT_OPTIONS) {
+        html += `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`;
+    }
+    html += '</optgroup>';
+    html += '<optgroup label="JanitorAI (MeiliSearch)">';
+    for (const o of JANNY_SORT_OPTIONS) {
+        html += `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`;
     }
     html += '</optgroup>';
     return html;
@@ -650,13 +835,38 @@ function clearCreatorFilter() {
 }
 
 // ========================================
-// SEARCH (UUID/URL navigation only)
+// SEARCH
 // ========================================
+
+function updateSearchPlaceholder() {
+    const input = document.getElementById('datacatSearchInput');
+    if (!input) return;
+    input.placeholder = isHampterSortMode(datacatSortMode)
+        ? 'Search JanitorAI characters or paste a URL...'
+        : isJannySortMode(datacatSortMode)
+            ? 'Search JanitorAI characters or paste a URL...'
+            : 'Paste a DataCat or JanitorAI character URL...';
+}
 
 function doSearch() {
     const input = document.getElementById('datacatSearchInput');
     const val = (input?.value || '').trim();
-    if (!val) return;
+    if (!val) {
+        // Clear MeiliSearch query if in janny mode and search is emptied
+        if (isJannySortMode(datacatSortMode) && meiliSearchQuery) {
+            meiliSearchQuery = '';
+            meiliCurrentPage = 1;
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        }
+        // Clear Hampter query if in hampter mode and search is emptied
+        if (isHampterSortMode(datacatSortMode) && hampterSearchQuery) {
+            hampterSearchQuery = '';
+            hampterCurrentPage = 1;
+            loadCharacters(false);
+        }
+        return;
+    }
 
     // UUID -> browse creator
     const uuidMatch = val.match(/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i);
@@ -680,9 +890,89 @@ function doSearch() {
                 return;
             }
         }
+
+        // JanitorAI URL -> look up on DataCat, offer extraction if not found
+        if (/^(www\.)?janitorai\.com$/i.test(url.hostname) || /^(www\.)?jannyai\.com$/i.test(url.hostname)) {
+            const charMatch = url.pathname.match(/\/characters\/([a-f0-9-]{36})/i);
+            if (charMatch) {
+                lookupJanitorCharacter(charMatch[1], val);
+                return;
+            }
+        }
     } catch { /* not a URL */ }
 
-    showToast('Paste a DataCat character or creator URL to browse', 'info');
+    // Text search in Hampter mode
+    if (isHampterSortMode(datacatSortMode)) {
+        hampterSearchQuery = val;
+        hampterCurrentPage = 1;
+        loadCharacters(false);
+        return;
+    }
+
+    // Text search in MeiliSearch mode
+    if (isJannySortMode(datacatSortMode)) {
+        meiliSearchQuery = val;
+        meiliCurrentPage = 1;
+        datacatCurrentOffset = 0;
+        loadCharacters(false);
+        return;
+    }
+
+    showToast('Paste a DataCat or JanitorAI character URL to browse', 'info');
+}
+
+function performDatacatCreatorSearch() {
+    const input = document.getElementById('datacatCreatorSearchInput');
+    const query = input?.value.trim();
+    if (!query) {
+        showToast('Please enter a creator name', 'warning');
+        return;
+    }
+    input.value = '';
+
+    const lowerQuery = query.toLowerCase();
+
+    // Scan followed creators
+    const followMatch = datacatFollowedCreators.find(c => c.name?.toLowerCase() === lowerQuery);
+    if (followMatch) {
+        browseCreator(followMatch.id);
+        return;
+    }
+
+    // Scan currently loaded browse characters
+    const browseMatch = datacatCharacters.find(c => getCreatorName(c).toLowerCase() === lowerQuery);
+    if (browseMatch) {
+        browseCreator(getCreatorId(browseMatch));
+        return;
+    }
+
+    // Scan following timeline characters
+    const followingMatch = datacatFollowingCharacters.find(c => getCreatorName(c).toLowerCase() === lowerQuery);
+    if (followingMatch) {
+        browseCreator(getCreatorId(followingMatch));
+        return;
+    }
+
+    // Partial match fallback
+    const partialFollow = datacatFollowedCreators.find(c => c.name?.toLowerCase().includes(lowerQuery));
+    if (partialFollow) {
+        browseCreator(partialFollow.id);
+        return;
+    }
+
+    const partialBrowse = datacatCharacters.find(c => getCreatorName(c).toLowerCase().includes(lowerQuery));
+    if (partialBrowse) {
+        browseCreator(getCreatorId(partialBrowse));
+        return;
+    }
+
+    const partialFollowing = datacatFollowingCharacters.find(c => getCreatorName(c).toLowerCase().includes(lowerQuery));
+    if (partialFollowing) {
+        browseCreator(getCreatorId(partialFollowing));
+        return;
+    }
+
+    showToast('Creator not found. Try pasting a DataCat creator URL instead.', 'warning');
 }
 
 async function fetchCharacterAndBrowseCreator(characterId) {
@@ -708,6 +998,385 @@ async function fetchCharacterAndBrowseCreator(characterId) {
         showToast(`Failed to look up character: ${e.message}`, 'error');
         clearCreatorFilter();
     }
+}
+
+// ========================================
+// JANITORAI LOOKUP + EXTRACTION
+// ========================================
+
+async function lookupJanitorCharacter(janitorId, originalUrl) {
+    const grid = document.getElementById('datacatGrid');
+    if (grid) {
+        grid.innerHTML = `
+            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
+                <p style="margin-top: 12px; color: var(--text-muted);">Looking up character on DataCat...</p>
+            </div>
+        `;
+    }
+
+    // Hide creator banner, load more, etc.
+    const banner = document.getElementById('datacatCreatorBanner');
+    if (banner) banner.classList.add('hidden');
+    const loadMoreEl = document.getElementById('datacatLoadMore');
+    if (loadMoreEl) loadMoreEl.style.display = 'none';
+
+    try {
+        const character = await fetchDatacatCharacter(janitorId);
+        if (character) {
+            openPreviewModal(character);
+            clearCreatorFilter();
+            return;
+        }
+    } catch { /* not found */ }
+
+    // Character not on DataCat: show extraction panel
+    showExtractionPanel(janitorId, originalUrl);
+}
+
+function showExtractionPanel(janitorId, originalUrl) {
+    const grid = document.getElementById('datacatGrid');
+    if (!grid) return;
+
+    const janitorUrl = originalUrl || `https://janitorai.com/characters/${janitorId}`;
+    const shortId = janitorId.substring(0, 8);
+
+    grid.innerHTML = `
+        <div class="datacat-extract-panel" style="grid-column: 1 / -1;">
+            <div class="datacat-extract-icon">
+                <i class="fa-solid fa-cat"></i>
+            </div>
+            <h3>Character Not on DataCat</h3>
+            <p class="datacat-extract-desc">
+                This JanitorAI character (<code>${escapeHtml(shortId)}...</code>) hasn't been extracted yet.
+                DataCat can retrieve its definition using a cloud browser instance.
+            </p>
+            <p class="datacat-extract-note">
+                <i class="fa-solid fa-circle-info"></i>
+                Extraction typically takes 15-60 seconds. A public account is used by default.
+            </p>
+            <div class="datacat-extract-actions">
+                <button id="datacatExtractBtn" class="action-btn primary" data-url="${escapeHtml(janitorUrl)}" data-id="${escapeHtml(janitorId)}">
+                    <i class="fa-solid fa-cloud-arrow-down"></i> Extract Character
+                </button>
+                <a href="${escapeHtml(janitorUrl)}" target="_blank" class="action-btn secondary">
+                    <i class="fa-solid fa-external-link"></i> View on JanitorAI
+                </a>
+            </div>
+            <div id="datacatExtractProgress" class="datacat-extract-progress hidden"></div>
+        </div>
+    `;
+
+    const extractBtn = document.getElementById('datacatExtractBtn');
+    if (extractBtn) {
+        extractBtn.addEventListener('click', () => {
+            startExtraction(extractBtn.dataset.url, extractBtn.dataset.id);
+        });
+    }
+}
+
+async function startExtraction(janitorUrl, janitorId) {
+    const extractBtn = document.getElementById('datacatExtractBtn');
+    const progressEl = document.getElementById('datacatExtractProgress');
+    if (!extractBtn || !progressEl) return;
+
+    extractBtn.disabled = true;
+    extractBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+    progressEl.classList.remove('hidden');
+    progressEl.innerHTML = `
+        <div class="datacat-extract-status">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <span>Submitting extraction request...</span>
+        </div>
+    `;
+
+    extractionTargetUrl = janitorUrl;
+    extractionTargetId = janitorId;
+    extractionStartTime = Date.now();
+
+    try {
+        const result = await submitExtraction(janitorUrl, { publicFeed: getSetting('datacatPublicFeed') === true });
+
+        if (result.queued || result.started) {
+            extractBtn.innerHTML = '<i class="fa-solid fa-hourglass-half"></i> Extracting...';
+            const position = result.queued ? ` (queue position: ${result.queuePosition || 1})` : '';
+            updateExtractionProgress('pending', result.queued ? `Queued for extraction${position}` : 'Extraction started, waiting for completion...');
+            startExtractionPolling(janitorId);
+        } else if (result.requiresLogin) {
+            extractBtn.disabled = false;
+            extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract Character';
+            updateExtractionProgress('error', 'DataCat has no valid session. The extraction service may be temporarily unavailable.');
+        } else if (result.error || result.errorCode) {
+            extractBtn.disabled = false;
+            extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+            updateExtractionProgress('error', result.message || result.error || 'Extraction failed');
+        } else {
+            extractBtn.disabled = false;
+            extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+            updateExtractionProgress('error', 'Unexpected response from DataCat');
+        }
+    } catch (e) {
+        extractBtn.disabled = false;
+        extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+        updateExtractionProgress('error', `Failed to submit: ${e.message}`);
+    }
+}
+
+function humanizeExtractionError(msg) {
+    if (!msg) return 'Extraction failed';
+    if (/CHARACTER_NOT_FOUND_OR_SET_TO_PRIVATE/i.test(msg)) return 'Character not found or privated';
+    if (/WORKER.?ERROR/i.test(msg)) return msg.replace(/WORKER.?ERROR\s*\(?/i, '').replace(/\)$/, '').trim() || 'Extraction failed';
+    return msg;
+}
+
+function updateExtractionProgress(status, message) {
+    const progressEl = document.getElementById('datacatExtractProgress');
+    if (!progressEl) return;
+
+    let icon, colorClass;
+    switch (status) {
+        case 'pending':
+            icon = 'fa-solid fa-spinner fa-spin';
+            colorClass = 'datacat-extract-pending';
+            break;
+        case 'success':
+            icon = 'fa-solid fa-check-circle';
+            colorClass = 'datacat-extract-success';
+            break;
+        case 'error':
+            icon = 'fa-solid fa-exclamation-circle';
+            colorClass = 'datacat-extract-error';
+            break;
+        default:
+            icon = 'fa-solid fa-circle-info';
+            colorClass = '';
+    }
+
+    const elapsed = extractionStartTime ? Math.round((Date.now() - extractionStartTime) / 1000) : 0;
+    const elapsedText = elapsed > 0 && status === 'pending' ? ` <span class="datacat-extract-elapsed">(${elapsed}s)</span>` : '';
+
+    progressEl.innerHTML = `
+        <div class="datacat-extract-status ${colorClass}">
+            <i class="${icon}"></i>
+            <span>${escapeHtml(message)}${elapsedText}</span>
+        </div>
+    `;
+}
+
+function startExtractionPolling(janitorId) {
+    stopExtractionPolling();
+
+    let elapsedTimer = setInterval(() => {
+        const progressEl = document.getElementById('datacatExtractProgress');
+        if (!progressEl || !extractionStartTime) { clearInterval(elapsedTimer); return; }
+        const statusEl = progressEl.querySelector('.datacat-extract-elapsed');
+        if (statusEl) {
+            const elapsed = Math.round((Date.now() - extractionStartTime) / 1000);
+            statusEl.textContent = `(${elapsed}s)`;
+        }
+    }, 1000);
+
+    extractionPollTimer = setInterval(async () => {
+        try {
+            const status = await fetchExtractionStatus();
+            if (!status) return;
+
+            // Check if our extraction completed (appears in history)
+            const completedEntry = status.history?.find(h => {
+                const historyId = String(h.characterId || '').trim();
+                return historyId === janitorId;
+            });
+
+            if (completedEntry) {
+                clearInterval(elapsedTimer);
+                stopExtractionPolling();
+
+                if (completedEntry.success !== false && completedEntry.status !== 'error') {
+                    updateExtractionProgress('success', 'Extraction complete! Loading character...');
+                    // Fetch the now-available character
+                    setTimeout(() => fetchExtractedCharacter(janitorId), 1000);
+                } else {
+                    const errMsg = humanizeExtractionError(completedEntry.error || completedEntry.message);
+                    updateExtractionProgress('error', errMsg);
+                    const extractBtn = document.getElementById('datacatExtractBtn');
+                    if (extractBtn) {
+                        extractBtn.disabled = false;
+                        extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+                    }
+                }
+                return;
+            }
+
+            // Still in progress: update status text
+            if (status.inProgress) {
+                const phase = status.inProgress.status || 'processing';
+                const phaseNames = {
+                    opening_page: 'Opening character page',
+                    preparing: 'Preparing extraction',
+                    initiating: 'Initiating extraction',
+                    pulling: 'Pulling character data',
+                    post_extract: 'Finalizing',
+                    complete: 'Completing',
+                };
+                const phaseName = phaseNames[phase] || phase.replace(/_/g, ' ');
+                updateExtractionProgress('pending', phaseName + '...');
+            } else if (status.queueLength > 0) {
+                updateExtractionProgress('pending', `Waiting in queue (${status.queueLength} ahead)...`);
+            }
+        } catch (e) {
+            debugLog('[DatacatBrowse] Extraction poll error:', e);
+        }
+    }, 3000);
+}
+
+function stopExtractionPolling() {
+    if (extractionPollTimer) {
+        clearInterval(extractionPollTimer);
+        extractionPollTimer = null;
+    }
+}
+
+async function fetchExtractedCharacter(janitorId) {
+    try {
+        const character = await fetchDatacatCharacter(janitorId);
+        if (character) {
+            openPreviewModal(character);
+            return;
+        }
+        // Might need a brief delay for DataCat indexing
+        await new Promise(r => setTimeout(r, 2000));
+        const retry = await fetchDatacatCharacter(janitorId);
+        if (retry) {
+            openPreviewModal(retry);
+            return;
+        }
+        updateExtractionProgress('success', 'Extraction complete, but the character could not be loaded yet. Try searching again in a moment.');
+    } catch (e) {
+        updateExtractionProgress('error', `Character extracted but failed to load: ${e.message}`);
+    }
+}
+
+// ========================================
+// MODAL EXTRACTION (extract from preview modal)
+// ========================================
+
+async function startModalExtraction(charId) {
+    const importBtn = document.getElementById('datacatImportBtn');
+    if (!importBtn) return;
+
+    const janitorUrl = `https://janitorai.com/characters/${charId}`;
+
+    importBtn.disabled = true;
+    importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+
+    extractionTargetUrl = janitorUrl;
+    extractionTargetId = charId;
+    extractionStartTime = Date.now();
+
+    try {
+        const result = await submitExtraction(janitorUrl, { publicFeed: getSetting('datacatPublicFeed') === true });
+
+        if (result.queued || result.started) {
+            const position = result.queued ? ` (${result.queuePosition || 1})` : '';
+            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Extracting...${position}`;
+            startModalExtractionPolling(charId);
+        } else if (result.requiresLogin) {
+            importBtn.disabled = false;
+            importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
+            showToast('DataCat has no valid session. The extraction service may be temporarily unavailable.', 'error');
+        } else {
+            importBtn.disabled = false;
+            importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+            showToast(result.message || result.error || 'Extraction failed', 'error');
+        }
+    } catch (e) {
+        importBtn.disabled = false;
+        importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+        showToast(`Failed to submit extraction: ${e.message}`, 'error');
+    }
+}
+
+function startModalExtractionPolling(charId) {
+    stopExtractionPolling();
+
+    const importBtn = document.getElementById('datacatImportBtn');
+
+    let elapsedTimer = setInterval(() => {
+        if (!importBtn || !extractionStartTime) { clearInterval(elapsedTimer); return; }
+        const elapsed = Math.round((Date.now() - extractionStartTime) / 1000);
+        if (importBtn.disabled) {
+            const phase = importBtn.dataset.extractPhase || 'Extracting';
+            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${phase}... (${elapsed}s)`;
+        }
+    }, 1000);
+
+    extractionPollTimer = setInterval(async () => {
+        try {
+            const status = await fetchExtractionStatus();
+            if (!status) return;
+
+            const completedEntry = status.history?.find(h => {
+                const historyId = String(h.characterId || '').trim();
+                return historyId === charId;
+            });
+
+            if (completedEntry) {
+                clearInterval(elapsedTimer);
+                stopExtractionPolling();
+
+                if (completedEntry.success !== false && completedEntry.status !== 'error') {
+                    if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> Done! Loading...';
+                    showToast('Extraction complete! Loading character...', 'success');
+                    await new Promise(r => setTimeout(r, 1000));
+                    try {
+                        const character = await fetchDatacatCharacter(charId);
+                        if (character) {
+                            openPreviewModal(character);
+                            return;
+                        }
+                        await new Promise(r => setTimeout(r, 2000));
+                        const retry = await fetchDatacatCharacter(charId);
+                        if (retry) {
+                            openPreviewModal(retry);
+                            return;
+                        }
+                        showToast('Character extracted but not yet available. Try searching again.', 'warning');
+                    } catch (e) {
+                        showToast(`Extracted but failed to load: ${e.message}`, 'error');
+                    }
+                    if (importBtn) {
+                        importBtn.disabled = false;
+                        importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+                    }
+                } else {
+                    const errMsg = humanizeExtractionError(completedEntry.error || completedEntry.message);
+                    showToast(errMsg, 'error');
+                    if (importBtn) {
+                        importBtn.disabled = false;
+                        importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+                    }
+                }
+                return;
+            }
+
+            if (status.inProgress) {
+                const phase = status.inProgress.status || 'processing';
+                const phaseNames = {
+                    opening_page: 'Opening page',
+                    preparing: 'Preparing',
+                    initiating: 'Initiating',
+                    pulling: 'Pulling data',
+                    post_extract: 'Finalizing',
+                    complete: 'Completing',
+                };
+                if (importBtn) importBtn.dataset.extractPhase = phaseNames[phase] || phase.replace(/_/g, ' ');
+            } else if (status.queueLength > 0 && importBtn) {
+                importBtn.dataset.extractPhase = `Queue (${status.queueLength})`;
+            }
+        } catch (e) {
+            debugLog('[DatacatBrowse] Modal extraction poll error:', e);
+        }
+    }, 3000);
 }
 
 // ========================================
@@ -1043,12 +1712,18 @@ function openPreviewModal(hit) {
     const tagsEl = document.getElementById('datacatCharTags');
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
 
-    // Creator's Notes — show spinner, full content populated by fetchAndPopulateDetails
+    // Creator's Notes — MeiliSearch/Hampter hits have the tagline immediately; DataCat hits show spinner
     const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
     if (creatorNotesSection) {
-        creatorNotesSection.style.display = 'block';
-        if (creatorNotesEl) creatorNotesEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading creator notes...</div>';
+        const immediateDesc = (hit._source === 'meilisearch' || hit._source === 'hampter') ? (hit.description || '').trim() : '';
+        if (immediateDesc) {
+            creatorNotesSection.style.display = 'block';
+            if (creatorNotesEl) renderCreatorNotesSecure(immediateDesc, name, creatorNotesEl);
+        } else {
+            creatorNotesSection.style.display = 'block';
+            if (creatorNotesEl) creatorNotesEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading creator notes...</div>';
+        }
     }
 
     // Loading indicator for definition sections
@@ -1068,22 +1743,21 @@ function openPreviewModal(hit) {
     if (greetingsStat) greetingsStat.style.display = 'none';
     window.currentBrowseAltGreetings = [];
 
-    // Import button
+    // Import button — disabled until fetchAndPopulateDetails resolves (prevents importing barebones data)
     const importBtn = document.getElementById('datacatImportBtn');
+    delete importBtn.dataset.extractId;
+    delete importBtn.dataset.extractPhase;
     if (inLibrary) {
         importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
         importBtn.classList.add('secondary');
         importBtn.classList.remove('primary', 'warning');
-    } else if (possibleMatch) {
-        importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
-        importBtn.classList.add('warning');
-        importBtn.classList.remove('primary', 'secondary');
+        importBtn.disabled = false;
     } else {
-        importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
-        importBtn.classList.add('primary');
-        importBtn.classList.remove('secondary', 'warning');
+        importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+        importBtn.classList.add('secondary');
+        importBtn.classList.remove('primary', 'warning');
+        importBtn.disabled = true;
     }
-    importBtn.disabled = false;
 
     modal.classList.remove('hidden');
     const charBody = modal.querySelector('.browse-char-body');
@@ -1106,10 +1780,24 @@ async function fetchAndPopulateDetails(hit, token) {
         if (!character) {
             const descEl = document.getElementById('datacatCharDescription');
             if (descEl) descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. This character may only exist on JanitorAI.</em>';
+            // Show tagline as creator notes when DataCat doesn't have the character
+            const fallbackDesc = (hit._source === 'meilisearch' || hit._source === 'hampter') ? (hit.description || '').trim() : '';
+            const cnSection = document.getElementById('datacatCharCreatorNotesSection');
+            const cnEl = document.getElementById('datacatCharCreatorNotes');
+            if (fallbackDesc) {
+                if (cnSection) cnSection.style.display = 'block';
+                if (cnEl) renderCreatorNotesSecure(fallbackDesc, name, cnEl);
+            } else {
+                if (cnSection) cnSection.style.display = 'none';
+                if (cnEl) cnEl.innerHTML = '';
+            }
             const importBtn = document.getElementById('datacatImportBtn');
             if (importBtn) {
-                importBtn.disabled = true;
-                importBtn.innerHTML = '<i class="fa-solid fa-ban"></i> Unavailable';
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
+                importBtn.classList.remove('primary', 'secondary', 'warning');
+                importBtn.classList.add('primary');
+                importBtn.dataset.extractId = charId;
             }
             return;
         }
@@ -1117,6 +1805,16 @@ async function fetchAndPopulateDetails(hit, token) {
         // Store full data on the selected char for import
         if (datacatSelectedChar && getCharId(datacatSelectedChar) === charId) {
             datacatSelectedChar._fullCharacter = character;
+        }
+
+        // Update creator name if available (MeiliSearch hits lack it)
+        const charCreatorName = character.creator_name || character.creatorName || '';
+        if (charCreatorName) {
+            const creatorEl = document.getElementById('datacatCharCreator');
+            if (creatorEl) creatorEl.textContent = charCreatorName;
+            if (datacatSelectedChar && getCharId(datacatSelectedChar) === charId) {
+                datacatSelectedChar.creator_name = charCreatorName;
+            }
         }
 
         const personality = character.personality || '';
@@ -1183,6 +1881,30 @@ async function fetchAndPopulateDetails(hit, token) {
             if (tagsEl) tagsEl.innerHTML = fullTags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
         }
 
+        // Enable the import button now that full data is available
+        const importBtn = document.getElementById('datacatImportBtn');
+        if (importBtn && !importBtn.dataset.extractId) {
+            const inLib = isCharInLocalLibrary(hit);
+            if (inLib) {
+                importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
+                importBtn.classList.add('secondary');
+                importBtn.classList.remove('primary', 'warning');
+            } else {
+                const creatorName = getCreatorName(hit) || 'Unknown';
+                const possible = view.isCharPossibleMatch(hit.name || '', creatorName);
+                if (possible) {
+                    importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
+                    importBtn.classList.add('warning');
+                    importBtn.classList.remove('primary', 'secondary');
+                } else {
+                    importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
+                    importBtn.classList.add('primary');
+                    importBtn.classList.remove('secondary', 'warning');
+                }
+            }
+            importBtn.disabled = false;
+        }
+
         // Fetch download data for alternate greetings
         fetchDatacatDownload(charId).then(downloadData => {
             if (token !== datacatDetailFetchToken) return;
@@ -1194,6 +1916,14 @@ async function fetchAndPopulateDetails(hit, token) {
         if (token === datacatDetailFetchToken) {
             const descEl = document.getElementById('datacatCharDescription');
             if (descEl) descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition.</em>';
+            const importBtn = document.getElementById('datacatImportBtn');
+            if (importBtn) {
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
+                importBtn.classList.remove('primary', 'secondary', 'warning');
+                importBtn.classList.add('primary');
+                importBtn.dataset.extractId = charId;
+            }
         }
     }
 }
@@ -1497,23 +2227,46 @@ function initDatacatView() {
         if (clearBtn) clearBtn.classList.toggle('hidden', !val);
     });
     on('datacatSearchBtn', 'click', () => doSearch());
+
+    // Creator search handlers
+    on('datacatCreatorSearchInput', 'keypress', (e) => {
+        if (e.key === 'Enter') performDatacatCreatorSearch();
+    });
+    on('datacatCreatorSearchBtn', 'click', () => performDatacatCreatorSearch());
     on('datacatClearSearchBtn', 'click', () => {
         const input = document.getElementById('datacatSearchInput');
         const clearBtn = document.getElementById('datacatClearSearchBtn');
         if (input) input.value = '';
         if (clearBtn) clearBtn.classList.add('hidden');
         if (datacatBrowseMode === 'creator') clearCreatorFilter();
+        if (isHampterSortMode(datacatSortMode) && hampterSearchQuery) {
+            hampterSearchQuery = '';
+            hampterCurrentPage = 1;
+            loadCharacters(false);
+        }
+        if (isJannySortMode(datacatSortMode) && meiliSearchQuery) {
+            meiliSearchQuery = '';
+            meiliCurrentPage = 1;
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        }
     });
 
     // Load More
     on('datacatLoadMoreBtn', 'click', () => {
-        const loadParsed = parseSortMode(datacatSortMode);
-        const isFreshMode = datacatBrowseMode !== 'creator' && loadParsed;
-        if (isFreshMode) {
-            if (loadParsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
-            else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
+        if (isHampterSortMode(datacatSortMode)) {
+            hampterCurrentPage++;
+        } else if (isJannySortMode(datacatSortMode)) {
+            meiliCurrentPage++;
         } else {
-            datacatCurrentOffset += PAGE_SIZE;
+            const loadParsed = parseSortMode(datacatSortMode);
+            const isFreshMode = datacatBrowseMode !== 'creator' && loadParsed;
+            if (isFreshMode) {
+                if (loadParsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
+                else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
+            } else {
+                datacatCurrentOffset += PAGE_SIZE;
+            }
         }
         loadCharacters(true);
     });
@@ -1542,8 +2295,13 @@ function initDatacatView() {
             datacatSortMode = el.value;
             datacatFreshLimit24 = 80;
             datacatFreshLimitWeek = 20;
+            meiliCurrentPage = 1;
+            hampterCurrentPage = 1;
+            hampterSearchQuery = '';
         }
         datacatCurrentOffset = 0;
+        updateSearchPlaceholder();
+        updateTagsVisibility();
         loadCharacters(false);
     });
 
@@ -1563,6 +2321,7 @@ function initDatacatView() {
         datacatCurrentOffset = 0;
         datacatFreshLimit24 = 80;
         datacatFreshLimitWeek = 20;
+        hampterCurrentPage = 1;
         loadCharacters(false);
     });
 
@@ -1574,15 +2333,26 @@ function initDatacatView() {
         const dropdown = document.getElementById('datacatTagsDropdown');
         if (!dropdown) return;
         dropdown.classList.toggle('hidden');
-        if (!dropdown.classList.contains('hidden')) loadFacetedTags();
+        if (!dropdown.classList.contains('hidden')) {
+            if (isJannyTagMode()) {
+                renderJannyTagsList();
+            } else {
+                loadFacetedTags();
+            }
+        }
     });
     on('datacatTagsClearBtn', 'click', () => {
-        datacatActiveTagIds.clear();
+        if (isJannyTagMode()) {
+            jannyActiveTagIds.clear();
+            renderJannyTagsList();
+        } else {
+            datacatActiveTagIds.clear();
+            renderTagsList();
+            refreshTagCounts();
+        }
         updateTagsButton();
-        renderTagsList();
         datacatCurrentOffset = 0;
         loadCharacters(false);
-        refreshTagCounts();
     });
 
     // Dropdown dismiss (click outside)
@@ -1674,7 +2444,13 @@ function initDatacatView() {
         }
 
         on('datacatImportBtn', 'click', () => {
-            if (datacatSelectedChar) importCharacter(datacatSelectedChar);
+            const importBtn = document.getElementById('datacatImportBtn');
+            const extractId = importBtn?.dataset.extractId;
+            if (extractId) {
+                startModalExtraction(extractId);
+            } else if (datacatSelectedChar) {
+                importCharacter(datacatSelectedChar);
+            }
         });
 
         const modalOverlay = document.getElementById('datacatCharModal');
@@ -1683,6 +2459,8 @@ function initDatacatView() {
                 if (e.target === modalOverlay) closePreviewModal();
             });
         }
+
+        window.registerOverlay?.({ id: 'datacatCharModal', tier: 7, close: () => closePreviewModal() });
     }
 }
 
@@ -1824,13 +2602,22 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                 <div class="browse-search-bar">
                     <div class="browse-search-input-wrapper">
                         <i class="fa-solid fa-search"></i>
-                        <input type="search" id="datacatSearchInput" placeholder="Paste a DataCat character or creator URL..." autocomplete="one-time-code">
+                        <input type="search" id="datacatSearchInput" placeholder="Paste a DataCat or JanitorAI character URL..." autocomplete="one-time-code">
                         <button id="datacatClearSearchBtn" class="browse-search-clear hidden" title="Clear search">
                             <i class="fa-solid fa-xmark"></i>
                         </button>
                         <button id="datacatSearchBtn" class="browse-search-submit">
                             <i class="fa-solid fa-arrow-right"></i>
                         </button>
+                    </div>
+                    <div class="browse-creator-search">
+                        <div class="browse-creator-search-wrapper">
+                            <i class="fa-solid fa-user"></i>
+                            <input type="search" id="datacatCreatorSearchInput" placeholder="Search by creator..." autocomplete="one-time-code">
+                            <button id="datacatCreatorSearchBtn" class="browse-search-submit" title="Search by creator">
+                                <i class="fa-solid fa-arrow-right"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -1989,13 +2776,19 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     canLoadMore() { return datacatHasMore && !datacatIsLoading; }
 
     loadMore() {
-        const parsed = parseSortMode(datacatSortMode);
-        const isFreshMode = datacatBrowseMode !== 'creator' && parsed;
-        if (isFreshMode) {
-            if (parsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
-            else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
+        if (isHampterSortMode(datacatSortMode)) {
+            hampterCurrentPage++;
+        } else if (isJannySortMode(datacatSortMode)) {
+            meiliCurrentPage++;
         } else {
-            datacatCurrentOffset += PAGE_SIZE;
+            const parsed = parseSortMode(datacatSortMode);
+            const isFreshMode = datacatBrowseMode !== 'creator' && parsed;
+            if (isFreshMode) {
+                if (parsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
+                else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
+            } else {
+                datacatCurrentOffset += PAGE_SIZE;
+            }
         }
         loadCharacters(true);
     }
@@ -2085,6 +2878,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             delegatesInitialized = true;
             this.buildLocalLibraryLookup();
             this.reconnectImageObserver();
+            updateSearchPlaceholder();
+            updateTagsVisibility();
         }
     }
 
@@ -2102,6 +2897,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     deactivate() {
         datacatDetailFetchToken++;
         delegatesInitialized = false;
+        stopExtractionPolling();
         super.deactivate();
         this.disconnectImageObserver();
     }

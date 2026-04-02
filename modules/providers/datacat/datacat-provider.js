@@ -132,7 +132,12 @@ class DatacatProvider extends ProviderBase {
     // ── Remote Data ─────────────────────────────────────────
 
     async fetchMetadata(characterId) {
-        return fetchDatacatCharacter(characterId);
+        const char = await fetchDatacatCharacter(characterId);
+        if (!char) return null;
+        // Normalize: library.js reads metadata.id as the link identifier.
+        // DataCat API returns numeric auto-increment as `id` and UUID as `character_id`.
+        // URLs and all API calls use the UUID, so expose it as `id`.
+        return { ...char, id: char.character_id || char.id };
     }
 
     async fetchRemoteCard(linkInfo) {
@@ -272,8 +277,8 @@ class DatacatProvider extends ProviderBase {
         if (!url) return null;
         try {
             const u = new URL(url.startsWith('http') ? url : `https://${url}`);
-            // Path: /characters/:uuid or /character/:uuid
-            const match = u.pathname.match(/\/characters?\/([a-f0-9-]{36})/i);
+            // Extract UUID from any path containing it (e.g. /characters/recent/:uuid)
+            const match = u.pathname.match(/\/characters?\/(?:[^/]+\/)*([a-f0-9-]{36})/i);
             if (match) return match[1];
         } catch { /* ignore */ }
         return null;

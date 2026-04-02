@@ -267,7 +267,7 @@ class WyvernBrowseView extends BrowseView {
     get hasModeToggle() { return true; }
 
     _getScrollThreshold() {
-        const zoom = parseFloat(document.documentElement.style.zoom) || 1;
+        const zoom = parseFloat(document.body.style.zoom) || 1;
         return 3000 / zoom;
     }
 
@@ -630,6 +630,10 @@ class WyvernBrowseView extends BrowseView {
     init() {
         super.init();
         initWyvernView();
+        this._registerDropdownDismiss([
+            { dropdownId: 'wyvernFiltersDropdown', buttonId: 'wyvernFiltersBtn' },
+            { dropdownId: 'wyvernTagsDropdown', buttonId: 'wyvernTagsBtn' },
+        ]);
     }
 
     applyDefaults(defaults) {
@@ -664,10 +668,6 @@ class WyvernBrowseView extends BrowseView {
             wyvernSelectedChar = null;
         }
         super.activate(container, options);
-
-        if (!_wyvernDropdownCloseHandler) {
-            initWyvernDropdownDismiss();
-        }
 
         this.buildLocalLibraryLookup();
 
@@ -708,10 +708,6 @@ class WyvernBrowseView extends BrowseView {
             try { wyvernDetailFetchController.abort(); } catch (e) { /* ignore */ }
             wyvernDetailFetchController = null;
         }
-        if (_wyvernDropdownCloseHandler) {
-            document.removeEventListener('click', _wyvernDropdownCloseHandler);
-            _wyvernDropdownCloseHandler = null;
-        }
     }
 
     closeDropdowns() {
@@ -724,24 +720,7 @@ class WyvernBrowseView extends BrowseView {
 // WYVERN BROWSE LOGIC
 // ========================================
 
-let _wyvernDropdownCloseHandler = null;
 
-function initWyvernDropdownDismiss() {
-    if (_wyvernDropdownCloseHandler) document.removeEventListener('click', _wyvernDropdownCloseHandler);
-    _wyvernDropdownCloseHandler = (e) => {
-        const filtersDropdown = document.getElementById('wyvernFiltersDropdown');
-        const filtersBtn = document.getElementById('wyvernFiltersBtn');
-        if (filtersDropdown && !filtersDropdown.contains(e.target) && e.target !== filtersBtn) {
-            filtersDropdown.classList.add('hidden');
-        }
-        const tagsDropdown = document.getElementById('wyvernTagsDropdown');
-        const tagsBtn = document.getElementById('wyvernTagsBtn');
-        if (tagsDropdown && !tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
-            tagsDropdown.classList.add('hidden');
-        }
-    };
-    document.addEventListener('click', _wyvernDropdownCloseHandler);
-}
 
 function initWyvernView() {
     const sortEl = document.getElementById('wyvernSortSelect');
@@ -925,9 +904,10 @@ function initWyvernView() {
             wyvernCurrentPage = 1;
             loadWyvernCharacters();
         });
-    }
 
-    initWyvernDropdownDismiss();
+        window.registerOverlay?.({ id: 'wyvernCharModal', tier: 7, close: () => hideModal('wyvernCharModal') });
+        window.registerOverlay?.({ id: 'wyvernLoginModal', tier: 6, close: () => hideModal('wyvernLoginModal') });
+    }
 
     loadWyvernToken();
 
@@ -2735,10 +2715,10 @@ async function downloadWyvernCharacter() {
 
         await new Promise(r => setTimeout(r, 200));
 
+        const added = await fetchAndAddCharacter(result.fileName);
+        if (!added) await fetchCharacters(true);
         view.buildLocalLibraryLookup();
         markWyvernCardAsImported(charId);
-
-        await fetchCharacters(true);
 
     } catch (e) {
         console.error('[Wyvern] Download error:', e);

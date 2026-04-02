@@ -59,18 +59,18 @@ body.char-modal-above .gv-modal.visible {
     margin-bottom: 16px;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
 }
 
 .card-update-status i {
-    font-size: 1.1em;
+    font-size: var(--font-lg);
 }
 
 /* Diff list */
 .card-update-diff-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .card-update-select-all {
@@ -80,7 +80,7 @@ body.char-modal-above .gv-modal.visible {
     border-radius: 6px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     cursor: pointer;
     font-weight: 500;
 }
@@ -98,13 +98,13 @@ body.char-modal-above .gv-modal.visible {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-md);
 }
 
 .card-update-diff-item.short label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     cursor: pointer;
     flex-shrink: 0;
 }
@@ -112,8 +112,8 @@ body.char-modal-above .gv-modal.visible {
 .card-update-diff-values {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.9em;
+    gap: var(--space-sm);
+    font-size: var(--font-md);
     overflow: hidden;
 }
 
@@ -149,7 +149,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-array-diff {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: var(--space-md);
     width: 100%;
 }
 
@@ -165,7 +165,7 @@ body.char-modal-above .gv-modal.visible {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #aaa);
     margin-bottom: 8px;
 }
@@ -174,13 +174,13 @@ body.char-modal-above .gv-modal.visible {
     padding: 2px 6px;
     border-radius: 999px;
     background: rgba(255,255,255,0.08);
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 .card-update-array-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     max-height: 140px;
     overflow: auto;
 }
@@ -192,7 +192,7 @@ body.char-modal-above .gv-modal.visible {
     border-radius: 999px;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.12);
-    font-size: 0.8em;
+    font-size: var(--font-sm);
 }
 
 .card-update-pill.tag {
@@ -215,7 +215,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-empty {
     color: var(--cl-text-secondary, #888);
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 /* Long text diff item */
@@ -223,20 +223,20 @@ body.char-modal-above .gv-modal.visible {
     padding: 10px 12px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-md);
     background: rgba(255,255,255,0.03);
 }
 
 .card-update-diff-item.long-text label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     cursor: pointer;
     flex-shrink: 0;
 }
 
 .card-update-diff-stats {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
     flex: 1;
     text-align: right;
@@ -286,7 +286,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-source-badge {
     display: inline-block;
-    font-size: 0.6rem;
+    font-size: var(--font-3xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -302,13 +302,13 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-diff-panel-header {
     padding: 8px 12px;
-    font-size: 0.75em;
+    font-size: var(--font-xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-xs-sm);
 }
 
 .card-update-diff-panel.local .card-update-diff-panel-header {
@@ -325,7 +325,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-diff-panel-content {
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 0.82em;
+    font-size: var(--font-sm);
     line-height: 1.6;
     max-height: 300px;
     overflow-y: auto;
@@ -380,7 +380,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     max-height: 50vh;
     overflow-y: auto;
 }
@@ -393,7 +393,7 @@ body.char-modal-above .gv-modal.visible {
     background: rgba(0,0,0,0.2);
     border: 1px solid var(--cl-border, rgba(80,80,80,0.3));
     border-radius: 6px;
-    gap: 12px;
+    gap: var(--space-md);
 }
 
 .card-update-batch-item-info {
@@ -419,7 +419,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-batch-item-path {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
     white-space: nowrap;
     overflow: hidden;
@@ -429,8 +429,8 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-item-status {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.9em;
+    gap: var(--space-xs-sm);
+    font-size: var(--font-md);
     flex-shrink: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -478,7 +478,7 @@ body.char-modal-above .gv-modal.visible {
     cursor: pointer;
     padding: 4px 7px;
     border-radius: 4px;
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     flex-shrink: 0;
     transition: all 0.15s;
 }
@@ -502,14 +502,14 @@ body.char-modal-above .gv-modal.visible {
 .card-update-unlock-check-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     margin-left: 12px;
     padding: 6px 14px;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 6px;
     color: var(--cl-text-primary, #eee);
-    font-size: 0.85em;
+    font-size: var(--font-md);
     cursor: pointer;
     transition: all 0.15s;
 }
@@ -526,7 +526,7 @@ body.char-modal-above .gv-modal.visible {
     border: none;
     border-radius: 4px;
     cursor: pointer;
-    font-size: 0.85em;
+    font-size: var(--font-md);
     transition: filter 0.15s;
 }
 
@@ -543,7 +543,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-actions {
     display: flex;
     justify-content: center;
-    gap: 12px;
+    gap: var(--space-md);
     padding-top: 12px;
     border-top: 1px solid var(--cl-border, rgba(80,80,80,0.4));
     margin-top: 12px;
@@ -573,7 +573,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-apply-progress {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 12px;
     border-radius: 10px;
     border: 1px solid rgba(74, 158, 255, 0.3);
@@ -582,7 +582,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-apply-text {
-    font-size: 0.9rem;
+    font-size: var(--font-md);
     color: var(--cl-text-primary, #eee);
 }
 
@@ -618,19 +618,19 @@ body.char-modal-above .gv-modal.visible {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-md);
     margin-bottom: 12px;
 }
 
 .card-update-field-title {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
 }
 
 .card-update-field-title i {
     color: var(--cl-accent, #4a9eff);
-    font-size: 1.1rem;
+    font-size: var(--font-lg);
 }
 
 .card-update-field-heading {
@@ -638,18 +638,18 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-sub {
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     color: rgba(255, 255, 255, 0.65);
 }
 
 .card-update-field-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .card-update-field-count {
-    font-size: 0.85rem;
+    font-size: var(--font-md);
     color: rgba(255, 255, 255, 0.75);
     padding: 4px 8px;
     border-radius: 999px;
@@ -660,13 +660,13 @@ body.char-modal-above .gv-modal.visible {
 .card-update-field-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 8px;
+    gap: var(--space-sm);
 }
 
 .card-update-field-option {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 8px 10px;
     border-radius: 10px;
     background: rgba(255, 255, 255, 0.05);
@@ -685,7 +685,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-label {
-    font-size: 0.9rem;
+    font-size: var(--font-md);
 }
 
 /* ========================================
@@ -695,7 +695,7 @@ body.char-modal-above .gv-modal.visible {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
+    gap: var(--space-sm-md);
     margin-bottom: 12px;
     flex-wrap: wrap;
 }
@@ -706,20 +706,20 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-filter-pills {
     display: flex;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     flex-wrap: wrap;
 }
 
 .card-update-filter-pill {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
     padding: 5px 10px;
     border-radius: 999px;
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(255, 255, 255, 0.05);
     color: var(--cl-text-secondary, #999);
-    font-size: 0.82em;
+    font-size: var(--font-sm);
     cursor: pointer;
     transition: all 0.15s ease;
 }
@@ -738,7 +738,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .filter-count {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     padding: 1px 5px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.1);
@@ -754,8 +754,8 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-selection-controls {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.82em;
+    gap: var(--space-xs-sm);
+    font-size: var(--font-sm);
 }
 
 .card-update-select-link {
@@ -794,7 +794,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-item-fields {
     display: inline-flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--space-2xs);
 }
 
 .batch-field-icon {
@@ -806,7 +806,7 @@ body.char-modal-above .gv-modal.visible {
     border-radius: 5px;
     background: rgba(74, 158, 255, 0.12);
     color: var(--cl-accent, #4a9eff);
-    font-size: 0.72em;
+    font-size: var(--font-2xs);
 }
 
 /* ========================================
@@ -823,7 +823,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-header {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding: 12px 14px;
     background: rgba(74, 158, 255, 0.08);
     border: 1px solid rgba(74, 158, 255, 0.2);
@@ -833,13 +833,13 @@ body.char-modal-above .gv-modal.visible {
 
 .batch-summary-header i {
     color: var(--cl-accent, #4a9eff);
-    font-size: 1.1em;
+    font-size: var(--font-lg);
 }
 
 .batch-summary-fields {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-xs-sm);
     margin-bottom: 16px;
 }
 
@@ -850,11 +850,11 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-field-name {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-xs-sm);
 }
 
 .batch-summary-field-count {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
 }
 
@@ -865,15 +865,15 @@ body.char-modal-above .gv-modal.visible {
     padding: 8px 0;
     margin-bottom: 6px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    font-size: 0.9em;
+    font-size: var(--font-md);
     font-weight: 500;
 }
 
 .batch-summary-toggle-all {
     display: flex;
     align-items: center;
-    gap: 6px;
-    font-size: 0.85em;
+    gap: var(--space-xs-sm);
+    font-size: var(--font-md);
     color: var(--cl-text-secondary, #999);
     cursor: pointer;
 }
@@ -885,7 +885,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-char-list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-2xs);
     max-height: 45vh;
     overflow-y: auto;
 }
@@ -893,7 +893,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-char-item {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding: 8px 10px;
     border-radius: 6px;
     background: rgba(0, 0, 0, 0.15);
@@ -921,7 +921,7 @@ body.char-modal-above .gv-modal.visible {
 
 .batch-summary-char-name {
     font-weight: 500;
-    font-size: 0.9em;
+    font-size: var(--font-md);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -937,7 +937,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-char-fields {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: var(--space-2xs);
     flex-wrap: wrap;
 }
 
@@ -945,17 +945,17 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-entries {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-xs);
     padding: 10px 12px;
 }
 
 .lorebook-diff-entry {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 6px 10px;
     border-radius: 6px;
-    font-size: 0.88em;
+    font-size: var(--font-md);
 }
 
 .lorebook-diff-entry.added { background: rgba(76, 175, 80, 0.1); }
@@ -971,7 +971,7 @@ body.char-modal-above .gv-modal.visible {
     height: 22px;
     border-radius: 50%;
     font-weight: bold;
-    font-size: 13px;
+    font-size: var(--font-sm);
     flex-shrink: 0;
     line-height: 1;
 }
@@ -979,12 +979,12 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-badge.added { background: rgba(76, 175, 80, 0.25); color: #81c784; }
 .lorebook-diff-badge.removed { background: rgba(244, 67, 54, 0.25); color: #ef9a9a; }
 .lorebook-diff-badge.modified { background: rgba(255, 152, 0, 0.25); color: #ffcc80; }
-.lorebook-diff-badge.local-only { background: rgba(158, 158, 158, 0.25); color: #bdbdbd; font-size: 11px; }
+.lorebook-diff-badge.local-only { background: rgba(158, 158, 158, 0.25); color: #bdbdbd; font-size: var(--font-2xs); }
 .lorebook-diff-entry.local-only { opacity: 0.7; }
 
 .lorebook-diff-summary {
     padding: 6px 10px;
-    font-size: 0.82em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
     border-bottom: 1px dashed rgba(255,255,255,0.08);
     line-height: 1.4;
@@ -992,13 +992,13 @@ body.char-modal-above .gv-modal.visible {
 
 .lorebook-diff-info-box {
     display: flex;
-    gap: 10px;
+    gap: var(--space-sm-md);
     padding: 10px 12px;
     margin: 6px 10px;
     background: rgba(74, 158, 255, 0.08);
     border: 1px solid rgba(74, 158, 255, 0.2);
     border-radius: 8px;
-    font-size: 0.82em;
+    font-size: var(--font-sm);
     line-height: 1.5;
     color: var(--cl-text-secondary, #bbb);
 }
@@ -1013,7 +1013,7 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-help-details { margin-top: 6px; }
 .lorebook-diff-help-details summary {
     cursor: pointer;
-    font-size: 0.9em;
+    font-size: var(--font-md);
     color: var(--cl-accent, #4a9eff);
     user-select: none;
     list-style: none;
@@ -1021,7 +1021,7 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-help-details summary::-webkit-details-marker { display: none; }
 .lorebook-diff-help-details summary::before {
     content: '\25B8 ';
-    font-size: 0.8em;
+    font-size: var(--font-sm);
 }
 .lorebook-diff-help-details[open] summary::before {
     content: '\25BE ';
@@ -1030,7 +1030,7 @@ body.char-modal-above .gv-modal.visible {
     margin-top: 8px;
     padding-top: 8px;
     border-top: 1px solid rgba(74, 158, 255, 0.15);
-    font-size: 0.92em;
+    font-size: var(--font-md);
     line-height: 1.6;
 }
 .lorebook-diff-help-body p { margin: 6px 0; }
@@ -1043,12 +1043,12 @@ body.char-modal-above .gv-modal.visible {
     background: rgba(255,255,255,0.08);
     padding: 1px 5px;
     border-radius: 3px;
-    font-size: 0.9em;
+    font-size: var(--font-md);
 }
 
 .lorebook-diff-entry-tag {
     margin-left: auto;
-    font-size: 0.75em;
+    font-size: var(--font-xs);
     padding: 1px 7px;
     border-radius: 9px;
     flex-shrink: 0;
@@ -1076,7 +1076,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .lorebook-diff-local-only-section { padding: 6px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
-.lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 0.82em; color: var(--cl-text-secondary, #999); }
+.lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: var(--space-xs-sm); cursor: pointer; font-size: var(--font-sm); color: var(--cl-text-secondary, #999); }
 .lorebook-diff-keep-toggle input { accent-color: var(--accent, #7b68ee); }
 
 .lorebook-diff-entry-name {
@@ -1088,7 +1088,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .lorebook-diff-entry-keys {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     color: var(--cl-text-secondary, #999);
     white-space: nowrap;
     overflow: hidden;
@@ -1103,7 +1103,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .lorebook-diff-entry-changes {
-    font-size: 0.8em;
+    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
     margin-left: auto;
     flex-shrink: 0;
@@ -1113,16 +1113,16 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-unchanged-count {
     opacity: 0.5;
     font-style: italic;
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 .lorebook-entry-counts {
-    font-size: 0.85em;
+    font-size: var(--font-md);
     opacity: 0.65;
     margin-left: 8px;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-xs);
 }
 
 .lorebook-entry-counts i {
@@ -1136,7 +1136,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .lorebook-diff-meta-title {
-    font-size: 0.75em;
+    font-size: var(--font-xs);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     color: var(--cl-text-secondary, #999);
@@ -1147,9 +1147,9 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-meta-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-sm);
     padding: 3px 0;
-    font-size: 0.85em;
+    font-size: var(--font-md);
 }
 
 .lorebook-diff-meta-key {
@@ -1174,7 +1174,7 @@ body.char-modal-above .gv-modal.visible {
 
 .lorebook-diff-meta-row i {
     color: var(--cl-text-secondary, #aaa);
-    font-size: 0.7em;
+    font-size: var(--font-2xs);
     opacity: 0.6;
     flex-shrink: 0;
 }
@@ -1194,27 +1194,27 @@ body.char-modal-above .gv-modal.visible {
     }
     .card-update-modal .cl-modal-header {
         padding: 10px 12px;
-        gap: 8px;
+        gap: var(--space-sm);
         flex-wrap: wrap;
         flex-shrink: 0;
     }
-    .card-update-source-badge { font-size: 0.55rem; padding: 1px 5px; margin-left: 5px; }
+    .card-update-source-badge { font-size: var(--font-4xs); padding: 1px 5px; margin-left: 5px; }
     .card-update-modal .cl-modal-body {
         flex: 1 !important;
         min-height: 0 !important;
         max-height: none !important;
         overflow-y: auto;
         padding: 12px;
-        font-size: 0.85rem;
+        font-size: var(--font-md);
         -webkit-overflow-scrolling: touch;
     }
-    .card-update-status { font-size: 0.82rem; padding: 10px 12px; gap: 8px; }
-    .card-update-select-all { font-size: 0.82rem; }
-    .card-update-diff-values { font-size: 0.82em; }
-    .card-update-diff-expand { font-size: 0.82rem; }
-    .card-update-empty { font-size: 0.78em; }
-    .card-update-apply-text { font-size: 0.82rem; }
-    .card-update-array-count { font-size: 0.75rem; }
+    .card-update-status { font-size: var(--font-sm); padding: 10px 12px; gap: var(--space-sm); }
+    .card-update-select-all { font-size: var(--font-sm); }
+    .card-update-diff-values { font-size: var(--font-sm); }
+    .card-update-diff-expand { font-size: var(--font-sm); }
+    .card-update-empty { font-size: var(--font-xs); }
+    .card-update-apply-text { font-size: var(--font-sm); }
+    .card-update-array-count { font-size: var(--font-xs); }
 
     .card-update-field-select {
         padding: 12px;
@@ -1225,31 +1225,31 @@ body.char-modal-above .gv-modal.visible {
     .card-update-field-header {
         flex-direction: column;
         align-items: flex-start;
-        gap: 10px;
+        gap: var(--space-sm-md);
     }
     .card-update-field-actions {
         width: 100%;
         display: grid;
         grid-template-columns: 1fr 1fr 1fr;
-        gap: 8px;
+        gap: var(--space-sm);
     }
     .card-update-field-actions .cl-btn {
         padding: 6px 8px;
-        font-size: 0.8rem;
+        font-size: var(--font-sm);
     }
     .card-update-field-count {
         grid-column: 1 / -1;
         text-align: center;
-        font-size: 0.78rem;
+        font-size: var(--font-xs);
     }
     .card-update-field-grid {
         grid-template-columns: 1fr;
-        gap: 10px;
+        gap: var(--space-sm-md);
     }
-    .card-update-field-title i { font-size: 0.92rem; }
-    .card-update-field-heading { font-size: 0.85rem; }
-    .card-update-field-sub { font-size: 0.78rem; }
-    .card-update-field-label { font-size: 0.82rem; }
+    .card-update-field-title i { font-size: var(--font-md); }
+    .card-update-field-heading { font-size: var(--font-md); }
+    .card-update-field-sub { font-size: var(--font-xs); }
+    .card-update-field-label { font-size: var(--font-sm); }
     .card-update-field-option {
         padding: 10px 12px;
         border-radius: 12px;
@@ -1273,7 +1273,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-item {
         flex-direction: row;
         align-items: center;
-        gap: 10px;
+        gap: var(--space-sm-md);
         padding: 9px 12px;
         border-radius: 0;
         background: rgba(255, 255, 255, 0.02);
@@ -1304,12 +1304,12 @@ body.char-modal-above .gv-modal.visible {
         gap: 1px;
     }
     .card-update-batch-item-name {
-        font-size: 0.88rem;
+        font-size: var(--font-md);
         font-weight: 600;
         line-height: 1.25;
     }
     .card-update-batch-item-path {
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         opacity: 0.5;
         line-height: 1.2;
     }
@@ -1326,10 +1326,10 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-item-status {
         width: auto;
         justify-content: flex-end;
-        gap: 6px;
+        gap: var(--space-xs-sm);
         flex-wrap: nowrap;
         flex-shrink: 0;
-        font-size: 0.78rem;
+        font-size: var(--font-xs);
         white-space: nowrap;
     }
 
@@ -1337,7 +1337,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-item-status .has-updates {
         padding: 2px 8px;
         border-radius: 10px;
-        font-size: 0.75rem;
+        font-size: var(--font-xs);
         font-weight: 600;
         letter-spacing: 0.01em;
     }
@@ -1347,62 +1347,62 @@ body.char-modal-above .gv-modal.visible {
         width: auto;
         padding: 3px 10px;
         border-radius: 10px;
-        font-size: 0.75rem;
+        font-size: var(--font-xs);
         font-weight: 600;
     }
 
     /* Card update lorebook header - prevent overflow on mobile */
     .card-update-diff-item.long-text .card-update-diff-header {
         flex-wrap: wrap;
-        gap: 8px;
+        gap: var(--space-sm);
         padding: 8px 10px;
     }
     .card-update-diff-item.long-text .card-update-diff-header label { flex-shrink: 1; min-width: 0; }
-    .card-update-diff-stats { font-size: 0.75em; white-space: nowrap; }
-    .lorebook-entry-counts { font-size: 0.78em; margin-left: 4px; gap: 3px; }
-    .lorebook-diff-summary { font-size: 0.78em; }
+    .card-update-diff-stats { font-size: var(--font-xs); white-space: nowrap; }
+    .lorebook-entry-counts { font-size: var(--font-xs); margin-left: 4px; gap: var(--space-2xs); }
+    .lorebook-diff-summary { font-size: var(--font-xs); }
 
     /* --- Card update lorebook diff entries (mobile) --- */
-    .lorebook-diff-entries { padding: 6px 8px; gap: 3px; }
+    .lorebook-diff-entries { padding: 6px 8px; gap: var(--space-2xs); }
     .lorebook-diff-info-box {
         flex-direction: column;
-        gap: 6px;
+        gap: var(--space-xs-sm);
         padding: 8px 10px;
         margin: 4px 6px;
-        font-size: 0.78em;
+        font-size: var(--font-xs);
         line-height: 1.4;
     }
-    .lorebook-diff-info-detail { font-size: 0.88em; }
+    .lorebook-diff-info-detail { font-size: var(--font-md); }
     .lorebook-diff-entry {
         flex-wrap: wrap;
-        gap: 4px 6px;
+        gap: var(--space-xs) var(--space-xs-sm);
         padding: 5px 8px;
-        font-size: 0.82em;
+        font-size: var(--font-sm);
     }
     .lorebook-diff-badge { width: 18px; height: 18px; font-size: 10px; }
     .lorebook-diff-entry-name { max-width: 45%; }
     .lorebook-diff-entry-tag {
-        font-size: 0.7em;
+        font-size: var(--font-2xs);
         padding: 1px 5px;
         order: 10;
     }
     .lorebook-world-check { margin-left: 0; }
-    .lorebook-diff-entry-keys { font-size: 0.78em; flex-basis: 100%; padding-left: 26px; }
-    .lorebook-diff-entry-changes { font-size: 0.75em; }
-    .lorebook-diff-meta-row { flex-wrap: wrap; gap: 4px 6px; font-size: 0.82em; }
+    .lorebook-diff-entry-keys { font-size: var(--font-xs); flex-basis: 100%; padding-left: 26px; }
+    .lorebook-diff-entry-changes { font-size: var(--font-xs); }
+    .lorebook-diff-meta-row { flex-wrap: wrap; gap: var(--space-xs) var(--space-xs-sm); font-size: var(--font-sm); }
     .lorebook-diff-meta-key { min-width: unset; }
 
     .card-update-diff-item.short {
         flex-direction: column;
         align-items: flex-start;
-        gap: 8px;
+        gap: var(--space-sm);
     }
     .card-update-diff-values {
         width: 100%;
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
         align-items: center;
-        gap: 6px;
+        gap: var(--space-xs-sm);
     }
     .card-update-diff-values .local-value,
     .card-update-diff-values .remote-value {
@@ -1420,7 +1420,7 @@ body.char-modal-above .gv-modal.visible {
         overflow: visible;
     }
     .card-update-pill {
-        font-size: 0.78em;
+        font-size: var(--font-xs);
         padding: 3px 8px;
     }
 
@@ -1434,12 +1434,12 @@ body.char-modal-above .gv-modal.visible {
     .card-update-diff-panel-content {
         max-height: none;
         overflow: visible;
-        font-size: 0.75em;
+        font-size: var(--font-xs);
     }
     /* Batch footer */
     .card-update-modal .cl-modal-footer {
         padding: 12px;
-        gap: 8px;
+        gap: var(--space-sm);
         display: flex;
         flex-wrap: wrap;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
@@ -1453,13 +1453,13 @@ body.char-modal-above .gv-modal.visible {
         height: 44px;
         padding: 0 16px;
         border-radius: 12px;
-        font-size: 0.92rem;
+        font-size: var(--font-md);
         font-weight: 500;
         box-sizing: border-box;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 8px;
+        gap: var(--space-sm);
         flex: 1 1 0;
         min-width: 0;
     }
@@ -1482,7 +1482,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-actions .cl-btn {
         width: 100%;
         height: 48px;          /* slightly taller - primary action */
-        font-size: 0.95rem;
+        font-size: var(--font-base);
         font-weight: 600;
         border-radius: 12px;
         letter-spacing: 0.01em;
@@ -1506,7 +1506,7 @@ body.char-modal-above .gv-modal.visible {
     /* Batch progress text - mobile */
     .card-update-batch-progress {
         padding: 12px 14px;
-        font-size: 0.9rem;
+        font-size: var(--font-md);
         font-weight: 500;
         color: rgba(255, 255, 255, 0.75);
         background: rgba(255, 255, 255, 0.03);
@@ -1524,7 +1524,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-filter-bar {
         flex-direction: column;
         align-items: stretch;
-        gap: 6px;
+        gap: var(--space-xs-sm);
         margin-bottom: 10px;
         flex-wrap: nowrap;
         overflow-x: visible;
@@ -1532,7 +1532,7 @@ body.char-modal-above .gv-modal.visible {
 
     .card-update-filter-pills {
         flex-wrap: nowrap;
-        gap: 5px;
+        gap: var(--space-xs);
         flex-shrink: 0;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -1542,7 +1542,7 @@ body.char-modal-above .gv-modal.visible {
     /* Touch-friendly pills */
     .card-update-filter-pill {
         padding: 6px 10px;
-        font-size: 0.78rem;
+        font-size: var(--font-xs);
         min-height: 32px;
         white-space: nowrap;
         touch-action: manipulation;
@@ -1559,16 +1559,16 @@ body.char-modal-above .gv-modal.visible {
     }
 
     .filter-count {
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         padding: 0 4px;
         min-width: 14px;
     }
 
     /* Selection controls - subtle centered row below pills */
     .card-update-batch-selection-controls {
-        font-size: 0.72rem;
+        font-size: var(--font-2xs);
         flex-shrink: 0;
-        gap: 4px;
+        gap: var(--space-xs);
         justify-content: center;
         opacity: 0.7;
     }
@@ -1600,12 +1600,12 @@ body.char-modal-above .gv-modal.visible {
 
     /* Inline field icons in status area */
     .card-update-batch-item-fields {
-        gap: 2px;
+        gap: var(--space-2xs);
     }
     .batch-field-icon {
         width: 20px;
         height: 20px;
-        font-size: 0.65em;
+        font-size: var(--font-3xs);
     }
 
     /* Pre-apply summary - full-width mobile layout */
@@ -1613,26 +1613,26 @@ body.char-modal-above .gv-modal.visible {
         padding: 10px 12px;
         border-radius: 8px;
         margin-bottom: 10px;
-        gap: 8px;
-        font-size: 0.88rem;
+        gap: var(--space-sm);
+        font-size: var(--font-md);
     }
 
     .batch-summary-fields {
-        gap: 5px;
+        gap: var(--space-xs);
         margin-bottom: 12px;
     }
     .batch-summary-field-count {
-        font-size: 0.75em;
+        font-size: var(--font-xs);
     }
 
     .batch-summary-chars-header {
         padding: 6px 0;
         margin-bottom: 4px;
-        font-size: 0.85em;
+        font-size: var(--font-md);
     }
 
     .batch-summary-toggle-all {
-        font-size: 0.8em;
+        font-size: var(--font-sm);
         min-height: 44px;
         display: flex;
         align-items: center;
@@ -1649,7 +1649,7 @@ body.char-modal-above .gv-modal.visible {
     }
 
     .batch-summary-char-item {
-        gap: 10px;
+        gap: var(--space-sm-md);
         padding: 10px 10px;
         min-height: 44px;
         border-radius: 4px;
@@ -1665,15 +1665,15 @@ body.char-modal-above .gv-modal.visible {
     }
 
     .batch-summary-char-name {
-        font-size: 0.85em;
+        font-size: var(--font-md);
     }
     .batch-summary-char-fields {
-        gap: 2px;
+        gap: var(--space-2xs);
     }
     .batch-summary-char-fields .batch-field-icon {
         width: 18px;
         height: 18px;
-        font-size: 0.6em;
+        font-size: var(--font-3xs);
     }
 
     /* Summary footer buttons - match existing batch footer styling */
@@ -1681,7 +1681,7 @@ body.char-modal-above .gv-modal.visible {
     #cardUpdateBatchSummaryConfirmBtn {
         height: 44px;
         border-radius: 12px;
-        font-size: 0.92rem;
+        font-size: var(--font-md);
         font-weight: 500;
         touch-action: manipulation;
     }

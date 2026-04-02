@@ -282,6 +282,7 @@ window.registerOverlay = function(cfg) {
         createSearchButton(topbar);
         createSettingsButton(topbar);
         createMenuButton(topbar);
+        createProviderQuickSwitch(topbar);
         setupModalAvatar();
         setupGallerySwipe();
         setupBrowseGallerySwipe();
@@ -292,6 +293,7 @@ window.registerOverlay = function(cfg) {
         setupViewportFix();
         relocateTagPopup();
         relocatePlaylistPopup();
+        relocateAdvFilterPanel();
         setDefaultExpandZoom();
         setupLorebookModalToolbar();
         fixInvalidDateText();
@@ -348,7 +350,6 @@ window.registerOverlay = function(cfg) {
             ['.mobile-ctx-sheet.visible',      () => { document.querySelector('.mobile-ctx-sheet')?.classList.remove('visible'); document.querySelector('.mobile-ctx-scrim')?.classList.remove('visible'); }],
             ['#clContextMenu.visible',         el => el.classList.remove('visible')],
             ['.custom-select-menu:not(.hidden)', el => el.classList.add('hidden')],
-            ['#batchTagModal.visible',         el => el.classList.remove('visible')],
 
             // When char details is stacked above another modal, unwind its layers first
             () => {
@@ -361,9 +362,6 @@ window.registerOverlay = function(cfg) {
                 if (charModal && !charModal.classList.contains('hidden')) { window.closeModal?.(); return true; }
                 return false;
             },
-
-            ['#cardUpdateSingleModal.visible', el => el.classList.remove('visible')],
-            ['#cardUpdateBatchModal.visible',  el => el.classList.remove('visible')],
 
             // Tier 1.5 — catch-all for dynamic modal-overlays
             () => {
@@ -396,9 +394,6 @@ window.registerOverlay = function(cfg) {
             ['#legacyFolderModal',                    el => el.remove()],
             ['#folderMappingModal',                   el => el.remove()],
             ['#orphanedFoldersModal',                 el => el.remove()],
-            ['#playlistPickerModal.visible',          el => window.closePlaylistPicker?.()],
-            ['#playlistManageModal.visible',          el => window.closePlaylistManager?.()],
-
             // Tier 2.5 — mobile sheets & overlays
             ['.mobile-search-overlay:not(.hidden)', () => {
                 const overlay = document.querySelector('.mobile-search-overlay');
@@ -1319,6 +1314,136 @@ window.registerOverlay = function(cfg) {
             openSheet(overlay, sheet);
         });
         document.body.appendChild(overlay);
+    }
+
+    /* ========================================
+       PROVIDER QUICK SWITCH BUTTON
+       ======================================== */
+    function createProviderQuickSwitch(topbar) {
+        const btn = document.createElement('button');
+        btn.id = 'mobileProviderQuickSwitch';
+        btn.className = 'mobile-provider-quick-switch hidden';
+        btn.title = 'Switch Provider';
+        btn.innerHTML = '<i class="fa-solid fa-globe"></i>';
+        btn.style.cssText = 'touch-action:manipulation';
+
+        const viewToggle = topbar.querySelector('.view-toggle');
+        if (viewToggle && viewToggle.nextSibling) {
+            topbar.insertBefore(btn, viewToggle.nextSibling);
+        } else {
+            topbar.appendChild(btn);
+        }
+
+        function updateIcon() {
+            if (!window.ProviderRegistry) return;
+            const activeId = window.ProviderRegistry.getActiveProviderId();
+            const providers = window.ProviderRegistry.getViewProviders();
+            const active = providers.find(p => p.id === activeId);
+            if (!active) return;
+
+            if (active.iconUrl) {
+                btn.innerHTML = '';
+                const img = document.createElement('img');
+                img.src = active.iconUrl;
+                img.alt = active.name;
+                img.className = 'mobile-provider-quick-switch-icon';
+                btn.appendChild(img);
+            } else {
+                btn.innerHTML = '<i class="' + active.icon + '"></i>';
+            }
+            btn.title = active.name;
+        }
+
+        function updateVisibility() {
+            const isOnline = getActiveView() === 'online';
+            const enabled = window.getSetting?.('mobileProviderQuickSwitch') !== false;
+            btn.classList.toggle('hidden', !isOnline || !enabled);
+            if (isOnline) updateIcon();
+        }
+
+        // Track view changes by wrapping switchView
+        const origSwitch = window.switchView;
+        if (origSwitch) {
+            window.switchView = function(view) {
+                origSwitch.call(this, view);
+                updateVisibility();
+            };
+        }
+
+        // Also listen to view toggle clicks for redundancy
+        document.querySelectorAll('.view-toggle-btn').forEach(b => {
+            b.addEventListener('click', () => setTimeout(updateVisibility, 50));
+        });
+
+        // Bottom sheet for provider selection
+        const { overlay, sheet, close } = createBottomSheet();
+
+        function populateSheet() {
+            if (!window.ProviderRegistry) return;
+            const providers = window.ProviderRegistry.getViewProviders();
+            const activeId = window.ProviderRegistry.getActiveProviderId();
+            sheet.innerHTML = '';
+
+            const handle = document.createElement('div');
+            handle.className = 'mobile-sheet-handle';
+            sheet.appendChild(handle);
+
+            const title = document.createElement('div');
+            title.className = 'mobile-provider-sheet-title';
+            title.textContent = 'Switch Provider';
+            sheet.appendChild(title);
+
+            providers.forEach(p => {
+                const item = document.createElement('button');
+                item.className = 'mobile-sheet-item';
+                if (p.id === activeId) item.style.color = 'var(--accent)';
+
+                if (p.iconUrl) {
+                    const img = document.createElement('img');
+                    img.src = p.iconUrl;
+                    img.alt = p.name;
+                    img.className = 'mobile-provider-sheet-icon';
+                    item.appendChild(img);
+                } else {
+                    const icon = document.createElement('i');
+                    icon.className = p.icon;
+                    item.appendChild(icon);
+                }
+
+                const name = document.createTextNode(' ' + p.name);
+                item.appendChild(name);
+
+                if (p.id === activeId) {
+                    const check = document.createElement('i');
+                    check.className = 'fa-solid fa-check';
+                    check.style.cssText = 'margin-left:auto;font-size:0.8rem;';
+                    item.appendChild(check);
+                }
+
+                item.addEventListener('click', () => {
+                    if (p.id !== activeId) {
+                        const select = document.getElementById('providerSelect');
+                        if (select) {
+                            select.value = p.id;
+                            select.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    close();
+                    setTimeout(updateIcon, 100);
+                });
+                sheet.appendChild(item);
+            });
+        }
+
+        btn.addEventListener('click', () => {
+            populateSheet();
+            openSheet(overlay, sheet);
+        });
+
+        document.body.appendChild(overlay);
+
+        // Initial state
+        setTimeout(updateVisibility, 300);
     }
 
     /* ========================================
@@ -2254,6 +2379,44 @@ window.registerOverlay = function(cfg) {
             scrim.style.display = popup.classList.contains('hidden') ? 'none' : 'block';
         });
         obs.observe(popup, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    /* ========================================
+       RELOCATE ADVANCED FILTER PANEL
+       Same pattern as tag/playlist popup — move to body,
+       add scrim + handle
+       ======================================== */
+    function relocateAdvFilterPanel() {
+        const panel = document.getElementById('advFilterPanel');
+        if (!panel || panel.dataset.relocated) return;
+        panel.dataset.relocated = 'true';
+
+        document.body.appendChild(panel);
+
+        const scrim = document.createElement('div');
+        scrim.className = 'mobile-advfilter-scrim';
+        scrim.style.display = 'none';
+        document.body.appendChild(scrim);
+
+        const handle = document.createElement('div');
+        handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
+        const bar = document.createElement('div');
+        bar.style.cssText = 'width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);';
+        handle.appendChild(bar);
+        panel.insertBefore(handle, panel.firstChild);
+
+        function closePanel() {
+            panel.classList.add('hidden');
+            scrim.style.display = 'none';
+        }
+
+        scrim.addEventListener('click', closePanel);
+        handle.addEventListener('click', closePanel);
+
+        const obs = new MutationObserver(() => {
+            scrim.style.display = panel.classList.contains('hidden') ? 'none' : 'block';
+        });
+        obs.observe(panel, { attributes: true, attributeFilter: ['class'] });
     }
 
     /* ========================================

@@ -367,7 +367,62 @@ export async function init(router) {
         /^\/api\/creators\/[a-f0-9-]+$/,
         /^\/api\/creators\/[a-f0-9-]+\/characters\b/,
         /^\/api\/tags\/faceted\b/,
+        /^\/api\/extraction\/status$/,
     ];
+
+    // POST-only: submit extraction request to DataCat
+    router.post('/dc-extract', async (req, res) => {
+        if (!dcSessionToken) {
+            return res.status(401).json({ error: 'No DataCat session token configured' });
+        }
+
+        const { url } = req.body ?? {};
+        if (!url || typeof url !== 'string') {
+            return res.status(400).json({ error: 'url string is required' });
+        }
+        if (url.length > 512) {
+            return res.status(400).json({ error: 'URL too long' });
+        }
+
+        // Only allow JanitorAI character URLs
+        try {
+            const parsed = new URL(url);
+            if (!/^(www\.)?janitorai\.com$/i.test(parsed.hostname) && !/^(www\.)?jannyai\.com$/i.test(parsed.hostname)) {
+                return res.status(400).json({ error: 'Only JanitorAI character URLs are supported' });
+            }
+            if (!/^\/characters\/[a-f0-9-]+/i.test(parsed.pathname)) {
+                return res.status(400).json({ error: 'Invalid character URL path' });
+            }
+        } catch {
+            return res.status(400).json({ error: 'Invalid URL' });
+        }
+
+        const requestId = randomUUID();
+
+        try {
+            const response = await fetch(`${DATACAT_BASE}/api/character/smart-extract-v2`, {
+                method: 'POST',
+                headers: {
+                    ...dcHeaders(dcSessionToken),
+                    'Content-Type': 'application/json',
+                    'X-Request-Id': requestId,
+                },
+                body: JSON.stringify({
+                    url,
+                    appearOnPublicFeed: req.body.publicFeed !== false,
+                    useSeparateWorkerServer: true,
+                    inlinePostExtractCreatorProfile: true,
+                    idempotencyKey: requestId,
+                }),
+            });
+
+            const data = await response.json();
+            res.status(response.status).json(data);
+        } catch (err) {
+            console.error('[cl-helper] DC extract error:', err.message);
+            res.status(502).json({ error: 'Failed to reach DataCat' });
+        }
+    });
 
     router.get('/dc-proxy/*', async (req, res) => {
         if (!dcSessionToken) {

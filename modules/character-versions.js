@@ -694,7 +694,7 @@ function renderRemoteList(versions) {
                     <span class="vt-item-id">${esc(vid)}</span>
                     ${isLatest ? '<span class="vt-badge latest">Latest</span>' : ''}
                 </div>
-                <div class="vt-item-title">${esc(truncate(title, 55))}</div>
+                <div class="vt-item-title">${esc(CoreAPI.truncate(title, 55))}</div>
                 <div class="vt-item-date">
                     <i class="fa-regular fa-clock"></i>
                     <span title="${esc(date.toLocaleString())}">${relTime(date)}</span>
@@ -768,7 +768,7 @@ function renderSnapshotList(snaps) {
             <div class="vt-item" data-snapshot-id="${s.id}">
                 <div class="vt-item-header">
                     <i class="fa-solid ${icon} vt-item-icon"></i>
-                    <span class="vt-item-label">${esc(truncate(s.label, 40))}</span>
+                    <span class="vt-item-label">${esc(CoreAPI.truncate(s.label, 40))}</span>
                 </div>
                 <div class="vt-item-date">
                     <i class="fa-regular fa-clock"></i>
@@ -1026,9 +1026,9 @@ function renderShortDiff(field, lv, rv) {
         <div class="vt-diff-item short">
             <span class="vt-diff-label">${fieldIcon(field)}${esc(field.label)}</span>
             <div class="vt-diff-vals">
-                <span class="vt-local" title="${esc(ls)}">${esc(truncate(ls, 60))}</span>
+                <span class="vt-local" title="${esc(ls)}">${esc(CoreAPI.truncate(ls, 60))}</span>
                 <i class="fa-solid fa-arrow-right"></i>
-                <span class="vt-remote" title="${esc(rs)}">${esc(truncate(rs, 60))}</span>
+                <span class="vt-remote" title="${esc(rs)}">${esc(CoreAPI.truncate(rs, 60))}</span>
             </div>
         </div>`;
 }
@@ -1834,8 +1834,6 @@ function fmtVal(v) {
     if (typeof v === 'object') return JSON.stringify(v, null, 2);
     return String(v);
 }
-
-function truncate(s, m) { if (!s) return ''; return s.length <= m ? s : s.slice(0, m - 3) + '...'; }
 
 function esc(s) { return CoreAPI.escapeHtml(s); }
 

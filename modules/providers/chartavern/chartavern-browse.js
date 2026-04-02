@@ -1279,6 +1279,9 @@ function initCtView() {
                 if (e.target === loginOverlay) closeCtLoginModal();
             });
         }
+
+        window.registerOverlay?.({ id: 'ctCharModal', tier: 7, close: () => closePreviewModal() });
+        window.registerOverlay?.({ id: 'ctLoginModal', tier: 6, close: () => closeCtLoginModal() });
     }
 }
 

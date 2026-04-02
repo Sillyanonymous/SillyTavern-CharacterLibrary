@@ -70,6 +70,7 @@ let chubCharacters = [];
 let chubCurrentPage = 1;
 let chubHasMore = true;
 let chubIsLoading = false;
+let chubLoadToken = 0;
 let chubDiscoveryPreset = 'popular_week'; // Combined sort + time preset
 let chubNsfwEnabled = true; // Default to NSFW enabled
 let chubCurrentSearch = '';
@@ -123,7 +124,7 @@ let chubTimelineLookup = new Map();
 let chubDelegatesInitialized = false;
 let chubModalEventsAttached = false;
 let chubDetailFetchController = null; // AbortController for in-flight detail fetches
-let _chubDropdownCloseHandler = null;
+
 const chubDetailCache = new Map();
 const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (stripped entries only)
 
@@ -718,6 +719,10 @@ class ChubBrowseView extends BrowseView {
     init() {
         super.init();
         initChubView();
+        this._registerDropdownDismiss([
+            { dropdownId: 'chubFiltersDropdown', buttonId: 'chubFiltersBtn' },
+            { dropdownId: 'chubTagsDropdown', buttonId: 'chubTagsBtn' },
+        ]);
     }
 
     applyDefaults(defaults) {
@@ -766,11 +771,6 @@ class ChubBrowseView extends BrowseView {
         super.activate(container, options);
         chubDelegatesInitialized = true;
 
-        // Re-register dropdown close handler after deactivate removed it
-        if (!_chubDropdownCloseHandler) {
-            initChubDropdownDismiss();
-        }
-
         // Ensure grid is populated — covers fresh init, provider switch, and tab re-entry
         this.buildLocalLibraryLookup();
         const browseGrid = document.getElementById('chubGrid');
@@ -813,10 +813,6 @@ class ChubBrowseView extends BrowseView {
             try { chubDetailFetchController.abort(); } catch (e) { /* ignore */ }
             chubDetailFetchController = null;
         }
-        if (_chubDropdownCloseHandler) {
-            document.removeEventListener('click', _chubDropdownCloseHandler);
-            _chubDropdownCloseHandler = null;
-        }
     }
 
     closeDropdowns() {
@@ -829,22 +825,7 @@ class ChubBrowseView extends BrowseView {
 // CHUB BROWSE LOGIC (moved from library.js)
 // ========================================
 
-function initChubDropdownDismiss() {
-    if (_chubDropdownCloseHandler) document.removeEventListener('click', _chubDropdownCloseHandler);
-    _chubDropdownCloseHandler = (e) => {
-        const filtersDropdown = document.getElementById('chubFiltersDropdown');
-        const filtersBtn = document.getElementById('chubFiltersBtn');
-        if (filtersDropdown && !filtersDropdown.contains(e.target) && e.target !== filtersBtn) {
-            filtersDropdown.classList.add('hidden');
-        }
-        const tagsDropdown = document.getElementById('chubTagsDropdown');
-        const tagsBtn = document.getElementById('chubTagsBtn');
-        if (tagsDropdown && !tagsDropdown.contains(e.target) && e.target !== tagsBtn && !tagsBtn?.contains(e.target)) {
-            tagsDropdown.classList.add('hidden');
-        }
-    };
-    document.addEventListener('click', _chubDropdownCloseHandler);
-}
+
 
 function initChubView() {
     // Sync dropdown values with JS state (browser may cache old form values)
@@ -1156,10 +1137,11 @@ function initChubView() {
         });
         on('chubSaveKeyBtn', 'click', saveChubToken);
         on('chubClearKeyBtn', 'click', clearChubToken);
+
+        window.registerOverlay?.({ id: 'chubCharModal', tier: 7, close: () => hideModal('chubCharModal') });
+        window.registerOverlay?.({ id: 'chubLoginModal', tier: 6, close: () => hideModal('chubLoginModal') });
     }
 
-    initChubDropdownDismiss();
-    
     // Load saved token on init
     loadChubToken();
     
@@ -1519,9 +1501,6 @@ function initChubTagsDropdown() {
             }
         }
     });
-    
-    // Dropdown close-on-outside-click is handled by the combined
-    // _chubDropdownCloseHandler in initChubView()
     
     // Prevent dropdown from closing when clicking inside
     dropdown.addEventListener('click', (e) => {
@@ -2633,14 +2612,14 @@ function performChubSearch() {
 }
 
 async function loadChubCharacters(forceRefresh = false) {
-    if (chubIsLoading) return;
+    const thisToken = ++chubLoadToken;
     
     const grid = document.getElementById('chubGrid');
     const loadMoreContainer = document.getElementById('chubLoadMore');
     
     // Special handling for favorites filter - use gateway API directly
     if (chubFilterFavorites && chubToken) {
-        await loadChubFavorites(forceRefresh);
+        await loadChubFavorites(forceRefresh, thisToken);
         return;
     }
     
@@ -2770,7 +2749,7 @@ async function loadChubCharacters(forceRefresh = false) {
         
         const data = await response.json();
         
-        // Provider was deactivated during the fetch
+        if (thisToken !== chubLoadToken) return;
         if (!chubDelegatesInitialized) return;
         
         // Handle different response formats
@@ -2833,6 +2812,7 @@ async function loadChubCharacters(forceRefresh = false) {
                 if (!moreRes.ok) break;
                 
                 const moreData = await moreRes.json();
+                if (thisToken !== chubLoadToken) return;
                 let moreNodes = [];
                 if (moreData.nodes) moreNodes = moreData.nodes;
                 else if (moreData.data?.nodes) moreNodes = moreData.data.nodes;
@@ -2861,6 +2841,7 @@ async function loadChubCharacters(forceRefresh = false) {
         chubBrowseView.updateLoadMoreVisibility('chubLoadMore', chubHasMore, chubCharacters.length > 0);
         
     } catch (e) {
+        if (thisToken !== chubLoadToken) return;
         console.error('ChubAI load error:', e);
         if (chubCurrentPage === 1) {
             grid.innerHTML = `
@@ -2877,10 +2858,12 @@ async function loadChubCharacters(forceRefresh = false) {
             showToast('Failed to load more: ' + e.message, 'error');
         }
     } finally {
-        chubIsLoading = false;
-        if (loadMoreBtn) {
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+        if (thisToken === chubLoadToken) {
+            chubIsLoading = false;
+            if (loadMoreBtn) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.innerHTML = '<i class="fa-solid fa-plus"></i> Load More';
+            }
         }
     }
 }
@@ -2921,7 +2904,7 @@ async function fetchChubUserFavoriteIds() {
  * Load user's favorites from ChubAI gateway API
  * This uses a different endpoint than the search API
  */
-async function loadChubFavorites(forceRefresh = false) {
+async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
     const grid = document.getElementById('chubGrid');
     const loadMoreContainer = document.getElementById('chubLoadMore');
     
@@ -2958,6 +2941,8 @@ async function loadChubFavorites(forceRefresh = false) {
         
         const data = await response.json();
         debugLog('[ChubAI] Favorites response:', data);
+        
+        if (loadToken && loadToken !== chubLoadToken) return;
         
         // Extract nodes from response
         let nodes = data.nodes || data.data || [];
@@ -3036,6 +3021,7 @@ async function loadChubFavorites(forceRefresh = false) {
         chubBrowseView.updateLoadMoreVisibility('chubLoadMore', chubHasMore, chubCharacters.length > 0);
         
     } catch (e) {
+        if (loadToken && loadToken !== chubLoadToken) return;
         console.error('[ChubAI] Favorites load error:', e);
         if (chubCurrentPage === 1) {
             grid.innerHTML = `
@@ -3052,7 +3038,9 @@ async function loadChubFavorites(forceRefresh = false) {
             showToast('Failed to load more: ' + e.message, 'error');
         }
     } finally {
-        chubIsLoading = false;
+        if (!loadToken || loadToken === chubLoadToken) {
+            chubIsLoading = false;
+        }
     }
 }
 
@@ -3575,6 +3563,14 @@ async function openChubCharPreview(char) {
                     `<img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onerror="this.style.display='none'">`
                 ).join('');
             }
+        } else if (node.hasGallery && gallerySection && galleryGrid) {
+            if (galleryStat) galleryStat.style.display = 'flex';
+            if (galleryCountEl) galleryCountEl.textContent = '';
+            gallerySection.style.display = 'block';
+            if (galleryLabel) galleryLabel.textContent = '';
+            galleryGrid.innerHTML = node.galleryAuthRequired
+                ? '<div class="browse-gallery-auth"><i class="fa-solid fa-lock"></i> Gallery requires login to view</div>'
+                : '<div class="browse-gallery-auth"><i class="fa-solid fa-images"></i> Gallery could not be loaded</div>';
         }
     };
 
@@ -3603,8 +3599,16 @@ async function openChubCharPreview(char) {
             const galleryPromise = char.hasGallery && charProjectId
                 ? fetch(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`, {
                     headers: galleryHeaders, signal: fetchSignal
-                }).then(r => r.ok ? r.json() : { nodes: [] })
-                  .then(data => (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false })))
+                }).then(r => {
+                    if (r.ok) return r.json();
+                    if (r.status === 401 || r.status === 403) return { nodes: [], _authRequired: true };
+                    return { nodes: [] };
+                })
+                  .then(data => {
+                      const images = (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false }));
+                      if (data._authRequired) images._authRequired = true;
+                      return images;
+                  })
                   .catch(err => { debugLog('[ChubAI] Gallery fetch failed:', err.message); return []; })
                 : Promise.resolve([]);
 
@@ -3635,6 +3639,8 @@ async function openChubCharPreview(char) {
                             alternate_greetings: node.definition.alternate_greetings,
                         } : undefined,
                         galleryImages: galleryImages?.length > 0 ? galleryImages : undefined,
+                        galleryAuthRequired: !!(galleryImages?._authRequired && !galleryImages.length),
+                        hasGallery: char.hasGallery || node.hasGallery || false,
                     };
                     // Enforce LRU cap — evict oldest entries
                     while (chubDetailCache.size >= CHUB_DETAIL_CACHE_MAX) {

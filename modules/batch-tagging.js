@@ -17,6 +17,8 @@ export function init(deps) {
     
     injectModal();
     setupEventListeners();
+
+    window.registerOverlay?.({ id: 'batchTagModal', tier: 7, close: () => closeModal(), visible: (el) => el.classList.contains('visible') });
     
     isInitialized = true;
     debugLog('[BatchTagging] Module initialized');

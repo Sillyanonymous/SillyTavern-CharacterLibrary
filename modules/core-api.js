@@ -55,6 +55,14 @@ export function onViewEnter(view, callback) {
 }
 
 /**
+ * @param {string} view - View name ('characters', 'chats', 'online')
+ * @param {function} callback - Function to call when view is exited
+ */
+export function onViewExit(view, callback) {
+    window.onViewExit?.(view, callback);
+}
+
+/**
  * Get all loaded characters
  * @returns {Array} All character objects
  */
@@ -76,7 +84,7 @@ export function getCurrentCharacters() {
  * @returns {Object|undefined} Character object or undefined
  */
 export function getCharacterByAvatar(avatar) {
-    return getAllCharacters().find(c => c.avatar === avatar);
+    return window.getCharacterByAvatar?.(avatar);
 }
 
 /**
@@ -146,10 +154,7 @@ export function closeCharacterModal() {
  * @param {Object} char - Character object
  */
 export function openProviderLinkModal(char) {
-    if (char) {
-        window.activeChar = char;
-    }
-    window.openProviderLinkModal?.();
+    window.openProviderLinkModal?.(char);
 }
 
 /**
@@ -198,7 +203,7 @@ export function refreshCharacters(forceRefresh = false) {
  * @returns {string} Gallery folder name
  */
 export function getGalleryFolderName(char) {
-    return window.getGalleryFolderName?.(char) || char?.name || '';
+    return window.getGalleryFolderName?.(char) ?? '';
 }
 
 /**
@@ -226,7 +231,7 @@ export function getCharacterGalleryInfo(char) {
  * @returns {string|null} The gallery_id or null if not set
  */
 export function getCharacterGalleryId(char) {
-    return window.getCharacterGalleryId?.(char) || char?.data?.extensions?.gallery_id || null;
+    return window.getCharacterGalleryId?.(char) ?? null;
 }
 
 /**
@@ -271,7 +276,7 @@ export function getCSRFToken() {
  * @returns {boolean}
  */
 export function isMultiSelectEnabled() {
-    return window.MultiSelect?.enabled || false;
+    return window.isMultiSelectEnabled?.() ?? false;
 }
 
 /**
@@ -371,7 +376,17 @@ export function isExtensionsRecoveryInProgress() {
  * @returns {Function} Debounced function
  */
 export function debounce(fn, delay) {
-    return window.debounce?.(fn, delay) || fn;
+    return window.debounce?.(fn, delay) ?? fn;
+}
+
+/**
+ * Truncate a string to a maximum length, appending '...' if truncated
+ * @param {string} str - String to truncate
+ * @param {number} max - Maximum length
+ * @returns {string} Truncated string
+ */
+export function truncate(str, max) {
+    return window.truncate?.(str, max) ?? '';
 }
 
 /**
@@ -401,7 +416,7 @@ export function getAllTags() {
  * @returns {HTMLElement|null}
  */
 export function findCardElement(avatar) {
-    return document.querySelector(`.char-card[data-avatar="${avatar}"]`);
+    return window.findCardElement?.(avatar) ?? null;
 }
 
 /**
@@ -409,7 +424,7 @@ export function findCardElement(avatar) {
  * @param {string} id - Element ID
  */
 export function showElement(id) {
-    document.getElementById(id)?.classList.remove('hidden');
+    window.showElement?.(id);
 }
 
 /**
@@ -417,7 +432,7 @@ export function showElement(id) {
  * @param {string} id - Element ID
  */
 export function hideElement(id) {
-    document.getElementById(id)?.classList.add('hidden');
+    window.hideElement?.(id);
 }
 
 /**
@@ -436,12 +451,7 @@ export function hideModal(modalId) {
  * @returns {boolean} Whether the element was found
  */
 export function onElement(id, event, handler) {
-    const el = document.getElementById(id);
-    if (el) {
-        el.addEventListener(event, handler);
-        return true;
-    }
-    return false;
+    return window.onElement?.(id, event, handler) ?? false;
 }
 
 /**
@@ -559,11 +569,27 @@ export function performSearch() {
     window.performSearch?.();
 }
 
+export function evaluateChatAdvancedFilters(chat) {
+    return window.evaluateChatAdvancedFilters?.(chat) ?? true;
+}
+
+export function getAdvFilterRulesForChats() {
+    return window.getAdvFilterRulesForChats?.() ?? [];
+}
+
 /**
  * Sync all gallery folder overrides with the server
  */
 export function syncAllGalleryFolderOverrides() {
     window.syncAllGalleryFolderOverrides?.();
+}
+
+export function getGallerySyncAuditDone() {
+    return window.getGallerySyncAuditDone?.() ?? false;
+}
+
+export function setGallerySyncAuditDone(v) {
+    window.setGallerySyncAuditDone?.(v);
 }
 
 /**
@@ -968,6 +994,7 @@ export default {
     switchView,
     getCurrentView,
     onViewEnter,
+    onViewExit,
     
     // UI
     openCharacterModal,
@@ -990,6 +1017,8 @@ export default {
     removeGalleryFolderOverride,
     generateGalleryId,
     syncAllGalleryFolderOverrides,
+    getGallerySyncAuditDone,
+    setGallerySyncAuditDone,
     
     // Multi-select
     isMultiSelectEnabled,
@@ -1008,6 +1037,7 @@ export default {
     sanitizeTaglineHtml,
     isExtensionsRecoveryInProgress,
     debounce,
+    truncate,
     getCharacterTags,
     getAllTags,
     findCardElement,
@@ -1033,6 +1063,8 @@ export default {
     removeCharacterFromList,
     hydrateCharacter,
     performSearch,
+    evaluateChatAdvancedFilters,
+    getAdvFilterRulesForChats,
     
     // Creator Notes
     renderCreatorNotesSecure,
