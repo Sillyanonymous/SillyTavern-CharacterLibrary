@@ -879,9 +879,9 @@ function doSearch() {
     try {
         const url = new URL(val.startsWith('http') ? val : `https://${val}`);
         if (/datacat\.run$/i.test(url.hostname)) {
-            const charMatch = url.pathname.match(/\/characters?\/([a-f0-9-]{36})/i);
+            const charMatch = url.pathname.match(/\/characters?\/(?:[^/]+\/)*([a-f0-9-]{36})/i);
             if (charMatch) {
-                fetchCharacterAndBrowseCreator(charMatch[1]);
+                fetchCharacterAndOpenPreview(charMatch[1]);
                 return;
             }
             const creatorMatch = url.pathname.match(/\/creators?\/([a-f0-9-]{36})/i);
@@ -925,10 +925,22 @@ function performDatacatCreatorSearch() {
     const input = document.getElementById('datacatCreatorSearchInput');
     const query = input?.value.trim();
     if (!query) {
-        showToast('Please enter a creator name', 'warning');
+        showToast('Please enter a creator name or URL', 'warning');
         return;
     }
     input.value = '';
+
+    // URL detection
+    try {
+        const u = new URL(query.startsWith('http') ? query : `https://${query}`);
+        if (/datacat\.run$/i.test(u.hostname)) {
+            const creatorMatch = u.pathname.match(/\/creators?\/([a-f0-9-]{36})/i);
+            if (creatorMatch) {
+                browseCreator(creatorMatch[1]);
+                return;
+            }
+        }
+    } catch { /* not a URL */ }
 
     const lowerQuery = query.toLowerCase();
 
@@ -975,7 +987,7 @@ function performDatacatCreatorSearch() {
     showToast('Creator not found. Try pasting a DataCat creator URL instead.', 'warning');
 }
 
-async function fetchCharacterAndBrowseCreator(characterId) {
+async function fetchCharacterAndOpenPreview(characterId) {
     const grid = document.getElementById('datacatGrid');
     if (grid) {
         grid.innerHTML = `
@@ -988,12 +1000,12 @@ async function fetchCharacterAndBrowseCreator(characterId) {
 
     try {
         const character = await fetchDatacatCharacter(characterId);
-        if (character?.creator_id) {
-            browseCreator(character.creator_id);
+        if (character) {
+            openPreviewModal(character);
         } else {
-            showToast('Could not find creator for this character', 'error');
-            clearCreatorFilter();
+            showToast('Character not found on DataCat', 'error');
         }
+        clearCreatorFilter();
     } catch (e) {
         showToast(`Failed to look up character: ${e.message}`, 'error');
         clearCreatorFilter();
@@ -2613,7 +2625,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <div class="browse-creator-search">
                         <div class="browse-creator-search-wrapper">
                             <i class="fa-solid fa-user"></i>
-                            <input type="search" id="datacatCreatorSearchInput" placeholder="Search by creator..." autocomplete="one-time-code">
+                            <input type="search" id="datacatCreatorSearchInput" placeholder="Creator name or URL..." autocomplete="one-time-code">
                             <button id="datacatCreatorSearchBtn" class="browse-search-submit" title="Search by creator">
                                 <i class="fa-solid fa-arrow-right"></i>
                             </button>
