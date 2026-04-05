@@ -12145,6 +12145,151 @@ const ADV_FILTER_PROVIDERS = [
     { value: 'datacat', label: 'DataCat' },
 ];
 
+// ========== FILTER PRESETS ==========
+
+const FILTER_PRESETS_FILE = '_cl_filterpresets.json';
+let _filterPresetsData = null;
+let _filterPresetsSaving = false;
+let _filterPresetsSaveQueued = false;
+
+function _filterPresetsToBase64(str) {
+    const bytes = new TextEncoder().encode(str);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin);
+}
+
+async function loadFilterPresets() {
+    if (_filterPresetsData) return _filterPresetsData;
+    try {
+        const resp = await fetch(`/user/files/${FILTER_PRESETS_FILE}`);
+        if (resp.ok) {
+            const text = await resp.text();
+            const data = text && text.trim() ? JSON.parse(text) : null;
+            if (data && data.version) {
+                _filterPresetsData = data;
+                if (!Array.isArray(_filterPresetsData.char)) _filterPresetsData.char = [];
+                if (!Array.isArray(_filterPresetsData.chat)) _filterPresetsData.chat = [];
+                return _filterPresetsData;
+            }
+        }
+    } catch {}
+    _filterPresetsData = { version: 1, char: [], chat: [] };
+    return _filterPresetsData;
+}
+
+async function saveFilterPresets() {
+    if (!_filterPresetsData) return;
+    if (_filterPresetsSaving) { _filterPresetsSaveQueued = true; return; }
+    _filterPresetsSaving = true;
+    try {
+        const b64 = _filterPresetsToBase64(JSON.stringify(_filterPresetsData));
+        const resp = await apiRequest('/files/upload', 'POST', { name: FILTER_PRESETS_FILE, data: b64 });
+        if (!resp.ok) throw new Error(resp.status);
+    } catch (e) {
+        console.error('[FilterPresets] Save failed:', e.message);
+        showToast('Failed to save filter presets', 'error');
+    } finally {
+        _filterPresetsSaving = false;
+        if (_filterPresetsSaveQueued) { _filterPresetsSaveQueued = false; saveFilterPresets(); }
+    }
+}
+
+function getFilterPresets() {
+    const key = currentView === 'chats' ? 'chat' : 'char';
+    return (_filterPresetsData || { char: [], chat: [] })[key] || [];
+}
+
+function _generateFilterPresetUid() {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let uid = '';
+    for (let i = 0; i < 10; i++) uid += chars[Math.floor(Math.random() * chars.length)];
+    return uid;
+}
+
+async function saveCurrentAsFilterPreset(name) {
+    name = (name || '').trim();
+    if (!name) return;
+    const rules = getAdvFilterRules();
+    const activeRules = rules.filter(r => ADV_FILTER_NO_VALUE_OPS.has(r.operator) || !!r.value);
+    if (activeRules.length === 0) { showToast('No active filters to save', 'warning'); return; }
+    await loadFilterPresets();
+    const key = currentView === 'chats' ? 'chat' : 'char';
+    const serialized = activeRules.map(({ field, operator, value }) => ({ field, operator, value }));
+    _filterPresetsData[key].push({ uid: _generateFilterPresetUid(), name, rules: serialized });
+    rerenderAdvFilterPresets();
+    const input = document.getElementById('advFilterPresetNameInput');
+    if (input) input.value = '';
+    saveFilterPresets();
+    showToast(`Preset "${name}" saved`, 'success', 2000);
+}
+
+async function applyFilterPreset(uid) {
+    await loadFilterPresets();
+    const preset = getFilterPresets().find(p => p.uid === uid);
+    if (!preset) return;
+    setAdvFilterRules(preset.rules.map(r => ({ ...r, id: advFilterNextId++ })));
+    rerenderAdvFilterRows();
+    updateAdvFilterIndicator();
+    triggerAdvFilterSearch();
+    closeAdvFilterPresetsPanel();
+    showToast(`Loaded "${preset.name}"`, 'success', 2000);
+}
+
+async function deleteFilterPreset(uid) {
+    await loadFilterPresets();
+    const key = currentView === 'chats' ? 'chat' : 'char';
+    _filterPresetsData[key] = _filterPresetsData[key].filter(p => p.uid !== uid);
+    rerenderAdvFilterPresets();
+    saveFilterPresets();
+}
+
+function toggleAdvFilterPresetsPanel() {
+    const panel = document.getElementById('advFilterPresetsPanel');
+    if (!panel) return;
+    if (panel.classList.contains('hidden')) openAdvFilterPresetsPanel();
+    else closeAdvFilterPresetsPanel();
+}
+
+function openAdvFilterPresetsPanel() {
+    loadFilterPresets().then(() => {
+        rerenderAdvFilterPresets();
+        document.getElementById('advFilterPresetsPanel')?.classList.remove('hidden');
+        document.getElementById('advFilterPresetsBtn')?.classList.add('active');
+        if (!window.matchMedia('(max-width: 768px)').matches) {
+            setTimeout(() => document.getElementById('advFilterPresetNameInput')?.focus(), 50);
+        }
+    });
+}
+
+function closeAdvFilterPresetsPanel() {
+    document.getElementById('advFilterPresetsPanel')?.classList.add('hidden');
+    document.getElementById('advFilterPresetsBtn')?.classList.remove('active');
+}
+
+function rerenderAdvFilterPresets() {
+    const list = document.getElementById('advFilterPresetsList');
+    if (!list) return;
+    const query = (document.getElementById('advFilterPresetNameInput')?.value || '').trim().toLowerCase();
+    const presets = getFilterPresets();
+    const filtered = query ? presets.filter(p => p.name.toLowerCase().includes(query)) : presets;
+    if (filtered.length === 0) {
+        list.innerHTML = presets.length === 0
+            ? `<div class="adv-filter-presets-empty">No saved presets</div>`
+            : `<div class="adv-filter-presets-empty">No match</div>`;
+        return;
+    }
+    list.innerHTML = filtered.map(p => `<div class="adv-filter-preset-item">
+        <button class="adv-filter-preset-load" data-uid="${escapeHtml(p.uid)}">
+            <i class="fa-regular fa-bookmark"></i>
+            <span>${escapeHtml(p.name)}</span>
+        </button>
+        <button class="adv-filter-preset-delete" data-uid="${escapeHtml(p.uid)}" title="Delete">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    </div>`).join('');
+}
+
 let charAdvFilterRules = [];
 let chatAdvFilterRules = [];
 let advFilterNextId = 1;
@@ -12184,6 +12329,7 @@ function toggleAdvFilterPanel() {
 
 function closeAdvFilterPanel() {
     document.getElementById('advFilterPanel')?.classList.add('hidden');
+    closeAdvFilterPresetsPanel();
 }
 
 function addAdvFilterRule() {
@@ -12863,6 +13009,34 @@ function setupEventListeners() {
 
         advFilterPanel.addEventListener('click', (e) => e.stopPropagation());
 
+        on('advFilterPresetsBtn', 'click', (e) => {
+            e.stopPropagation();
+            toggleAdvFilterPresetsPanel();
+        });
+
+        on('advFilterPresetSaveBtn', 'click', (e) => {
+            e.stopPropagation();
+            saveCurrentAsFilterPreset(document.getElementById('advFilterPresetNameInput')?.value || '');
+        });
+
+        document.getElementById('advFilterPresetNameInput')?.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter') return;
+            e.stopPropagation();
+            saveCurrentAsFilterPreset(e.target.value);
+        });
+
+        document.getElementById('advFilterPresetNameInput')?.addEventListener('input', (e) => {
+            e.stopPropagation();
+            rerenderAdvFilterPresets();
+        });
+
+        document.getElementById('advFilterPresetsList')?.addEventListener('click', (e) => {
+            const load = e.target.closest('.adv-filter-preset-load');
+            if (load) { applyFilterPreset(load.dataset.uid); return; }
+            const del = e.target.closest('.adv-filter-preset-delete');
+            if (del) deleteFilterPreset(del.dataset.uid);
+        });
+
         if (advFilterRows) {
             advFilterRows.addEventListener('change', (e) => {
                 const ruleId = parseInt(e.target.dataset.ruleId);
@@ -12913,7 +13087,7 @@ function setupEventListeners() {
                 !advFilterPanel.contains(e.target) &&
                 e.target !== advFilterBtn &&
                 !advFilterBtn.contains(e.target)) {
-                advFilterPanel.classList.add('hidden');
+                closeAdvFilterPanel();
             }
         });
 

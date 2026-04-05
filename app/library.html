@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>SillyTavern Character Library</title>
     <link rel="stylesheet" href="library.css?v=56">
     <link rel="stylesheet" href="library-mobile.css?v=4" media="screen and (max-width: 768px)">
@@ -48,7 +49,21 @@
                 <div id="advFilterPanel" class="adv-filter-panel hidden">
                     <div class="adv-filter-header">
                         <span class="adv-filter-title">Filters</span>
-                        <button id="advFilterClearAll" class="adv-filter-clear">Clear all</button>
+                        <div class="adv-filter-header-actions">
+                            <button id="advFilterPresetsBtn" class="adv-filter-presets-btn" title="Saved presets">
+                                <i class="fa-regular fa-bookmark"></i><span> Presets</span>
+                            </button>
+                            <button id="advFilterClearAll" class="adv-filter-clear">Clear all</button>
+                        </div>
+                    </div>
+                    <div id="advFilterPresetsPanel" class="adv-filter-presets-panel hidden">
+                        <div id="advFilterPresetsList" class="adv-filter-presets-list"></div>
+                        <div class="adv-filter-presets-save">
+                            <input type="search" id="advFilterPresetNameInput" class="adv-filter-presets-name-input" placeholder="Filter or name new preset..." autocomplete="off" maxlength="40">
+                            <button id="advFilterPresetSaveBtn" class="adv-filter-presets-save-btn" title="Save current filters as preset">
+                                <i class="fa-solid fa-floppy-disk"></i>
+                            </button>
+                        </div>
                     </div>
                     <div id="advFilterRows" class="adv-filter-rows"></div>
                     <button id="advFilterAddBtn" class="adv-filter-add">
@@ -2431,7 +2446,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.5</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.6</span>
                             </div>
                         </div>
                     </div>

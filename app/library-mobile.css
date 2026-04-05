@@ -287,7 +287,7 @@
     }
 
     .adv-filter-header {
-        padding: 14px 20px 10px;
+        padding: 10px 16px 8px;
         margin-bottom: 0;
         border-bottom: 1px solid var(--glass-border);
         position: sticky;
@@ -307,7 +307,7 @@
 
     .adv-filter-clear {
         font-size: var(--font-sm);
-        padding: 6px 12px;
+        padding: 5px 10px;
         min-height: 36px;
         display: flex;
         align-items: center;
@@ -316,16 +316,16 @@
     }
 
     .adv-filter-rows {
-        padding: 10px 16px;
-        gap: var(--space-sm);
+        padding: 8px 14px;
+        gap: var(--space-xs);
     }
 
     .adv-filter-row {
         flex-wrap: wrap;
         background: rgba(255, 255, 255, 0.04);
         border-radius: 10px;
-        padding: 10px 12px;
-        gap: var(--space-sm);
+        padding: 8px 10px;
+        gap: var(--space-xs);
         position: relative;
     }
 
@@ -338,6 +338,7 @@
         color: var(--text-muted);
         flex-basis: 100%;
         text-align: left;
+        padding-bottom: var(--space-xs);
     }
 
     .adv-filter-field,
@@ -348,9 +349,9 @@
     }
 
     .adv-filter-row select {
-        font-size: var(--font-md-lg) !important;
-        min-height: 40px;
-        padding: 8px 12px !important;
+        font-size: var(--font-sm) !important;
+        min-height: 38px;
+        padding: 6px 10px !important;
         border-radius: 8px !important;
         background: rgba(255, 255, 255, 0.06) !important;
         touch-action: manipulation;
@@ -358,8 +359,8 @@
 
     .adv-filter-row input {
         font-size: 16px !important;
-        min-height: 40px;
-        padding: 8px 12px !important;
+        min-height: 38px;
+        padding: 6px 10px !important;
         border-radius: 8px !important;
         background: rgba(255, 255, 255, 0.06) !important;
         touch-action: manipulation;
@@ -374,18 +375,18 @@
     .adv-filter-remove {
         position: absolute;
         top: 6px;
-        right: 6px;
+        right: 8px;
         min-height: 32px;
         min-width: 32px;
         justify-content: center;
-        font-size: var(--font-md);
+        font-size: var(--font-sm);
         touch-action: manipulation;
     }
 
     .adv-filter-add {
-        margin: 8px 16px 14px;
-        padding: 12px;
-        font-size: var(--font-md);
+        margin: 6px 14px 12px;
+        padding: 9px 12px;
+        font-size: var(--font-sm);
         border-radius: 10px;
         min-height: 44px;
         width: auto;
@@ -393,7 +394,62 @@
     }
 
     .adv-filter-unit {
-        font-size: var(--font-md);
+        font-size: var(--font-sm);
+    }
+
+    .adv-filter-presets-panel {
+        padding: var(--space-xs) var(--space-md) 0;
+        margin: var(--space-xs-sm) 14px;
+        border: 1px solid var(--glass-border);
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.04);
+        max-height: 240px;
+    }
+
+    .adv-filter-presets-list {
+        margin-bottom: 0;
+    }
+
+    .adv-filter-preset-load {
+        font-size: var(--font-sm);
+        padding: 8px var(--space-sm);
+        min-height: 44px;
+        touch-action: manipulation;
+    }
+
+    .adv-filter-preset-delete {
+        font-size: var(--font-sm);
+        min-height: 44px;
+        min-width: 44px;
+        touch-action: manipulation;
+    }
+
+    .adv-filter-presets-empty {
+        font-size: var(--font-sm);
+        padding: var(--space-xs) 0;
+    }
+
+    .adv-filter-presets-save {
+        padding-top: var(--space-xs);
+        padding-bottom: var(--space-xs);
+        gap: var(--space-xs);
+        flex-shrink: 0;
+    }
+
+    .adv-filter-presets-name-input {
+        font-size: 16px !important;
+        min-height: 40px;
+        padding: var(--space-xs-sm) var(--space-sm-md);
+        border-radius: 8px;
+    }
+
+    .adv-filter-presets-save-btn {
+        min-height: 40px;
+        min-width: 44px;
+        padding: var(--space-sm);
+        font-size: var(--font-sm);
+        border-radius: 8px;
+        touch-action: manipulation;
     }
 
     /* ---------------------------------------------------

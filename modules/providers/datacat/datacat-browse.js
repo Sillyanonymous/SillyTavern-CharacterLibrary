@@ -92,7 +92,6 @@ let datacatFollowedCreators = [];
 let datacatFollowingCharacters = [];
 let datacatFollowingLoading = false;
 let datacatFollowingSort = 'newest';
-let datacatFollowingGridRenderedCount = 0;
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
 
@@ -1520,16 +1519,27 @@ async function loadFollowingCharacters(forceRefresh = false) {
             const batch = datacatFollowedCreators.slice(i, i + BATCH_SIZE);
             const promises = batch.map(async (creator) => {
                 try {
-                    const data = await fetchDatacatCreatorCharacters(creator.id, {
-                        limit: 50,
-                        offset: 0,
-                        sortBy: 'newest'
-                    });
-                    return (data?.list || []).map(c => ({
-                        ...c,
-                        _followedCreatorName: creator.name,
-                        _followedCreatorId: creator.id,
-                    }));
+                    const allChars = [];
+                    let offset = 0;
+                    const limit = 50;
+                    while (true) {
+                        const data = await fetchDatacatCreatorCharacters(creator.id, {
+                            limit,
+                            offset,
+                            sortBy: 'newest'
+                        });
+                        const list = data?.list || [];
+                        for (const c of list) {
+                            allChars.push({
+                                ...c,
+                                _followedCreatorName: creator.name,
+                                _followedCreatorId: creator.id,
+                            });
+                        }
+                        if (list.length < limit || allChars.length >= (data?.total || 0)) break;
+                        offset += limit;
+                    }
+                    return allChars;
                 } catch (e) {
                     debugLog('[DatacatFollowing] Error fetching from creator:', creator.name, e.message);
                     return [];
@@ -1575,7 +1585,6 @@ async function loadFollowingCharacters(forceRefresh = false) {
         }
     } finally {
         datacatFollowingLoading = false;
-        datacatBrowseView.updateLoadMoreVisibility('datacatFollowingLoadMore', false, true);
     }
 }
 
@@ -1659,8 +1668,6 @@ function renderFollowing() {
     }
 
     grid.innerHTML = sorted.map(c => createDatacatCard(c)).join('');
-    datacatFollowingGridRenderedCount = sorted.length;
-
     const followingGrid = document.getElementById('datacatFollowingGrid');
     if (followingGrid) datacatBrowseView.observeImages(followingGrid);
 }
@@ -2266,14 +2273,15 @@ function initDatacatView() {
 
     // Load More
     on('datacatLoadMoreBtn', 'click', () => {
-        if (isHampterSortMode(datacatSortMode)) {
+        if (datacatBrowseMode === 'creator') {
+            datacatCurrentOffset += PAGE_SIZE;
+        } else if (isHampterSortMode(datacatSortMode)) {
             hampterCurrentPage++;
         } else if (isJannySortMode(datacatSortMode)) {
             meiliCurrentPage++;
         } else {
             const loadParsed = parseSortMode(datacatSortMode);
-            const isFreshMode = datacatBrowseMode !== 'creator' && loadParsed;
-            if (isFreshMode) {
+            if (loadParsed) {
                 if (loadParsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
                 else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
             } else {
@@ -2330,11 +2338,16 @@ function initDatacatView() {
 
     // Refresh
     on('datacatRefreshBtn', 'click', () => {
-        datacatCurrentOffset = 0;
-        datacatFreshLimit24 = 80;
-        datacatFreshLimitWeek = 20;
-        hampterCurrentPage = 1;
-        loadCharacters(false);
+        if (datacatViewMode === 'following') {
+            datacatFollowingCharacters = [];
+            loadFollowingCharacters(true);
+        } else {
+            datacatCurrentOffset = 0;
+            datacatFreshLimit24 = 80;
+            datacatFreshLimitWeek = 20;
+            hampterCurrentPage = 1;
+            loadCharacters(false);
+        }
     });
 
     // Clear creator filter
@@ -2422,11 +2435,6 @@ function initDatacatView() {
         });
     }
 
-    // Following refresh
-    on('datacatFollowingRefreshBtn', 'click', () => {
-        datacatFollowingCharacters = [];
-        loadFollowingCharacters(true);
-    });
 
     // ---- Preview modal events (only attach once) ----
     if (!modalEventsAttached) {
@@ -2670,16 +2678,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
                         <p>New characters from creators you follow</p>
                     </div>
-                    <button id="datacatFollowingRefreshBtn" class="glass-btn icon-only" title="Refresh timeline">
-                        <i class="fa-solid fa-sync"></i>
-                    </button>
                 </div>
                 <div id="datacatFollowingGrid" class="browse-grid"></div>
-                <div class="browse-load-more" id="datacatFollowingLoadMore" style="display: none;">
-                    <button id="datacatFollowingLoadMoreBtn" class="glass-btn">
-                        <i class="fa-solid fa-plus"></i> Load More
-                    </button>
-                </div>
             </div>
         `;
     }
@@ -2785,17 +2785,18 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
 
     _getImageGridIds() { return ['datacatGrid', 'datacatFollowingGrid']; }
 
-    canLoadMore() { return datacatHasMore && !datacatIsLoading; }
+    canLoadMore() { return datacatHasMore && !datacatIsLoading && datacatViewMode === 'browse'; }
 
     loadMore() {
-        if (isHampterSortMode(datacatSortMode)) {
+        if (datacatBrowseMode === 'creator') {
+            datacatCurrentOffset += PAGE_SIZE;
+        } else if (isHampterSortMode(datacatSortMode)) {
             hampterCurrentPage++;
         } else if (isJannySortMode(datacatSortMode)) {
             meiliCurrentPage++;
         } else {
             const parsed = parseSortMode(datacatSortMode);
-            const isFreshMode = datacatBrowseMode !== 'creator' && parsed;
-            if (isFreshMode) {
+            if (parsed) {
                 if (parsed.window === '24h') datacatFreshLimit24 += FRESH_PAGE_INCREMENT;
                 else datacatFreshLimitWeek += FRESH_PAGE_INCREMENT;
             } else {
@@ -2881,7 +2882,6 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             datacatTagsLoaded = false;
             datacatViewMode = 'browse';
             datacatFollowingCharacters = [];
-            datacatFollowingGridRenderedCount = 0;
         }
         const wasInitialized = this._initialized;
         super.activate(container, options);

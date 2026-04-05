@@ -632,6 +632,165 @@ body {
     border-color: var(--accent);
 }
 
+.adv-filter-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.adv-filter-presets-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    padding: var(--space-2xs) var(--space-xs);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    transition: color 0.2s;
+    font-family: inherit;
+    flex-shrink: 0;
+}
+
+.adv-filter-presets-btn:hover,
+.adv-filter-presets-btn.active {
+    color: var(--accent);
+}
+
+.adv-filter-presets-panel {
+    border-top: 1px solid var(--glass-border);
+    padding: var(--space-xs) 0 0;
+    margin-bottom: var(--space-xs);
+    display: flex;
+    flex-direction: column;
+    max-height: 180px;
+}
+
+.adv-filter-presets-panel.hidden {
+    display: none;
+}
+
+.adv-filter-presets-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.adv-filter-presets-empty {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    padding: var(--space-xs) 0;
+    font-style: italic;
+}
+
+.adv-filter-preset-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2xs);
+}
+
+.adv-filter-preset-load {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    padding: 3px var(--space-xs);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font-family: inherit;
+    transition: color 0.15s, background 0.15s;
+}
+
+.adv-filter-preset-load span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.adv-filter-preset-load:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.adv-filter-preset-delete {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    padding: 3px var(--space-xs);
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.adv-filter-preset-delete:hover {
+    color: #e74c3c;
+}
+
+.adv-filter-presets-save {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    padding-top: var(--space-xs);
+    flex-shrink: 0;
+    padding-bottom: var(--space-sm);
+}
+
+.adv-filter-presets-name-input {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-xs);
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.adv-filter-presets-name-input:focus {
+    border-color: var(--accent);
+}
+
+.adv-filter-presets-save-btn {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: 6px;
+    font-size: var(--font-xs);
+    flex-shrink: 0;
+    transition: color 0.2s, background 0.2s, border-color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.adv-filter-presets-save-btn:hover {
+    color: var(--accent);
+    background: rgba(74, 158, 255, 0.1);
+    border-color: var(--accent);
+}
+
 .filter-area {
     display: flex;
     gap: var(--space-sm-md);
