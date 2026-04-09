@@ -388,7 +388,7 @@ function prepareCharacterKeys(chars) {
         if (!c.name) c.name = c.data?.name || c.definition?.name || 'Unknown';
         // Pre-compute lowercase fields for text search
         c._lowerName = c.name.toLowerCase();
-        c._lowerCreator = (c.creator || c.data?.creator || '').toLowerCase();
+        c._lowerCreator = String(c.creator || c.data?.creator || '').toLowerCase();
         const tags = getTags(c);
         c._tagsLower = tags.length > 0 ? tags.join(' ').toLowerCase() : '';
         // Pre-compute numeric timestamps for date sorting
@@ -422,6 +422,7 @@ const DEFAULT_SETTINGS = {
     wyvernRememberCredentials: true,
     datacatToken: null,
     datacatPublicFeed: false,
+    datacatReextractOnUpdate: false,
     ctCookie: null,
 
     // ---- NSFW Toggles ----
@@ -444,6 +445,7 @@ const DEFAULT_SETTINGS = {
     // ---- Gallery & Media ----
     includeProviderGallery: true,
     richCreatorNotes: true,
+    expandCreatorNotes: false,
     highlightColor: '#4a9eff',
     mediaLocalizationEnabled: true,
     fixFilenames: true,
@@ -889,6 +891,7 @@ function setupSettingsModal() {
     
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
+    const expandCreatorNotesCheckbox = document.getElementById('settingsExpandCreatorNotes');
     
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
@@ -1411,6 +1414,13 @@ function setupSettingsModal() {
                 setSetting('datacatPublicFeed', datacatPublicFeedCheckbox.checked);
             });
         }
+        const datacatReextractCheckbox = document.getElementById('datacatReextractOnUpdateCheckbox');
+        if (datacatReextractCheckbox) {
+            datacatReextractCheckbox.checked = getSetting('datacatReextractOnUpdate') === true;
+            datacatReextractCheckbox.addEventListener('change', () => {
+                setSetting('datacatReextractOnUpdate', datacatReextractCheckbox.checked);
+            });
+        }
         
         // Check cl-helper plugin availability for provider sections
         checkClHelperPlugin(
@@ -1443,6 +1453,7 @@ function setupSettingsModal() {
         
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
+        if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = getSetting('expandCreatorNotes') || false;
         
         // Media Localization
         if (mediaLocalizationCheckbox) {
@@ -1748,6 +1759,7 @@ function setupSettingsModal() {
             searchInNotes: searchNotesCheckbox.checked,
             defaultSort: defaultSortSelect.value,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
+            expandCreatorNotes: expandCreatorNotesCheckbox ? expandCreatorNotesCheckbox.checked : false,
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
             fixFilenames: fixFilenamesCheckbox ? fixFilenamesCheckbox.checked : false,
@@ -1897,6 +1909,7 @@ function setupSettingsModal() {
         searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
         defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
+        if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.expandCreatorNotes;
         if (highlightColorInput) {
             highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
         }
@@ -8282,6 +8295,8 @@ async function openModal(char) {
 
     if (creatorNotes && notesBox && notesContainer) {
         notesBox.style.display = 'block';
+        const detailsEl = document.getElementById('creatorNotesDetails');
+        if (detailsEl) detailsEl.open = !!getSetting('expandCreatorNotes');
         // Store raw content for fullscreen expand feature
         window.currentCreatorNotesContent = creatorNotes;
         // Use the shared secure rendering function
@@ -8657,11 +8672,11 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Creator</span>
-            <span class="info-value">${escapeHtml(char.creator || char.data?.creator || '(not set)')}</span>
+            <span class="info-value">${escapeHtml(String(char.creator || char.data?.creator || '(not set)'))}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Version</span>
-            <span class="info-value">${escapeHtml(char.character_version || char.data?.character_version || '(not set)')}</span>
+            <span class="info-value">${escapeHtml(String(char.character_version || char.data?.character_version || '(not set)'))}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Favorite</span>
@@ -10320,6 +10335,8 @@ function refreshModalDisplay() {
     const notesContainer = document.getElementById('modalCreatorNotes');
     if (creatorNotes && notesBox && notesContainer) {
         notesBox.style.display = 'block';
+        const detailsEl = document.getElementById('creatorNotesDetails');
+        if (detailsEl) detailsEl.open = !!getSetting('expandCreatorNotes');
         // Store raw content for fullscreen expand feature
         window.currentCreatorNotesContent = creatorNotes;
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
@@ -12173,7 +12190,9 @@ async function loadFilterPresets() {
                 return _filterPresetsData;
             }
         }
-    } catch {}
+    } catch (e) {
+        console.error('[FilterPresets] Load failed:', e.message);
+    }
     _filterPresetsData = { version: 1, char: [], chat: [] };
     return _filterPresetsData;
 }
@@ -12202,8 +12221,12 @@ function getFilterPresets() {
 
 function _generateFilterPresetUid() {
     const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let uid = '';
-    for (let i = 0; i < 10; i++) uid += chars[Math.floor(Math.random() * chars.length)];
+    const existing = getFilterPresets();
+    let uid;
+    do {
+        uid = '';
+        for (let i = 0; i < 10; i++) uid += chars[Math.floor(Math.random() * chars.length)];
+    } while (existing.some(p => p.uid === uid));
     return uid;
 }
 
@@ -12215,6 +12238,11 @@ async function saveCurrentAsFilterPreset(name) {
     if (activeRules.length === 0) { showToast('No active filters to save', 'warning'); return; }
     await loadFilterPresets();
     const key = currentView === 'chats' ? 'chat' : 'char';
+    const nameLower = name.toLowerCase();
+    if (_filterPresetsData[key].some(p => p.name.toLowerCase() === nameLower)) {
+        showToast(`A preset named "${name}" already exists`, 'warning');
+        return;
+    }
     const serialized = activeRules.map(({ field, operator, value }) => ({ field, operator, value }));
     _filterPresetsData[key].push({ uid: _generateFilterPresetUid(), name, rules: serialized });
     rerenderAdvFilterPresets();
@@ -12464,7 +12492,7 @@ function evaluateAdvFilterRule(c, rule) {
         case 'creator': return evalTextOp(c._lowerCreator, op, val);
         case 'tags': return evalTagOp(c, op, val);
         case 'creatorNotes': {
-            const notes = (c.creator_notes || c.data?.creator_notes || '').toLowerCase();
+            const notes = String(c.creator_notes || c.data?.creator_notes || '').toLowerCase();
             return evalTextOp(notes, op, val);
         }
         case 'favorite':
@@ -16443,7 +16471,7 @@ async function runBulkAutoLinkScan() {
         
         const char = charsToScan[i];
         const charName = getCharacterName(char, 'Unknown');
-        const charCreator = (char.creator || char.data?.creator || '').trim();
+        const charCreator = String(char.creator || char.data?.creator || '').trim();
         
         const currentProgress = alreadyScanned + i + 1;
         
@@ -16551,7 +16579,7 @@ function sortResultsByContentSimilarity(results, localChar) {
     const charCreatorNotes = getCharField(localChar, 'creator_notes') || '';
     const charFirstMes = getCharField(localChar, 'first_mes') || '';
     const charName = getCharacterName(localChar, '').toLowerCase().trim();
-    const charCreator = (localChar.creator || localChar.data?.creator || '').toLowerCase().trim();
+    const charCreator = String(localChar.creator || localChar.data?.creator || '').toLowerCase().trim();
     const charNameWords = charName.split(/\s+/).filter(w => w.length > 2);
     
     // Combine local content for matching
@@ -16681,7 +16709,7 @@ function calculateTextSimilarity(textA, textB) {
  */
 function findConfidentMatch(char, searchResults) {
     const charName = getCharacterName(char, '').toLowerCase().trim();
-    const charCreator = (char.creator || char.data?.creator || '').toLowerCase().trim();
+    const charCreator = String(char.creator || char.data?.creator || '').toLowerCase().trim();
     const charDescription = getCharField(char, 'description') || '';
     const charFirstMes = getCharField(char, 'first_mes') || '';
     const charPersonality = getCharField(char, 'personality') || '';
@@ -16811,7 +16839,7 @@ function renderBulkAutoLinkConfidentList() {
     
     container.innerHTML = bulkAutoLinkResults.confident.map((item, idx) => {
         const charName = getCharacterName(item.char, 'Unknown');
-        const charCreator = item.char.creator || item.char.data?.creator || '';
+        const charCreator = String(item.char.creator || item.char.data?.creator || '');
         const selectedOpt = item.options[item.selectedOption] || item.bestMatch;
         const selectedProvider = registry?.getProvider(selectedOpt.providerId);
         const selectedAvatarUrl = selectedProvider?.getResultAvatarUrl?.(selectedOpt) || selectedOpt.avatarUrl || '';
@@ -16881,7 +16909,7 @@ function renderBulkAutoLinkUncertainList() {
     
     container.innerHTML = bulkAutoLinkResults.uncertain.map((item, idx) => {
         const charName = getCharacterName(item.char, 'Unknown');
-        const charCreator = item.char.creator || item.char.data?.creator || '';
+        const charCreator = String(item.char.creator || item.char.data?.creator || '');
         const hasSelection = item.selectedOption !== null;
         
         let optionsHtml = item.options.map((opt, optIdx) => {
@@ -16945,7 +16973,7 @@ function renderBulkAutoLinkNoMatchList() {
     
     container.innerHTML = bulkAutoLinkResults.nomatch.map((item) => {
         const charName = getCharacterName(item.char, 'Unknown');
-        const charCreator = item.char.creator || item.char.data?.creator || '';
+        const charCreator = String(item.char.creator || item.char.data?.creator || '');
         
         return `
             <div class="bulk-auto-link-item bulk-auto-link-item-nomatch">
@@ -20000,7 +20028,8 @@ function contentSimilarity(text1, text2) {
  */
 function getCharField(char, field) {
     if (!char) return '';
-    return char[field] || (char.data ? char.data[field] : '') || '';
+    const val = char[field] || (char.data ? char.data[field] : '') || '';
+    return typeof val === 'string' ? val : String(val);
 }
 
 /**
@@ -20610,7 +20639,7 @@ async function checkCharacterForDuplicatesAsync(newChar) {
     }
 
     const newName = normalizeCharName(newChar.name || newChar.definition?.name || '');
-    const newCreator = (newChar.creator || newChar.definition?.creator || '').toLowerCase().trim();
+    const newCreator = String(newChar.creator || newChar.definition?.creator || '').toLowerCase().trim();
     const newNameRaw = newChar.name || newChar.definition?.name || '';
     const newNameVariants = nameVariantsForDupe(newNameRaw);
 
@@ -20655,7 +20684,7 @@ async function checkCharacterForDuplicatesAsync(newChar) {
         const creatorCandidates = [];
         for (const existing of allCharacters) {
             if (!existing?._slim || candidateSet.has(existing)) continue;
-            const existingCreator = (existing.data?.creator || '').toLowerCase().trim();
+            const existingCreator = String(existing.data?.creator || '').toLowerCase().trim();
             if (existingCreator.length < 3) continue;
             const existingCompact = existingCreator.replace(/[\s_-]/g, '');
             if (newCreatorCompact === existingCompact || stringSimilarity(newCreator, existingCreator) >= 0.75) {

@@ -26,6 +26,13 @@ export class BrowseView {
             byProviderId: new Set(),
             byNormalizedName: new Map(), // normalized name → Set<normalized creator>
         };
+        // Following manager state
+        this._mgrOpen = false;
+        this._mgrCreators = [];
+        this._mgrFilter = '';
+        this._mgrSort = 'name_asc';
+        this._mgrDebounceTimer = null;
+        this._mgrConfirmTimer = null;
     }
 
     // ── HTML Rendering ──────────────────────────────────────
@@ -59,6 +66,9 @@ export class BrowseView {
      */
     init() {
         this._initialized = true;
+        if (this.supportsFollowingManager) {
+            this._initFollowingManager();
+        }
     }
 
     /**
@@ -110,6 +120,21 @@ export class BrowseView {
     deactivate() {
         this._removeDropdownDismiss();
         this._detachScrollListener();
+        // Reset manager state for clean re-activation
+        this._mgrOpen = false;
+        clearTimeout(this._mgrDebounceTimer);
+        clearTimeout(this._mgrConfirmTimer);
+        // Reset any in-progress unfollow confirmation
+        const pid = this.provider.id;
+        const list = document.getElementById(`${pid}FollowMgrList`);
+        if (list) {
+            for (const btn of list.querySelectorAll('.follow-mgr-unfollow-btn[data-confirming]')) {
+                delete btn.dataset.confirming;
+                btn.classList.remove('confirming');
+                btn.title = 'Unfollow';
+                btn.innerHTML = '<i class="fa-solid fa-user-minus"></i>';
+            }
+        }
     }
 
     // ── Library Lookup ───────────────────────────────────────
@@ -129,7 +154,7 @@ export class BrowseView {
             if (!char) continue;
 
             const name = (char.name || '').toLowerCase().trim();
-            const creator = (char.creator || char.data?.creator || '').toLowerCase().trim();
+            const creator = String(char.creator || char.data?.creator || '').toLowerCase().trim();
             if (name && creator) byNameAndCreator.add(`${name}|${creator}`);
 
             this._extractProviderIds(char, byProviderId);
@@ -645,6 +670,356 @@ export class BrowseView {
         if (this._dropdownCloseHandler) {
             document.removeEventListener('click', this._dropdownCloseHandler);
             this._dropdownCloseHandler = null;
+        }
+    }
+
+    // ── Following Manager (Abstract) ────────────────────────
+
+    /** @returns {boolean} */
+    get supportsFollowingManager() { return false; }
+
+    /**
+     * Fetch followed creators in normalized form.
+     * @returns {Promise<Array<{id: string, name: string, username?: string, avatar?: string, characterCount?: number}>>}
+     */
+    async getFollowedCreators() { return []; }
+
+    /**
+     * Follow a creator by query (name, URL, or UUID).
+     * @param {string} query
+     * @returns {Promise<{id: string, name: string}|null>}
+     */
+    async followCreator(query) { return null; }
+
+    /**
+     * Unfollow a creator by normalized ID.
+     * @param {string} id
+     * @returns {Promise<boolean>}
+     */
+    async unfollowCreator(id) { return false; }
+
+    /**
+     * @param {{id: string, avatar?: string}} creator
+     * @returns {string}
+     */
+    getCreatorAvatarUrl(creator) { return creator.avatar || ''; }
+
+    _getInitialsColor(name) {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        const hue = ((hash % 360) + 360) % 360;
+        return `hsl(${hue}, 50%, 35%)`;
+    }
+
+    /**
+     * Navigate to this creator's characters in the browse grid.
+     * Should close the manager panel and switch to browse mode.
+     * @param {{id: string, name: string}} creator
+     */
+    browseCreatorFromManager(creator) {}
+
+    /**
+     * Provider-specific sort options for the manager list.
+     * @returns {Array<{value: string, label: string}>}
+     */
+    getFollowingManagerSortOptions() {
+        return [
+            { value: 'name_asc', label: 'Name A-Z' },
+            { value: 'name_desc', label: 'Name Z-A' },
+        ];
+    }
+
+    // ── Following Manager (Shared UI) ───────────────────────
+
+    /**
+     * Render the manager panel HTML. Include in renderView() after the timeline header.
+     * @returns {string}
+     */
+    renderFollowingManagerPanel() {
+        if (!this.supportsFollowingManager) return '';
+        const pid = this.provider.id;
+        const sortOptions = this.getFollowingManagerSortOptions();
+        const sortHtml = sortOptions.map(o =>
+            `<option value="${o.value}">${o.label}</option>`
+        ).join('');
+
+        return `
+            <div class="follow-mgr-panel hidden" id="${pid}FollowMgr">
+                <div class="follow-mgr-toolbar">
+                    <div class="follow-mgr-search-wrap">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="search" class="follow-mgr-search glass-input"
+                               id="${pid}FollowMgrSearch" placeholder="Filter creators...">
+                    </div>
+                    <div class="follow-mgr-toolbar-actions">
+                        <select class="follow-mgr-sort" id="${pid}FollowMgrSort">
+                            ${sortHtml}
+                        </select>
+                    </div>
+                </div>
+                <div class="follow-mgr-list" id="${pid}FollowMgrList"></div>
+                <div class="follow-mgr-empty hidden" id="${pid}FollowMgrEmpty">
+                    <i class="fa-solid fa-user-group"></i>
+                    <p>No followed creators</p>
+                </div>
+                <div class="follow-mgr-add">
+                    <input type="search" class="follow-mgr-add-input glass-input"
+                           id="${pid}FollowMgrAddInput" placeholder="Follow by name or URL...">
+                    <button class="follow-mgr-add-btn glass-btn" id="${pid}FollowMgrAddBtn"
+                            title="Follow creator">
+                        <i class="fa-solid fa-user-plus"></i>
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    /**
+     * Attach event listeners for the manager panel. Auto-called from init().
+     */
+    _initFollowingManager() {
+        const pid = this.provider.id;
+        const panel = document.getElementById(`${pid}FollowMgr`);
+        if (!panel) return;
+
+        const sortEl = document.getElementById(`${pid}FollowMgrSort`);
+        if (sortEl) {
+            CoreAPI.initCustomSelect?.(sortEl);
+            sortEl.addEventListener('change', () => {
+                this._mgrSort = sortEl.value;
+                this._renderManagerCreators();
+            });
+        }
+
+        const searchEl = document.getElementById(`${pid}FollowMgrSearch`);
+        if (searchEl) {
+            searchEl.addEventListener('input', () => {
+                clearTimeout(this._mgrDebounceTimer);
+                this._mgrDebounceTimer = setTimeout(() => {
+                    this._mgrFilter = searchEl.value.trim().toLowerCase();
+                    this._renderManagerCreators();
+                }, 150);
+            });
+        }
+
+        const addInput = document.getElementById(`${pid}FollowMgrAddInput`);
+        const addBtn = document.getElementById(`${pid}FollowMgrAddBtn`);
+        const handleAdd = async () => {
+            const query = addInput?.value?.trim();
+            if (!query) return;
+            addBtn?.classList.add('loading');
+            try {
+                const creator = await this.followCreator(query);
+                if (creator) {
+                    addInput.value = '';
+                    await this._loadManagerCreators();
+                    this._renderManagerCreators();
+                }
+            } catch (e) {
+                console.error('[FollowingManager] Follow failed:', e);
+                CoreAPI.showToast?.('Failed to follow creator', 'error');
+            } finally {
+                addBtn?.classList.remove('loading');
+            }
+        };
+        if (addBtn) addBtn.addEventListener('click', handleAdd);
+        if (addInput) addInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); handleAdd(); }
+        });
+
+        // Delegation on the list container
+        const list = document.getElementById(`${pid}FollowMgrList`);
+        if (list) {
+            list.addEventListener('click', (e) => {
+                const card = e.target.closest('.follow-mgr-card');
+                if (!card) return;
+                const creatorId = card.dataset.creatorId;
+                const creator = this._mgrCreators.find(c => c.id === creatorId);
+                if (!creator) return;
+
+                // Unfollow button
+                const unfollowBtn = e.target.closest('.follow-mgr-unfollow-btn');
+                if (unfollowBtn) {
+                    this._handleManagerUnfollow(unfollowBtn, card, creator);
+                    return;
+                }
+
+                // Card click = browse creator
+                this.closeFollowingManager();
+                this.browseCreatorFromManager(creator);
+            });
+        }
+
+        // Toggle button
+        const toggleBtn = document.getElementById(`${pid}FollowMgrToggle`);
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => this.toggleFollowingManager());
+        }
+    }
+
+    toggleFollowingManager() {
+        if (this._mgrOpen) {
+            this.closeFollowingManager();
+        } else {
+            this.openFollowingManager();
+        }
+    }
+
+    async openFollowingManager() {
+        const pid = this.provider.id;
+        const panel = document.getElementById(`${pid}FollowMgr`);
+        const toggleBtn = document.getElementById(`${pid}FollowMgrToggle`);
+        if (!panel) return;
+
+        this._mgrOpen = true;
+        toggleBtn?.classList.add('active');
+        panel.classList.remove('hidden');
+
+        await this._loadManagerCreators();
+        this._renderManagerCreators();
+    }
+
+    closeFollowingManager() {
+        const pid = this.provider.id;
+        const panel = document.getElementById(`${pid}FollowMgr`);
+        const toggleBtn = document.getElementById(`${pid}FollowMgrToggle`);
+        if (!panel) return;
+
+        this._mgrOpen = false;
+        toggleBtn?.classList.remove('active');
+        panel.classList.add('hidden');
+
+        clearTimeout(this._mgrDebounceTimer);
+        this._mgrFilter = '';
+        const searchEl = document.getElementById(`${pid}FollowMgrSearch`);
+        if (searchEl) searchEl.value = '';
+    }
+
+    async _loadManagerCreators() {
+        this._mgrCreators = await this.getFollowedCreators();
+    }
+
+    _renderManagerCreators() {
+        const pid = this.provider.id;
+        const list = document.getElementById(`${pid}FollowMgrList`);
+        const empty = document.getElementById(`${pid}FollowMgrEmpty`);
+        if (!list) return;
+
+        let creators = [...this._mgrCreators];
+
+        // Filter
+        if (this._mgrFilter) {
+            const q = this._mgrFilter;
+            creators = creators.filter(c =>
+                c.name.toLowerCase().includes(q) ||
+                (c.username && c.username.toLowerCase().includes(q))
+            );
+        }
+
+        // Sort
+        this._sortCreators(creators, this._mgrSort);
+
+        if (creators.length === 0) {
+            list.innerHTML = '';
+            empty?.classList.remove('hidden');
+            return;
+        }
+
+        empty?.classList.add('hidden');
+        list.innerHTML = creators.map((c, i) =>
+            this._renderManagerCreatorCard(c, i)
+        ).join('');
+    }
+
+    _renderManagerCreatorCard(creator, index) {
+        const avatarUrl = this.getCreatorAvatarUrl(creator);
+        const name = CoreAPI.escapeHtml?.(creator.name) || creator.name;
+        const username = creator.username ? CoreAPI.escapeHtml?.(creator.username) || creator.username : '';
+        const charCount = creator.characterCount != null ? creator.characterCount : -1;
+        const initial = (creator.name || '?').charAt(0).toUpperCase();
+        const initialsColor = this._getInitialsColor(creator.name || creator.id || '');
+
+        return `
+            <div class="follow-mgr-card" data-creator-id="${creator.id}"
+                 style="animation-delay: ${index * 0.04}s">
+                <div class="follow-mgr-card-avatar">
+                    ${avatarUrl
+                        ? `<img src="${avatarUrl}" alt="" loading="lazy"
+                               onerror="this.style.display='none';this.parentElement.querySelector('.follow-mgr-card-avatar-fallback').style.display='flex'">`
+                        : ''}
+                    <div class="follow-mgr-card-avatar-fallback"
+                         style="${avatarUrl ? 'display:none;' : ''}background-color:${initialsColor}">
+                        ${initial}
+                    </div>
+                </div>
+                <div class="follow-mgr-card-info">
+                    <div class="follow-mgr-card-name">${name}</div>
+                    <div class="follow-mgr-card-meta">
+                        ${username ? `<span class="follow-mgr-card-handle">@${username}</span>` : ''}
+                        ${charCount >= 0 ? `<span class="follow-mgr-card-count">${charCount} char${charCount !== 1 ? 's' : ''}</span>` : ''}
+                    </div>
+                </div>
+                <div class="follow-mgr-card-actions">
+                    <button class="follow-mgr-unfollow-btn glass-btn icon-only"
+                            title="Unfollow">
+                        <i class="fa-solid fa-user-minus"></i>
+                    </button>
+                </div>
+            </div>`;
+    }
+
+    _sortCreators(creators, sort) {
+        switch (sort) {
+            case 'name_asc':
+                creators.sort((a, b) => a.name.localeCompare(b.name));
+                break;
+            case 'name_desc':
+                creators.sort((a, b) => b.name.localeCompare(a.name));
+                break;
+            case 'recent':
+                creators.sort((a, b) => (b.followedAt || 0) - (a.followedAt || 0));
+                break;
+            case 'chars':
+                creators.sort((a, b) => (b.characterCount || 0) - (a.characterCount || 0));
+                break;
+        }
+    }
+
+    async _handleManagerUnfollow(btn, card, creator) {
+        // Two-phase confirm
+        if (!btn.dataset.confirming) {
+            btn.dataset.confirming = '1';
+            btn.classList.add('confirming');
+            btn.title = 'Click again to confirm';
+            btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+            this._mgrConfirmTimer = setTimeout(() => {
+                delete btn.dataset.confirming;
+                btn.classList.remove('confirming');
+                btn.title = 'Unfollow';
+                btn.innerHTML = '<i class="fa-solid fa-user-minus"></i>';
+            }, 3000);
+            return;
+        }
+
+        clearTimeout(this._mgrConfirmTimer);
+        card.classList.add('removing');
+        let success = false;
+        try {
+            success = await this.unfollowCreator(creator.id);
+        } catch (e) {
+            console.error('[FollowingManager] Unfollow failed:', e);
+            CoreAPI.showToast?.('Failed to unfollow creator', 'error');
+        }
+        if (success) {
+            card.addEventListener('animationend', () => {
+                this._mgrCreators = this._mgrCreators.filter(c => c.id !== creator.id);
+                this._renderManagerCreators();
+            }, { once: true });
+        } else {
+            card.classList.remove('removing');
+            delete btn.dataset.confirming;
+            btn.classList.remove('confirming');
+            btn.title = 'Unfollow';
+            btn.innerHTML = '<i class="fa-solid fa-user-minus"></i>';
         }
     }
 

@@ -1122,6 +1122,7 @@ function initJannyView() {
         }
 
         window.registerOverlay?.({ id: 'jannyCharModal', tier: 7, close: () => closePreviewModal() });
+        window.registerOverlay?.({ id: 'jannyAuthorBanner', tier: 9, close: () => clearAuthorFilter() });
     }
 }
 
@@ -1172,6 +1173,7 @@ function filterByAuthor(authorName) {
     if (banner && bannerName) {
         bannerName.textContent = authorName;
         banner.classList.remove('hidden');
+        window.pushOverlayGuard?.();
     }
 
     loadCharacters(false);

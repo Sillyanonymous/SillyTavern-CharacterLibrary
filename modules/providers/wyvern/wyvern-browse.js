@@ -88,6 +88,8 @@ let wyvernFilterHasAltGreetings = false;
 let wyvernViewMode = 'browse';
 let wyvernFollowingCharacters = [];
 let wyvernFollowingLoading = false;
+let _followingCreatorFilter = null;
+let _followingCssFiltered = false;
 let wyvernCreatorFilter = null; // { uid, displayName, vanityUrl }
 let wyvernCreatorSort = 'created_at';
 let wyvernIsFollowingCurrentCreator = false;
@@ -433,6 +435,24 @@ class WyvernBrowseView extends BrowseView {
                         <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
                         <p>New characters from authors you follow</p>
                     </div>
+                    <div class="chub-timeline-header-right">
+                        <button class="follow-mgr-toggle-btn glass-btn" id="wyvernFollowMgrToggle"
+                                title="Manage followed creators">
+                            <i class="fa-solid fa-users-gear"></i> Manage
+                        </button>
+                    </div>
+                </div>
+                ${this.renderFollowingManagerPanel()}
+                <div id="wyvernFollowingCreatorBanner" class="browse-author-banner hidden">
+                    <div class="browse-author-banner-content">
+                        <i class="fa-solid fa-user"></i>
+                        <span>Showing characters by <strong id="wyvernFollowingCreatorName"></strong></span>
+                    </div>
+                    <div class="browse-author-banner-actions">
+                        <button id="wyvernFollowingCreatorClose" class="glass-btn icon-only" title="Back to timeline">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="wyvernFollowingGrid" class="browse-grid"></div>
             </div>
@@ -700,6 +720,135 @@ class WyvernBrowseView extends BrowseView {
         });
     }
 
+    // ── Following Manager ───────────────────────────────────
+
+    get supportsFollowingManager() { return true; }
+
+    async getFollowedCreators() {
+        if (!wyvernToken) return [];
+        // Extract unique creators from timeline feed results
+        const seen = new Map();
+        for (const c of wyvernFollowingCharacters) {
+            const cr = c.creator;
+            if (!cr?.uid || seen.has(cr.uid)) continue;
+            seen.set(cr.uid, {
+                id: cr.uid,
+                name: cr.displayName || cr.username || cr.uid,
+                username: cr.vanityUrl || cr.username || '',
+                characterCount: 0,
+            });
+        }
+        // Count characters per creator
+        for (const c of wyvernFollowingCharacters) {
+            const entry = c.creator?.uid && seen.get(c.creator.uid);
+            if (entry) entry.characterCount++;
+        }
+        return [...seen.values()];
+    }
+
+    async followCreator(query) {
+        if (!wyvernToken) {
+            showToast('Login required to follow creators on Wyvern', 'warning');
+            return null;
+        }
+        const trimmed = query.trim();
+        if (!trimmed) return null;
+
+        // Search for the user by name
+        try {
+            const headers = getWyvernHeaders(false);
+            const resp = await fetchWithProxy(
+                `${WYVERN_API_BASE}/exploreSearch/users?q=${encodeURIComponent(trimmed)}&page=1&limit=10`,
+                { method: 'GET', headers }
+            );
+            const data = await resp.json();
+            const results = data.results || [];
+            if (results.length === 0) {
+                showToast(`No creators found matching "${trimmed}"`, 'warning');
+                return null;
+            }
+            const exact = results.find(u =>
+                u.displayName?.toLowerCase() === trimmed.toLowerCase() ||
+                u.vanityUrl?.toLowerCase() === trimmed.toLowerCase());
+            const user = exact || results[0];
+
+            // Follow
+            const authHeaders = getWyvernHeaders(true);
+            const followResp = await fetchWithProxy(
+                `${WYVERN_API_BASE}/users/${user.uid}/follow`,
+                { method: 'GET', headers: authHeaders }
+            );
+            const followData = await followResp.json();
+            if (followData.message === 'Followed') {
+                showToast(`Now following ${user.displayName}!`, 'success');
+                return { id: user.uid, name: user.displayName, username: user.vanityUrl || '' };
+            }
+            showToast(followData.message || 'Already following this creator', 'info');
+            return null;
+        } catch (e) {
+            showToast(`Failed to follow: ${e.message}`, 'error');
+            return null;
+        }
+    }
+
+    async unfollowCreator(id) {
+        if (!wyvernToken) return false;
+        try {
+            const headers = getWyvernHeaders(true);
+            const resp = await fetchWithProxy(
+                `${WYVERN_API_BASE}/users/${id}/unfollow`,
+                { method: 'GET', headers }
+            );
+            const data = await resp.json();
+            if (data.message === 'Unfollowed') {
+                showToast('Unfollowed creator', 'info');
+                return true;
+            }
+            return false;
+        } catch (e) {
+            showToast(`Failed to unfollow: ${e.message}`, 'error');
+            return false;
+        }
+    }
+
+    browseCreatorFromManager(creator) {
+        _followingCreatorFilter = creator.id;
+        _followingCssFiltered = true;
+        const banner = document.getElementById('wyvernFollowingCreatorBanner');
+        const nameEl = document.getElementById('wyvernFollowingCreatorName');
+        if (banner && nameEl) {
+            nameEl.textContent = creator.name || creator.id;
+            banner.classList.remove('hidden');
+            window.pushOverlayGuard?.();
+        }
+        const grid = document.getElementById('wyvernFollowingGrid');
+        if (grid) {
+            grid.classList.add('grid-suspended');
+            let source = wyvernFollowingCharacters.filter(c => {
+                const uid = c.creator?.uid || '';
+                return uid === creator.id;
+            });
+            if (wyvernFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
+            if (wyvernFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
+            const sorted = sortWyvernFollowingCharacters(source);
+            const tempGrid = document.createElement('div');
+            tempGrid.id = 'wyvernCreatorFollowingGrid';
+            tempGrid.className = 'browse-grid';
+            tempGrid.innerHTML = sorted.map(c => createWyvernCard(c)).join('');
+            grid.after(tempGrid);
+            tempGrid.addEventListener('click', _handleFollowingCardClick);
+            wyvernBrowseView.observeImages(tempGrid);
+        }
+    }
+
+    getFollowingManagerSortOptions() {
+        return [
+            { value: 'name_asc', label: 'Name A\u2013Z' },
+            { value: 'name_desc', label: 'Name Z\u2013A' },
+            { value: 'chars', label: 'Most Characters' },
+        ];
+    }
+
     deactivate() {
         super.deactivate();
         wyvernDelegatesInitialized = false;
@@ -907,6 +1056,8 @@ function initWyvernView() {
 
         window.registerOverlay?.({ id: 'wyvernCharModal', tier: 7, close: () => hideModal('wyvernCharModal') });
         window.registerOverlay?.({ id: 'wyvernLoginModal', tier: 6, close: () => hideModal('wyvernLoginModal') });
+        window.registerOverlay?.({ id: 'wyvernCreatorBanner', tier: 9, close: () => clearWyvernCreatorFilter() });
+        window.registerOverlay?.({ id: 'wyvernFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 
     loadWyvernToken();
@@ -1849,9 +2000,51 @@ function sortWyvernFollowingCharacters(characters) {
     return [...characters].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 }
 
+function clearFollowingCreator() {
+    _followingCreatorFilter = null;
+    const banner = document.getElementById('wyvernFollowingCreatorBanner');
+    if (banner) banner.classList.add('hidden');
+    if (_followingCssFiltered) {
+        _followingCssFiltered = false;
+        const tempGrid = document.getElementById('wyvernCreatorFollowingGrid');
+        if (tempGrid) tempGrid.remove();
+        const grid = document.getElementById('wyvernFollowingGrid');
+        if (grid) grid.classList.remove('grid-suspended');
+    } else {
+        renderWyvernFollowing();
+    }
+}
+
+function _handleFollowingCardClick(e) {
+    const creatorLink = e.target.closest('.browse-card-creator-link');
+    if (creatorLink) {
+        e.stopPropagation();
+        const uid = creatorLink.dataset.creatorUid;
+        const name = creatorLink.dataset.creatorName;
+        const vanity = creatorLink.dataset.creatorVanity || '';
+        if (uid && name) {
+            switchWyvernViewMode('browse');
+            loadWyvernCreatorCharacters(uid, name, vanity);
+        }
+        return;
+    }
+    const card = e.target.closest('.browse-card');
+    if (!card) return;
+    const charId = card.dataset.charId;
+    const char = wyvernFollowingCharacters.find(c => c.id === charId);
+    if (char) openWyvernCharPreview(char);
+}
+
 function renderWyvernFollowing() {
+    const tempGrid = document.getElementById('wyvernCreatorFollowingGrid');
+    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('wyvernFollowingGrid');
     if (!grid) return;
+    grid.classList.remove('grid-suspended');
+    _followingCreatorFilter = null;
+    _followingCssFiltered = false;
+    const banner = document.getElementById('wyvernFollowingCreatorBanner');
+    if (banner) banner.classList.add('hidden');
 
     let filtered = wyvernFollowingCharacters;
     if (wyvernFilterHideOwned) {
@@ -1912,6 +2105,7 @@ async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     if (banner && nameEl) {
         nameEl.textContent = displayName;
         banner.classList.remove('hidden');
+        window.pushOverlayGuard?.();
     }
 
     updateWyvernFollowCreatorButton(uid);
@@ -2169,7 +2363,9 @@ function setupWyvernGridDelegates() {
     if (grid) grid.addEventListener('click', cardClickHandler);
 
     const followingGrid = document.getElementById('wyvernFollowingGrid');
-    if (followingGrid) followingGrid.addEventListener('click', cardClickHandler);
+    if (followingGrid) followingGrid.addEventListener('click', _handleFollowingCardClick);
+
+    on('wyvernFollowingCreatorClose', 'click', () => clearFollowingCreator());
 
     wyvernDelegatesInitialized = true;
 }

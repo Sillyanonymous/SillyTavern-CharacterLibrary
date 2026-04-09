@@ -441,12 +441,15 @@ export async function submitExtraction(janitorUrl, { publicFeed = true } = {}) {
     if (!_apiRequest) throw new Error('DataCat: apiRequest not bound');
     try {
         const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed });
-        const text = await resp.text();
+        if (!resp.ok) {
+            const errText = await resp.text();
+            console.error('[DataCat] dc-extract error:', resp.status, errText.substring(0, 200));
+            return { success: false, error: `Server returned ${resp.status}: ${errText.substring(0, 100)}` };
+        }
         try {
-            return JSON.parse(text);
+            return await resp.json();
         } catch {
-            console.error('[DataCat] dc-extract returned non-JSON:', resp.status, text.substring(0, 200));
-            return { success: false, error: `Server returned ${resp.status}: ${text.substring(0, 100)}` };
+            return { success: false, error: 'Invalid JSON response from cl-helper' };
         }
     } catch (e) {
         console.error('[DataCat] submitExtraction failed:', e);
@@ -551,6 +554,47 @@ export async function searchMeiliJanny(opts = {}) {
         totalHits: result.totalHits || 0,
         totalPages: result.totalPages || 0,
     };
+}
+
+/**
+ * Try to find a JanitorAI character on MeiliSearch by UUID.
+ * MeiliSearch doesn't support ID filtering, so we search by name (extracted from URL slug)
+ * and verify the UUID matches in the results.
+ * @param {string} charId - JanitorAI character UUID
+ * @param {string} [nameHint] - Name extracted from URL slug (optional)
+ * @returns {Promise<Object|null>} Normalized character object or null
+ */
+export async function lookupMeiliByUuid(charId, nameHint) {
+    if (!nameHint) return null;
+
+    try {
+        const { characters } = await searchMeiliJanny({ search: nameHint, limit: 20 });
+        return characters.find(c => c.character_id === charId) || null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Extract a human-readable name from a JanitorAI URL slug.
+ * URL patterns: /characters/{uuid}_{slug} or /characters/{uuid}
+ * Slug format: "character-some-name-here"
+ * @param {string} url - Full JanitorAI URL
+ * @param {string} charId - Already-extracted character UUID
+ * @returns {string|null} Extracted name or null
+ */
+export function extractNameFromJannyUrl(url, charId) {
+    if (!url || !charId) return null;
+    try {
+        const pathname = new URL(url).pathname;
+        const afterId = pathname.split(charId)[1] || '';
+        // Slug starts with _ and often has "character-" prefix
+        const slugMatch = afterId.match(/^_(?:character-)?(.+)/);
+        if (!slugMatch) return null;
+        return decodeURIComponent(slugMatch[1]).replace(/-/g, ' ').trim() || null;
+    } catch {
+        return null;
+    }
 }
 
 // ========================================

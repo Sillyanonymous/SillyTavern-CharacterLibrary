@@ -23,6 +23,8 @@ import {
     checkDcPluginAvailable,
     buildV2FromDatacat,
     buildV2FromDownload,
+    submitExtraction,
+    fetchExtractionStatus,
 } from './datacat-api.js';
 
 let api = null;
@@ -164,6 +166,87 @@ class DatacatProvider extends ProviderBase {
     normalizeRemoteCard(rawData) {
         if (rawData?.spec === 'chara_card_v2') return rawData;
         return buildV2FromDatacat(rawData);
+    }
+
+    async refreshRemoteData(linkInfo, options = {}) {
+        if (!linkInfo?.id) return;
+        if (CoreAPI.getSetting('datacatReextractOnUpdate') !== true) return;
+
+        const report = options?.onStatus;
+
+        try {
+            report?.('Checking cl-helper plugin...');
+            const pluginOk = await checkDcPluginAvailable();
+            if (!pluginOk) {
+                api?.debugLog?.('[DatacatProvider] refreshRemoteData: cl-helper not available, skipping re-extraction');
+                return;
+            }
+
+            report?.('Validating DataCat session...');
+            const sessionOk = await validateDcSession();
+            if (!sessionOk) {
+                api?.debugLog?.('[DatacatProvider] refreshRemoteData: no active DataCat session, skipping re-extraction');
+                return;
+            }
+
+            const janitorUrl = `https://janitorai.com/characters/${linkInfo.id}`;
+            const publicFeed = CoreAPI.getSetting('datacatPublicFeed') === true;
+
+            report?.('Submitting extraction request...');
+            const result = await submitExtraction(janitorUrl, { publicFeed });
+            if (!result?.success && !result?.queued && !result?.started) {
+                api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction submit failed:', result?.error);
+                return;
+            }
+
+            if (result?.queued) {
+                const pos = result.queuePosition ? ` (position ${result.queuePosition})` : '';
+                report?.(`Queued for extraction${pos}...`);
+            } else {
+                report?.('Extraction started...');
+            }
+
+            const signal = options?.signal;
+            const POLL_INTERVAL = 3000;
+            const MAX_POLLS = 60;
+            for (let i = 0; i < MAX_POLLS; i++) {
+                if (signal?.aborted) return;
+                await new Promise(r => setTimeout(r, POLL_INTERVAL));
+                if (signal?.aborted) return;
+                const status = await fetchExtractionStatus();
+                if (!status) continue;
+
+                const done = status.history?.find(h =>
+                    h.characterId === linkInfo.id || h.character_id === linkInfo.id
+                );
+                if (done) {
+                    report?.('Extraction complete');
+                    api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction complete for', linkInfo.id);
+                    return;
+                }
+
+                if (status.inProgress) {
+                    const phase = status.inProgress.status;
+                    const PHASE_LABELS = {
+                        opening_page: 'Opening page',
+                        preparing: 'Preparing',
+                        initiating: 'Initiating',
+                        pulling: 'Pulling data',
+                        post_extract: 'Finalizing',
+                        complete: 'Completing',
+                    };
+                    report?.(PHASE_LABELS[phase] || `Extracting (${phase})...`);
+                } else if (!status.queue || status.queue.length === 0) {
+                    api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction finished (no longer in progress)');
+                    report?.('Extraction complete');
+                    return;
+                }
+            }
+            report?.('Extraction timed out, using cached data');
+            api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction timed out after', MAX_POLLS * POLL_INTERVAL / 1000, 'seconds');
+        } catch (err) {
+            console.error('[DatacatProvider] refreshRemoteData failed, continuing with cached data:', err);
+        }
     }
 
     // ── Update Checking ─────────────────────────────────────

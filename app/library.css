@@ -2055,7 +2055,7 @@ h3 {
 
 /* Rich text formatting for Details tab */
 .scrolling-text em,
-.scrolling-text i {
+.scrolling-text i:not([class*="fa-"]) {
     font-style: italic;
     color: #c8d8e8;
 }
@@ -7136,6 +7136,28 @@ details.settings-provider-section > .settings-provider-body {
     color: var(--accent);
     opacity: 0.8;
     font-size: var(--font-md-lg);
+}
+
+/* Lightweight divider subheadings within settings groups */
+.settings-subheading {
+    font-size: var(--font-xs);
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: var(--space-xl);
+    margin-bottom: var(--space-sm);
+    padding-bottom: var(--space-xs-sm);
+    border-bottom: 1px solid var(--glass-border);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs-sm);
+}
+
+.settings-subheading i {
+    color: var(--accent);
+    opacity: 0.6;
+    font-size: var(--font-2xs);
 }
 
 /* Sub-sections within groups */

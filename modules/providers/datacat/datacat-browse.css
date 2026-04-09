@@ -142,7 +142,85 @@
 }
 
 
-/* Mobile: extraction panel */
+/* ============================================
+   In-Modal Extraction CTA
+   ============================================ */
+
+.datacat-modal-extract-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-2xl) 0 var(--space-md);
+    max-width: 360px;
+    margin: 0 auto;
+    line-height: 1;
+}
+
+.datacat-modal-extract-icon-wrap {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.04);
+    margin-bottom: var(--space-lg);
+    transition: background 0.3s ease;
+}
+
+.datacat-modal-extract-cta.extracting .datacat-modal-extract-icon-wrap {
+    background: rgba(var(--accent-rgb, 52, 152, 219), 0.08);
+}
+
+.datacat-modal-extract-cta.success .datacat-modal-extract-icon-wrap {
+    background: rgba(74, 222, 128, 0.08);
+}
+
+.datacat-modal-extract-cta.error .datacat-modal-extract-icon-wrap {
+    background: rgba(248, 113, 113, 0.08);
+}
+
+.datacat-modal-extract-icon {
+    font-size: var(--font-xl);
+    color: var(--text-muted);
+    transition: color 0.3s ease;
+}
+
+.datacat-modal-extract-cta.extracting .datacat-modal-extract-icon {
+    color: var(--accent);
+}
+
+.datacat-modal-extract-cta.success .datacat-modal-extract-icon {
+    color: #4ade80;
+}
+
+.datacat-modal-extract-cta.error .datacat-modal-extract-icon {
+    color: #f87171;
+}
+
+.datacat-modal-extract-message {
+    color: var(--text-primary);
+    font-size: var(--font-md);
+    margin: 0 0 var(--space-xs);
+    font-weight: 500;
+}
+
+.datacat-modal-extract-hint {
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    margin: 0 0 var(--space-xl);
+    line-height: 1.6;
+    max-width: 300px;
+}
+
+.datacat-modal-extract-btn {
+    gap: var(--space-xs);
+    min-width: 180px;
+}
+
+
+/* Mobile: extraction panel + in-modal CTA */
 @media screen and (max-width: 768px) {
 
     .datacat-extract-panel {
@@ -157,6 +235,37 @@
 
     .datacat-extract-actions .action-btn {
         width: 100%;
+        justify-content: center;
+    }
+
+    .datacat-modal-extract-cta {
+        max-width: 100%;
+        padding: var(--space-xl) 0 var(--space-sm);
+    }
+
+    .datacat-modal-extract-icon-wrap {
+        width: 48px;
+        height: 48px;
+        margin-bottom: var(--space-md);
+    }
+
+    .datacat-modal-extract-icon {
+        font-size: var(--font-lg);
+    }
+
+    .datacat-modal-extract-message {
+        font-size: var(--font-sm);
+    }
+
+    .datacat-modal-extract-hint {
+        font-size: var(--font-xs);
+        max-width: 100%;
+        margin-bottom: var(--space-lg);
+    }
+
+    .datacat-modal-extract-btn {
+        width: 100%;
+        min-width: 0;
         justify-content: center;
     }
 

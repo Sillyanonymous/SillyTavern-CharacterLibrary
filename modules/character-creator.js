@@ -1459,7 +1459,7 @@ function renderImportList(query, isSaveAs = false) {
     if (query) {
         filtered = chars.filter(c =>
             (c.name || '').toLowerCase().includes(query) ||
-            (c.data?.creator || '').toLowerCase().includes(query) ||
+            String(c.data?.creator || '').toLowerCase().includes(query) ||
             (c.data?.tags || []).some(t => t.toLowerCase().includes(query))
         );
     }

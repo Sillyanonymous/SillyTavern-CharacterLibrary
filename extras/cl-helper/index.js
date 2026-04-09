@@ -370,6 +370,26 @@ export async function init(router) {
         /^\/api\/extraction\/status$/,
     ];
 
+    // Fetch a usable public session ID for extraction
+    async function getPublicSessionId(token) {
+        try {
+            const resp = await fetch(`${DATACAT_BASE}/api/users`, {
+                headers: dcHeaders(token),
+            });
+            if (!resp.ok) return null;
+            const data = await resp.json();
+            const publicUser = (data.users || []).find(u => u.isPublic);
+            if (!publicUser?.sessions) return null;
+            // Pick a non-background, logged_in session
+            const session = publicUser.sessions.find(
+                s => s.purpose !== 'BACKGROUND_SCRAPER' && s.status === 'logged_in'
+            );
+            return session?.id || null;
+        } catch {
+            return null;
+        }
+    }
+
     // POST-only: submit extraction request to DataCat
     router.post('/dc-extract', async (req, res) => {
         if (!dcSessionToken) {
@@ -398,6 +418,13 @@ export async function init(router) {
         }
 
         const requestId = randomUUID();
+        const wantPublicFeed = req.body.publicFeed !== false;
+
+        // Resolve a public session ID when public feed is requested
+        let sessionId = null;
+        if (wantPublicFeed) {
+            sessionId = await getPublicSessionId(dcSessionToken);
+        }
 
         try {
             const response = await fetch(`${DATACAT_BASE}/api/character/smart-extract-v2`, {
@@ -409,7 +436,8 @@ export async function init(router) {
                 },
                 body: JSON.stringify({
                     url,
-                    appearOnPublicFeed: req.body.publicFeed !== false,
+                    sessionId,
+                    appearOnPublicFeed: wantPublicFeed && !!sessionId,
                     useSeparateWorkerServer: true,
                     inlinePostExtractCreatorProfile: true,
                     idempotencyKey: requestId,

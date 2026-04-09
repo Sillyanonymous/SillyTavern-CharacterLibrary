@@ -3,6 +3,8 @@
    Extracted from library.css
    ============================================ */
 
+.grid-suspended { visibility: hidden !important; max-height: 0 !important; overflow: hidden !important; }
+
 /* Online filter area - hidden by default, higher specificity.
    flex:1 when visible so margin-left:auto on #onlineFilterContent works. */
 .filter-area.online-filters,
@@ -1590,8 +1592,306 @@
     box-shadow: inset 0 0 0 2px rgba(240, 165, 0, 0.3);
 }
 
+/* ── Following Manager ─────────────────────────────────── */
+
+.follow-mgr-panel {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    margin-bottom: var(--space-md);
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm-md);
+    animation: followMgrOpen 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.follow-mgr-panel.hidden {
+    display: none;
+}
+
+@keyframes followMgrOpen {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Toolbar */
+.follow-mgr-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm-md);
+}
+
+.follow-mgr-search-wrap {
+    flex: 1;
+    position: relative;
+}
+
+.follow-mgr-search-wrap > i {
+    position: absolute;
+    left: var(--space-sm-md);
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    pointer-events: none;
+}
+
+.follow-mgr-search {
+    width: 100%;
+    padding-left: 30px !important;
+    font-size: var(--font-sm) !important;
+    height: 34px;
+}
+
+.follow-mgr-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs-sm);
+    flex-shrink: 0;
+}
+
+.follow-mgr-sort {
+    min-width: 120px;
+    font-size: var(--font-sm);
+}
+
+/* Creator list */
+.follow-mgr-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+/* Creator card */
+.follow-mgr-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm-md);
+    padding: var(--space-xs-sm) var(--space-sm);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+    animation: followMgrCardIn 0.3s ease both;
+}
+
+.follow-mgr-card:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: var(--glass-border);
+    transform: translateY(-1px);
+    cursor: pointer;
+}
+
+@keyframes followMgrCardIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.follow-mgr-card.removing {
+    animation: followMgrCardOut 0.3s ease forwards;
+    pointer-events: none;
+}
+
+@keyframes followMgrCardOut {
+    to { opacity: 0; transform: translateX(20px); height: 0; padding: 0; margin: 0; overflow: hidden; }
+}
+
+/* Avatar */
+.follow-mgr-card-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--glass-border);
+}
+
+.follow-mgr-card-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.follow-mgr-card-avatar-fallback {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: var(--font-base);
+    font-weight: 600;
+    text-transform: uppercase;
+    user-select: none;
+}
+
+/* Info */
+.follow-mgr-card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.follow-mgr-card-name {
+    font-size: var(--font-md);
+    font-weight: 500;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.follow-mgr-card-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-2xs);
+}
+
+.follow-mgr-card-handle {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.follow-mgr-card-count {
+    font-size: var(--font-2xs);
+    color: var(--text-muted);
+    background: rgba(255, 255, 255, 0.06);
+    padding: 1px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+/* Actions */
+.follow-mgr-card-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    flex-shrink: 0;
+}
+
+.follow-mgr-unfollow-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    font-size: var(--font-xs);
+    transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.follow-mgr-unfollow-btn:hover {
+    color: #e74c3c;
+}
+
+.follow-mgr-unfollow-btn.confirming {
+    background: rgba(231, 76, 60, 0.2) !important;
+    color: #e74c3c !important;
+    border-color: rgba(231, 76, 60, 0.4) !important;
+    animation: followMgrPulse 0.6s ease;
+}
+
+@keyframes followMgrPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.15); }
+}
+
+/* Empty state */
+.follow-mgr-empty {
+    text-align: center;
+    padding: var(--space-lg) var(--space-md);
+    color: var(--text-muted);
+}
+
+.follow-mgr-empty i {
+    font-size: var(--font-xl);
+    margin-bottom: var(--space-xs);
+    display: block;
+    opacity: 0.5;
+}
+
+.follow-mgr-empty p {
+    margin: 0;
+    font-size: var(--font-sm);
+}
+
+/* Add section */
+.follow-mgr-add {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs-sm);
+    padding-top: var(--space-xs);
+    border-top: 1px solid var(--glass-border);
+}
+
+.follow-mgr-add-input {
+    flex: 1;
+    font-size: var(--font-sm) !important;
+    height: 34px;
+}
+
+.follow-mgr-add-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: var(--font-sm);
+    transition: color 0.15s ease, transform 0.15s ease;
+}
+
+.follow-mgr-add-btn:hover {
+    color: var(--accent);
+    transform: scale(1.1);
+}
+
+.follow-mgr-add-btn.loading {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* Toggle button in timeline header */
+.follow-mgr-toggle-btn {
+    font-size: var(--font-sm);
+    gap: var(--space-xs);
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.follow-mgr-toggle-btn.active {
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.08);
+}
+
 /* Mobile overrides */
 @media screen and (max-width: 768px) {
+
+    /* Following manager */
+    .follow-mgr-panel { padding: var(--space-sm); border-radius: 10px; margin-bottom: var(--space-sm); }
+    .follow-mgr-toolbar { flex-direction: column; gap: var(--space-xs); }
+    .follow-mgr-search { font-size: 16px !important; height: 40px; }
+    .follow-mgr-sort { min-width: 100%; }
+    .follow-mgr-list { max-height: 300px; }
+    .follow-mgr-card { padding: var(--space-xs-sm); }
+    .follow-mgr-card:hover { transform: none; }
+    .follow-mgr-card-avatar { width: 36px; height: 36px; }
+    .follow-mgr-unfollow-btn { width: 44px; height: 44px; font-size: var(--font-md); }
+    .follow-mgr-add-input { font-size: 16px !important; height: 40px; }
+    .follow-mgr-add-btn { width: 44px; height: 44px; }
+    .follow-mgr-add-btn:hover { transform: none; }
+    .follow-mgr-toggle-btn { font-size: 0; gap: 0; padding: var(--space-xs-sm) var(--space-sm-md); }
+    .follow-mgr-toggle-btn i { font-size: var(--font-sm); }
 
     /* ChubAI character detail modal */
     .browse-char-modal {
@@ -1831,8 +2131,15 @@
 
 
     .browse-author-banner { flex-direction: column; gap: var(--space-sm-md); padding: 10px 12px; }
-    .browse-author-banner-content { font-size: var(--font-md); }
-    .browse-author-banner-actions { width: 100%; gap: var(--space-xs-sm); flex-wrap: wrap; }
+    .browse-author-banner-content { font-size: var(--font-sm); min-width: 0; }
+    .browse-author-banner-content span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .browse-author-banner-actions { width: 100%; gap: var(--space-xs-sm); }
+    .browse-author-banner-actions .glass-select,
+    .browse-author-banner-actions [data-select-id] { min-width: 0; flex: 0 1 auto; display: flex; font-size: var(--font-sm); }
+    .browse-author-banner-actions [data-select-id] .custom-select-trigger { min-width: 0; width: 100%; }
+    .browse-author-banner-actions [data-select-id] .custom-select-trigger .trigger-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .browse-author-banner-actions .glass-btn { font-size: var(--font-sm); flex-shrink: 0; }
+    .browse-author-banner-actions .glass-btn.icon-only { padding: 4px 8px; }
 
     .browse-grid {
         grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));

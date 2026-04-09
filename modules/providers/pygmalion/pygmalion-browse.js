@@ -64,6 +64,8 @@ let pygFollowedUsers = [];
 let pygFollowingCharacters = [];
 let pygFollowingLoading = false;
 let pygFollowingSort = 'newest';
+let _followingCreatorFilter = null;
+let _followingCssFiltered = false;
 
 // Auth state
 let pygPluginAvailable = false;
@@ -1092,6 +1094,7 @@ function filterByAuthor(authorName, ownerId) {
     const bannerName = document.getElementById('pygAuthorBannerName');
     if (banner) {
         banner.classList.remove('hidden');
+        window.pushOverlayGuard?.();
         if (bannerName) bannerName.textContent = authorName;
     }
 
@@ -1396,9 +1399,51 @@ function sortPygFollowingCharacters(characters) {
     }
 }
 
+function clearFollowingCreator() {
+    _followingCreatorFilter = null;
+    const banner = document.getElementById('pygFollowingCreatorBanner');
+    if (banner) banner.classList.add('hidden');
+    if (_followingCssFiltered) {
+        _followingCssFiltered = false;
+        const tempGrid = document.getElementById('pygCreatorGrid');
+        if (tempGrid) tempGrid.remove();
+        const grid = document.getElementById('pygFollowingGrid');
+        if (grid) grid.classList.remove('grid-suspended');
+    } else {
+        renderPygFollowing();
+    }
+}
+
+function _handleFollowingCardClick(e) {
+    const creatorLink = e.target.closest('.browse-card-creator-link');
+    if (creatorLink) {
+        e.stopPropagation();
+        const author = creatorLink.dataset.author;
+        const ownerId = creatorLink.dataset.ownerId;
+        if (author) {
+            switchPygViewMode('browse');
+            filterByAuthor(author, ownerId);
+        }
+        return;
+    }
+    const card = e.target.closest('.browse-card');
+    if (card) {
+        const charId = card.dataset.pygId;
+        const hit = pygFollowingCharacters.find(c => c.id === charId);
+        if (hit) openPreviewModal(hit);
+    }
+}
+
 function renderPygFollowing() {
+    const tempGrid = document.getElementById('pygCreatorGrid');
+    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('pygFollowingGrid');
     if (!grid) return;
+    grid.classList.remove('grid-suspended');
+    _followingCreatorFilter = null;
+    _followingCssFiltered = false;
+    const banner = document.getElementById('pygFollowingCreatorBanner');
+    if (banner) banner.classList.add('hidden');
 
     // Client-side tag + hide-owned filtering
     const includeTags = [...pygIncludeTags];
@@ -1486,7 +1531,10 @@ async function openPygTokenModal() {
     }
 
     const modal = document.getElementById('pygLoginModal');
-    if (modal) modal.classList.remove('hidden');
+    if (modal) {
+        modal.classList.remove('hidden');
+        window.pushOverlayGuard?.();
+    }
 }
 
 function closePygTokenModal() {
@@ -2158,27 +2206,10 @@ function initPygView() {
     // Grid card click (following)
     const followingGrid = document.getElementById('pygFollowingGrid');
     if (followingGrid) {
-        followingGrid.addEventListener('click', (e) => {
-            const creatorLink = e.target.closest('.browse-card-creator-link');
-            if (creatorLink) {
-                e.stopPropagation();
-                const author = creatorLink.dataset.author;
-                const ownerId = creatorLink.dataset.ownerId;
-                if (author) {
-                    switchPygViewMode('browse');
-                    filterByAuthor(author, ownerId);
-                }
-                return;
-            }
-
-            const card = e.target.closest('.browse-card');
-            if (card) {
-                const charId = card.dataset.pygId;
-                const hit = pygFollowingCharacters.find(c => c.id === charId);
-                if (hit) openPreviewModal(hit);
-            }
-        });
+        followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
+
+    on('pygFollowingCreatorClose', 'click', () => clearFollowingCreator());
 
     // ── Preview modal events (attached once — persist across provider switches)
     if (!modalEventsAttached) {
@@ -2269,6 +2300,8 @@ function initPygView() {
 
         window.registerOverlay?.({ id: 'pygCharModal', tier: 7, close: () => closePreviewModal() });
         window.registerOverlay?.({ id: 'pygLoginModal', tier: 6, close: () => closePygTokenModal() });
+        window.registerOverlay?.({ id: 'pygAuthorBanner', tier: 9, close: () => clearAuthorFilter() });
+        window.registerOverlay?.({ id: 'pygFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 }
 
@@ -2286,6 +2319,115 @@ class PygmalionBrowseView extends BrowseView {
     _extractProviderIds(char, idSet) {
         const pygData = char.data?.extensions?.pygmalion;
         if (pygData?.id) idSet.add(pygData.id);
+    }
+
+    // -- Following Manager --
+
+    get supportsFollowingManager() { return true; }
+
+    async getFollowedCreators() {
+        if (!pygToken) return [];
+        // Use already-loaded user list if available
+        if (pygFollowedUsers.length > 0) {
+            return pygFollowedUsers.map(u => ({
+                id: u.id || u.userId,
+                name: u.displayName || u.username || 'Unknown',
+                username: u.username,
+                avatar: u.profilePicture || u.avatarUrl || '',
+            }));
+        }
+        // Fall back to fetching IDs only (no display names available from cache)
+        const ids = await fetchPygFollowedUserIds();
+        return [...ids].map(id => ({
+            id,
+            name: id,
+        }));
+    }
+
+    getCreatorAvatarUrl(creator) {
+        return creator.avatar ? getAvatarUrl(creator.avatar) : '';
+    }
+
+    async followCreator(query) {
+        if (!pygToken) {
+            showToast('Login required to follow users on Pygmalion', 'warning');
+            return null;
+        }
+        const trimmed = query.trim();
+        if (!trimmed) return null;
+
+        // Pygmalion requires userId UUID to follow
+        const uuidMatch = trimmed.match(/^[0-9a-f-]{36}$/i);
+        if (!uuidMatch) {
+            showToast('Enter a Pygmalion user ID (UUID) to follow', 'info');
+            return null;
+        }
+
+        try {
+            const result = await toggleFollowUser(pygToken, trimmed);
+            if (result.isFollowing) {
+                if (pygFollowedUserIds) pygFollowedUserIds.add(trimmed);
+                showToast('Followed user!', 'success');
+                return { id: trimmed, name: trimmed };
+            }
+            return null;
+        } catch (e) {
+            if (e.authFailed) {
+                showToast('Token expired, please re-authenticate', 'warning');
+            } else {
+                showToast(`Failed: ${e.message}`, 'error');
+            }
+            return null;
+        }
+    }
+
+    async unfollowCreator(id) {
+        if (!pygToken) return false;
+        try {
+            const result = await toggleFollowUser(pygToken, id);
+            if (!result.isFollowing) {
+                if (pygFollowedUserIds) pygFollowedUserIds.delete(id);
+                // Clear cached following data so it reloads
+                pygFollowedUsers = pygFollowedUsers.filter(u => (u.id || u.userId) !== id);
+                showToast('Unfollowed user', 'info');
+                return true;
+            }
+            return false;
+        } catch (e) {
+            showToast(`Failed: ${e.message}`, 'error');
+            return false;
+        }
+    }
+
+    browseCreatorFromManager(creator) {
+        _followingCreatorFilter = creator.id;
+        _followingCssFiltered = true;
+        const banner = document.getElementById('pygFollowingCreatorBanner');
+        const nameEl = document.getElementById('pygFollowingCreatorName');
+        if (banner && nameEl) {
+            nameEl.textContent = creator.name || creator.id;
+            banner.classList.remove('hidden');
+            window.pushOverlayGuard?.();
+        }
+        const grid = document.getElementById('pygFollowingGrid');
+        if (grid) {
+            grid.classList.add('grid-suspended');
+            let source = pygFollowingCharacters.filter(c => {
+                const ownerId = c._followedAuthorId || '';
+                return ownerId === creator.id;
+            });
+            if (pygFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
+            if (pygFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
+            if (!pygNsfwEnabled) source = source.filter(c => !c.isSensitive);
+            const sorted = sortPygFollowingCharacters(source);
+            const tempGrid = document.createElement('div');
+            tempGrid.id = 'pygCreatorGrid';
+            tempGrid.className = 'browse-grid';
+            tempGrid.innerHTML = sorted.map(c => createPygCard(c)).join('');
+            grid.after(tempGrid);
+            tempGrid.addEventListener('click', _handleFollowingCardClick);
+            pygmalionBrowseView.observeImages(tempGrid);
+        }
     }
 
     get previewModalId() { return 'pygCharModal'; }
@@ -2470,6 +2612,24 @@ class PygmalionBrowseView extends BrowseView {
                     <div class="chub-timeline-header-left">
                         <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
                         <p>New characters from authors you follow</p>
+                    </div>
+                    <div class="chub-timeline-header-right">
+                        <button class="follow-mgr-toggle-btn glass-btn" id="pygmalionFollowMgrToggle"
+                                title="Manage followed creators">
+                            <i class="fa-solid fa-users-gear"></i> Manage
+                        </button>
+                    </div>
+                </div>
+                ${this.renderFollowingManagerPanel()}
+                <div id="pygFollowingCreatorBanner" class="browse-author-banner hidden">
+                    <div class="browse-author-banner-content">
+                        <i class="fa-solid fa-user"></i>
+                        <span>Showing characters by <strong id="pygFollowingCreatorName"></strong></span>
+                    </div>
+                    <div class="browse-author-banner-actions">
+                        <button id="pygFollowingCreatorClose" class="glass-btn icon-only" title="Back to timeline">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
                     </div>
                 </div>
                 <div id="pygFollowingGrid" class="browse-grid"></div>

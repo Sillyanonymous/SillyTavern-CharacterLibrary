@@ -492,6 +492,7 @@ window.registerOverlay = function(cfg) {
             processedHash = null;
             location.hash = 'g' + guardId;
         }
+        window.pushOverlayGuard = pushGuard;
 
         function closeTopLayer() {
             for (let i = 0; i < stack.length; i++) {
@@ -518,6 +519,12 @@ window.registerOverlay = function(cfg) {
                 }
                 const [selector] = entry;
                 if (document.querySelector(selector)) return true;
+            }
+            for (const reg of (window._overlayRegistry || [])) {
+                const el = document.getElementById(reg.id);
+                if (!el) continue;
+                const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
+                if (visible) return true;
             }
             return false;
         }

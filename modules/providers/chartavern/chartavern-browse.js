@@ -1282,6 +1282,7 @@ function initCtView() {
 
         window.registerOverlay?.({ id: 'ctCharModal', tier: 7, close: () => closePreviewModal() });
         window.registerOverlay?.({ id: 'ctLoginModal', tier: 6, close: () => closeCtLoginModal() });
+        window.registerOverlay?.({ id: 'ctAuthorBanner', tier: 9, close: () => clearCtAuthorFilter() });
     }
 }
 
@@ -1319,6 +1320,7 @@ function filterByAuthor(authorName) {
     if (banner && bannerName) {
         bannerName.textContent = authorName;
         banner.classList.remove('hidden');
+        window.pushOverlayGuard?.();
     }
 
     closePreviewModal();

@@ -205,6 +205,19 @@ export class ProviderBase {
     // ── Remote Data ─────────────────────────────────────────
 
     /**
+     * Refresh/re-extract remote data before an update check.
+     * Providers that cache or aggregate stale data (e.g. DataCat) can
+     * override this to trigger a re-extraction so fetchRemoteCard()
+     * returns fresh data.
+     * @param {ProviderLinkInfo} linkInfo
+     * @param {Object} [options]
+     * @param {AbortSignal} [options.signal] — abort signal to cancel long-running operations
+     * @param {function(string):void} [options.onStatus] — progress callback for UI updates
+     * @returns {Promise<void>}
+     */
+    async refreshRemoteData(linkInfo, options = {}) { return; }
+
+    /**
      * Fetch full remote metadata for a linked character.
      * @param {string} fullPath — provider-specific canonical path
      * @returns {Promise<Object|null>} provider-specific metadata blob

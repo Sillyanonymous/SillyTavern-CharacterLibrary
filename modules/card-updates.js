@@ -620,6 +620,13 @@ async function performSingleCheck(char) {
         // Ensure heavy fields are loaded before comparing card content
         await CoreAPI.hydrateCharacter(char);
         
+        await provider.refreshRemoteData(linkInfo, {
+            onStatus: (msg) => {
+                statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${CoreAPI.escapeHtml(msg)}`;
+            },
+        });
+        
+        statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching remote card...';
         const remoteCard = await provider.fetchRemoteCard(linkInfo);
         
         if (!remoteCard) {
@@ -1428,6 +1435,15 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 errors++;
                 continue;
             }
+
+            await match.provider.refreshRemoteData(match.linkInfo, {
+                signal: abortController.signal,
+                onStatus: statusEl ? (msg) => {
+                    statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${CoreAPI.escapeHtml(msg)}`;
+                } : undefined,
+            });
+
+            if (abortController.signal.aborted || batchCheckPaused) break;
             const remoteCard = await match.provider.fetchRemoteCard(match.linkInfo);
             
             if (!remoteCard) {

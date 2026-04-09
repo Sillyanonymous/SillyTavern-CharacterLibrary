@@ -1817,6 +1817,40 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
                             </div>
+
+                            <div class="settings-subheading"><i class="fa-solid fa-id-card"></i> Character Details</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsShowProviderTagline" checked> Show provider tagline in character details
+                                </label>
+                                <span class="settings-hint">Display the provider tagline below metadata in the Details tab (ChubAI, CharacterTavern, etc.)</span>
+                            </div>
+                            <div class="settings-row" style="padding-left: 24px;">
+                                <label>
+                                    <input type="checkbox" id="settingsAllowRichTagline"> Allow rich tagline display
+                                </label>
+                                <span class="settings-hint">Render HTML formatting in taglines (sanitized). Use with care.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsRichCreatorNotes"> Rich creator's notes rendering
+                                </label>
+                                <span class="settings-hint">Uses sandboxed iframe to render with full CSS/HTML support. May cause issues with unusual formatting.</span>
+                            </div>
+                            <div class="settings-row" style="padding-left: 24px;">
+                                <label>
+                                    <input type="checkbox" id="settingsExpandCreatorNotes"> Expand creator's notes by default
+                                </label>
+                                <span class="settings-hint">Automatically expand the creator's notes section when opening character details.</span>
+                            </div>
+                            <div class="settings-row" data-platform="mobile">
+                                <label>
+                                    <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
+                                </label>
+                                <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
+                            </div>
+
+                            <div class="settings-subheading"><i class="fa-solid fa-grip"></i> Card Grid</div>
                             <div class="settings-row" data-platform="desktop">
                                 <label>
                                     <input type="checkbox" id="settingsAnimateTagPills"> Animate card info on hover <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i>
@@ -1835,30 +1869,8 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Hide the playlist indicator icon on character cards</span>
                             </div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsRichCreatorNotes"> Rich creator's notes rendering
-                                </label>
-                                <span class="settings-hint">Uses sandboxed iframe to render with full CSS/HTML support. May cause issues with unusual formatting.</span>
-                            </div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsShowProviderTagline" checked> Show provider tagline in character details
-                                </label>
-                                <span class="settings-hint">Display the provider tagline below metadata in the Details tab (ChubAI, CharacterTavern, etc.)</span>
-                            </div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsAllowRichTagline"> Allow rich tagline display
-                                </label>
-                                <span class="settings-hint">Render HTML formatting in taglines (sanitized). Use with care.</span>
-                            </div>
-                            <div class="settings-row" data-platform="mobile">
-                                <label>
-                                    <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
-                                </label>
-                                <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
-                            </div>
+
+                            <div class="settings-subheading"><i class="fa-solid fa-globe"></i> Online</div>
                             <div class="settings-row" data-platform="mobile">
                                 <label>
                                     <input type="checkbox" id="settingsMobileProviderQuickSwitch" checked> Provider quick switch <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
@@ -2190,6 +2202,15 @@ https://jannyai.com/characters/uuid_slug
                                     <div class="settings-row">
                                         <span class="settings-hint">When enabled, extracted characters appear on the public DataCat feed and are accessible via URL. Disable to keep extractions private (API-only access).</span>
                                     </div>
+                                    <div class="settings-row">
+                                        <label class="settings-checkbox-label">
+                                            <input type="checkbox" id="datacatReextractOnUpdateCheckbox">
+                                            <span>Re-extract characters on update checks</span>
+                                        </label>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Force DataCat to re-extract character data from JanitorAI before checking for updates. Slower, but ensures comparisons use fresh data instead of a stale cache.</span>
+                                    </div>
                                 </div>
                                 <div class="settings-group" style="opacity: 0.45; pointer-events: none;">
                                     <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
@@ -2446,7 +2467,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.6</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.7</span>
                             </div>
                         </div>
                     </div>

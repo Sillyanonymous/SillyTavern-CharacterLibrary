@@ -67,8 +67,13 @@ let datacatBrowseMode = 'recent';
 // Creator browsing state
 let datacatCreatorId = null;
 let datacatCreatorName = '';
+let _followingCreatorFilter = null;
+let _followingCssFiltered = false;
 let datacatSortMode = 'recent';
 let datacatCreatorSortMode = 'chat_count';
+
+let datacatFilterHideOwned = false;
+let datacatFilterHidePossible = false;
 
 // Fresh endpoint pagination
 let datacatFreshLimit24 = 80;
@@ -166,6 +171,11 @@ function isCharInLocalLibrary(dcChar) {
     if (name && creator && view._lookup.byNameAndCreator.has(`${name}|${creator}`)) return true;
 
     return false;
+}
+
+function isCharPossibleMatchObj(c) {
+    if (isCharInLocalLibrary(c)) return false;
+    return view.isCharPossibleMatch(c.name || '', getCreatorName(c));
 }
 
 // ========================================
@@ -267,6 +277,13 @@ function renderGrid(characters, append = false) {
     let filtered = datacatNsfwEnabled
         ? characters
         : characters.filter(c => !isNsfw(c));
+
+    if (datacatFilterHideOwned) {
+        filtered = filtered.filter(c => !isCharInLocalLibrary(c));
+    }
+    if (datacatFilterHidePossible) {
+        filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
+    }
 
     // Client-side: persistent exclude tags from settings
     const dcPersistentExclude = getProviderExcludeTags('datacat');
@@ -670,17 +687,17 @@ function renderJannyTagsList(filter = '') {
 // ========================================
 
 const FRESH_SORT_LABELS = [
-    { value: 'fresh', label: 'Freshest' },
-    { value: 'score', label: 'Score' },
-    { value: 'chat_count', label: 'Chat Count' },
-    { value: 'messages_per_chat', label: 'MSG/Chat' },
-    { value: 'first_published', label: 'First Published' },
+    { value: 'fresh', label: '🌟 Freshest' },
+    { value: 'score', label: '⭐ Score' },
+    { value: 'chat_count', label: '💬 Chat Count' },
+    { value: 'messages_per_chat', label: '📊 MSG/Chat' },
+    { value: 'first_published', label: '📅 First Published' },
 ];
 
 const CREATOR_SORT_OPTIONS = [
-    { value: 'chat_count', label: 'Most Messages' },
-    { value: 'newest', label: 'Newest' },
-    { value: 'oldest', label: 'Oldest' },
+    { value: 'chat_count', label: '💬 Most Messages' },
+    { value: 'newest', label: '🆕 Newest' },
+    { value: 'oldest', label: '🕐 Oldest' },
 ];
 
 function isJannySortMode(mode) {
@@ -701,20 +718,20 @@ function parseSortMode(mode) {
 }
 
 const JANNY_SORT_OPTIONS = [
-    { value: 'janny_newest', label: 'Newest' },
-    { value: 'janny_oldest', label: 'Oldest' },
-    { value: 'janny_tokens_desc', label: 'Most Tokens' },
-    { value: 'janny_tokens_asc', label: 'Least Tokens' },
-    { value: 'janny_relevant', label: 'Relevance' },
+    { value: 'janny_newest', label: '🆕 Newest' },
+    { value: 'janny_oldest', label: '🕐 Oldest' },
+    { value: 'janny_tokens_desc', label: '📊 Most Tokens' },
+    { value: 'janny_tokens_asc', label: '📊 Least Tokens' },
+    { value: 'janny_relevant', label: '🔍 Relevance' },
 ];
 
 const HAMPTER_SORT_OPTIONS = [
-    { value: 'hampter_trending', label: 'Trending' },
-    { value: 'hampter_popular', label: 'Popular' },
+    { value: 'hampter_trending', label: '🔥 Trending' },
+    { value: 'hampter_popular', label: '👑 Popular' },
 ];
 
 function buildSortOptionsHtml(selected) {
-    let html = `<option value="recent" ${selected === 'recent' ? 'selected' : ''}>Recent</option>`;
+    let html = `<option value="recent" ${selected === 'recent' ? 'selected' : ''}>🆕 Recent</option>`;
     html += '<optgroup label="Last 24 Hours">';
     for (const o of FRESH_SORT_LABELS) {
         const val = `${o.value}_24h`;
@@ -798,6 +815,7 @@ async function browseCreator(creatorId) {
     if (banner && bannerName) {
         bannerName.textContent = datacatCreatorName;
         banner.classList.remove('hidden');
+        window.pushOverlayGuard?.();
     }
 
     updateFollowButton(creatorId);
@@ -831,6 +849,21 @@ function clearCreatorFilter() {
     updateSortOptions();
 
     loadCharacters(false);
+}
+
+function clearFollowingCreator() {
+    _followingCreatorFilter = null;
+    const banner = document.getElementById('datacatFollowingCreatorBanner');
+    if (banner) banner.classList.add('hidden');
+    if (_followingCssFiltered) {
+        _followingCssFiltered = false;
+        const tempGrid = document.getElementById('datacatCreatorGrid');
+        if (tempGrid) tempGrid.remove();
+        const grid = document.getElementById('datacatFollowingGrid');
+        if (grid) grid.classList.remove('grid-suspended');
+    } else {
+        renderFollowing();
+    }
 }
 
 // ========================================
@@ -1041,7 +1074,6 @@ async function lookupJanitorCharacter(janitorId, originalUrl) {
         }
     } catch { /* not found */ }
 
-    // Character not on DataCat: show extraction panel
     showExtractionPanel(janitorId, originalUrl);
 }
 
@@ -1247,10 +1279,18 @@ function stopExtractionPolling() {
     }
 }
 
+function clearExtractionState() {
+    stopExtractionPolling();
+    extractionTargetUrl = null;
+    extractionTargetId = null;
+    extractionStartTime = null;
+}
+
 async function fetchExtractedCharacter(janitorId) {
     try {
         const character = await fetchDatacatCharacter(janitorId);
         if (character) {
+            character._fullCharacter = character;
             openPreviewModal(character);
             return;
         }
@@ -1258,6 +1298,7 @@ async function fetchExtractedCharacter(janitorId) {
         await new Promise(r => setTimeout(r, 2000));
         const retry = await fetchDatacatCharacter(janitorId);
         if (retry) {
+            retry._fullCharacter = retry;
             openPreviewModal(retry);
             return;
         }
@@ -1271,6 +1312,45 @@ async function fetchExtractedCharacter(janitorId) {
 // MODAL EXTRACTION (extract from preview modal)
 // ========================================
 
+function updateInlineExtractionCTA(state, detail) {
+    const cta = document.querySelector('.datacat-modal-extract-cta');
+    if (!cta) return;
+    const iconWrap = cta.querySelector('.datacat-modal-extract-icon-wrap');
+    const message = cta.querySelector('.datacat-modal-extract-message');
+    const hint = cta.querySelector('.datacat-modal-extract-hint');
+    const btn = cta.querySelector('.datacat-modal-extract-btn');
+
+    cta.classList.remove('extracting', 'success', 'error');
+
+    if (state === 'submitting') {
+        cta.classList.add('extracting');
+        if (iconWrap) iconWrap.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin datacat-modal-extract-icon"></i>';
+        if (message) message.textContent = 'Submitting extraction request...';
+        if (hint) hint.textContent = '';
+        if (btn) btn.style.display = 'none';
+    } else if (state === 'extracting') {
+        cta.classList.add('extracting');
+        if (iconWrap) iconWrap.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin datacat-modal-extract-icon"></i>';
+        if (message) message.textContent = 'Extraction in progress';
+        if (hint) hint.textContent = detail || '';
+        if (btn) btn.style.display = 'none';
+    } else if (state === 'progress') {
+        if (message) message.textContent = detail || 'Extracting...';
+    } else if (state === 'done') {
+        cta.classList.add('success');
+        if (iconWrap) iconWrap.innerHTML = '<i class="fa-solid fa-circle-check datacat-modal-extract-icon"></i>';
+        if (message) message.textContent = 'Extraction complete!';
+        if (hint) hint.textContent = 'Loading character...';
+        if (btn) btn.style.display = 'none';
+    } else if (state === 'error') {
+        cta.classList.add('error');
+        if (iconWrap) iconWrap.innerHTML = '<i class="fa-solid fa-triangle-exclamation datacat-modal-extract-icon"></i>';
+        if (message) message.textContent = detail || 'Extraction failed';
+        if (hint) hint.textContent = 'Try again or check back later.';
+        if (btn) { btn.disabled = false; btn.style.display = ''; btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry'; }
+    }
+}
+
 async function startModalExtraction(charId) {
     const importBtn = document.getElementById('datacatImportBtn');
     if (!importBtn) return;
@@ -1279,6 +1359,7 @@ async function startModalExtraction(charId) {
 
     importBtn.disabled = true;
     importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
+    updateInlineExtractionCTA('submitting');
 
     extractionTargetUrl = janitorUrl;
     extractionTargetId = charId;
@@ -1290,19 +1371,23 @@ async function startModalExtraction(charId) {
         if (result.queued || result.started) {
             const position = result.queued ? ` (${result.queuePosition || 1})` : '';
             importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Extracting...${position}`;
+            updateInlineExtractionCTA('extracting', position.trim() ? `Queue position${position}` : '');
             startModalExtractionPolling(charId);
         } else if (result.requiresLogin) {
             importBtn.disabled = false;
             importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
+            updateInlineExtractionCTA('error', 'Session unavailable');
             showToast('DataCat has no valid session. The extraction service may be temporarily unavailable.', 'error');
         } else {
             importBtn.disabled = false;
             importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+            updateInlineExtractionCTA('error', result.message || result.error || 'Extraction failed');
             showToast(result.message || result.error || 'Extraction failed', 'error');
         }
     } catch (e) {
         importBtn.disabled = false;
         importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
+        updateInlineExtractionCTA('error', e.message);
         showToast(`Failed to submit extraction: ${e.message}`, 'error');
     }
 }
@@ -1317,7 +1402,9 @@ function startModalExtractionPolling(charId) {
         const elapsed = Math.round((Date.now() - extractionStartTime) / 1000);
         if (importBtn.disabled) {
             const phase = importBtn.dataset.extractPhase || 'Extracting';
-            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${phase}... (${elapsed}s)`;
+            const label = `${phase}... (${elapsed}s)`;
+            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${label}`;
+            updateInlineExtractionCTA('progress', label);
         }
     }, 1000);
 
@@ -1333,21 +1420,24 @@ function startModalExtractionPolling(charId) {
 
             if (completedEntry) {
                 clearInterval(elapsedTimer);
-                stopExtractionPolling();
+                clearExtractionState();
 
                 if (completedEntry.success !== false && completedEntry.status !== 'error') {
                     if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check-circle"></i> Done! Loading...';
+                    updateInlineExtractionCTA('done');
                     showToast('Extraction complete! Loading character...', 'success');
                     await new Promise(r => setTimeout(r, 1000));
                     try {
                         const character = await fetchDatacatCharacter(charId);
                         if (character) {
+                            character._fullCharacter = character;
                             openPreviewModal(character);
                             return;
                         }
                         await new Promise(r => setTimeout(r, 2000));
                         const retry = await fetchDatacatCharacter(charId);
                         if (retry) {
+                            retry._fullCharacter = retry;
                             openPreviewModal(retry);
                             return;
                         }
@@ -1359,6 +1449,7 @@ function startModalExtractionPolling(charId) {
                         importBtn.disabled = false;
                         importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
                     }
+                    updateInlineExtractionCTA('error', 'Extracted but failed to load');
                 } else {
                     const errMsg = humanizeExtractionError(completedEntry.error || completedEntry.message);
                     showToast(errMsg, 'error');
@@ -1366,6 +1457,7 @@ function startModalExtractionPolling(charId) {
                         importBtn.disabled = false;
                         importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Retry';
                     }
+                    updateInlineExtractionCTA('error', errMsg);
                 }
                 return;
             }
@@ -1637,13 +1729,47 @@ function sortFollowingCharacters(characters) {
     }
 }
 
+function _handleFollowingCardClick(e) {
+    const authorLink = e.target.closest('.browse-card-creator-link');
+    if (authorLink) {
+        e.stopPropagation();
+        const creatorId = authorLink.dataset.creatorId;
+        if (creatorId) {
+            switchDatacatViewMode('browse');
+            browseCreator(creatorId);
+        }
+        return;
+    }
+    const card = e.target.closest('.browse-card');
+    if (!card) return;
+    const charId = card.dataset.datacatId;
+    if (!charId) return;
+    const hit = datacatFollowingCharacters.find(c => String(getCharId(c)) === charId);
+    if (hit) openPreviewModal(hit);
+}
+
 function renderFollowing() {
+    const tempGrid = document.getElementById('datacatCreatorGrid');
+    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('datacatFollowingGrid');
     if (!grid) return;
+    grid.classList.remove('grid-suspended');
+
+    let source = datacatFollowingCharacters;
+    if (_followingCreatorFilter) {
+        source = source.filter(c => getCreatorId(c) === _followingCreatorFilter);
+    }
 
     let filtered = datacatNsfwEnabled
-        ? datacatFollowingCharacters
-        : datacatFollowingCharacters.filter(c => !isNsfw(c));
+        ? source
+        : source.filter(c => !isNsfw(c));
+
+    if (datacatFilterHideOwned) {
+        filtered = filtered.filter(c => !isCharInLocalLibrary(c));
+    }
+    if (datacatFilterHidePossible) {
+        filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
+    }
 
     const dcPersistentExclude = getProviderExcludeTags('datacat');
     if (dcPersistentExclude.length > 0) {
@@ -1657,6 +1783,7 @@ function renderFollowing() {
     const sorted = sortFollowingCharacters(filtered);
 
     if (sorted.length === 0 && datacatFollowingCharacters.length > 0) {
+        _followingCssFiltered = false;
         grid.innerHTML = `
             <div class="chub-timeline-empty">
                 <i class="fa-solid fa-filter"></i>
@@ -1668,6 +1795,7 @@ function renderFollowing() {
     }
 
     grid.innerHTML = sorted.map(c => createDatacatCard(c)).join('');
+    _followingCssFiltered = false;
     const followingGrid = document.getElementById('datacatFollowingGrid');
     if (followingGrid) datacatBrowseView.observeImages(followingGrid);
 }
@@ -1678,6 +1806,7 @@ function renderFollowing() {
 
 let datacatDetailFetchToken = 0;
 let datacatDetailFetchPromise = null;
+let datacatLastCreatorNotes = '';
 
 function openPreviewModal(hit) {
     datacatSelectedChar = hit;
@@ -1719,39 +1848,32 @@ function openPreviewModal(hit) {
     if (tokensEl) tokensEl.textContent = formatNumber(totalTokens);
     if (dateEl) dateEl.textContent = createdDate;
 
-    // Show/hide stats based on data source
-    const chatsStat = chatsEl?.closest('.browse-stat');
-    const msgsStat = msgsEl?.closest('.browse-stat');
-    const tokensStat = tokensEl?.closest('.browse-stat');
-    if (chatsStat) chatsStat.style.display = (chatCount || msgCount) ? '' : 'none';
-    if (msgsStat) msgsStat.style.display = (chatCount || msgCount) ? '' : 'none';
-    if (tokensStat) tokensStat.style.display = totalTokens ? '' : 'none';
-
     // Tags
     const tagsEl = document.getElementById('datacatCharTags');
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
 
-    // Creator's Notes — MeiliSearch/Hampter hits have the tagline immediately; DataCat hits show spinner
+    // Creator's Notes — show immediately if description is available (all sources include it)
     const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
+    const immediateDesc = (hit.description || '').trim();
+    datacatLastCreatorNotes = immediateDesc;
     if (creatorNotesSection) {
-        const immediateDesc = (hit._source === 'meilisearch' || hit._source === 'hampter') ? (hit.description || '').trim() : '';
         if (immediateDesc) {
             creatorNotesSection.style.display = 'block';
             if (creatorNotesEl) renderCreatorNotesSecure(immediateDesc, name, creatorNotesEl);
         } else {
-            creatorNotesSection.style.display = 'block';
-            if (creatorNotesEl) creatorNotesEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading creator notes...</div>';
+            creatorNotesSection.style.display = 'none';
+            if (creatorNotesEl) creatorNotesEl.innerHTML = '';
         }
     }
 
-    // Loading indicator for definition sections
+    // Definition sections: all hidden, single loading indicator shown
+    const defLoading = document.getElementById('datacatCharDefinitionLoading');
+    if (defLoading) defLoading.style.display = 'block';
     const descSection = document.getElementById('datacatCharDescriptionSection');
-    const descEl = document.getElementById('datacatCharDescription');
     const scenarioSection = document.getElementById('datacatCharScenarioSection');
     const firstMsgSection = document.getElementById('datacatCharFirstMsgSection');
-    descSection.style.display = 'block';
-    descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
+    descSection.style.display = 'none';
     scenarioSection.style.display = 'none';
     firstMsgSection.style.display = 'none';
 
@@ -1762,7 +1884,7 @@ function openPreviewModal(hit) {
     if (greetingsStat) greetingsStat.style.display = 'none';
     window.currentBrowseAltGreetings = [];
 
-    // Import button — disabled until fetchAndPopulateDetails resolves (prevents importing barebones data)
+    // Import button — neutral loading state until definition fetch resolves
     const importBtn = document.getElementById('datacatImportBtn');
     delete importBtn.dataset.extractId;
     delete importBtn.dataset.extractPhase;
@@ -1772,9 +1894,9 @@ function openPreviewModal(hit) {
         importBtn.classList.remove('primary', 'warning');
         importBtn.disabled = false;
     } else {
-        importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+        importBtn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> Loading...';
+        importBtn.classList.remove('primary', 'secondary', 'warning');
         importBtn.classList.add('secondary');
-        importBtn.classList.remove('primary', 'warning');
         importBtn.disabled = true;
     }
 
@@ -1791,33 +1913,48 @@ async function fetchAndPopulateDetails(hit, token) {
     const charId = getCharId(hit);
     const name = hit.name || 'Unknown';
 
+    function showExtractionCTA(message) {
+        const descSection = document.getElementById('datacatCharDescriptionSection');
+        const descEl = document.getElementById('datacatCharDescription');
+        if (descSection) descSection.style.display = 'block';
+        if (descEl) descEl.innerHTML = `
+            <div class="datacat-modal-extract-cta">
+                <div class="datacat-modal-extract-icon-wrap">
+                    <i class="fa-solid fa-wand-magic-sparkles datacat-modal-extract-icon"></i>
+                </div>
+                <p class="datacat-modal-extract-message">${escapeHtml(message)}</p>
+                <p class="datacat-modal-extract-hint">Use DataCat's extraction service to retrieve this character's full definition from JanitorAI.</p>
+                <button class="action-btn primary datacat-modal-extract-btn" data-extract-id="${escapeHtml(String(charId))}">
+                    <i class="fa-solid fa-cloud-arrow-down"></i> Extract Character
+                </button>
+            </div>
+        `;
+        const inlineBtn = descEl?.querySelector('.datacat-modal-extract-btn');
+        if (inlineBtn) inlineBtn.addEventListener('click', () => startModalExtraction(charId));
+        const importBtn = document.getElementById('datacatImportBtn');
+        if (importBtn) {
+            importBtn.disabled = false;
+            importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
+            importBtn.classList.remove('primary', 'secondary', 'warning');
+            importBtn.classList.add('primary');
+            importBtn.dataset.extractId = charId;
+        }
+    }
+
+    // Start download fetch early (runs in parallel with character fetch)
+    const downloadPromise = fetchDatacatDownload(charId).catch(() => null);
+
     try {
-        const character = await fetchDatacatCharacter(charId);
+        const character = hit._fullCharacter || await fetchDatacatCharacter(charId);
 
         if (token !== datacatDetailFetchToken) return;
 
+        // Hide the loading indicator
+        const defLoading = document.getElementById('datacatCharDefinitionLoading');
+        if (defLoading) defLoading.style.display = 'none';
+
         if (!character) {
-            const descEl = document.getElementById('datacatCharDescription');
-            if (descEl) descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. This character may only exist on JanitorAI.</em>';
-            // Show tagline as creator notes when DataCat doesn't have the character
-            const fallbackDesc = (hit._source === 'meilisearch' || hit._source === 'hampter') ? (hit.description || '').trim() : '';
-            const cnSection = document.getElementById('datacatCharCreatorNotesSection');
-            const cnEl = document.getElementById('datacatCharCreatorNotes');
-            if (fallbackDesc) {
-                if (cnSection) cnSection.style.display = 'block';
-                if (cnEl) renderCreatorNotesSecure(fallbackDesc, name, cnEl);
-            } else {
-                if (cnSection) cnSection.style.display = 'none';
-                if (cnEl) cnEl.innerHTML = '';
-            }
-            const importBtn = document.getElementById('datacatImportBtn');
-            if (importBtn) {
-                importBtn.disabled = false;
-                importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
-                importBtn.classList.remove('primary', 'secondary', 'warning');
-                importBtn.classList.add('primary');
-                importBtn.dataset.extractId = charId;
-            }
+            showExtractionCTA('Character definition is hidden or unavailable.');
             return;
         }
 
@@ -1841,8 +1978,8 @@ async function fetchAndPopulateDetails(hit, token) {
         const firstMessage = character.first_message || '';
 
         const descSection = document.getElementById('datacatCharDescriptionSection');
-        const descEl = document.getElementById('datacatCharDescription');
         if (descSection) {
+            const descEl = document.getElementById('datacatCharDescription');
             if (personality) {
                 descSection.style.display = 'block';
                 if (descEl) descEl.innerHTML = formatRichText(personality, name, false);
@@ -1869,49 +2006,49 @@ async function fetchAndPopulateDetails(hit, token) {
             }
         }
 
-        // Update modal stats with full character data (may have chat/msg counts)
+        // Silently update stats values if full character has better data
         const chatsEl = document.getElementById('datacatCharChats');
         const msgsEl = document.getElementById('datacatCharMessages');
         const fullChatCount = getChatCount(character);
         const fullMsgCount = getMsgCount(character);
         if (chatsEl && fullChatCount) chatsEl.textContent = formatNumber(fullChatCount);
         if (msgsEl && fullMsgCount) msgsEl.textContent = formatNumber(fullMsgCount);
-        const chatsStat = chatsEl?.closest('.browse-stat');
-        const msgsStat = msgsEl?.closest('.browse-stat');
-        if (chatsStat && (fullChatCount || fullMsgCount)) chatsStat.style.display = '';
-        if (msgsStat && (fullChatCount || fullMsgCount)) msgsStat.style.display = '';
 
-        // Refresh creator notes with untruncated HTML from the full character
-        const fullCreatorNotes = character.description || '';
+        // Refresh creator notes only if content changed (avoids iframe rebuild flash)
+        const fullCreatorNotes = (character.description || '').trim();
         const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
         const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
-        if (fullCreatorNotes.trim()) {
+        if (fullCreatorNotes && fullCreatorNotes !== datacatLastCreatorNotes) {
+            datacatLastCreatorNotes = fullCreatorNotes;
             if (creatorNotesSection) creatorNotesSection.style.display = 'block';
             if (creatorNotesEl) renderCreatorNotesSecure(fullCreatorNotes, name, creatorNotesEl);
-        } else {
+        } else if (!fullCreatorNotes && !datacatLastCreatorNotes) {
             if (creatorNotesSection) creatorNotesSection.style.display = 'none';
             if (creatorNotesEl) creatorNotesEl.innerHTML = '';
         }
 
-        // Update tags if the full character has them
+        // Update tags only if they differ from what's already rendered
         if (character.tags?.length) {
             const tagsEl = document.getElementById('datacatCharTags');
-            const fullTags = resolveTagNames(character.tags);
-            if (tagsEl) tagsEl.innerHTML = fullTags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
+            if (tagsEl) {
+                const fullTags = resolveTagNames(character.tags);
+                const newHtml = fullTags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
+                if (tagsEl.innerHTML !== newHtml) tagsEl.innerHTML = newHtml;
+            }
         }
 
-        // Enable the import button now that full data is available
+        // Enable import button now that full character data is confirmed
         const importBtn = document.getElementById('datacatImportBtn');
         if (importBtn && !importBtn.dataset.extractId) {
-            const inLib = isCharInLocalLibrary(hit);
-            if (inLib) {
+            const inLibrary = isCharInLocalLibrary(hit);
+            if (inLibrary) {
                 importBtn.innerHTML = '<i class="fa-solid fa-check"></i> In Library';
                 importBtn.classList.add('secondary');
                 importBtn.classList.remove('primary', 'warning');
             } else {
-                const creatorName = getCreatorName(hit) || 'Unknown';
-                const possible = view.isCharPossibleMatch(hit.name || '', creatorName);
-                if (possible) {
+                const creatorName = character.creator_name || character.creatorName || hit.creator_name || '';
+                const possibleMatch = view.isCharPossibleMatch(name, creatorName);
+                if (possibleMatch) {
                     importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import (Possible Match)';
                     importBtn.classList.add('warning');
                     importBtn.classList.remove('primary', 'secondary');
@@ -1924,25 +2061,18 @@ async function fetchAndPopulateDetails(hit, token) {
             importBtn.disabled = false;
         }
 
-        // Fetch download data for alternate greetings
-        fetchDatacatDownload(charId).then(downloadData => {
+        // Fetch download data for alternate greetings (started in parallel above)
+        downloadPromise.then(downloadData => {
             if (token !== datacatDetailFetchToken) return;
             const altGreetings = downloadData?.data?.alternate_greetings;
             renderAltGreetings(altGreetings, name);
-        }).catch(() => {});
+        });
     } catch (err) {
         debugLog('[DatacatBrowse] Detail fetch error:', err);
         if (token === datacatDetailFetchToken) {
-            const descEl = document.getElementById('datacatCharDescription');
-            if (descEl) descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition.</em>';
-            const importBtn = document.getElementById('datacatImportBtn');
-            if (importBtn) {
-                importBtn.disabled = false;
-                importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
-                importBtn.classList.remove('primary', 'secondary', 'warning');
-                importBtn.classList.add('primary');
-                importBtn.dataset.extractId = charId;
-            }
+            const defLoading = document.getElementById('datacatCharDefinitionLoading');
+            if (defLoading) defLoading.style.display = 'none';
+            showExtractionCTA('Could not load character definition.');
         }
     }
 }
@@ -2031,6 +2161,7 @@ function closePreviewModal() {
     datacatDetailFetchToken++;
     datacatDetailFetchPromise = null;
     cleanupDatacatCharModal();
+    clearExtractionState();
     const modal = document.getElementById('datacatCharModal');
     if (modal) modal.classList.add('hidden');
     datacatSelectedChar = null;
@@ -2060,7 +2191,15 @@ async function importCharacter(charData) {
             try { await datacatDetailFetchPromise; } catch { /* ignore */ }
         }
 
-        const character = charData._fullCharacter || charData;
+        const character = charData._fullCharacter;
+        if (!character) {
+            showToast('Character definition not available. Try extracting first.', 'warning');
+            if (importBtn) {
+                importBtn.disabled = false;
+                importBtn.innerHTML = '<i class="fa-solid fa-download"></i> Import';
+            }
+            return;
+        }
         const charName = character.chat_name || character.name || charData.name || '';
         const charCreator = character.creator_name || charData.creatorName || charData.creator_name || '';
 
@@ -2189,6 +2328,16 @@ function updateNsfwToggle() {
     }
 }
 
+function updateDatacatFiltersButtonState() {
+    const btn = document.getElementById('datacatFiltersBtn');
+    if (!btn) return;
+    const count = [datacatFilterHideOwned, datacatFilterHidePossible].filter(Boolean).length;
+    btn.classList.toggle('has-filters', count > 0);
+    btn.innerHTML = count > 0
+        ? `<i class="fa-solid fa-sliders"></i> Features (${count})`
+        : '<i class="fa-solid fa-sliders"></i> <span>Features</span>';
+}
+
 // ========================================
 // EVENT WIRING
 // ========================================
@@ -2303,6 +2452,37 @@ function initDatacatView() {
     });
     updateNsfwToggle();
 
+    // Filters dropdown toggle
+    on('datacatFiltersBtn', 'click', (e) => {
+        e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns();
+        document.getElementById('datacatTagsDropdown')?.classList.add('hidden');
+        document.getElementById('datacatFiltersDropdown')?.classList.toggle('hidden');
+    });
+
+    // Filter checkboxes
+    const dcFilterCheckboxes = [
+        { id: 'datacatFilterHideOwned', setter: (v) => datacatFilterHideOwned = v, getter: () => datacatFilterHideOwned },
+        { id: 'datacatFilterHidePossible', setter: (v) => datacatFilterHidePossible = v, getter: () => datacatFilterHidePossible },
+    ];
+    dcFilterCheckboxes.forEach(({ id, getter }) => {
+        const cb = document.getElementById(id);
+        if (cb) cb.checked = getter();
+    });
+    updateDatacatFiltersButtonState();
+
+    dcFilterCheckboxes.forEach(({ id, setter }) => {
+        document.getElementById(id)?.addEventListener('change', (e) => {
+            setter(e.target.checked);
+            updateDatacatFiltersButtonState();
+            if (datacatViewMode === 'following') {
+                renderFollowing();
+            } else {
+                renderGrid(datacatCharacters, false);
+            }
+        });
+    });
+
     // Sort mode
     on('datacatSortSelect', 'change', () => {
         const el = document.getElementById('datacatSortSelect');
@@ -2352,9 +2532,11 @@ function initDatacatView() {
 
     // Clear creator filter
     on('datacatClearCreatorBtn', 'click', () => clearCreatorFilter());
+    on('datacatFollowingCreatorClose', 'click', () => clearFollowingCreator());
 
     // Tags dropdown toggle
     on('datacatTagsBtn', 'click', () => {
+        document.getElementById('datacatFiltersDropdown')?.classList.add('hidden');
         const dropdown = document.getElementById('datacatTagsDropdown');
         if (!dropdown) return;
         dropdown.classList.toggle('hidden');
@@ -2383,6 +2565,7 @@ function initDatacatView() {
     // Dropdown dismiss (click outside)
     datacatBrowseView._registerDropdownDismiss([
         { dropdownId: 'datacatTagsDropdown', buttonId: 'datacatTagsBtn' },
+        { dropdownId: 'datacatFiltersDropdown', buttonId: 'datacatFiltersBtn' },
     ]);
 
     // View mode toggle (Browse / Following)
@@ -2414,25 +2597,7 @@ function initDatacatView() {
     // Following grid card click --> open preview (delegation)
     const followingGrid = document.getElementById('datacatFollowingGrid');
     if (followingGrid) {
-        followingGrid.addEventListener('click', (e) => {
-            const authorLink = e.target.closest('.browse-card-creator-link');
-            if (authorLink) {
-                e.stopPropagation();
-                const creatorId = authorLink.dataset.creatorId;
-                if (creatorId) {
-                    switchDatacatViewMode('browse');
-                    browseCreator(creatorId);
-                }
-                return;
-            }
-
-            const card = e.target.closest('.browse-card');
-            if (!card) return;
-            const charId = card.dataset.datacatId;
-            if (!charId) return;
-            const hit = datacatFollowingCharacters.find(c => String(getCharId(c)) === charId);
-            if (hit) openPreviewModal(hit);
-        });
+        followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
 
 
@@ -2481,6 +2646,8 @@ function initDatacatView() {
         }
 
         window.registerOverlay?.({ id: 'datacatCharModal', tier: 7, close: () => closePreviewModal() });
+        window.registerOverlay?.({ id: 'datacatCreatorBanner', tier: 9, close: () => clearCreatorFilter() });
+        window.registerOverlay?.({ id: 'datacatFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 }
 
@@ -2506,6 +2673,102 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     _extractProviderIds(char, idSet) {
         const dcData = char.data?.extensions?.datacat;
         if (dcData?.id) idSet.add(String(dcData.id));
+    }
+
+    // -- Following Manager --
+
+    get supportsFollowingManager() { return true; }
+
+    async getFollowedCreators() {
+        return datacatFollowedCreators.map((c, i) => ({
+            id: c.id,
+            name: c.name,
+            followedAt: i,
+        }));
+    }
+
+    async followCreator(query) {
+        if (!query) return null;
+        let creatorId = query.trim();
+
+        // Extract UUID from DataCat creator URL
+        const urlMatch = creatorId.match(/creators?\/([0-9a-f-]{36})/i);
+        if (urlMatch) creatorId = urlMatch[1];
+
+        // Check if already followed
+        if (isCreatorFollowed(creatorId)) {
+            showToast('Already following this creator', 'info');
+            return null;
+        }
+
+        // UUID format: try API lookup
+        if (/^[0-9a-f-]{36}$/i.test(creatorId)) {
+            const creator = await fetchDatacatCreator(creatorId);
+            if (creator) {
+                const name = creator.userName || creatorId;
+                followCreator(creatorId, name);
+                return { id: creatorId, name };
+            }
+        }
+
+        // Client-side name search across known data
+        const lowerQ = query.toLowerCase().trim();
+        const sources = [
+            ...datacatFollowedCreators.map(c => ({ id: c.id, name: c.name })),
+            ...datacatCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c) })),
+            ...datacatFollowingCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c) })),
+        ];
+        const exact = sources.find(c => c.name?.toLowerCase() === lowerQ);
+        const match = exact || sources.find(c => c.name?.toLowerCase().includes(lowerQ));
+
+        if (match && match.id && !isCreatorFollowed(match.id)) {
+            followCreator(match.id, match.name);
+            return { id: match.id, name: match.name };
+        }
+
+        showToast('Creator not found. Try pasting a DataCat creator URL.', 'warning');
+        return null;
+    }
+
+    async unfollowCreator(id) {
+        unfollowCreator(id);
+        return true;
+    }
+
+    browseCreatorFromManager(creator) {
+        _followingCreatorFilter = creator.id;
+        _followingCssFiltered = true;
+        const banner = document.getElementById('datacatFollowingCreatorBanner');
+        const nameEl = document.getElementById('datacatFollowingCreatorName');
+        if (banner && nameEl) {
+            nameEl.textContent = creator.name || creator.username || creator.id;
+            banner.classList.remove('hidden');
+            window.pushOverlayGuard?.();
+        }
+        const grid = document.getElementById('datacatFollowingGrid');
+        if (grid) {
+            grid.classList.add('grid-suspended');
+            let source = datacatFollowingCharacters.filter(c => getCreatorId(c) === creator.id);
+            if (!datacatNsfwEnabled) source = source.filter(c => !isNsfw(c));
+            if (datacatFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
+            if (datacatFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
+            const sorted = sortFollowingCharacters(source);
+            const tempGrid = document.createElement('div');
+            tempGrid.id = 'datacatCreatorGrid';
+            tempGrid.className = 'browse-grid';
+            tempGrid.innerHTML = sorted.map(c => createDatacatCard(c)).join('');
+            grid.after(tempGrid);
+            tempGrid.addEventListener('click', _handleFollowingCardClick);
+            datacatBrowseView.observeImages(tempGrid);
+        }
+    }
+
+    getFollowingManagerSortOptions() {
+        return [
+            { value: 'name_asc', label: 'Name A-Z' },
+            { value: 'name_desc', label: 'Name Z-A' },
+            { value: 'recent', label: 'Recently Added' },
+        ];
     }
 
     get previewModalId() { return 'datacatCharModal'; }
@@ -2550,6 +2813,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             sort: 'datacatSortSelect',
             timelineSort: 'datacatFollowingSortSelect',
             tags: 'datacatTagsBtn',
+            filters: 'datacatFiltersBtn',
             nsfw: 'datacatNsfwToggle',
             refresh: 'datacatRefreshBtn',
             modeBrowseSelector: '.datacat-view-btn[data-datacat-view="browse"]',
@@ -2598,6 +2862,18 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         </button>
                     </div>
                     <div class="browse-tags-list" id="datacatTagsList"></div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="browse-more-filters" style="position: relative;">
+                <button id="datacatFiltersBtn" class="glass-btn" title="Filter by character features">
+                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
+                </button>
+                <div id="datacatFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
+                    <div class="dropdown-section-title">Library:</div>
+                    <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                 </div>
             </div>
 
@@ -2678,6 +2954,24 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         <h3><i class="fa-solid fa-clock"></i> Timeline</h3>
                         <p>New characters from creators you follow</p>
                     </div>
+                    <div class="chub-timeline-header-right">
+                        <button class="follow-mgr-toggle-btn glass-btn" id="datacatFollowMgrToggle"
+                                title="Manage followed creators">
+                            <i class="fa-solid fa-users-gear"></i> Manage
+                        </button>
+                    </div>
+                </div>
+                ${this.renderFollowingManagerPanel()}
+                <div id="datacatFollowingCreatorBanner" class="browse-author-banner hidden">
+                    <div class="browse-author-banner-content">
+                        <i class="fa-solid fa-user"></i>
+                        <span>Showing characters by <strong id="datacatFollowingCreatorName"></strong></span>
+                    </div>
+                    <div class="browse-author-banner-actions">
+                        <button id="datacatFollowingCreatorClose" class="glass-btn icon-only" title="Back to all following">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="datacatFollowingGrid" class="browse-grid"></div>
             </div>
@@ -2743,6 +3037,11 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
                     </h3>
                     <div id="datacatCharCreatorNotes" class="scrolling-text"></div>
+                </div>
+
+                <!-- Definition loading indicator -->
+                <div id="datacatCharDefinitionLoading" class="browse-char-section" style="display: none;">
+                    <div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>
                 </div>
 
                 <!-- Description (personality field) -->
@@ -2878,6 +3177,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             datacatGridRenderedCount = 0;
             datacatCreatorId = null;
             datacatCreatorName = '';
+            _followingCreatorFilter = null;
+            _followingCssFiltered = false;
             datacatActiveTagIds.clear();
             datacatTagsLoaded = false;
             datacatViewMode = 'browse';
@@ -2909,7 +3210,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     deactivate() {
         datacatDetailFetchToken++;
         delegatesInitialized = false;
-        stopExtractionPolling();
+        clearExtractionState();
         super.deactivate();
         this.disconnectImageObserver();
     }
