@@ -303,6 +303,7 @@ window.registerOverlay = function(cfg) {
         preventAutoFocusOnOpen();
         setupMobileTagEditor();
         setupModalHeaderCollapse();
+        setupTitleScrollReveal();
         setupMultiSelectConfirm();
         setupBackButton();
     }
@@ -1511,25 +1512,31 @@ window.registerOverlay = function(cfg) {
             let lastScrollY = 0;
             let attached = false;
             let scrollBody = null;
-            let snapEnabled = false;
             let collapsedAt = 0;
 
             function handleScroll() {
                 if (!scrollBody) return;
                 const y = scrollBody.scrollTop;
                 const isBrowse = glass.classList.contains('browse-char-modal');
-                if (!snapEnabled && isBrowse && y > 5 && window.getSetting?.('browseSnapSections') !== false) {
-                    snapEnabled = true;
-                    scrollBody.classList.add('snap-active');
+
+                if (isBrowse && window.getSetting?.('browseSnapSections') !== false) {
+                    const hasSnap = scrollBody.classList.contains('snap-active');
+                    if (y > 50 && !hasSnap) scrollBody.classList.add('snap-active');
+                    else if (y <= 50 && hasSnap) scrollBody.classList.remove('snap-active');
                 }
+
                 const isCollapsed = glass.classList.contains('header-collapsed');
-                const topZone = isCollapsed ? 2 : (isBrowse ? 3 : 10);
+                const topZone = isCollapsed
+                    ? (isBrowse ? 12 : 2)
+                    : (isBrowse ? 20 : 10);
+                const upDelta = isBrowse ? -3 : -4;
+
                 if (y <= topZone) {
                     glass.classList.remove('header-collapsed');
                 } else if (y > lastScrollY + 2) {
                     if (!isCollapsed) collapsedAt = Date.now();
                     glass.classList.add('header-collapsed');
-                } else if (y < lastScrollY - 4 && Date.now() - collapsedAt > 300) {
+                } else if (y < lastScrollY + upDelta && Date.now() - collapsedAt > 300) {
                     glass.classList.remove('header-collapsed');
                 }
                 lastScrollY = y;
@@ -1551,7 +1558,6 @@ window.registerOverlay = function(cfg) {
                     scrollBody.classList.remove('snap-active');
                 }
                 glass.classList.remove('header-collapsed');
-                snapEnabled = false;
                 lastScrollY = 0;
                 attached = false;
                 scrollBody = null;
@@ -1692,6 +1698,118 @@ window.registerOverlay = function(cfg) {
     function closeAvatarViewer() {
         const viewer = document.querySelector('.mobile-avatar-viewer');
         if (viewer) viewer.remove();
+    }
+
+    /* ========================================
+       TITLE SCROLL-REVEAL
+       ======================================== */
+    function setupTitleScrollReveal() {
+        function easeOut(t) { return 1 - Math.pow(1 - t, 3); }
+        function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
+
+        function wireTitle(titleEl, overlayEl, glassEl) {
+            let _anim = null;
+
+            function unwrap() {
+                const inner = titleEl.querySelector('.title-scroll-inner');
+                if (inner) titleEl.textContent = inner.textContent;
+            }
+
+            function cancel() {
+                if (!_anim) return;
+                cancelAnimationFrame(_anim.raf);
+                clearTimeout(_anim.timeout);
+                _anim = null;
+                unwrap();
+                titleEl.classList.remove('title-scrolling', 'title-scroll-start', 'title-scroll-end');
+            }
+
+            function animate(inner, from, to, duration, easeFn) {
+                return new Promise(resolve => {
+                    const t0 = performance.now();
+                    function step(now) {
+                        if (!_anim) return;
+                        const p = Math.min((now - t0) / duration, 1);
+                        inner.style.transform = `translateX(${from + (to - from) * easeFn(p)}px)`;
+                        if (p < 1) _anim.raf = requestAnimationFrame(step);
+                        else resolve();
+                    }
+                    _anim.raf = requestAnimationFrame(step);
+                });
+            }
+
+            titleEl.addEventListener('click', async () => {
+                if (_anim) { cancel(); return; }
+
+                const distance = titleEl.scrollWidth - titleEl.clientWidth;
+                if (distance <= 0) return;
+
+                const inner = document.createElement('span');
+                inner.className = 'title-scroll-inner';
+                inner.textContent = titleEl.textContent;
+                titleEl.textContent = '';
+                titleEl.appendChild(inner);
+
+                const speed = 75;
+                const fwdMs = Math.max(600, (distance / speed) * 1000);
+                const retMs = Math.max(400, fwdMs * 0.6);
+
+                _anim = { raf: 0, timeout: 0 };
+                titleEl.classList.add('title-scrolling', 'title-scroll-start');
+
+                await animate(inner, 0, -distance, fwdMs, easeOut);
+                if (!_anim) return;
+
+                titleEl.classList.remove('title-scroll-start');
+                titleEl.classList.add('title-scroll-end');
+
+                await new Promise(r => { _anim.timeout = setTimeout(r, 1400); });
+                if (!_anim) return;
+
+                titleEl.classList.remove('title-scroll-end');
+
+                await animate(inner, -distance, 0, retMs, easeInOut);
+                if (_anim) {
+                    _anim = null;
+                    unwrap();
+                    titleEl.classList.remove('title-scrolling');
+                }
+            });
+
+            if (overlayEl) {
+                new MutationObserver(() => {
+                    if (overlayEl.classList.contains('hidden')) cancel();
+                }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
+            }
+
+            if (glassEl) {
+                new MutationObserver(() => {
+                    if (glassEl.classList.contains('header-collapsed')) cancel();
+                }).observe(glassEl, { attributes: true, attributeFilter: ['class'] });
+            }
+        }
+
+        // charModal
+        const charModal = document.getElementById('charModal');
+        const modalTitle = document.getElementById('modalTitle');
+        if (charModal && modalTitle) {
+            wireTitle(modalTitle, charModal, charModal.querySelector('.modal-glass'));
+        }
+
+        // Browse preview modals (lazy discovery)
+        const wiredTitles = new WeakSet();
+        function scanBrowseTitles() {
+            document.querySelectorAll('.modal-overlay').forEach(overlay => {
+                const glass = overlay.querySelector('.browse-char-modal');
+                if (!glass) return;
+                const h2 = glass.querySelector('.browse-char-header-info h2');
+                if (!h2 || wiredTitles.has(h2)) return;
+                wiredTitles.add(h2);
+                wireTitle(h2, overlay, glass);
+            });
+        }
+        scanBrowseTitles();
+        new MutationObserver(scanBrowseTitles).observe(document.body, { childList: true });
     }
 
     /* ========================================
@@ -1920,7 +2038,7 @@ window.registerOverlay = function(cfg) {
             recentTouch = true;
             const img = getImageEl();
             if (!img) return;
-            img.style.transition = '';
+            img.style.transition = 'none';
 
             if (e.touches.length !== 1) return;
 
@@ -1998,11 +2116,8 @@ window.registerOverlay = function(cfg) {
             e.preventDefault();
             currentX = dx;
 
-            const resistance = Math.abs(dx) > 120 ? 0.3 : 1;
-            const offset = dx * resistance;
-            const opacity = 1 - Math.min(Math.abs(offset) / 300, 0.4);
-            img.style.transform = `translateX(${offset}px)`;
-            img.style.opacity = opacity;
+            img.style.transform = `translateX(${dx}px)`;
+            img.style.opacity = Math.max(0.6, 1 - Math.abs(dx) / 400);
         }, { passive: false });
 
         container.addEventListener('touchend', (e) => {
@@ -2026,32 +2141,27 @@ window.registerOverlay = function(cfg) {
             const nextBtn = document.getElementById('galleryViewerNext');
 
             if (swiping && Math.abs(currentX) >= SWIPE_THRESHOLD) {
-                if (img) {
-                    const dir = currentX < 0 ? -1 : 1;
-                    img.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
-                    img.style.transform = `translateX(${dir * window.innerWidth}px)`;
-                    img.style.opacity = '0';
-                }
-                setTimeout(() => {
-                    recentTouch = false; // Allow programmatic click through
-                    if (currentX < 0 && nextBtn) nextBtn.click();
-                    else if (currentX > 0 && prevBtn) prevBtn.click();
-                    if (img) { img.style.transition = 'none'; img.style.transform = ''; img.style.opacity = ''; }
-                    requestAnimationFrame(() => {
-                        const newImg = getImageEl();
-                        if (newImg) {
-                            newImg.style.transition = 'none';
-                            const fromDir = currentX < 0 ? 1 : -1;
-                            newImg.style.transform = `translateX(${fromDir * 60}px)`;
-                            newImg.style.opacity = '0.5';
-                            requestAnimationFrame(() => {
-                                newImg.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
-                                newImg.style.transform = 'translateX(0)';
-                                newImg.style.opacity = '1';
-                            });
-                        }
-                    });
-                }, 180);
+                const dir = currentX < 0 ? -1 : 1;
+
+                // Navigate immediately so the new image is ready
+                recentTouch = false;
+                if (currentX < 0 && nextBtn) nextBtn.click();
+                else if (currentX > 0 && prevBtn) prevBtn.click();
+
+                // Animate the NEW image in from the swipe direction
+                requestAnimationFrame(() => {
+                    const newImg = getImageEl();
+                    if (newImg) {
+                        newImg.style.transition = 'none';
+                        newImg.style.transform = `translateX(${-dir * 80}px)`;
+                        newImg.style.opacity = '0.3';
+                        requestAnimationFrame(() => {
+                            newImg.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+                            newImg.style.transform = 'translateX(0)';
+                            newImg.style.opacity = '1';
+                        });
+                    }
+                });
             } else {
                 if (img) {
                     img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';

@@ -64,6 +64,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Right-click context menu** on any character card for quick actions
 - **Version history & snapshots** with save/restore, remote version browsing, and full diff preview
 - **Playlists** for organizing characters into named, ordered virtual folders with icons and colors
+- **Filter presets** to save and restore your current filter configuration (tags, sort, search, advanced filters)
 - **Character Creator** with built-in AI Studio for assisted card authoring, brainstorming, and iterative refinement
 - **Animated card info** on hover with configurable visibility options
 
@@ -199,7 +200,7 @@ Keep provider-linked characters in sync with their online source:
 2. Review side-by-side diffs for each field
 3. Apply selected fields or apply all in batch
 
-Updates are fetched from the provider's API and only change the fields you choose. Works with all five providers: ChubAI, JanitorAI, CharacterTavern, Pygmalion, and Wyvern.
+Updates are fetched from the provider's API and only change the fields you choose. Works with all linked providers.
 
 > Review fields carefully before applying. If you manually tag your characters, skip the tags field during sync.
 
@@ -237,12 +238,28 @@ Snapshots are stored as JSON files via SillyTavern's Files API (`user/files/`), 
 <details>
 <summary><h3>🔍 Duplicate Detection</h3></summary>
 
-- **Name similarity** and **creator matching**
+- **Name similarity** and **creator matching** with fuzzy scoring
+- **Creator notes comparison** alongside name, creator, and content fields
 - **Jaccard similarity** for content comparison
+- **Content divergence penalty** to reduce false positives when name/creator match but card content clearly differs (e.g. male/female character variants)
 - **Duplicate media detection** via file hashing
 - **Match confidence & reasoning** for each result
-- **Delete duplicates** directly from the interface
+- **Exact mode**: Slide the sensitivity to maximum for strict duplicate detection, showing only pairs with identical content across all card fields
+- **Playlist integration**: In Exact mode, collect the newest or oldest card from each duplicate group into a playlist for batch cleanup
+- **Delete duplicates** directly from the interface with gallery transfer options
 - **Pre-import warnings** when downloading potential duplicates
+
+</details>
+
+<details>
+<summary><h3>🏷️ Display Name Override</h3></summary>
+
+Set a per-character display name that overrides the card's original name in the library grid and detail modal. The original name is always preserved in the card data.
+
+- **Per-character override**: Click the name type toggle in the character details header to switch between the card name and your custom display name
+- **SillyTavern integration**: Optionally push the display name into SillyTavern's chat and character panel (toggleable in Settings)
+- **Search and filter**: Find characters with overrides using the Advanced Filters panel
+- **Useful for**: Listing names from providers, translations, personal nicknames, or any scenario where you want a different display name without modifying the card
 
 </details>
 
@@ -401,6 +418,8 @@ All providers share a common set of capabilities:
 - **Bulk link scanner** to automatically scan your library and match unlinked characters
 - **Auto-link on import** for characters imported from any provider
 
+Providers with Following support include a **Followed Creators Manager** panel for browsing, searching, adding, and removing followed creators directly from the Following tab.
+
 ### Provider Feature Matrix
 
 | Feature | ChubAI | JanitorAI | CharacterTavern | Pygmalion | Wyvern | DataCat |
@@ -410,9 +429,8 @@ All providers share a common set of capabilities:
 | Character Linking | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Gallery Downloads | ✅ | -- | -- | ✅ | ✅ | -- |
 | Remote Version History | ✅ | -- | -- | -- | -- | -- |
-| Following / Timeline | ✅ | -- | -- | ✅ | ✅ | -- |
+| Following / Timeline | ✅ | -- | -- | ✅ | ✅ | ✅ |
 | Favorites | ✅ | -- | -- | -- | -- | -- |
-| JanitorAI Extraction | -- | -- | -- | -- | -- | ✅ |
 | Auth Required | Optional | None | Optional | Optional | Optional | None |
 
 <details>
@@ -548,6 +566,9 @@ DataCat aggregates JanitorAI characters with its own REST API and AI-powered cha
 - Character linking and card updates
 - **Creator search** to find characters by a specific creator
 - **JanitorAI search** via MeiliSearch integration (searches JanitorAI's full catalog through DataCat)
+- **Following tab** to browse characters from creators you follow
+- **Inline extraction** in the preview modal when viewing a JanitorAI character not yet on DataCat
+- **Re-extraction for updates** to ensure the latest character definition is compared during update checks
 
 #### JanitorAI Extraction
 
@@ -639,6 +660,7 @@ The full app is optimized for mobile with:
 - **Full-viewport modals** for character details and previews
 - **Mobile search overlay** with dedicated search UI
 - **Gallery viewer** with zoom, drag pan, and swipe navigation
+- **Title scroll-reveal**: Tap long character names or titles in modals to scroll through the full text
 - **Back button handling** for modal navigation
 
 ---

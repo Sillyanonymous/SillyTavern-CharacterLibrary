@@ -486,6 +486,18 @@ export function getCharacterAvatarUrl(avatar) {
 }
 
 /**
+ * @param {Object} char
+ * @returns {string|null}
+ */
+export function getListingNameFromExtensions(char) {
+    return window.getListingNameFromExtensions?.(char) ?? null;
+}
+
+export function getCharacterName(char) {
+    return window.getCharacterName?.(char) ?? char?.name ?? '';
+}
+
+/**
  * Format rich text (markdown-like formatting for chat messages)
  * @param {string} text - Raw text
  * @param {string} charName - Character name for substitution
@@ -1052,6 +1064,8 @@ export default {
     // Rendering
     renderLoadingState,
     getCharacterAvatarUrl,
+    getListingNameFromExtensions,
+    getCharacterName,
     formatRichText,
     
     // Character actions

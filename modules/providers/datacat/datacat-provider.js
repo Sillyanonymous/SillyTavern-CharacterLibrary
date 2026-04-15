@@ -102,9 +102,11 @@ class DatacatProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.datacat || {};
             char.data.extensions.datacat = {
                 id: linkInfo.id,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.datacat;
@@ -149,12 +151,18 @@ class DatacatProvider extends ProviderBase {
             const downloadData = await fetchDatacatDownload(linkInfo.id);
             if (downloadData?.data) {
                 const character = await fetchDatacatCharacter(linkInfo.id);
-                return buildV2FromDownload(downloadData, character);
+                const result = buildV2FromDownload(downloadData, character);
+                if (result) result._listingName = this.getListingName(character);
+                return result;
             }
 
             // Fallback to building from character metadata
             const character = await fetchDatacatCharacter(linkInfo.id);
-            if (character) return buildV2FromDatacat(character);
+            if (character) {
+                const result = buildV2FromDatacat(character);
+                if (result) result._listingName = this.getListingName(character);
+                return result;
+            }
 
             return null;
         } catch (e) {
@@ -404,6 +412,7 @@ class DatacatProvider extends ProviderBase {
                 id: charId,
                 creatorId: character.creator_id || null,
                 creatorName: character.creator_name || null,
+                pageName: this.getListingName(character),
                 linkedAt: new Date().toISOString()
             };
 

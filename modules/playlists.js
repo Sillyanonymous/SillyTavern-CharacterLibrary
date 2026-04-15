@@ -278,6 +278,18 @@ async function onCharacterDeleted(avatar) {
     if (changed) await savePlaylists();
 }
 
+async function pruneDeletedCharacters() {
+    if (!playlistsData) return;
+    const validAvatars = new Set(CoreAPI.getAllCharacters().map(c => c.avatar));
+    let changed = false;
+    for (const pl of Object.values(playlistsData.playlists)) {
+        const before = pl.characters.length;
+        pl.characters = pl.characters.filter(a => validAvatars.has(a));
+        if (pl.characters.length !== before) changed = true;
+    }
+    if (changed) await savePlaylists();
+}
+
 // ========================================
 // PLAYLIST PICKER MODAL
 // ========================================
@@ -811,6 +823,7 @@ export {
     isCharInPlaylist,
     isCharInAnyPlaylist,
     onCharacterDeleted,
+    pruneDeletedCharacters,
     openPlaylistPicker,
     closePlaylistPicker,
     openPlaylistManager,

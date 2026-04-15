@@ -467,10 +467,12 @@ class JannyProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.jannyai || {};
             char.data.extensions.jannyai = {
                 id: linkInfo.id,
                 slug: linkInfo.slug || null,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.jannyai;
@@ -525,7 +527,11 @@ class JannyProvider extends ProviderBase {
         try {
             const slug = linkInfo.slug || slugify(linkInfo.name || '');
             const data = await fetchCharacterDetails(linkInfo.id, slug);
-            if (data) return buildV2FromDetails(data);
+            if (data) {
+                const result = buildV2FromDetails(data);
+                if (result) result._listingName = this.getListingName(data);
+                return result;
+            }
             return null;
         } catch (e) {
             console.error('[JannyProvider] fetchRemoteCard failed:', linkInfo.id, e);
@@ -684,7 +690,8 @@ class JannyProvider extends ProviderBase {
                 creatorUsername: char.creatorUsername || null,
                 slug,
                 linkedAt: new Date().toISOString(),
-                tagline: stripHtml(enrichedCard.data.creator_notes) || ''
+                tagline: stripHtml(enrichedCard.data.creator_notes) || '',
+                pageName: this.getListingName(char),
             };
 
             // Preserve gallery_id from original card
@@ -810,7 +817,8 @@ class JannyProvider extends ProviderBase {
                 creatorUsername: char.creatorUsername || null,
                 slug: slug,
                 linkedAt: new Date().toISOString(),
-                tagline: stripHtml(characterCard.data.creator_notes) || existingJanny.tagline || ''
+                tagline: stripHtml(characterCard.data.creator_notes) || existingJanny.tagline || '',
+                pageName: this.getListingName(char),
             };
 
             // Gallery ID: inherit from replaced character, or generate new

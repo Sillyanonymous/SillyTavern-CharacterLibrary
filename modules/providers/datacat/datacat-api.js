@@ -556,47 +556,6 @@ export async function searchMeiliJanny(opts = {}) {
     };
 }
 
-/**
- * Try to find a JanitorAI character on MeiliSearch by UUID.
- * MeiliSearch doesn't support ID filtering, so we search by name (extracted from URL slug)
- * and verify the UUID matches in the results.
- * @param {string} charId - JanitorAI character UUID
- * @param {string} [nameHint] - Name extracted from URL slug (optional)
- * @returns {Promise<Object|null>} Normalized character object or null
- */
-export async function lookupMeiliByUuid(charId, nameHint) {
-    if (!nameHint) return null;
-
-    try {
-        const { characters } = await searchMeiliJanny({ search: nameHint, limit: 20 });
-        return characters.find(c => c.character_id === charId) || null;
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Extract a human-readable name from a JanitorAI URL slug.
- * URL patterns: /characters/{uuid}_{slug} or /characters/{uuid}
- * Slug format: "character-some-name-here"
- * @param {string} url - Full JanitorAI URL
- * @param {string} charId - Already-extracted character UUID
- * @returns {string|null} Extracted name or null
- */
-export function extractNameFromJannyUrl(url, charId) {
-    if (!url || !charId) return null;
-    try {
-        const pathname = new URL(url).pathname;
-        const afterId = pathname.split(charId)[1] || '';
-        // Slug starts with _ and often has "character-" prefix
-        const slugMatch = afterId.match(/^_(?:character-)?(.+)/);
-        if (!slugMatch) return null;
-        return decodeURIComponent(slugMatch[1]).replace(/-/g, ' ').trim() || null;
-    } catch {
-        return null;
-    }
-}
-
 // ========================================
 // HAMPTER (JanitorAI internal API)
 // ========================================

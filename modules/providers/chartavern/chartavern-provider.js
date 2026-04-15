@@ -176,10 +176,12 @@ class ChartavernProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.chartavern || {};
             char.data.extensions.chartavern = {
                 id: linkInfo.id || null,
                 path: linkInfo.fullPath,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.chartavern;
@@ -288,7 +290,8 @@ class ChartavernProvider extends ProviderBase {
                 id: detailData?.id || match.id || null,
                 path: match.fullPath,
                 linkedAt: new Date().toISOString(),
-                tagline: detailData?.tagline || match.tagline || ''
+                tagline: detailData?.tagline || match.tagline || '',
+                pageName: this.getListingName(detailData || match),
             };
 
             // Enrich tags if missing
@@ -387,6 +390,7 @@ class ChartavernProvider extends ProviderBase {
                             cardData.data.extensions.chartavern.tagline = detail.card.tagline || '';
                         }
                     } catch (_) { /* detail enrichment is best-effort */ }
+                    cardData._listingName = this.getListingName(detail?.card);
                     return cardData;
                 }
             } catch (e) {
@@ -396,7 +400,9 @@ class ChartavernProvider extends ProviderBase {
             // Fallback: detail API only (alternate_greetings will be empty)
             const data = await fetchCharacterDetail(parts[0], parts[1], api?.apiRequest);
             if (!data?.card) return null;
-            return buildV2FromDetail(data.card, parts[0]);
+            const result = buildV2FromDetail(data.card, parts[0]);
+            if (result) result._listingName = this.getListingName(data.card);
+            return result;
         } catch (e) {
             console.error('[ChartavernProvider] fetchRemoteCard failed:', linkInfo.fullPath, e);
             return null;
@@ -557,7 +563,8 @@ class ChartavernProvider extends ProviderBase {
                 id: cardData?.id || hitData?.id || null,
                 path: path,
                 linkedAt: new Date().toISOString(),
-                tagline: cardData?.tagline || hitData?.tagline || ''
+                tagline: cardData?.tagline || hitData?.tagline || '',
+                pageName: this.getListingName(cardData || hitData)
             };
 
             assignGalleryId(characterCard, options, api);

@@ -389,6 +389,7 @@ function prepareCharacterKeys(chars) {
         // Pre-compute lowercase fields for text search
         c._lowerName = c.name.toLowerCase();
         c._lowerCreator = String(c.creator || c.data?.creator || '').toLowerCase();
+        c._lowerListingName = (getListingNameFromExtensions(c) || '').toLowerCase();
         const tags = getTags(c);
         c._tagsLower = tags.length > 0 ? tags.join(' ').toLowerCase() : '';
         // Pre-compute numeric timestamps for date sorting
@@ -433,6 +434,7 @@ const DEFAULT_SETTINGS = {
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
     searchInName: true,
+    searchInListingName: true,
     searchInTags: true,
     searchInAuthor: false,
     searchInNotes: false,
@@ -444,6 +446,7 @@ const DEFAULT_SETTINGS = {
 
     // ---- Gallery & Media ----
     includeProviderGallery: true,
+    includeLorebook: false,
     richCreatorNotes: true,
     expandCreatorNotes: false,
     highlightColor: '#4a9eff',
@@ -470,6 +473,10 @@ const DEFAULT_SETTINGS = {
     showProviderTagline: true,
     showWyvernTagline: true,
     allowRichTagline: false,
+    displayNamePreference: 'card',
+    displayNameOverrideEnabled: true,
+    showNameToggle: true,
+    namePreferences: {},
     browseSnapSections: false,
     mobileProviderQuickSwitch: true,
 
@@ -626,6 +633,17 @@ async function loadGallerySettings() {
             // (ST's context API uses camelCase "extensionSettings", but the raw file doesn't)
             if (parsedSettings?.extension_settings?.[SETTINGS_KEY]) {
                 gallerySettings = { ...DEFAULT_SETTINGS, ...parsedSettings.extension_settings[SETTINGS_KEY] };
+                // localStorage is written synchronously by saveGallerySettings() and may
+                // contain changes that haven't flushed to disk yet (debounced save window)
+                try {
+                    const stored = localStorage.getItem(SETTINGS_KEY);
+                    if (stored) {
+                        const localData = JSON.parse(stored);
+                        if (localData.namePreferences && Object.keys(localData.namePreferences).length) {
+                            gallerySettings.namePreferences = localData.namePreferences;
+                        }
+                    }
+                } catch (_) { /* ignore */ }
                 debugLog('[Settings] Loaded fresh from disk via /api/settings/get', gallerySettings);
                 // Also sync to opener's in-memory state so saves work correctly
                 const context = getSTContext();
@@ -884,6 +902,7 @@ function setupSettingsModal() {
     
     // Search defaults
     const searchNameCheckbox = document.getElementById('settingsSearchName');
+    const searchListingNameCheckbox = document.getElementById('settingsSearchListingName');
     const searchTagsCheckbox = document.getElementById('settingsSearchTags');
     const searchAuthorCheckbox = document.getElementById('settingsSearchAuthor');
     const searchNotesCheckbox = document.getElementById('settingsSearchNotes');
@@ -892,11 +911,15 @@ function setupSettingsModal() {
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
     const expandCreatorNotesCheckbox = document.getElementById('settingsExpandCreatorNotes');
+    const displayNamePreferenceSelect = document.getElementById('settingsDisplayNamePreference');
+    const displayNameOverrideCheckbox = document.getElementById('settingsDisplayNameOverride');
+    const showNameToggleCheckbox = document.getElementById('settingsShowNameToggle');
     
     // Media Localization
     const mediaLocalizationCheckbox = document.getElementById('settingsMediaLocalization');
     const fixFilenamesCheckbox = document.getElementById('settingsFixFilenames');
     const includeProviderGalleryCheckbox = document.getElementById('settingsIncludeProviderGallery');
+    const includeLorebookCheckbox = document.getElementById('settingsIncludeLorebook');
     const fastFilenameSkipCheckbox = document.getElementById('settingsFastFilenameSkip');
     const fastSkipValidateHeadersCheckbox = document.getElementById('settingsFastSkipValidateHeaders');
     const fastSkipValidateRow = document.getElementById('fastSkipValidateRow');
@@ -1442,10 +1465,11 @@ function setupSettingsModal() {
         
         const minScore = getSetting('duplicateMinScore') || 35;
         minScoreSlider.value = minScore;
-        minScoreValue.textContent = minScore;
+        minScoreValue.textContent = parseInt(minScore) >= 120 ? 'Exact' : minScore;
         
         // Search defaults
         searchNameCheckbox.checked = getSetting('searchInName') !== false;
+        if (searchListingNameCheckbox) searchListingNameCheckbox.checked = getSetting('searchInListingName') !== false;
         searchTagsCheckbox.checked = getSetting('searchInTags') !== false;
         searchAuthorCheckbox.checked = getSetting('searchInAuthor') || false;
         searchNotesCheckbox.checked = getSetting('searchInNotes') || false;
@@ -1454,6 +1478,9 @@ function setupSettingsModal() {
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
         if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = getSetting('expandCreatorNotes') || false;
+        if (displayNamePreferenceSelect) displayNamePreferenceSelect.value = getSetting('displayNamePreference') || 'card';
+        if (displayNameOverrideCheckbox) displayNameOverrideCheckbox.checked = getSetting('displayNameOverrideEnabled') !== false;
+        if (showNameToggleCheckbox) showNameToggleCheckbox.checked = getSetting('showNameToggle') !== false;
         
         // Media Localization
         if (mediaLocalizationCheckbox) {
@@ -1464,6 +1491,9 @@ function setupSettingsModal() {
         }
         if (includeProviderGalleryCheckbox) {
             includeProviderGalleryCheckbox.checked = getSetting('includeProviderGallery') !== false;
+        }
+        if (includeLorebookCheckbox) {
+            includeLorebookCheckbox.checked = getSetting('includeLorebook') || false;
         }
         if (fastFilenameSkipCheckbox) {
             fastFilenameSkipCheckbox.checked = getSetting('fastFilenameSkip') || false;
@@ -1678,8 +1708,9 @@ function setupSettingsModal() {
     }
     
     // Slider value display
+    const formatMinScore = (val) => parseInt(val) >= 120 ? 'Exact' : val;
     minScoreSlider.oninput = () => {
-        minScoreValue.textContent = minScoreSlider.value;
+        minScoreValue.textContent = formatMinScore(minScoreSlider.value);
     };
     
     // Live preview highlight color
@@ -1754,16 +1785,21 @@ function setupSettingsModal() {
             wyvernRememberCredentials: wyvernRememberCredsCheckbox ? wyvernRememberCredsCheckbox.checked : false,
             duplicateMinScore: parseInt(minScoreSlider.value),
             searchInName: searchNameCheckbox.checked,
+            searchInListingName: searchListingNameCheckbox ? searchListingNameCheckbox.checked : true,
             searchInTags: searchTagsCheckbox.checked,
             searchInAuthor: searchAuthorCheckbox.checked,
             searchInNotes: searchNotesCheckbox.checked,
             defaultSort: defaultSortSelect.value,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             expandCreatorNotes: expandCreatorNotesCheckbox ? expandCreatorNotesCheckbox.checked : false,
+            displayNamePreference: displayNamePreferenceSelect ? displayNamePreferenceSelect.value : 'card',
+            displayNameOverrideEnabled: displayNameOverrideCheckbox ? displayNameOverrideCheckbox.checked : true,
+            showNameToggle: showNameToggleCheckbox ? showNameToggleCheckbox.checked : true,
             highlightColor: newHighlightColor,
             mediaLocalizationEnabled: mediaLocalizationCheckbox ? mediaLocalizationCheckbox.checked : false,
             fixFilenames: fixFilenamesCheckbox ? fixFilenamesCheckbox.checked : false,
             includeProviderGallery: includeProviderGalleryCheckbox ? includeProviderGalleryCheckbox.checked : false,
+            includeLorebook: includeLorebookCheckbox ? includeLorebookCheckbox.checked : false,
             fastFilenameSkip: fastFilenameSkipCheckbox ? fastFilenameSkipCheckbox.checked : false,
             fastSkipValidateHeaders: fastSkipValidateHeadersCheckbox ? fastSkipValidateHeadersCheckbox.checked : false,
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
@@ -1826,11 +1862,13 @@ function setupSettingsModal() {
         
         // Also update the current session search checkboxes
         const searchName = document.getElementById('searchName');
+        const searchListingName = document.getElementById('searchListingName');
         const searchTags = document.getElementById('searchTags');
         const searchAuthor = document.getElementById('searchAuthor');
         const searchNotes = document.getElementById('searchNotes');
         const sortSelect = document.getElementById('sortSelect');
         if (searchName) searchName.checked = searchNameCheckbox.checked;
+        if (searchListingName && searchListingNameCheckbox) searchListingName.checked = searchListingNameCheckbox.checked;
         if (searchTags) searchTags.checked = searchTagsCheckbox.checked;
         if (searchAuthor) searchAuthor.checked = searchAuthorCheckbox.checked;
         if (searchNotes) searchNotes.checked = searchNotesCheckbox.checked;
@@ -1838,6 +1876,8 @@ function setupSettingsModal() {
         
         showToast('Settings saved', 'success');
         closeModal();
+        
+        performSearch();
 
         // Update gallery sync indicator visibility
         if (typeof window.updateGallerySyncWarning === 'function') {
@@ -1904,17 +1944,24 @@ function setupSettingsModal() {
         minScoreSlider.value = DEFAULT_SETTINGS.duplicateMinScore;
         minScoreValue.textContent = String(DEFAULT_SETTINGS.duplicateMinScore);
         searchNameCheckbox.checked = DEFAULT_SETTINGS.searchInName;
+        if (searchListingNameCheckbox) searchListingNameCheckbox.checked = DEFAULT_SETTINGS.searchInListingName;
         searchTagsCheckbox.checked = DEFAULT_SETTINGS.searchInTags;
         searchAuthorCheckbox.checked = DEFAULT_SETTINGS.searchInAuthor;
         searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
         defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
         if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.expandCreatorNotes;
+        if (displayNamePreferenceSelect) displayNamePreferenceSelect.value = DEFAULT_SETTINGS.displayNamePreference;
+        if (displayNameOverrideCheckbox) displayNameOverrideCheckbox.checked = DEFAULT_SETTINGS.displayNameOverrideEnabled;
+        if (showNameToggleCheckbox) showNameToggleCheckbox.checked = DEFAULT_SETTINGS.showNameToggle;
         if (highlightColorInput) {
             highlightColorInput.value = DEFAULT_SETTINGS.highlightColor;
         }
         if (mediaLocalizationCheckbox) {
             mediaLocalizationCheckbox.checked = DEFAULT_SETTINGS.mediaLocalizationEnabled;
+        }
+        if (includeLorebookCheckbox) {
+            includeLorebookCheckbox.checked = DEFAULT_SETTINGS.includeLorebook;
         }
         if (replaceUserPlaceholderCheckbox) {
             replaceUserPlaceholderCheckbox.checked = DEFAULT_SETTINGS.replaceUserPlaceholder;
@@ -1976,11 +2023,13 @@ function setupSettingsModal() {
         });
         
         const searchName = document.getElementById('searchName');
+        const searchListingName = document.getElementById('searchListingName');
         const searchTags = document.getElementById('searchTags');
         const searchAuthor = document.getElementById('searchAuthor');
         const searchNotes = document.getElementById('searchNotes');
         const sortSelect = document.getElementById('sortSelect');
         if (searchName) searchName.checked = DEFAULT_SETTINGS.searchInName;
+        if (searchListingName) searchListingName.checked = DEFAULT_SETTINGS.searchInListingName;
         if (searchTags) searchTags.checked = DEFAULT_SETTINGS.searchInTags;
         if (searchAuthor) searchAuthor.checked = DEFAULT_SETTINGS.searchInAuthor;
         if (searchNotes) searchNotes.checked = DEFAULT_SETTINGS.searchInNotes;
@@ -5938,10 +5987,12 @@ function resetFiltersAndSearch() {
     
     // Reset search settings checkboxes
     const searchName = document.getElementById('searchName');
+    const searchListingName = document.getElementById('searchListingName');
     const searchDesc = document.getElementById('searchDesc');
     const searchTags = document.getElementById('searchTags');
     
     if (searchName) searchName.checked = true;
+    if (searchListingName) searchListingName.checked = true;
     if (searchDesc) searchDesc.checked = false;
     if (searchTags) searchTags.checked = true;
 }
@@ -6317,6 +6368,7 @@ function slimCharacter(char) {
         // Pre-computed keys (added by prepareCharacterKeys)
         _lowerName: char._lowerName,
         _lowerCreator: char._lowerCreator,
+        _lowerListingName: char._lowerListingName || '',
         _tagsLower: char._tagsLower,
         _dateAdded: char._dateAdded,
         _createDate: char._createDate,
@@ -6441,6 +6493,7 @@ async function recoverShallowExtensions(generation) {
                         char.data.extensions = full.data.extensions;
                         if (full.spec) char.spec = full.spec;
                         if (full.spec_version) char.spec_version = full.spec_version;
+                        char._lowerListingName = (getListingNameFromExtensions(char) || '').toLowerCase();
                         _extensionsCache.set(char.avatar, full.data.extensions);
                         recovered++;
                     } catch { /* skip */ }
@@ -6465,6 +6518,13 @@ async function recoverShallowExtensions(generation) {
 
     window.ProviderRegistry?.rebuildAllBrowseLookups?.();
     window.ProviderRegistry?.refreshActiveBrowseBadges?.();
+
+    // Re-render the characters grid now that extensions are available.
+    // The initial render happened before recovery (shallow chars had no extensions),
+    // so features like alt display names couldn't resolve listing names.
+    if ((getCurrentView() || 'characters') === 'characters') {
+        performSearch();
+    }
 
     document.dispatchEvent(new CustomEvent('cl-extensions-recovered'));
 
@@ -6580,6 +6640,11 @@ function processAndRender(data) {
     // ST lazy loading: skip gallery sync here — gallery_ids are stripped.
     // recoverShallowExtensions() re-runs sync+audit after patching extensions.
     if (isSTShallow) return;
+
+    // Prune stale playlist entries for characters that no longer exist
+    if (typeof window.playlistsPruneDeleted === 'function') {
+        window.playlistsPruneDeleted();
+    }
 
     // Sync gallery folder overrides to opener's settings after every character list refresh.
     // This ensures the opener's in-memory extensionSettings.gallery.folders is up-to-date,
@@ -7366,7 +7431,6 @@ function createCharacterCard(char) {
     }
     
     const name = getCharacterName(char);
-    char.name = name;
     const imgPath = getCharacterAvatarUrl(char.avatar);
     const tags = getTags(char);
     
@@ -7573,6 +7637,9 @@ async function fetchCharacterImages(charOrName) {
 
 let _galleryImageObserver = null;
 
+const GALLERY_PAGE_SIZE = 100;
+let _galleryState = null;
+
 function getGalleryImageObserver() {
     if (_galleryImageObserver) return _galleryImageObserver;
     const root = document.querySelector('#charModal .modal-body');
@@ -7595,6 +7662,8 @@ function renderGalleryImages(files, folderName) {
     const grid = document.getElementById('spritesGrid');
     grid.innerHTML = '';
     if (_galleryImageObserver) { _galleryImageObserver.disconnect(); }
+    if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
+    _galleryState = null;
     // Reset grid class - we'll manage layout with sections inside
     grid.className = 'gallery-media-container';
     
@@ -7703,74 +7772,219 @@ function renderGalleryImages(files, folderName) {
         const imagesGrid = document.createElement('div');
         imagesGrid.className = 'gallery-sprites-grid';
         
-        // Build media data for the viewer (images and videos together)
         const galleryMedia = visualMedia.map(({ fileName, type }) => ({
             name: fileName,
             url: `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`,
             type: type
         }));
         
-        visualMedia.forEach(({ fileName, type }, index) => {
-            const mediaUrl = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
-            const mediaContainer = document.createElement('div');
-            const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
-            mediaContainer.className = `sprite-item${mediaIsGif ? ' gif-thumb' : ''}`;
-            
-            if (type === 'video') {
-                // Video thumbnail with play icon overlay
-                mediaContainer.innerHTML = `
-                    <div class="video-thumbnail" title="${escapeHtml(fileName)}">
-                        <video src="${mediaUrl}" preload="metadata" muted></video>
-                        <div class="video-play-overlay">
-                            <i class="fa-solid fa-play"></i>
-                        </div>
-                    </div>
-                `;
-                
-                // Click handler to open gallery viewer at this video
-                mediaContainer.querySelector('.video-thumbnail').addEventListener('click', () => {
-                    if (window.openGalleryViewerWithImages) {
-                        const charName = activeChar?.name || 'Gallery';
-                        window.openGalleryViewerWithImages(galleryMedia, index, charName);
-                    } else {
-                        window.open(mediaUrl, '_blank');
-                    }
-                });
-            } else {
-                // Image thumbnail: GIFs load eagerly (need src for freeze), others lazy via observer
-                if (mediaIsGif) {
-                    mediaContainer.innerHTML = `
-                        <img src="${mediaUrl}" decoding="async" data-gif="1" title="${escapeHtml(fileName)}">
-                    `;
-                    freezeGifThumbnailImage(mediaContainer.querySelector('img'));
-                } else {
-                    mediaContainer.innerHTML = `
-                        <img data-src="${mediaUrl}" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E" decoding="async" data-gif="0" title="${escapeHtml(fileName)}">
-                    `;
-                    getGalleryImageObserver().observe(mediaContainer.querySelector('img'));
-                }
-                
-                // Click handler to open gallery viewer at this image
-                mediaContainer.querySelector('img').addEventListener('click', () => {
-                    if (window.openGalleryViewerWithImages) {
-                        const charName = activeChar?.name || 'Gallery';
-                        window.openGalleryViewerWithImages(galleryMedia, index, charName);
-                    } else {
-                        window.open(mediaUrl, '_blank');
-                    }
-                });
-            }
-            
-            imagesGrid.appendChild(mediaContainer);
-        });
+        _galleryState = { visualMedia, galleryMedia, safeFolderName, imagesGrid, imagesSection, currentPage: 0, paginationEls: [] };
         
-        imagesSection.appendChild(imagesGrid);
+        imagesGrid.addEventListener('click', _handleGalleryGridClick);
+        
+        if (visualMedia.length > GALLERY_PAGE_SIZE) {
+            const paginationTop = _createGalleryPagination();
+            imagesSection.appendChild(paginationTop);
+            imagesSection.appendChild(imagesGrid);
+            const paginationBottom = _createGalleryPagination();
+            imagesSection.appendChild(paginationBottom);
+            _renderGalleryPage(0, false);
+        } else {
+            _populateGalleryGrid(0, visualMedia.length);
+            imagesSection.appendChild(imagesGrid);
+        }
+        
         grid.appendChild(imagesSection);
     }
     
     // Show empty state if no media at all
     if (imageFiles.length === 0 && videoFiles.length === 0 && audioFiles.length === 0) {
         renderSimpleEmpty(grid, 'No media found.');
+    }
+}
+
+function _handleGalleryGridClick(e) {
+    const item = e.target.closest('.sprite-item');
+    if (!item || !_galleryState) return;
+    const index = parseInt(item.dataset.galleryIndex, 10);
+    if (isNaN(index)) return;
+    if (window.openGalleryViewerWithImages) {
+        const charName = activeChar?.name || 'Gallery';
+        window.openGalleryViewerWithImages(_galleryState.galleryMedia, index, charName);
+    } else {
+        const media = _galleryState.galleryMedia[index];
+        if (media) window.open(media.url, '_blank');
+    }
+}
+
+function _populateGalleryGrid(startIndex, endIndex) {
+    const state = _galleryState;
+    if (!state) return;
+
+    const observer = getGalleryImageObserver();
+    const fragment = document.createDocumentFragment();
+    const gifImages = [];
+
+    for (let i = startIndex; i < endIndex; i++) {
+        const { fileName, type } = state.visualMedia[i];
+        const mediaUrl = state.galleryMedia[i].url;
+        const mediaContainer = document.createElement('div');
+        const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
+        mediaContainer.className = `sprite-item${mediaIsGif ? ' gif-thumb' : ''}`;
+        mediaContainer.dataset.galleryIndex = i;
+
+        if (type === 'video') {
+            mediaContainer.innerHTML = `
+                <div class="video-thumbnail" title="${escapeHtml(fileName)}">
+                    <video src="${mediaUrl}" preload="metadata" muted></video>
+                    <div class="video-play-overlay"><i class="fa-solid fa-play"></i></div>
+                </div>
+            `;
+        } else {
+            const img = document.createElement('img');
+            img.decoding = 'async';
+            img.title = fileName;
+            if (mediaIsGif) {
+                img.src = mediaUrl;
+                img.dataset.gif = '1';
+                gifImages.push(img);
+            } else {
+                img.dataset.src = mediaUrl;
+                img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
+                img.dataset.gif = '0';
+                observer.observe(img);
+            }
+            mediaContainer.appendChild(img);
+        }
+
+        fragment.appendChild(mediaContainer);
+    }
+
+    state.imagesGrid.appendChild(fragment);
+    if (gifImages.length > 0) _scheduleGifFreeze(gifImages);
+}
+
+const GIF_FREEZE_BATCH_SIZE = 4;
+let _gifFreezePending = null;
+
+function _scheduleGifFreeze(images) {
+    if (_gifFreezePending) cancelAnimationFrame(_gifFreezePending);
+    const queue = images.slice();
+    function processBatch() {
+        const batch = queue.splice(0, GIF_FREEZE_BATCH_SIZE);
+        for (const img of batch) freezeGifThumbnailImage(img);
+        if (queue.length > 0) {
+            _gifFreezePending = requestAnimationFrame(processBatch);
+        } else {
+            _gifFreezePending = null;
+        }
+    }
+    _gifFreezePending = requestAnimationFrame(processBatch);
+}
+
+function _renderGalleryPage(page, scroll = true) {
+    const state = _galleryState;
+    if (!state) return;
+    const totalPages = Math.ceil(state.visualMedia.length / GALLERY_PAGE_SIZE);
+    page = Math.max(0, Math.min(page, totalPages - 1));
+    state.currentPage = page;
+
+    state.imagesGrid.innerHTML = '';
+    if (_galleryImageObserver) _galleryImageObserver.disconnect();
+    if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
+
+    const start = page * GALLERY_PAGE_SIZE;
+    const end = Math.min(start + GALLERY_PAGE_SIZE, state.visualMedia.length);
+    _populateGalleryGrid(start, end);
+
+    _updateGalleryPagination();
+
+    if (scroll) {
+        const tabPane = state.imagesSection.closest('.tab-pane');
+        if (tabPane) tabPane.scrollTop = 0;
+    }
+}
+
+function _createGalleryPagination() {
+    const state = _galleryState;
+    const totalPages = Math.ceil(state.visualMedia.length / GALLERY_PAGE_SIZE);
+
+    const container = document.createElement('div');
+    container.className = 'gallery-pagination';
+
+    const nav = document.createElement('div');
+    nav.className = 'gallery-page-nav';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'gallery-page-btn gallery-page-prev';
+    prevBtn.title = 'Previous page';
+    prevBtn.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
+    prevBtn.addEventListener('click', () => {
+        if (_galleryState && _galleryState.currentPage > 0) {
+            _renderGalleryPage(_galleryState.currentPage - 1);
+        }
+    });
+
+    const info = document.createElement('span');
+    info.className = 'gallery-page-info';
+
+    const pageInput = document.createElement('input');
+    pageInput.type = 'text';
+    pageInput.inputMode = 'numeric';
+    pageInput.className = 'gallery-page-input';
+    pageInput.value = '1';
+    pageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            const p = parseInt(pageInput.value, 10);
+            if (!isNaN(p) && _galleryState) {
+                _renderGalleryPage(p - 1);
+            }
+        }
+    });
+    pageInput.addEventListener('blur', () => {
+        if (_galleryState) pageInput.value = _galleryState.currentPage + 1;
+    });
+
+    const totalSpan = document.createElement('span');
+    totalSpan.className = 'gallery-page-total';
+    totalSpan.textContent = totalPages;
+
+    info.append(pageInput, ' / ', totalSpan);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'gallery-page-btn gallery-page-next';
+    nextBtn.title = 'Next page';
+    nextBtn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
+    nextBtn.addEventListener('click', () => {
+        if (_galleryState) {
+            const tp = Math.ceil(_galleryState.visualMedia.length / GALLERY_PAGE_SIZE);
+            if (_galleryState.currentPage < tp - 1) {
+                _renderGalleryPage(_galleryState.currentPage + 1);
+            }
+        }
+    });
+
+    nav.append(prevBtn, info, nextBtn);
+    container.append(nav);
+    state.paginationEls.push(container);
+    return container;
+}
+
+function _updateGalleryPagination() {
+    const state = _galleryState;
+    if (!state) return;
+    const totalPages = Math.ceil(state.visualMedia.length / GALLERY_PAGE_SIZE);
+
+    for (const el of state.paginationEls) {
+        const prevBtn = el.querySelector('.gallery-page-prev');
+        const nextBtn = el.querySelector('.gallery-page-next');
+        const pageInput = el.querySelector('.gallery-page-input');
+        const totalSpan = el.querySelector('.gallery-page-total');
+
+        if (prevBtn) prevBtn.disabled = state.currentPage === 0;
+        if (nextBtn) nextBtn.disabled = state.currentPage >= totalPages - 1;
+        if (pageInput) pageInput.value = state.currentPage + 1;
+        if (totalSpan) totalSpan.textContent = totalPages;
     }
 }
 
@@ -8194,7 +8408,7 @@ async function openModal(char) {
     // Load avatar with transition: keep spinner until the correct image is ready
     modalImg.onload = modalImg.onerror = () => { modalImg.classList.remove('loading'); };
     modalImg.src = imgPath;
-    document.getElementById('modalTitle').innerText = char.name;
+    document.getElementById('modalTitle').innerText = getCharacterName(char);
     
     // Reset/hide legacy folder button (will be updated when Gallery tab is clicked)
     const legacyBtn = document.getElementById('checkLegacyFolderBtn');
@@ -8638,6 +8852,7 @@ function populateInfoTab(char) {
     if (!container || !char) return;
     
     const charName = char.name || char.data?.name || 'Unknown';
+    const listingName = getListingNameFromExtensions(char);
     const avatar = char.avatar || '';
     const galleryFolder = getGalleryFolderName(char);
     const chatsFolder = sanitizeFolderName(charName);
@@ -8651,7 +8866,7 @@ function populateInfoTab(char) {
     const tokenEstimate = estimateTokens(char);
     
     // Get embedded media URLs count
-    const embeddedMediaUrls = findCharacterMediaUrls(char);
+    const { embeddedUrls: sidebarEmbeddedUrls, lorebookUrls: sidebarLorebookUrls } = findCharacterMediaUrls(char, { split: true });
     
     // Get lorebook info
     const characterBook = char.character_book || char.data?.character_book;
@@ -8667,8 +8882,12 @@ function populateInfoTab(char) {
     html += `<div class="info-section">
         <div class="info-section-title"><i class="fa-solid fa-user"></i> Identity</div>
         <div class="info-row">
-            <span class="info-label">Display Name</span>
+            <span class="info-label">Card Name</span>
             <span class="info-value">${escapeHtml(charName)}</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Listing Name</span>
+            <span class="info-value">${listingName ? escapeHtml(listingName) : '<span style="color: #888;">(none)</span>'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Creator</span>
@@ -8765,7 +8984,11 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Embedded Media URLs</span>
-            <span class="info-value">${embeddedMediaUrls.length} URL(s) found</span>
+            <span class="info-value">${sidebarEmbeddedUrls.length} URL(s) found</span>
+        </div>
+        <div class="info-row">
+            <span class="info-label">Lorebook Media URLs</span>
+            <span class="info-value">${sidebarLorebookUrls.length} URL(s) found</span>
         </div>
     </div>`;
     
@@ -9755,6 +9978,15 @@ async function deleteCharacter(char, deleteChats = false) {
             window.playlistsOnCharDeleted(avatar);
         }
 
+        // Clean up per-character name preference
+        if (avatar) {
+            const prefs = gallerySettings.namePreferences;
+            if (prefs && prefs[avatar]) {
+                delete prefs[avatar];
+                setSetting('namePreferences', prefs);
+            }
+        }
+
         // Evict from extensions cache (ST lazy loading)
         if (avatar) _extensionsCache.delete(avatar);
         
@@ -10316,7 +10548,7 @@ function refreshModalDisplay() {
     const char = activeChar;
     
     // Update modal title
-    document.getElementById('modalTitle').innerText = char.name;
+    document.getElementById('modalTitle').innerText = getCharacterName(char);
     
     // Update author
     const author = char.creator || (char.data ? char.data.creator : "") || "";
@@ -12098,6 +12330,7 @@ function initBrowseExpandButtons() {
 
 const ADV_FILTER_FIELDS = {
     name: { label: 'Name', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with', 'is_empty', 'is_not_empty'] },
+    listingName: { label: 'Listing Name', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with', 'is_empty', 'is_not_empty'] },
     creator: { label: 'Creator', type: 'text', operators: ['contains', 'not_contains', 'equals', 'starts_with', 'is_empty', 'is_not_empty'] },
     tags: { label: 'Tags', type: 'tag', operators: ['includes', 'excludes'] },
     creatorNotes: { label: 'Creator Notes', type: 'text', operators: ['contains', 'not_contains', 'is_empty', 'is_not_empty'] },
@@ -12108,6 +12341,7 @@ const ADV_FILTER_FIELDS = {
     lastChat: { label: 'Last Chat', type: 'date', operators: ['before', 'after', 'in_the_last', 'never'] },
     version: { label: 'Version', type: 'text', operators: ['contains', 'is_empty', 'is_not_empty'] },
     playlist: { label: 'Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
+    nameOverride: { label: 'Name Override', type: 'nameOverride', operators: ['has_override', 'no_override', 'set_to_card', 'set_to_listing'] },
 };
 
 const CHAT_ADV_FILTER_FIELDS = {
@@ -12147,10 +12381,15 @@ const ADV_FILTER_OP_LABELS = {
     not_in: 'not in',
     in_any: 'in any',
     not_in_any: 'not in any',
+    has_override: 'yes',
+    no_override: 'no',
+    set_to_card: 'to card name',
+    set_to_listing: 'to listing name',
 };
 
 const ADV_FILTER_NO_VALUE_OPS = new Set([
     'is_empty', 'is_not_empty', 'is_true', 'is_false', 'is_linked', 'is_not_linked', 'never', 'in_any', 'not_in_any',
+    'has_override', 'no_override', 'set_to_card', 'set_to_listing',
 ]);
 
 const ADV_FILTER_PROVIDERS = [
@@ -12489,6 +12728,7 @@ function evaluateAdvFilterRule(c, rule) {
 
     switch (rule.field) {
         case 'name': return evalTextOp(c._lowerName, op, val);
+        case 'listingName': return evalTextOp(c._lowerListingName || '', op, val);
         case 'creator': return evalTextOp(c._lowerCreator, op, val);
         case 'tags': return evalTagOp(c, op, val);
         case 'creatorNotes': {
@@ -12506,6 +12746,7 @@ function evaluateAdvFilterRule(c, rule) {
             return evalTextOp(ver, op, val);
         }
         case 'playlist': return evalPlaylistOp(c, op, rule.value);
+        case 'nameOverride': return evalNameOverrideOp(c, op);
     }
     return true;
 }
@@ -12562,6 +12803,18 @@ function evalPlaylistOp(c, op, val) {
     const avatarSet = window.playlistsGetAvatarSet?.(val);
     const inPlaylist = avatarSet ? avatarSet.has(c.avatar) : false;
     return op === 'in' ? inPlaylist : !inPlaylist;
+}
+
+function evalNameOverrideOp(c, op) {
+    const prefs = getSetting('namePreferences') || {};
+    const pref = prefs[c.avatar] || null;
+    switch (op) {
+        case 'has_override': return !!pref;
+        case 'no_override': return !pref;
+        case 'set_to_card': return pref === 'card';
+        case 'set_to_listing': return pref === 'listing';
+    }
+    return true;
 }
 
 function evaluateChatAdvancedFilters(chat) {
@@ -12622,6 +12875,7 @@ function performSearch() {
     const rawQuery = document.getElementById('searchInput').value;
     
     const useName = document.getElementById('searchName').checked;
+    const useListingName = document.getElementById('searchListingName').checked;
     const useTags = document.getElementById('searchTags').checked;
     const useAuthor = document.getElementById('searchAuthor').checked;
     const useNotes = document.getElementById('searchNotes').checked;
@@ -12772,6 +13026,7 @@ function performSearch() {
             matchesSearch = true;
         } else {
             if (useName && c._lowerName.includes(query)) matchesSearch = true;
+            if (!matchesSearch && useListingName && c._lowerListingName && c._lowerListingName.includes(query)) matchesSearch = true;
             if (!matchesSearch && useTags && c._tagsLower.includes(query)) matchesSearch = true;
             if (!matchesSearch && useAuthor && c._lowerCreator.includes(query)) matchesSearch = true;
             if (!matchesSearch && useNotes) {
@@ -12906,7 +13161,7 @@ function setupEventListeners() {
     on('searchInput', 'input', debouncedSearch);
 
     // Filter Checkboxes
-    ['searchName', 'searchTags', 'searchAuthor', 'searchNotes'].forEach(id => {
+    ['searchName', 'searchListingName', 'searchTags', 'searchAuthor', 'searchNotes'].forEach(id => {
         on(id, 'change', performSearch);
     });
 
@@ -13730,8 +13985,32 @@ function getCharacterBookFromEditor() {
 // Utility Functions
 // ==============================================
 
+const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat'];
+
+function getListingNameFromExtensions(char) {
+    const ext = char?.data?.extensions;
+    if (!ext) return null;
+    const activeProvider = window.ProviderRegistry?.getCharacterProvider(char);
+    if (activeProvider?.linkInfo) {
+        const pn = ext[activeProvider.provider.id]?.pageName;
+        if (pn) return pn;
+    }
+    for (const key of PROVIDER_EXT_KEYS) {
+        if (ext[key]?.pageName) return ext[key].pageName;
+    }
+    return null;
+}
+
 function getCharacterName(char, fallback = 'Unknown') {
     if (!char) return fallback;
+    const prefs = getSetting('namePreferences') || {};
+    const pref = prefs[char.avatar]
+        || getSetting('displayNamePreference')
+        || 'card';
+    if (pref === 'listing') {
+        const listingName = getListingNameFromExtensions(char);
+        if (listingName) return listingName;
+    }
     return char.name || char.data?.name || char.definition?.name || fallback;
 }
 
@@ -14568,8 +14847,8 @@ async function importLocalCharacter(file) {
         
         const galleryId = cardData.data?.extensions?.gallery_id || null;
         
-        // Check for embedded media URLs
-        const mediaUrls = findCharacterMediaUrls(cardData);
+        // Check for embedded media URLs (split by source)
+        const { embeddedUrls: importEmbeddedUrls, lorebookUrls: importLorebookUrls } = findCharacterMediaUrls(cardData, { split: true });
         
         // Re-embed updated card data if enrichment or gallery_id changed it
         let pngToUpload = needsReembed ? embedCharacterDataInPng(arrayBuffer, cardData) : arrayBuffer;
@@ -14610,7 +14889,8 @@ async function importLocalCharacter(file) {
             success: true,
             fileName: result.file_name || file.name,
             characterName: characterName,
-            embeddedMediaUrls: mediaUrls,
+            embeddedMediaUrls: importEmbeddedUrls,
+            lorebookMediaUrls: importLorebookUrls,
             galleryId: galleryId,
             linkedProvider: providerResult?.providerId || null,
             providerCharId: providerResult?.charId || null,
@@ -15075,6 +15355,7 @@ startImportBtn?.addEventListener('click', async () => {
     const shouldStop = () => importAbortState.abort;
     
     const linkIndex = skipDuplicates ? buildProviderLinkIndex() : null;
+    const batchImportedIds = new Set();
 
     for (let i = 0; i < importItems.length; i++) {
         // === ABORT CHECK: top of each iteration ===
@@ -15096,8 +15377,21 @@ startImportBtn?.addEventListener('click', async () => {
                 if (importSourceMode === 'url') {
                     // URL mode: check if any existing character is linked to same provider+identifier
                     const importId = String(item.identifier).toLowerCase();
+                    const batchKey = `${item.provider.id}:${importId}`;
+                    
+                    // Check within current batch first
+                    if (batchImportedIds.has(batchKey)) {
+                        skippedCount++;
+                        updateStats();
+                        updateLogEntry(logEntry, `${displayName} skipped - duplicate URL in this batch`, 'info');
+                        const progress = ((i + 1) / importItems.length) * 100;
+                        importProgressFill.style.width = `${progress}%`;
+                        importProgressCount.textContent = `${i + 1}/${importItems.length}`;
+                        continue;
+                    }
+                    
                     const existingMatch = linkIndex
-                        ? (linkIndex.providerIndex.get(`${item.provider.id}:${importId}`) || null)
+                        ? (linkIndex.providerIndex.get(batchKey) || null)
                         : allCharacters.find(char => {
                             const linkInfo = item.provider.getLinkInfo(char);
                             if (!linkInfo) return false;
@@ -15188,6 +15482,7 @@ startImportBtn?.addEventListener('click', async () => {
             if (result.success) {
                 successCount++;
                 if (result.fileName) importedFileNames.push(result.fileName);
+                if (importSourceMode === 'url') batchImportedIds.add(`${item.provider.id}:${String(item.identifier).toLowerCase()}`);
                 updateStats();
                 updateLogEntry(logEntry, `${displayName} imported successfully`, 'success');
             }
@@ -15201,6 +15496,7 @@ startImportBtn?.addEventListener('click', async () => {
         if (result.success) {
             successCount++;
             if (result.fileName) importedFileNames.push(result.fileName);
+            if (importSourceMode === 'url') batchImportedIds.add(`${item.provider.id}:${String(item.identifier).toLowerCase()}`);
             updateStats();
             updateLogEntry(logEntry, `${displayName} imported successfully`, 'success');
             
@@ -15216,39 +15512,81 @@ startImportBtn?.addEventListener('click', async () => {
             }
             
             // Auto-download embedded media if enabled
-            if (autoDownloadMedia && result.embeddedMediaUrls && result.embeddedMediaUrls.length > 0) {
+            const totalImportMediaUrls = (result.embeddedMediaUrls?.length || 0) + (result.lorebookMediaUrls?.length || 0);
+            if (autoDownloadMedia && totalImportMediaUrls > 0) {
                 if (shouldStop()) { wasCancelled = true; break; }
                 
                 if (importMediaProgress) {
                     importMediaProgress.classList.remove('hidden');
                     importMediaProgressFill.style.width = '0%';
-                    importMediaProgressCount.textContent = `0/${result.embeddedMediaUrls.length}`;
+                    importMediaProgressCount.textContent = `0/${totalImportMediaUrls}`;
                 }
                 
-                const mediaLogEntry = addImportLogEntry(`  ↳ Embedded Media: downloading ${result.embeddedMediaUrls.length} file(s)...`, 'pending');
-                const mediaResult = await downloadEmbeddedMediaForCharacter(folderName, result.embeddedMediaUrls, {
-                    onProgress: (current, total) => {
-                        if (importMediaProgressFill) {
-                            importMediaProgressFill.style.width = `${(current / total) * 100}%`;
-                            importMediaProgressCount.textContent = `${current}/${total}`;
-                        }
-                    },
-                    shouldAbort: shouldStop,
-                    abortSignal: importAbortState.controller.signal
-                });
-                mediaDownloadCount += mediaResult.success || 0;
+                let importMediaDownloaded = 0;
+                let importMediaAborted = false;
+                
+                // Phase 1a: Embedded media
+                if (result.embeddedMediaUrls.length > 0) {
+                    const mediaLogEntry = addImportLogEntry(`  ↳ Embedded Media: downloading ${result.embeddedMediaUrls.length} file(s)...`, 'pending');
+                    const mediaResult = await downloadEmbeddedMediaForCharacter(folderName, result.embeddedMediaUrls, {
+                        onProgress: (current, total) => {
+                            if (importMediaProgressFill) {
+                                importMediaProgressFill.style.width = `${(current / totalImportMediaUrls) * 100}%`;
+                                importMediaProgressCount.textContent = `${current}/${totalImportMediaUrls}`;
+                            }
+                        },
+                        shouldAbort: shouldStop,
+                        abortSignal: importAbortState.controller.signal
+                    });
+                    importMediaDownloaded += mediaResult.success || 0;
+                    
+                    if (mediaResult.aborted) {
+                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: cancelled (${mediaResult.success || 0} downloaded before stop)`, 'warning');
+                        importMediaAborted = true;
+                    } else if (mediaResult.success > 0) {
+                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.success} downloaded, ${mediaResult.skipped || 0} skipped, ${mediaResult.errors || 0} failed`, 'success');
+                    } else if (mediaResult.skipped > 0) {
+                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.skipped} already exist`, 'info');
+                    } else {
+                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: no files downloaded`, 'info');
+                    }
+                }
+                
+                // Phase 1b: Lorebook media
+                if (result.lorebookMediaUrls.length > 0 && !importMediaAborted && !shouldStop()) {
+                    const lbLogEntry = addImportLogEntry(`  ↳ Lorebook Media: downloading ${result.lorebookMediaUrls.length} file(s)...`, 'pending');
+                    const lbResult = await downloadEmbeddedMediaForCharacter(folderName, result.lorebookMediaUrls, {
+                        prefix: 'lorebook_media',
+                        onProgress: (current, total) => {
+                            if (importMediaProgressFill) {
+                                const totalDone = result.embeddedMediaUrls.length + current;
+                                importMediaProgressFill.style.width = `${(totalDone / totalImportMediaUrls) * 100}%`;
+                                importMediaProgressCount.textContent = `${totalDone}/${totalImportMediaUrls}`;
+                            }
+                        },
+                        shouldAbort: shouldStop,
+                        abortSignal: importAbortState.controller.signal
+                    });
+                    importMediaDownloaded += lbResult.success || 0;
+                    
+                    if (lbResult.aborted) {
+                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: cancelled (${lbResult.success || 0} downloaded before stop)`, 'warning');
+                        importMediaAborted = true;
+                    } else if (lbResult.success > 0) {
+                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: ${lbResult.success} downloaded, ${lbResult.skipped || 0} skipped, ${lbResult.errors || 0} failed`, 'success');
+                    } else if (lbResult.skipped > 0) {
+                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: ${lbResult.skipped} already exist`, 'info');
+                    } else {
+                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: no files downloaded`, 'info');
+                    }
+                }
+                
+                mediaDownloadCount += importMediaDownloaded;
                 updateStats();
                 
-                if (mediaResult.aborted) {
-                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: cancelled (${mediaResult.success || 0} downloaded before stop)`, 'warning');
+                if (importMediaAborted) {
                     wasCancelled = true;
                     break;
-                } else if (mediaResult.success > 0) {
-                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.success} downloaded, ${mediaResult.skipped || 0} skipped, ${mediaResult.errors || 0} failed`, 'success');
-                } else if (mediaResult.skipped > 0) {
-                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.skipped} already exist`, 'info');
-                } else {
-                    updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: no files downloaded`, 'info');
                 }
             }
             
@@ -15716,6 +16054,82 @@ function updateProviderLinkIndicator(char) {
             textSpan.innerHTML = '<span class="provider-link-name">Link</span>';
         }
     }
+    
+    updateNamePreferenceToggle(char);
+}
+
+function updateNamePreferenceToggle(char) {
+    const toggle = document.getElementById('namePreferenceToggle');
+    if (!toggle) return;
+    
+    const listingName = getListingNameFromExtensions(char);
+    const label = toggle.querySelector('.name-pref-label');
+    
+    if (!listingName) {
+        toggle.classList.add('hidden');
+        return;
+    }
+    
+    if (!getSetting('showNameToggle')) {
+        toggle.classList.add('hidden');
+        return;
+    }
+    
+    const cardName = char.name || char.data?.name || '';
+    if (listingName.toLowerCase() === cardName.toLowerCase()) {
+        toggle.classList.add('hidden');
+        return;
+    }
+    
+    toggle.classList.remove('hidden');
+    const prefs = getSetting('namePreferences') || {};
+    const pref = prefs[char.avatar] || null;
+    const isListing = pref === 'listing' || (!pref && getSetting('displayNamePreference') === 'listing');
+    
+    toggle.classList.toggle('active', isListing);
+    const hasOverride = !!(prefs[char.avatar]) && prefs[char.avatar] !== (getSetting('displayNamePreference') || 'card');
+    toggle.classList.toggle('override', hasOverride);
+    if (label) label.textContent = isListing ? 'Listing' : 'Card';
+    toggle.title = isListing
+        ? `Showing listing name "${listingName}". Click to use card name "${cardName}".`
+        : `Showing card name. Click to use listing name "${listingName}".`;
+}
+
+let _isTogglingNamePref = false;
+async function toggleCharNamePreference(char) {
+    if (!char?.avatar || _isTogglingNamePref) return;
+    _isTogglingNamePref = true;
+    
+    try {
+        const prefs = { ...(getSetting('namePreferences') || {}) };
+        const current = prefs[char.avatar] || null;
+        const globalPref = getSetting('displayNamePreference') || 'card';
+        
+        let newPref;
+        if (current === 'listing') {
+            newPref = 'card';
+        } else if (current === 'card') {
+            newPref = 'listing';
+        } else {
+            newPref = globalPref === 'listing' ? 'card' : 'listing';
+        }
+        
+        if (newPref === globalPref) {
+            delete prefs[char.avatar];
+        } else {
+            prefs[char.avatar] = newPref;
+        }
+        setSetting('namePreferences', prefs);
+        
+        updateNamePreferenceToggle(char);
+        
+        const headerName = document.querySelector('#charModal .modal-header h2');
+        if (headerName) headerName.textContent = getCharacterName(char);
+        
+        performSearch();
+    } finally {
+        _isTogglingNamePref = false;
+    }
 }
 
 // Tracks which provider the link modal is currently showing
@@ -15738,7 +16152,7 @@ function openProviderLinkModal(char) {
     // Populate sidebar with character info
     const avatarEl = document.getElementById('providerLinkCharAvatar');
     const charNameEl = document.getElementById('providerLinkCharName');
-    const charName = activeChar.name || activeChar.data?.name || 'Character';
+    const charName = getCharacterName(activeChar) || 'Character';
     
     if (avatarEl) {
         avatarEl.src = getCharacterAvatarUrl(activeChar.avatar);
@@ -15952,12 +16366,16 @@ async function linkToSearchResult(btn) {
     
     try {
         // Fetch metadata to get numeric ID (needed for gallery, versioning)
+        let pageName = null;
         if (!resultId && provider.fetchMetadata) {
             const metadata = await provider.fetchMetadata(fullPath);
-            if (metadata?.id) resultId = metadata.id;
+            if (metadata) {
+                if (metadata.id) resultId = metadata.id;
+                pageName = provider.getListingName(metadata);
+            }
         }
         
-        await saveProviderLink(activeChar, provider, { id: resultId, fullPath });
+        await saveProviderLink(activeChar, provider, { id: resultId, fullPath, pageName });
         
         showToast(`Linked to ${fullPath} (${provider.name})`, 'success');
         
@@ -16010,14 +16428,18 @@ async function linkToProviderUrl(url) {
     
     try {
         let resultId = null;
+        let pageName = null;
         
         // Fetch metadata to get the project/numeric ID
         if (matchedProvider.fetchMetadata) {
             const metadata = await matchedProvider.fetchMetadata(parsedPath);
-            if (metadata) resultId = metadata.id;
+            if (metadata) {
+                resultId = metadata.id;
+                pageName = matchedProvider.getListingName(metadata);
+            }
         }
         
-        await saveProviderLink(activeChar, matchedProvider, { id: resultId, fullPath: parsedPath });
+        await saveProviderLink(activeChar, matchedProvider, { id: resultId, fullPath: parsedPath, pageName });
         
         showToast(`Linked to ${parsedPath} (${matchedProvider.name})`, 'success');
         
@@ -16215,6 +16637,11 @@ on('providerLinkIndicator', 'click', () => {
     // Not linked — default to Chub link modal (primary provider)
     openProviderLinkModal();
 });
+
+on('namePreferenceToggle', 'click', () => {
+    if (activeChar) toggleCharNamePreference(activeChar);
+});
+
 on('closeProviderLinkModal', 'click', () => {
     linkModalActiveProvider?.provider?.clearCachedLinkNode?.();
     hideModal('providerLinkModal');
@@ -17110,6 +17537,13 @@ async function saveProviderLink(char, provider, linkInfo) {
         _extensionsCache.set(char.avatar, char.data.extensions);
     }
 
+    // Recompute listing name search key
+    const listingName = getListingNameFromExtensions(char);
+    char._lowerListingName = listingName ? listingName.toLowerCase() : '';
+    if (charInArray && charInArray !== char) {
+        charInArray._lowerListingName = char._lowerListingName;
+    }
+
     // Sync to ST main window
     try {
         const context = getSTContext();
@@ -17181,7 +17615,8 @@ async function applyBulkAutoLinks() {
                 debugLog('[bulkAutoLink] Linking', item.char.name, 'to', selectedResult.fullPath, `(${provider.name})`);
                 await saveProviderLink(item.char, provider, {
                     id: resultId,
-                    fullPath: selectedResult.fullPath
+                    fullPath: selectedResult.fullPath,
+                    pageName: selectedResult.name || null,
                 });
                 successCount++;
                 debugLog('[bulkAutoLink] Successfully linked', item.char.name);
@@ -17212,7 +17647,8 @@ async function applyBulkAutoLinks() {
                 debugLog('[bulkAutoLink] Linking', item.char.name, 'to', selectedResult.fullPath, `(${provider.name})`);
                 await saveProviderLink(item.char, provider, {
                     id: resultId,
-                    fullPath: selectedResult.fullPath
+                    fullPath: selectedResult.fullPath,
+                    pageName: selectedResult.name || null,
                 });
                 successCount++;
                 debugLog('[bulkAutoLink] Successfully linked', item.char.name);
@@ -17484,7 +17920,7 @@ async function getExistingFileIndex(folderName) {
             const localPath = `/user/images/${encodeURIComponent(safeFolderName)}/${encodeURIComponent(fileName)}`;
             const nameNoExt = fileName.includes('.') ? fileName.substring(0, fileName.lastIndexOf('.')) : fileName;
 
-            const embeddedMatch = nameNoExt.match(/^localized_media_\d+_(.+)$/);
+            const embeddedMatch = nameNoExt.match(/^(?:localized_media|lorebook_media)_\d+_(.+)$/);
             if (embeddedMatch) {
                 index.set(embeddedMatch[1].toLowerCase(), { fileName, localPath });
                 continue;
@@ -17522,7 +17958,7 @@ async function validateFileByHead(localPath) {
  * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
  */
 async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, prefix = 'localized_media' } = options;
     
     let successCount = 0;
     let errorCount = 0;
@@ -17579,19 +18015,27 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             if (sanitizedName.length >= FAST_SKIP_MIN_NAME_LENGTH) {
                 const match = fileNameIndex.get(sanitizedName.toLowerCase());
                 if (match) {
-                    let valid = true;
-                    if (validateHeaders) {
-                        valid = await validateFileByHead(match.localPath);
-                        if (!valid) {
-                            debugLog(`[EmbeddedMedia] Fast skip rejected (HEAD validation): ${match.fileName}`);
+                    // If fixFilenames is on and the matched file has the wrong prefix, skip the fast path
+                    // so it falls through to hash-check where reclassification happens
+                    const fixFilenames = getSetting('fixFilenames') !== false;
+                    const hasCorrectPrefix = match.fileName.startsWith(prefix + '_');
+                    if (fixFilenames && !hasCorrectPrefix) {
+                        debugLog(`[EmbeddedMedia] Fast skip bypassed (wrong prefix): ${match.fileName} needs ${prefix}_*`);
+                    } else {
+                        let valid = true;
+                        if (validateHeaders) {
+                            valid = await validateFileByHead(match.localPath);
+                            if (!valid) {
+                                debugLog(`[EmbeddedMedia] Fast skip rejected (HEAD validation): ${match.fileName}`);
+                            }
                         }
-                    }
-                    if (valid) {
-                        skippedCount++;
-                        filenameSkippedCount++;
-                        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (filename match): ${match.fileName}`, 'success');
-                        if (onProgress) onProgress(i + 1, mediaUrls.length);
-                        continue;
+                        if (valid) {
+                            skippedCount++;
+                            filenameSkippedCount++;
+                            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (filename match): ${match.fileName}`, 'success');
+                            if (onProgress) onProgress(i + 1, mediaUrls.length);
+                            continue;
+                        }
                     }
                 }
             }
@@ -17620,7 +18064,8 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             // Also rename if extension doesn't match actual content type (fixes corrupted files)
             const isProviderGalleryFile = (window.ProviderRegistry?.getAllProviders() || [])
                 .some(p => existingFile.fileName.startsWith(p.galleryFilePrefix + '_'));
-            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_');
+            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_') || existingFile.fileName.startsWith('lorebook_media_');
+            const hasCorrectPrefix = existingFile.fileName.startsWith(prefix + '_');
             
             // Check if extension matches detected content type
             let hasWrongExtension = false;
@@ -17646,24 +18091,44 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
                 }
             }
             
-            const needsRename = isProviderGalleryFile || !isAlreadyLocalized || hasWrongExtension;
+            const fixFilenames = getSetting('fixFilenames') !== false;
+            const needsRename = isProviderGalleryFile || !isAlreadyLocalized || hasWrongExtension || (fixFilenames && !hasCorrectPrefix);
             
             if (needsRename) {
-                // Rename to proper localized_media_* format (pass downloadResult since we have it)
-                const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult);
-                downloadResult = null; // Release after rename
+                const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult, prefix);
+                downloadResult = null;
                 if (renameResult.success) {
                     renamedCount++;
-                    const action = isProviderGalleryFile ? 'Converted' : (hasWrongExtension ? 'Fixed extension' : 'Renamed');
+                    const action = isProviderGalleryFile ? 'Converted' : (!hasCorrectPrefix && isAlreadyLocalized) ? 'Reclassified' : (hasWrongExtension ? 'Fixed extension' : 'Renamed');
                     if (onLogUpdate && logEntry) onLogUpdate(logEntry, `${action}: ${existingFile.fileName} → ${renameResult.newName}`, 'success');
                 } else {
                     skippedCount++;
                     if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (rename failed): ${displayUrl}`, 'success');
                 }
             } else {
-                skippedCount++;
-                downloadResult = null; // Release — already localized, no action needed
-                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
+                // Check if existing file was saved under a different URL's name.
+                // If so, save an additional copy so both URLs resolve during localization lookup.
+                // Only for localized/lorebook files — provider gallery files aren't part of text localization.
+                const existingSanitized = isAlreadyLocalized
+                    ? existingFile.fileName.match(/^(?:localized_media|lorebook_media)_\d+_(.+)\.[^.]+$/)
+                    : null;
+                const currentSanitized = existingSanitized ? extractSanitizedUrlName(url) : null;
+                if (existingSanitized && currentSanitized && existingSanitized[1] !== currentSanitized) {
+                    const aliasResult = await saveMediaFromMemory({ arrayBuffer: downloadResult.arrayBuffer, contentType: downloadResult.contentType }, url, folderName, fileIndex, prefix);
+                    downloadResult = null;
+                    if (aliasResult.success) {
+                        successCount++;
+                        hashMap.set(contentHash + '_alias_' + currentSanitized, { fileName: aliasResult.filename, localPath: aliasResult.localPath });
+                        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved alias: ${aliasResult.filename} (same content as ${existingFile.fileName})`, 'success');
+                    } else {
+                        skippedCount++;
+                        if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
+                    }
+                } else {
+                    skippedCount++;
+                    downloadResult = null;
+                    if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Skipped (already localized): ${displayUrl}`, 'success');
+                }
             }
             debugLog(`[EmbeddedMedia] Duplicate found: ${url} -> ${existingFile.fileName}`);
             if (onProgress) onProgress(i + 1, mediaUrls.length);
@@ -17672,7 +18137,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         
         // Not a duplicate, save the file
         if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saving ${displayUrl}...`, 'pending');
-        const result = await saveMediaFromMemory(downloadResult, url, folderName, fileIndex);
+        const result = await saveMediaFromMemory(downloadResult, url, folderName, fileIndex, prefix);
         downloadResult = null; // Release after save
         
         if (result.success) {
@@ -17695,19 +18160,20 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
 }
 
 /**
- * Rename an existing file to localized_media_* format
+ * Rename an existing file to {prefix}_* format
  * Since there's no rename API, we delete old + save new (data already in memory)
  * @param {Object} existingFile - Existing file info
  * @param {string} originalUrl - Original URL of the media
  * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
  * @param {number} index - File index for naming
  * @param {Object} downloadResult - Result from downloadMediaToMemory
+ * @param {string} [prefix='localized_media'] - Filename prefix
  */
-async function renameToLocalizedFormat(existingFile, originalUrl, folderName, index, downloadResult) {
+async function renameToLocalizedFormat(existingFile, originalUrl, folderName, index, downloadResult, prefix = 'localized_media') {
     try {
         // Save with new name using saveMediaFromMemory which determines correct extension
         // from the detected content type (via magic bytes), not the old filename
-        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, folderName, index);
+        const saveResult = await saveMediaFromMemory(downloadResult, originalUrl, folderName, index, prefix);
         
         if (!saveResult.success) {
             return { success: false, error: saveResult.error };
@@ -17766,6 +18232,12 @@ function extractMediaUrls(text) {
         }
     }
     
+    // Match CSS url() patterns: background-image: url('...'), content: url("..."), etc.
+    const cssUrlPattern = /url\(["']?(https?:\/\/[^"')\s]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))["']?\)/gi;
+    while ((match = cssUrlPattern.exec(text)) !== null) {
+        urls.push(match[1]);
+    }
+    
     // Match raw URLs for media files
     const urlPattern = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))/gi;
     while ((match = urlPattern.exec(text)) !== null) {
@@ -17778,8 +18250,8 @@ function extractMediaUrls(text) {
 /**
  * Find all remote media URLs in a character card
  */
-function findCharacterMediaUrls(character) {
-    if (!character) return [];
+function findCharacterMediaUrls(character, { split = false } = {}) {
+    if (!character) return split ? { embeddedUrls: [], lorebookUrls: [] } : [];
     
     const mediaUrls = new Set();
     
@@ -17840,7 +18312,34 @@ function findCharacterMediaUrls(character) {
             }
         });
     }
+
+    // Scan lorebook entries
+    const lorebookUrls = new Set();
+    const includeLorebook = getSetting('includeLorebook') || false;
+    const entries = includeLorebook ? data.character_book?.entries : null;
+    if (entries) {
+        const entryList = Array.isArray(entries) ? entries : Object.values(entries);
+        for (const entry of entryList) {
+            if (entry?.content && typeof entry.content === 'string') {
+                const urls = extractMediaUrls(entry.content);
+                urls.forEach(url => {
+                    if (url.startsWith('http://') || url.startsWith('https://')) {
+                        if (!mediaUrls.has(url)) {
+                            lorebookUrls.add(url);
+                        }
+                    }
+                });
+            }
+        }
+    }
     
+    if (split) {
+        debugLog(`[Localize] Found ${mediaUrls.size} embedded + ${lorebookUrls.size} lorebook media URLs`);
+        return { embeddedUrls: Array.from(mediaUrls), lorebookUrls: Array.from(lorebookUrls) };
+    }
+    
+    // Combined mode (backwards compat)
+    lorebookUrls.forEach(url => mediaUrls.add(url));
     debugLog(`[Localize] Found ${mediaUrls.size} remote media URLs in character`);
     return Array.from(mediaUrls);
 }
@@ -18188,8 +18687,9 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
  * @param {string} url - Original URL of the media
  * @param {string} folderName - Gallery folder name (use getGalleryFolderName() for unique folders)
  * @param {number} index - File index for naming
+ * @param {string} [prefix='localized_media'] - Filename prefix
  */
-async function saveMediaFromMemory(downloadResult, url, folderName, index) {
+async function saveMediaFromMemory(downloadResult, url, folderName, index, prefix = 'localized_media') {
     try {
         const { arrayBuffer, contentType } = downloadResult;
         
@@ -18248,7 +18748,7 @@ async function saveMediaFromMemory(downloadResult, url, folderName, index) {
         const sanitizedName = extractSanitizedUrlName(url) || 'media';
         
         // Generate local filename
-        const filenameBase = `localized_media_${index}_${sanitizedName}`;
+        const filenameBase = `${prefix}_${index}_${sanitizedName}`;
         
         // Convert arrayBuffer to base64 then release the buffer immediately.
         // This prevents holding both the raw buffer (5MB) and the base64 string (6.7MB)
@@ -18402,7 +18902,8 @@ localizeMediaBtn?.addEventListener('click', async () => {
     const characterName = getCharacterName(activeChar, 'unknown');
     const folderName = getGalleryFolderName(activeChar);
     
-    const mediaUrls = findCharacterMediaUrls(activeChar);
+    const { embeddedUrls, lorebookUrls } = findCharacterMediaUrls(activeChar, { split: true });
+    const mediaUrls = [...embeddedUrls, ...lorebookUrls];
     
     let galleryProvider = null;
     let providerLinkInfo = null;
@@ -18425,28 +18926,72 @@ localizeMediaBtn?.addEventListener('click', async () => {
         return;
     }
     
-    // Phase 1: Download embedded media first (takes precedence for duplicate detection)
-    localizeStatus.textContent = mediaUrls.length > 0 
-        ? `Downloading ${mediaUrls.length} embedded media file(s)...`
-        : 'No embedded media, checking provider gallery...';
+    // Phase 1a: Download embedded media first (takes precedence for duplicate detection)
+    localizeStatus.textContent = embeddedUrls.length > 0 
+        ? `Downloading ${embeddedUrls.length} embedded media file(s)...`
+        : 'No embedded media found.';
     localizeProgressCount.textContent = `0/${mediaUrls.length}`;
     
-    // Add section header for embedded media
-    if (mediaUrls.length > 0) {
-        addLocalizeLogEntry(`Embedded Media (${mediaUrls.length} URL(s) found)`, 'info');
+    let totalProgress = 0;
+    const totalFiles = mediaUrls.length;
+    
+    if (embeddedUrls.length > 0) {
+        addLocalizeLogEntry(`Embedded Media (${embeddedUrls.length} URL(s) found)`, 'info');
     } else {
         addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
     }
     
-    const result = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
+    const result = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
         onProgress: (current, total) => {
-            const progress = (current / total) * 100;
+            totalProgress = current;
+            const progress = (totalProgress / totalFiles) * 100;
             localizeProgressFill.style.width = `${progress}%`;
-            localizeProgressCount.textContent = `${current}/${total}`;
+            localizeProgressCount.textContent = `${totalProgress}/${totalFiles}`;
         },
         onLog: (message, status) => addLocalizeLogEntry(message, status),
         onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
     });
+    
+    if (embeddedUrls.length > 0) {
+        if (result.success > 0) {
+            addLocalizeLogEntry(`  ✓ ${result.success} downloaded, ${result.skipped || 0} skipped, ${result.errors || 0} failed`, 'success');
+        } else if (result.skipped > 0) {
+            addLocalizeLogEntry(`  ✓ ${result.skipped} already exist`, 'info');
+        } else if (result.errors > 0) {
+            addLocalizeLogEntry(`  ✗ ${result.errors} failed to download`, 'error');
+        }
+    }
+    
+    // Phase 1b: Download lorebook media with lorebook_media prefix
+    if (lorebookUrls.length > 0) {
+        addLocalizeLogEntry('', 'divider');
+        addLocalizeLogEntry(`Lorebook Media (${lorebookUrls.length} URL(s) found)`, 'info');
+        localizeStatus.textContent = `Downloading ${lorebookUrls.length} lorebook media file(s)...`;
+        
+        const lorebookResult = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
+            prefix: 'lorebook_media',
+            onProgress: (current, total) => {
+                const progress = ((embeddedUrls.length + current) / totalFiles) * 100;
+                localizeProgressFill.style.width = `${progress}%`;
+                localizeProgressCount.textContent = `${embeddedUrls.length + current}/${totalFiles}`;
+            },
+            onLog: (message, status) => addLocalizeLogEntry(message, status),
+            onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
+        });
+        
+        result.success += lorebookResult.success;
+        result.skipped += lorebookResult.skipped;
+        result.errors += lorebookResult.errors;
+        result.renamed += lorebookResult.renamed || 0;
+        
+        if (lorebookResult.success > 0) {
+            addLocalizeLogEntry(`  ✓ ${lorebookResult.success} downloaded, ${lorebookResult.skipped || 0} skipped, ${lorebookResult.errors || 0} failed`, 'success');
+        } else if (lorebookResult.skipped > 0) {
+            addLocalizeLogEntry(`  ✓ ${lorebookResult.skipped} already exist`, 'info');
+        } else if (lorebookResult.errors > 0) {
+            addLocalizeLogEntry(`  ✗ ${lorebookResult.errors} failed to download`, 'error');
+        }
+    }
     
     // Done - show status
     let statusMsg = '';
@@ -18464,17 +19009,6 @@ localizeMediaBtn?.addEventListener('click', async () => {
     }
     
     localizeStatus.textContent = statusMsg || 'No new files to download.';
-    
-    // Add embedded media result summary to log
-    if (mediaUrls.length > 0) {
-        if (result.success > 0) {
-            addLocalizeLogEntry(`  ✓ ${result.success} downloaded, ${result.skipped || 0} skipped, ${result.errors || 0} failed`, 'success');
-        } else if (result.skipped > 0) {
-            addLocalizeLogEntry(`  ✓ ${result.skipped} already exist`, 'info');
-        } else if (result.errors > 0) {
-            addLocalizeLogEntry(`  ✗ ${result.errors} failed to download`, 'error');
-        }
-    }
     
     if (result.success > 0 || result.renamed > 0) {
         const msg = result.renamed > 0 
@@ -18877,7 +19411,7 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
                         <span class="label">Failed</span>
                     </div>
                     ${totals.renamed > 0 ? `
-                    <div class="source-stat renamed" title="Existing gallery files that were renamed to localized_media_* format for proper hash-based lookup">
+                    <div class="source-stat renamed" title="Existing gallery files that were renamed to their correct prefix format for proper hash-based lookup">
                         <i class="fa-solid fa-file-pen"></i>
                         <span class="value">${totals.renamed}</span>
                         <span class="label">Renamed</span>
@@ -19049,50 +19583,80 @@ async function runBulkLocalization() {
         // Hydrate slim character — findCharacterMediaUrls reads description/first_mes/etc.
         await hydrateCharacter(char);
         
-        // Find media URLs for this character
-        const mediaUrls = findCharacterMediaUrls(char);
+        // Find media URLs for this character (split by source)
+        const { embeddedUrls, lorebookUrls } = findCharacterMediaUrls(char, { split: true });
+        const totalMediaUrls = embeddedUrls.length + lorebookUrls.length;
         
         const result = {
             name: charName,
             avatar: char.avatar,
-            totalUrls: mediaUrls.length,
+            totalUrls: totalMediaUrls,
             downloaded: 0,
             skipped: 0,
             errors: 0,
+            renamed: 0,
+            filenameSkipped: 0,
             incomplete: false
         };
         
-        if (mediaUrls.length > 0) {
-            bulkLocalizeFileCount.textContent = `0/${mediaUrls.length} files`;
+        if (totalMediaUrls > 0) {
+            bulkLocalizeFileCount.textContent = `0/${totalMediaUrls} files`;
             bulkLocalizeFileFill.style.width = '0%';
             
-            // Download media for this character with abort support
-            const downloadResult = await downloadEmbeddedMediaForCharacter(folderName, mediaUrls, {
-                onProgress: (current, total) => {
-                    if (!bulkLocalizeAborted) {
-                        bulkLocalizeFileCount.textContent = `${current}/${total} files`;
-                        bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
-                    }
-                },
-                shouldAbort: () => bulkLocalizeAborted,
-                abortSignal: bulkLocalizeAbortController.signal
-            });
+            const progressCallback = (current, total, offset = 0) => {
+                if (!bulkLocalizeAborted) {
+                    bulkLocalizeFileCount.textContent = `${offset + current}/${totalMediaUrls} files`;
+                    bulkLocalizeFileFill.style.width = `${((offset + current) / totalMediaUrls) * 100}%`;
+                }
+            };
             
-            result.downloaded = downloadResult.success;
-            result.skipped = downloadResult.skipped;
-            result.errors = downloadResult.errors;
-            result.renamed = downloadResult.renamed || 0;
-            result.filenameSkipped = downloadResult.filenameSkipped || 0;
+            let downloadAborted = false;
             
-            // Mark as incomplete if aborted mid-character or had errors
-            if (downloadResult.aborted || downloadResult.errors > 0) {
-                result.incomplete = true;
+            // Phase 1a: Embedded media
+            if (embeddedUrls.length > 0 && !bulkLocalizeAborted) {
+                const embeddedResult = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
+                    onProgress: (current, total) => progressCallback(current, total, 0),
+                    shouldAbort: () => bulkLocalizeAborted,
+                    abortSignal: bulkLocalizeAbortController.signal
+                });
+                
+                result.downloaded += embeddedResult.success;
+                result.skipped += embeddedResult.skipped;
+                result.errors += embeddedResult.errors;
+                result.renamed = (result.renamed || 0) + (embeddedResult.renamed || 0);
+                result.filenameSkipped = (result.filenameSkipped || 0) + (embeddedResult.filenameSkipped || 0);
+                downloadAborted = !!embeddedResult.aborted;
+                
+                if (embeddedResult.aborted || embeddedResult.errors > 0) {
+                    result.incomplete = true;
+                }
             }
             
-            totalDownloaded += downloadResult.success;
-            totalSkipped += downloadResult.skipped;
-            totalErrors += downloadResult.errors;
-            totalRenamed += downloadResult.renamed || 0;
+            // Phase 1b: Lorebook media
+            if (lorebookUrls.length > 0 && !bulkLocalizeAborted && !downloadAborted) {
+                const lorebookResult = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
+                    prefix: 'lorebook_media',
+                    onProgress: (current, total) => progressCallback(current, total, embeddedUrls.length),
+                    shouldAbort: () => bulkLocalizeAborted,
+                    abortSignal: bulkLocalizeAbortController.signal
+                });
+                
+                result.downloaded += lorebookResult.success;
+                result.skipped += lorebookResult.skipped;
+                result.errors += lorebookResult.errors;
+                result.renamed = (result.renamed || 0) + (lorebookResult.renamed || 0);
+                result.filenameSkipped = (result.filenameSkipped || 0) + (lorebookResult.filenameSkipped || 0);
+                downloadAborted = !!lorebookResult.aborted;
+                
+                if (lorebookResult.aborted || lorebookResult.errors > 0) {
+                    result.incomplete = true;
+                }
+            }
+            
+            totalDownloaded += result.downloaded;
+            totalSkipped += result.skipped;
+            totalErrors += result.errors;
+            totalRenamed += result.renamed || 0;
             
             // Update stats
             bulkStatDownloaded.textContent = totalDownloaded;
@@ -19100,12 +19664,12 @@ async function runBulkLocalization() {
             bulkStatErrors.textContent = totalErrors;
             
             // Clear cache for this character if we downloaded anything
-            if (downloadResult.success > 0 && char.avatar) {
+            if (result.downloaded > 0 && char.avatar) {
                 clearMediaLocalizationCache(char.avatar);
             }
             
             // If download was aborted, stop the loop
-            if (downloadResult.aborted) {
+            if (downloadAborted) {
                 result.incomplete = true;
                 bulkLocalizeResults.push(result);
                 break;
@@ -19272,7 +19836,7 @@ function sanitizeMediaFilename(filename) {
     const nameWithoutExt = filename.includes('.') 
         ? filename.substring(0, filename.lastIndexOf('.'))
         : filename;
-    return nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+    return nameWithoutExt.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
 }
 
 /**
@@ -19369,9 +19933,10 @@ async function buildMediaLocalizationMap(characterName, avatar, forceRefresh = f
             return urlMap;
         }
         
-        // Parse localized_media files to build reverse mapping
-        // Format: localized_media_{index}_{sanitizedOriginalName}.{ext}
-        const localizedPattern = /^localized_media_\d+_(.+)\.[^.]+$/;
+        // Parse localized/lorebook/provider-gallery media files to build reverse mapping
+        // Format: {localized_media|lorebook_media}_{index}_{sanitizedName}.{ext}
+        // Format: {provider}gallery_{hash8}_{sanitizedName}.{ext}
+        const localizedPattern = /^(?:(?:localized_media|lorebook_media)_\d+|[a-z]+gallery_[a-f0-9]+)_(.+)\.[^.]+$/;
         
         for (const file of files) {
             const fileName = (typeof file === 'string') ? file : file.name;
@@ -19505,6 +20070,15 @@ function replaceMediaUrlsInText(text, urlMap) {
         return match;
     });
     
+    // Replace CSS url() patterns: background-image: url('...'), content: url("..."), etc.
+    result = result.replace(/url\((["']?)(https?:\/\/[^"')\s]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a))\1\)/gi, (match, quote, url) => {
+        const localPath = lookupLocalizedMedia(urlMap, url);
+        if (localPath) {
+            return `url(${quote}${localPath}${quote})`;
+        }
+        return match;
+    });
+    
     // Replace raw media URLs (not already in markdown or HTML tags)
     result = result.replace(/(^|[^"'(])((https?:\/\/[^\s<>"{}|\\^`\[\]]+\.(?:png|jpg|jpeg|gif|webp|svg|mp4|webm|mov|mp3|wav|ogg|m4a)))(?=[)\s<"']|$)/gi, (match, prefix, url) => {
         const localPath = lookupLocalizedMedia(urlMap, url);
@@ -19556,10 +20130,10 @@ async function applyMediaLocalizationToModal(char, desc, firstMes, altGreetings,
     if (gen !== undefined && gen !== _modalOpenGen) return;
     
     if (Object.keys(urlMap).length === 0) {
-        return; // No localized files, nothing to replace
+        return;
     }
     
-    debugLog(`[MediaLocalize] Applying localization to modal for ${charName}`);
+    debugLog(`[MediaLocalize] Applying localization to modal for ${charName} (${Object.keys(urlMap).length} map entries)`);
     
     // Update Description
     if (desc) {
@@ -19728,6 +20302,7 @@ function buildNormalizedCharacterData(fullDataMap) {
         const firstMes = getCharField(src, 'first_mes') || '';
         const personality = getCharField(src, 'personality') || '';
         const scenario = getCharField(src, 'scenario') || '';
+        const creatorNotes = getCharField(char, 'creator_notes') || '';
         
         // Pre-extract words for content similarity (expensive operation)
         const getWords = (text) => {
@@ -19749,10 +20324,12 @@ function buildNormalizedCharacterData(fullDataMap) {
             firstMes: firstMes,
             personality: personality,
             scenario: scenario,
+            creatorNotes: creatorNotes,
             descWords: getWords(description),
             firstMesWords: getWords(firstMes),
             persWords: getWords(personality),
-            scenWords: getWords(scenario)
+            scenWords: getWords(scenario),
+            creatorNotesWords: getWords(creatorNotes)
         };
     }).filter(Boolean);
 }
@@ -19790,13 +20367,13 @@ function calculateFastSimilarity(normA, normB) {
         for (const vb of normB.nameVariants) {
             if (vb.length < 3) continue;
             if (va === vb) {
-                if (20 > bestNameScore) { bestNameScore = 20; bestNameReason = 'Exact name match'; }
+                if (15 > bestNameScore) { bestNameScore = 15; bestNameReason = 'Exact name match'; }
             } else if (isNamePrefixMatch(va, vb)) {
-                if (18 > bestNameScore) { bestNameScore = 18; bestNameReason = 'Name prefix match'; }
+                if (13 > bestNameScore) { bestNameScore = 13; bestNameReason = 'Name prefix match'; }
             } else {
                 const sim = stringSimilarity(va, vb);
                 if (sim >= 0.7) {
-                    const s = Math.round(sim * 12);
+                    const s = Math.round(sim * 10);
                     if (s > bestNameScore) {
                         bestNameScore = s;
                         bestNameReason = sim >= 0.85 ? `${Math.round(sim * 100)}% name similarity` : '';
@@ -19818,17 +20395,35 @@ function calculateFastSimilarity(normA, normB) {
     // === CREATOR COMPARISON (fuzzy, aligned with full scorer) ===
     if (normA.creator && normB.creator) {
         if (normA.creatorCompact && normA.creatorCompact === normB.creatorCompact) {
-            score += 20;
-            breakdown.creator = 20;
+            score += 15;
+            breakdown.creator = 15;
             matchReasons.push('Same creator');
         } else {
             const creatorSim = stringSimilarity(normA.creator, normB.creator);
             if (creatorSim >= 0.75) {
-                const creatorScore = Math.round(creatorSim * 20);
+                const creatorScore = Math.round(creatorSim * 15);
                 score += creatorScore;
                 breakdown.creator = creatorScore;
                 matchReasons.push(creatorSim >= 0.95 ? 'Same creator' : 'Similar creator');
             }
+        }
+    }
+    
+    // === CREATOR NOTES COMPARISON ===
+    if (normA.creatorNotesWords && normB.creatorNotesWords) {
+        const cnSim = wordSetSimilarity(normA.creatorNotesWords, normB.creatorNotesWords);
+        if (cnSim >= 0.25) {
+            const cnScore = Math.round(cnSim * 25);
+            score += cnScore;
+            breakdown.creator_notes = cnScore;
+            if (cnSim >= 0.6) matchReasons.push(`${Math.round(cnSim * 100)}% creator notes match`);
+        }
+    } else if (normA.creatorNotes && normB.creatorNotes && normA.creatorNotes.length > 10 && normB.creatorNotes.length > 10) {
+        const cnSim = stringSimilarity(normA.creatorNotes, normB.creatorNotes);
+        if (cnSim >= 0.25) {
+            const cnScore = Math.round(cnSim * 25);
+            score += cnScore;
+            breakdown.creator_notes = cnScore;
         }
     }
     
@@ -19886,6 +20481,44 @@ function calculateFastSimilarity(normA, normB) {
         }
     }
     
+    // === CONTENT DIVERGENCE PENALTY ===
+    const contentScore = (breakdown.description || 0) + (breakdown.first_mes || 0) +
+                         (breakdown.personality || 0) + (breakdown.scenario || 0) +
+                         (breakdown.creator_notes || 0);
+    let substantialPairs = 0;
+    if (normA.descWords && normB.descWords) substantialPairs++;
+    if (normA.firstMesWords && normB.firstMesWords) substantialPairs++;
+    if (normA.persWords && normB.persWords) substantialPairs++;
+    if (normA.creatorNotesWords && normB.creatorNotesWords) substantialPairs++;
+    if (score >= 25 && substantialPairs >= 1 && contentScore < 10) {
+        const penalty = Math.min(score - 20, 15);
+        if (penalty > 0) {
+            score -= penalty;
+            breakdown.divergence = -penalty;
+        }
+    }
+    
+    // === CONTENT IDENTICAL CHECK ===
+    let contentIdentical = false;
+    let strictIdentical = false;
+    if (breakdown.name && breakdown.creator && substantialPairs >= 1) {
+        contentIdentical = true;
+        if (normA.descWords && normB.descWords && normA.description.length > 50 && normB.description.length > 50 && wordSetSimilarity(normA.descWords, normB.descWords) < 1.0) contentIdentical = false;
+        if (normA.firstMesWords && normB.firstMesWords && normA.firstMes.length > 30 && normB.firstMes.length > 30 && wordSetSimilarity(normA.firstMesWords, normB.firstMesWords) < 1.0) contentIdentical = false;
+        if (normA.persWords && normB.persWords && normA.personality.length > 20 && normB.personality.length > 20 && wordSetSimilarity(normA.persWords, normB.persWords) < 1.0) contentIdentical = false;
+        if (normA.scenWords && normB.scenWords && normA.scenario.length > 20 && normB.scenario.length > 20 && wordSetSimilarity(normA.scenWords, normB.scenWords) < 1.0) contentIdentical = false;
+        if (normA.creatorNotesWords && normB.creatorNotesWords && normA.creatorNotes.length > 50 && normB.creatorNotes.length > 50 && wordSetSimilarity(normA.creatorNotesWords, normB.creatorNotesWords) < 1.0) contentIdentical = false;
+        if (contentIdentical) {
+            const eq = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+            strictIdentical = true;
+            if (normA.description && normB.description && normA.description.length > 50 && normB.description.length > 50 && !eq(normA.description, normB.description)) strictIdentical = false;
+            if (normA.firstMes && normB.firstMes && normA.firstMes.length > 30 && normB.firstMes.length > 30 && !eq(normA.firstMes, normB.firstMes)) strictIdentical = false;
+            if (normA.personality && normB.personality && normA.personality.length > 20 && normB.personality.length > 20 && !eq(normA.personality, normB.personality)) strictIdentical = false;
+            if (normA.scenario && normB.scenario && normA.scenario.length > 20 && normB.scenario.length > 20 && !eq(normA.scenario, normB.scenario)) strictIdentical = false;
+            if (normA.creatorNotes && normB.creatorNotes && normA.creatorNotes.length > 50 && normB.creatorNotes.length > 50 && !eq(normA.creatorNotes, normB.creatorNotes)) strictIdentical = false;
+        }
+    }
+    
     // === DETERMINE CONFIDENCE ===
     // Fast scan uses a low fixed floor to cast a wide net for candidates.
     // The user's minScore threshold is applied in calculateCharacterSimilarity
@@ -19899,7 +20532,7 @@ function calculateFastSimilarity(normA, normB) {
         ? matchReasons.slice(0, 3).join(', ')
         : (confidence ? `${score} point similarity score` : '');
     
-    return { score, breakdown, confidence, matchReason, matchReasons };
+    return { score, breakdown, confidence, contentIdentical, strictIdentical, matchReason, matchReasons };
 }
 
 /**
@@ -20060,10 +20693,10 @@ function estimateTokens(char) {
  * Returns { score, breakdown, confidence, matchReasons }
  * 
  * Scoring weights:
- * - Name exact variant match: 20 pts
- * - Name prefix match: 18 pts
- * - Name similarity (scaled): up to 12 pts
- * - Same creator (non-empty): 20 pts
+ * - Name exact variant match: 15 pts
+ * - Name prefix match: 13 pts
+ * - Name similarity (scaled): up to 10 pts
+ * - Same creator (non-empty): 15 pts
  * - Creator notes similarity: up to 25 pts
  * - Description similarity: up to 25 pts
  * - First message similarity: up to 15 pts
@@ -20097,13 +20730,13 @@ function calculateCharacterSimilarity(charA, charB) {
         for (const vb of variantsB) {
             if (vb.length < 3) continue;
             if (va === vb) {
-                if (20 > bestNameScore) { bestNameScore = 20; bestNameReason = 'Exact name match'; }
+                if (15 > bestNameScore) { bestNameScore = 15; bestNameReason = 'Exact name match'; }
             } else if (isNamePrefixMatch(va, vb)) {
-                if (18 > bestNameScore) { bestNameScore = 18; bestNameReason = 'Name prefix match'; }
+                if (13 > bestNameScore) { bestNameScore = 13; bestNameReason = 'Name prefix match'; }
             } else {
                 const sim = stringSimilarity(va, vb);
                 if (sim >= 0.7) {
-                    const s = Math.round(sim * 12);
+                    const s = Math.round(sim * 10);
                     if (s > bestNameScore) {
                         bestNameScore = s;
                         bestNameReason = sim >= 0.85 ? `${Math.round(sim * 100)}% name similarity` : '';
@@ -20129,13 +20762,13 @@ function calculateCharacterSimilarity(charA, charB) {
         const caCompact = caLower.replace(/[\s_-]/g, '');
         const cbCompact = cbLower.replace(/[\s_-]/g, '');
         if (caCompact === cbCompact) {
-            score += 20;
-            breakdown.creator = 20;
+            score += 15;
+            breakdown.creator = 15;
             matchReasons.push('Same creator');
         } else {
             const creatorSim = stringSimilarity(creatorA, creatorB);
             if (creatorSim >= 0.75) {
-                const creatorScore = Math.round(creatorSim * 20);
+                const creatorScore = Math.round(creatorSim * 15);
                 score += creatorScore;
                 breakdown.creator = creatorScore;
                 matchReasons.push(creatorSim >= 0.95 ? 'Same creator' : 'Similar creator');
@@ -20221,27 +20854,46 @@ function calculateCharacterSimilarity(charA, charB) {
     }
 
     // === CONTENT DIVERGENCE PENALTY ===
-    // When name+creator match but card content clearly differs,
-    // reduce score to avoid false positives (e.g. male/female variants)
-    if (score >= 35 && !breakdown.description && !breakdown.first_mes) {
-        if (descA && descB && descA.length > 50 && descB.length > 50) {
-            const descDiv = contentSimilarity(descA, descB);
-            if (descDiv < 0.25) {
-                const penalty = Math.min(score - 25, 15);
-                score -= penalty;
-                breakdown.divergence = -penalty;
-            }
+    const contentScore = (breakdown.description || 0) + (breakdown.first_mes || 0) +
+                         (breakdown.personality || 0) + (breakdown.scenario || 0) +
+                         (breakdown.creator_notes || 0);
+    let substantialPairs = 0;
+    if (descA && descB && descA.length > 50 && descB.length > 50) substantialPairs++;
+    if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30) substantialPairs++;
+    if (persA && persB && persA.length > 20 && persB.length > 20) substantialPairs++;
+    if (notesA && notesB && notesA.length > 50 && notesB.length > 50) substantialPairs++;
+    if (score >= 25 && substantialPairs >= 1 && contentScore < 10) {
+        const penalty = Math.min(score - 20, 15);
+        if (penalty > 0) {
+            score -= penalty;
+            breakdown.divergence = -penalty;
+        }
+    }
+    
+    // === CONTENT IDENTICAL CHECK ===
+    let contentIdentical = false;
+    let strictIdentical = false;
+    if (breakdown.name && breakdown.creator && substantialPairs >= 1) {
+        contentIdentical = true;
+        if (descA && descB && descA.length > 50 && descB.length > 50 && contentSimilarity(descA, descB) < 1.0) contentIdentical = false;
+        if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30 && contentSimilarity(firstMesA, firstMesB) < 1.0) contentIdentical = false;
+        if (persA && persB && persA.length > 20 && persB.length > 20 && contentSimilarity(persA, persB) < 1.0) contentIdentical = false;
+        if (notesA && notesB && notesA.length > 50 && notesB.length > 50 && contentSimilarity(notesA, notesB) < 1.0) contentIdentical = false;
+        if (contentIdentical) {
+            const eq = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+            strictIdentical = true;
+            if (descA && descB && descA.length > 50 && descB.length > 50 && !eq(descA, descB)) strictIdentical = false;
+            if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30 && !eq(firstMesA, firstMesB)) strictIdentical = false;
+            if (persA && persB && persA.length > 20 && persB.length > 20 && !eq(persA, persB)) strictIdentical = false;
+            if (notesA && notesB && notesA.length > 50 && notesB.length > 50 && !eq(notesA, notesB)) strictIdentical = false;
         }
     }
     
     // === DETERMINE CONFIDENCE ===
-    const minScore = getSetting('duplicateMinScore') || 35;
     let confidence = null;
-    if (score >= minScore) {
-        if (score >= 60) confidence = 'high';
-        else if (score >= 40) confidence = 'medium';
-        else confidence = 'low';
-    }
+    if (score >= 60) confidence = 'high';
+    else if (score >= 40) confidence = 'medium';
+    else if (score >= 25) confidence = 'low';
     
     // Build match reason string
     let matchReason = '';
@@ -20255,6 +20907,8 @@ function calculateCharacterSimilarity(charA, charB) {
         score,
         breakdown,
         confidence,
+        contentIdentical,
+        strictIdentical,
         matchReason,
         matchReasons
     };
@@ -20346,6 +21000,8 @@ async function findCharacterDuplicates(forceRefresh = false) {
                 duplicates.push({
                     char: normB.char,
                     confidence: similarity.confidence,
+                    contentIdentical: similarity.contentIdentical || false,
+                    strictIdentical: similarity.strictIdentical || false,
                     matchReason: similarity.matchReason,
                     score: similarity.score,
                     breakdown: similarity.breakdown
@@ -20405,11 +21061,13 @@ async function findCharacterDuplicates(forceRefresh = false) {
                 dup.score = rescore.score;
                 dup.breakdown = rescore.breakdown;
                 dup.confidence = rescore.confidence;
+                dup.contentIdentical = rescore.contentIdentical || false;
+                dup.strictIdentical = rescore.strictIdentical || false;
                 dup.matchReason = rescore.matchReason;
                 dup.matchReasons = rescore.matchReasons;
             }
-            // Drop dupes that fell below threshold after re-score
-            group.duplicates = group.duplicates.filter(d => d.confidence);
+            // Drop dupes that fell below threshold after re-score (but keep content-identical)
+            group.duplicates = group.duplicates.filter(d => d.confidence || d.contentIdentical);
             // Recalculate group confidence
             if (group.duplicates.length > 0) {
                 const confidenceOrder = { high: 3, medium: 2, low: 1 };
@@ -20450,9 +21108,12 @@ async function findCharacterDuplicates(forceRefresh = false) {
 
 function applyDuplicateMinScoreFilter(groups) {
     const minScore = getSetting('duplicateMinScore') || 35;
+    const exactMode = minScore >= 120;
     const filtered = [];
     for (const group of groups) {
-        const dupes = group.duplicates.filter(d => d.score >= minScore);
+        const dupes = group.duplicates.filter(d =>
+            exactMode ? d.strictIdentical : (d.contentIdentical || d.score >= minScore)
+        );
         if (dupes.length > 0) {
             filtered.push({ ...group, duplicates: dupes });
         }
@@ -20618,6 +21279,8 @@ function checkCharacterForDuplicates(newChar, linkIndex) {
             matches.push({
                 char: existing,
                 confidence: similarity.confidence,
+                contentIdentical: similarity.contentIdentical || false,
+                strictIdentical: similarity.strictIdentical || false,
                 matchReason: similarity.matchReason,
                 score: similarity.score,
                 breakdown: similarity.breakdown
@@ -20724,12 +21387,16 @@ async function checkCharacterForDuplicatesAsync(newChar) {
             // and can apply divergence penalties that slim scoring can't
             existingMatch.score = similarity.score;
             existingMatch.confidence = similarity.confidence;
+            existingMatch.contentIdentical = similarity.contentIdentical || false;
+            existingMatch.strictIdentical = similarity.strictIdentical || false;
             existingMatch.matchReason = similarity.matchReason;
             existingMatch.breakdown = similarity.breakdown;
         } else if (similarity.confidence) {
             syncMatches.push({
                 char: existing,
                 confidence: similarity.confidence,
+                contentIdentical: similarity.contentIdentical || false,
+                strictIdentical: similarity.strictIdentical || false,
                 matchReason: similarity.matchReason,
                 score: similarity.score,
                 breakdown: similarity.breakdown
@@ -20974,7 +21641,7 @@ function compareCharacterDifferences(refChar, dupChar) {
 
 function getDuplicateScoreLabel(score, isContentIdentical = false) {
     if (isContentIdentical) return 'Identical';
-    if (score >= 90) return 'Near-Identical';
+    if (score >= 80) return 'Near-Identical';
     if (score >= 60) return 'Very Similar';
     if (score >= 40) return 'Similar';
     return 'Possible Match';
@@ -21068,6 +21735,68 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     `;
 }
 
+function getCharDateMs(char) {
+    if (char.date_added) return Number(char.date_added);
+    if (char.create_date) return new Date(char.create_date).getTime();
+    return 0;
+}
+
+function showDupPlaylistSelectionMenu(anchorBtn, groups) {
+    const existing = document.querySelector('.dup-playlist-dropdown');
+    if (existing) { existing.remove(); return; }
+
+    const menu = document.createElement('div');
+    menu.className = 'dropdown-menu dup-playlist-dropdown';
+    menu.style.position = 'absolute';
+    menu.style.zIndex = '1001';
+    menu.innerHTML = `
+        <div class="dropdown-section-title">Add to Playlist</div>
+        <button class="dropdown-item" data-selection="newest">
+            <i class="fa-solid fa-arrow-up"></i> Select all newest
+        </button>
+        <button class="dropdown-item" data-selection="oldest">
+            <i class="fa-solid fa-arrow-down"></i> Select all oldest
+        </button>
+    `;
+
+    anchorBtn.style.position = 'relative';
+    anchorBtn.appendChild(menu);
+    menu.style.top = '100%';
+    menu.style.right = '0';
+    menu.style.marginTop = '4px';
+
+    const collect = (pickNewest) => {
+        const avatars = new Set();
+        for (const group of groups) {
+            const allChars = [group.reference, ...group.duplicates.map(d => d.char)];
+            allChars.sort((a, b) => getCharDateMs(a) - getCharDateMs(b));
+            const pick = pickNewest ? allChars[allChars.length - 1] : allChars[0];
+            if (pick?.avatar) avatars.add(pick.avatar);
+        }
+        return [...avatars];
+    };
+
+    menu.addEventListener('click', (e) => {
+        const item = e.target.closest('[data-selection]');
+        if (!item) return;
+        e.stopPropagation();
+        const selection = item.dataset.selection;
+        const avatars = collect(selection === 'newest');
+        menu.remove();
+        if (avatars.length > 0 && window.openPlaylistPicker) {
+            window.openPlaylistPicker(avatars);
+        }
+    });
+
+    const closeMenu = (e) => {
+        if (!menu.contains(e.target) && e.target !== anchorBtn) {
+            menu.remove();
+            document.removeEventListener('click', closeMenu, true);
+        }
+    };
+    setTimeout(() => document.addEventListener('click', closeMenu, true), 0);
+}
+
 /**
  * Render duplicate groups in the modal
  */
@@ -21091,7 +21820,9 @@ async function renderDuplicateGroups(groups) {
     await Promise.all([...charsToHydrate].map(c => hydrateCharacter(c)));
     
     let totalDuplicates = groups.reduce((sum, g) => sum + g.duplicates.length, 0);
-    statusEl.innerHTML = `<i class="fa-solid fa-exclamation-triangle"></i> Found ${totalDuplicates} potential duplicate(s) in ${groups.length} group(s)`;
+    const isExactMode = (getSetting('duplicateMinScore') || 35) >= 120;
+    statusEl.innerHTML = `<i class="fa-solid fa-exclamation-triangle"></i> Found ${totalDuplicates} potential duplicate(s) in ${groups.length} group(s)`
+        + (isExactMode ? `<button class="action-btn secondary small dup-playlist-all-btn" style="margin-left:auto" title="Add newest or oldest from each group to a playlist"><i class="fa-solid fa-list-ul"></i> Add to Playlist</button>` : '');
     statusEl.className = 'char-duplicates-status complete';
     
     let html = '';
@@ -21283,6 +22014,15 @@ async function renderDuplicateGroups(groups) {
     });
     
     resultsEl.innerHTML = html;
+    
+    // Attach playlist-all button handler (Exact mode only)
+    const playlistAllBtn = statusEl.querySelector('.dup-playlist-all-btn');
+    if (playlistAllBtn) {
+        playlistAllBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            showDupPlaylistSelectionMenu(playlistAllBtn, groups);
+        });
+    }
     
     // Load gallery and chat counts asynchronously after rendering
     loadDuplicateGalleryCounts(groups);
@@ -23370,6 +24110,8 @@ window.onViewExit = onViewExit;
 // DOM / Rendering helpers
 window.renderLoadingState = renderLoadingState;
 window.getCharacterAvatarUrl = getCharacterAvatarUrl;
+window.getListingNameFromExtensions = getListingNameFromExtensions;
+window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;
 window.loadCharInMain = loadCharInMain;
 window.registerGalleryFolderOverride = registerGalleryFolderOverride;

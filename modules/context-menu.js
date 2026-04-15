@@ -231,7 +231,7 @@ function buildSingleMenuItems(char, cardElement) {
     
     items.push({
         type: 'header',
-        label: CoreAPI.truncate(char.name || 'Character', 25)
+        label: CoreAPI.truncate(CoreAPI.getCharacterName(char) || 'Character', 25)
     });
     
     items.push({
@@ -626,7 +626,7 @@ async function bulkDelete() {
     const charsWithSharedGallery = galleryInfos.filter(g => g.info.count > 0 && (!g.hasUniqueGallery || !uniqueFoldersEnabled));
     const totalUniqueGalleryFiles = charsWithUniqueGallery.reduce((sum, g) => sum + g.info.count, 0);
     
-    const names = selected.slice(0, 5).map(c => c.name).join(', ');
+    const names = selected.slice(0, 5).map(c => CoreAPI.escapeHtml(CoreAPI.getCharacterName(c))).join(', ');
     const andMore = selected.length > 5 ? ` and ${selected.length - 5} more` : '';
     
     const modal = document.createElement('div');
@@ -741,6 +741,7 @@ async function bulkDelete() {
                     if (galleryData?.hasUniqueGallery) {
                         CoreAPI.removeGalleryFolderOverride(char.avatar);
                     }
+                    CoreAPI.playlistsOnCharDeleted(char.avatar);
                     
                     const card = CoreAPI.findCardElement(char.avatar);
                     card?.remove();
@@ -838,7 +839,7 @@ function confirmDelete(char) {
         if (deleteBtn) {
             deleteBtn.click();
         } else {
-            if (confirm(`Are you sure you want to delete "${char.name}"?\n\nThis cannot be undone.`)) {
+            if (confirm(`Are you sure you want to delete "${CoreAPI.getCharacterName(char)}"?\n\nThis cannot be undone.`)) {
                 deleteCharacter(char);
             }
         }
@@ -853,6 +854,7 @@ async function deleteCharacter(char) {
         });
         
         if (response.ok) {
+            CoreAPI.playlistsOnCharDeleted(char.avatar);
             currentCard?.remove();
             CoreAPI.showToast(`Deleted "${char.name}"`, 'success');
             CoreAPI.refreshCharacters();

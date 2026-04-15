@@ -3502,7 +3502,6 @@ input[type="search"]::-webkit-search-results-decoration {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
     gap: var(--space-lg);
-    padding-bottom: 20px;
     width: 100%;
 }
 
@@ -3518,7 +3517,7 @@ input[type="search"]::-webkit-search-results-decoration {
     width: 100%;
     max-width: 100%;
     content-visibility: auto;
-    contain-intrinsic-size: 120px;
+    contain-intrinsic-size: auto 120px;
 }
 
 .sprite-item:hover {
@@ -3603,8 +3602,8 @@ input[type="search"]::-webkit-search-results-decoration {
     color: var(--accent);
     font-size: var(--font-base);
     font-weight: 600;
-    margin-bottom: 15px;
-    padding-bottom: 8px;
+    margin-bottom: var(--space-xs);
+    padding-bottom: var(--space-sm);
     border-bottom: 1px solid var(--glass-border);
 }
 
@@ -3641,6 +3640,95 @@ input[type="search"]::-webkit-search-results-decoration {
 
 .gallery-images-section {
     width: 100%;
+}
+
+/* Gallery Pagination */
+.gallery-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-sm-md) 0;
+}
+
+.gallery-page-nav {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: rgba(var(--accent-rgb), 0.04);
+    border: 1px solid rgba(var(--accent-rgb), 0.1);
+    border-radius: 22px;
+    padding: var(--space-2xs);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+.gallery-page-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    background: none;
+    border: none;
+    border-radius: 50%;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.gallery-page-btn:hover:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
+}
+
+.gallery-page-btn:active:not(:disabled) {
+    background: rgba(var(--accent-rgb), 0.22);
+    transform: scale(0.9);
+}
+
+.gallery-page-btn:disabled {
+    opacity: 0.15;
+    cursor: default;
+}
+
+.gallery-page-btn i {
+    font-size: var(--font-3xs);
+}
+
+.gallery-page-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3xs);
+    padding: 0 var(--space-2xs);
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    white-space: nowrap;
+    user-select: none;
+}
+
+.gallery-page-input {
+    width: 28px;
+    height: 24px;
+    text-align: center;
+    padding: 0 !important;
+    font-size: var(--font-xs) !important;
+    font-weight: 600;
+    border-radius: 12px !important;
+    background: rgba(var(--accent-rgb), 0.08) !important;
+    border: 1px solid transparent !important;
+    color: var(--accent) !important;
+    transition: all 0.2s ease;
+}
+
+.gallery-page-input:focus {
+    border-color: rgba(var(--accent-rgb), 0.3) !important;
+    background: rgba(var(--accent-rgb), 0.12) !important;
+    box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.08);
+    outline: none;
+}
+
+.gallery-page-total {
+    color: var(--text-muted);
 }
 
 /* Audio Files Grid */
@@ -3719,6 +3807,7 @@ input[type="search"]::-webkit-search-results-decoration {
     border: 2px dashed var(--glass-border);
     border-radius: 10px;
     padding: 30px;
+    margin-top: var(--space-xl);
     text-align: center;
     color: var(--text-secondary);
     cursor: pointer;
@@ -4582,6 +4671,40 @@ input[type="search"]::-webkit-search-results-decoration {
 
 .provider-link-icon {
     display: none !important;
+}
+
+.name-pref-toggle {
+    cursor: pointer;
+    color: var(--accent);
+    transition: opacity 0.2s ease, background 0.2s ease;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 2px;
+    font-size: var(--font-xs);
+    opacity: 0.6;
+}
+
+.name-pref-toggle:hover {
+    opacity: 1;
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+.name-pref-toggle.active {
+    opacity: 1;
+    background: rgba(var(--accent-rgb), 0.15);
+}
+
+.name-pref-toggle.override {
+    outline: 1px dashed rgba(var(--accent-rgb), 0.5);
+    outline-offset: 1px;
+}
+
+.name-pref-toggle.active:hover {
+    background: rgba(var(--accent-rgb), 0.25);
 }
 
 /* Modal content */

@@ -719,9 +719,9 @@
     #charModal .modal-header {
         max-height: 80px;
         overflow: hidden;
-        transition: max-height 0.25s ease, min-height 0.25s ease,
-                    padding-top 0.25s ease, padding-bottom 0.25s ease,
-                    opacity 0.2s ease, border-color 0.25s ease;
+        transition: max-height 0.15s ease-out, min-height 0.15s ease-out,
+                    padding-top 0.15s ease-out, padding-bottom 0.15s ease-out,
+                    opacity 0.12s ease, border-color 0.15s ease-out;
     }
     .modal-header h2 {
         font-size: var(--font-pre-base);
@@ -731,6 +731,27 @@
         white-space: nowrap;
         min-width: 0;
     }
+    .title-scroll-inner {
+        display: inline-block;
+        will-change: transform;
+    }
+    h2.title-scrolling {
+        text-overflow: clip;
+        contain: paint;
+        -webkit-mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 12px), transparent);
+        mask-image: linear-gradient(to right, transparent, black 20px, black calc(100% - 12px), transparent);
+    }
+    h2.title-scroll-start {
+        -webkit-mask-image: linear-gradient(to right, black calc(100% - 12px), transparent);
+        mask-image: linear-gradient(to right, black calc(100% - 12px), transparent);
+    }
+    h2.title-scroll-end {
+        -webkit-mask-image: linear-gradient(to right, transparent, black 20px);
+        mask-image: linear-gradient(to right, transparent, black 20px);
+    }
+    .name-pref-toggle { touch-action: manipulation; }
+    .name-pref-toggle:hover { opacity: 0.6; background: none; }
+    .name-pref-toggle.active:hover { background: rgba(var(--accent-rgb), 0.15); }
 
     .provider-tagline-row {
         font-size: var(--font-md);
@@ -1073,6 +1094,14 @@
         grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
         gap: var(--space-xs-sm);
     }
+    .sprite-item { contain-intrinsic-size: auto 80px; }
+    .gallery-pagination { padding: var(--space-xs-sm) 0; }
+    .gallery-page-nav { padding: 2px; }
+    .gallery-page-btn { min-width: 44px; min-height: 44px; touch-action: manipulation; }
+    .gallery-page-btn:hover:not(:disabled) { background: none; color: var(--text-muted); }
+    .gallery-page-btn:active:not(:disabled) { background: rgba(var(--accent-rgb), 0.15); color: var(--accent); }
+    .gallery-page-input { font-size: 16px !important; min-width: 36px; min-height: 44px; touch-action: manipulation; }
+    .gallery-page-info { font-size: var(--font-xs); }
     .upload-zone { font-size: var(--font-sm); padding: 16px 12px; border-width: 1px; }
 
     /* Related tab (inside character modal) */

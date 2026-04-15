@@ -1912,14 +1912,14 @@
         width: 100%; /* force controls to wrap below */
         max-height: 60px;
         overflow: hidden;
-        transition: max-height 0.25s ease, opacity 0.2s ease;
+        transition: max-height 0.15s ease-out, opacity 0.12s ease;
     }
     .browse-char-modal.header-collapsed .browse-char-header-info {
         max-height: 0 !important;
         opacity: 0;
     }
     .browse-char-modal .modal-header {
-        transition: row-gap 0.25s ease;
+        transition: row-gap 0.15s ease-out;
     }
     .browse-char-modal.header-collapsed .modal-header {
         row-gap: 0 !important;
@@ -1949,7 +1949,7 @@
     .browse-char-avatar { width: 40px; height: 40px; border-radius: 8px; }
     .browse-char-header-info { gap: var(--space-sm-md); min-width: 0; overflow: hidden; }
     .browse-char-header-info > div { min-width: 0; overflow: hidden; }
-    .browse-char-header-info h2 { font-size: var(--font-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .browse-char-header-info h2 { font-size: var(--font-base); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
     .browse-char-meta { font-size: var(--font-xs); overflow: hidden; }
     .browse-char-body.snap-active { scroll-snap-type: y proximity; }
     .browse-char-body.snap-active > .browse-char-section { scroll-snap-align: start; }

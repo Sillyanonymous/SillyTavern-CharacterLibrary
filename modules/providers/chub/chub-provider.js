@@ -158,10 +158,12 @@ class ChubProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.chub || {};
             char.data.extensions.chub = {
                 id: linkInfo.id,
                 full_path: linkInfo.fullPath,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.chub;
@@ -259,6 +261,8 @@ class ChubProvider extends ProviderBase {
             const metadata = await this.fetchMetadata(fullPath);
             const projectId = metadata?.id;
 
+            const _listingName = this.getListingName(metadata);
+
             // V4 Git card.json — canonical exported state
             if (useV4 && projectId) {
                 const cardJson = await this._fetchCardFromV4(projectId);
@@ -272,15 +276,20 @@ class ChubProvider extends ProviderBase {
                             if (!cardJson.data.extensions.chub.tagline)
                                 cardJson.data.extensions.chub.tagline = metadata.tagline;
                         }
+                        cardJson._listingName = _listingName;
                         return cardJson;
                     }
-                    return normalizeToV2(cardJson, metadata);
+                    const result = normalizeToV2(cardJson, metadata);
+                    if (result) result._listingName = _listingName;
+                    return result;
                 }
             }
 
             // Metadata API path
             if (metadata?.definition) {
-                return await this._buildCardFromMetadata(metadata);
+                const result = await this._buildCardFromMetadata(metadata);
+                if (result) result._listingName = _listingName;
+                return result;
             }
 
             // Last resort: PNG extraction
@@ -692,6 +701,7 @@ class ChubProvider extends ProviderBase {
 
             const metadataId = metadata.id || null;
             const metadataTagline = metadata.tagline || metadata.definition?.tagline || '';
+            const metadataListingName = this.getListingName(metadata);
             const metadataMaxResUrl = metadata.max_res_url || null;
             const metadataAvatarUrl = metadata.avatar_url || null;
             metadata = null;
@@ -703,6 +713,7 @@ class ChubProvider extends ProviderBase {
                 id: metadataId || existingChub.id || null,
                 full_path: fullPath,
                 tagline: metadataTagline || existingChub.tagline || '',
+                pageName: metadataListingName || existingChub.pageName || null,
                 linkedAt: new Date().toISOString()
             };
 

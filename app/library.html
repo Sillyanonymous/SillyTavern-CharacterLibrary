@@ -77,6 +77,7 @@
                     <div id="searchSettingsMenu" class="dropdown-menu hidden">
                         <div class="dropdown-section-title">Search in</div>
                         <label><input type="checkbox" id="searchName" checked> Character Name</label>
+                        <label><input type="checkbox" id="searchListingName" checked> Listing Name</label>
                         <label><input type="checkbox" id="searchTags" checked> Tags</label>
                         <label><input type="checkbox" id="searchAuthor" checked> Author</label>
                         <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
@@ -367,6 +368,9 @@
                             <span id="modalAuthorContainer" style="display:none">• Author: <a href="#" id="modalAuthor" class="creator-link" title="Click to filter by this creator"></a></span>
                             <span class="provider-link-indicator" id="providerLinkIndicator" title="Click to link to a provider">
                                 • <i class="fa-solid fa-link"></i> <span class="provider-link-text">Link</span>
+                            </span>
+                            <span class="name-pref-toggle hidden" id="namePreferenceToggle" title="Toggle display name">
+                                • <i class="fa-solid fa-shuffle"></i> <span class="name-pref-label"></span>
                             </span>
                         </p>
 
@@ -1746,6 +1750,7 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-search"></i> Search Defaults</div>
                             <div class="settings-row checkboxes">
                                 <label><input type="checkbox" id="settingsSearchName" checked> Character Name</label>
+                                <label><input type="checkbox" id="settingsSearchListingName" checked> Listing Name</label>
                                 <label><input type="checkbox" id="settingsSearchTags" checked> Tags</label>
                                 <label><input type="checkbox" id="settingsSearchAuthor"> Author</label>
                                 <label><input type="checkbox" id="settingsSearchNotes"> Creator Notes</label>
@@ -1771,7 +1776,7 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-row">
                                 <label for="settingsMinScore">Minimum Match Score:</label>
                                 <div class="settings-slider-group">
-                                    <input type="range" id="settingsMinScore" min="20" max="80" step="5" value="35">
+                                    <input type="range" id="settingsMinScore" min="20" max="120" step="5" value="35">
                                     <span id="minScoreValue">35</span>
                                 </div>
                                 <span class="settings-hint">Lower = more matches shown</span>
@@ -1848,6 +1853,29 @@ https://jannyai.com/characters/uuid_slug
                                     <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
                                 </label>
                                 <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
+                            </div>
+
+                            <div class="settings-row">
+                                <label for="settingsDisplayNamePreference">Display name source</label>
+                                <select id="settingsDisplayNamePreference" class="glass-select">
+                                    <option value="card">Card name</option>
+                                    <option value="listing">Listing name</option>
+                                </select>
+                                <span class="settings-hint">Use the provider's listing/page name instead of the card's internal name. Only affects linked characters with a known listing name.</span>
+                            </div>
+
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsShowNameToggle" checked> Show name type toggle in details
+                                </label>
+                                <span class="settings-hint">Show the card/listing name toggle button in the character detail modal header</span>
+                            </div>
+
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsDisplayNameOverride" checked> Apply display name override in SillyTavern
+                                </label>
+                                <span class="settings-hint">When using listing name as display name, also override the character name shown in ST's chat messages and character panel</span>
                             </div>
 
                             <div class="settings-subheading"><i class="fa-solid fa-grip"></i> Card Grid</div>
@@ -2283,9 +2311,15 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                             <div class="settings-row">
                                 <label>
+                                    <input type="checkbox" id="settingsIncludeLorebook"> Include Lorebook Media
+                                </label>
+                                <span class="settings-hint">Scan lorebook entries for embedded media URLs. Some cards have thousands of images in their lorebooks.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
                                     <input type="checkbox" id="settingsFixFilenames" checked> Fix filenames during localization
                                 </label>
-                                <span class="settings-hint">Rename files to localized_media_* format when duplicates are detected.</span>
+                                <span class="settings-hint">Rename files to their correct prefix format when duplicates are detected.</span>
                             </div>
                             <div class="settings-row">
                                 <label>
@@ -2467,7 +2501,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v4.9.7</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.0.0</span>
                             </div>
                         </div>
                     </div>

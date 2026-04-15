@@ -92,9 +92,11 @@ class WyvernProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.wyvern || {};
             char.data.extensions.wyvern = {
                 id: linkInfo.id || linkInfo.fullPath,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.wyvern;
@@ -174,7 +176,9 @@ class WyvernProvider extends ProviderBase {
         try {
             const metadata = await this.fetchMetadata(charId);
             if (!metadata) return null;
-            return buildCharacterCardFromWyvern(metadata);
+            const result = buildCharacterCardFromWyvern(metadata);
+            if (result) result._listingName = this.getListingName(metadata);
+            return result;
         } catch (e) {
             console.error('[WyvernProvider] fetchRemoteCard failed:', charId, e);
             return null;
@@ -386,6 +390,7 @@ class WyvernProvider extends ProviderBase {
             characterCard.data.extensions.wyvern = {
                 id: metadataId,
                 tagline: metadataTagline,
+                pageName: this.getListingName(metadata),
                 linkedAt: new Date().toISOString()
             };
 

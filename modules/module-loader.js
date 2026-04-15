@@ -286,6 +286,7 @@ async function initModuleSystem() {
         window.playlistsIsCharInPlaylist = playlistsModule.isCharInPlaylist;
         window.playlistsIsCharInAny = playlistsModule.isCharInAnyPlaylist;
         window.playlistsOnCharDeleted = playlistsModule.onCharacterDeleted;
+        window.playlistsPruneDeleted = playlistsModule.pruneDeletedCharacters;
         window.openPlaylistPicker = playlistsModule.openPlaylistPicker;
         window.closePlaylistPicker = playlistsModule.closePlaylistPicker;
         window.openPlaylistManager = playlistsModule.openPlaylistManager;

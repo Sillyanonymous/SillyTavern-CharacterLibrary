@@ -155,6 +155,15 @@ export class ProviderBase {
     setLinkInfo(char, linkInfo) { /* optional, some providers are read-only */ }
 
     /**
+     * Extract the listing/page name from provider hit or metadata.
+     * This is the name shown on the provider's website, which may differ
+     * from the card's internal data.name.
+     * @param {Object} hitData — provider metadata or search hit object
+     * @returns {string|null}
+     */
+    getListingName(hitData) { return hitData?.name || null; }
+
+    /**
      * Return all characters in the local library that are linked to this provider.
      * Default implementation filters allCharacters through getLinkInfo().
      * @param {Array} allCharacters

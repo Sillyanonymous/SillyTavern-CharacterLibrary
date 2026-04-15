@@ -157,6 +157,7 @@
     border-radius: 8px;
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
     transition: transform 0.1s ease-out;
+    will-change: transform, opacity;
     cursor: pointer;
 }
 
@@ -240,6 +241,16 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
     scroll-behavior: smooth;
+}
+
+.gv-thumbnails.gv-virtual {
+    display: block;
+    position: relative;
+    overflow-y: hidden;
+}
+
+.gv-thumb-spacer {
+    pointer-events: none;
 }
 
 .gv-thumbnails::-webkit-scrollbar {
@@ -386,6 +397,8 @@ body.char-modal-above .gv-modal.visible {
     }
     .gv-image {
         transform-origin: center center;
-        will-change: transform;
+        will-change: transform, opacity;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
     }
 }

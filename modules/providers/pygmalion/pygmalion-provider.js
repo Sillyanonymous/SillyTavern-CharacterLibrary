@@ -193,14 +193,20 @@ class PygmalionProvider extends ProviderBase {
         if (!char.data.extensions) char.data.extensions = {};
 
         if (linkInfo) {
+            const existing = char.data.extensions.pygmalion || {};
             char.data.extensions.pygmalion = {
                 id: linkInfo.id,
                 versionId: linkInfo.versionId || null,
-                linkedAt: linkInfo.linkedAt || new Date().toISOString()
+                linkedAt: linkInfo.linkedAt || new Date().toISOString(),
+                pageName: linkInfo.pageName || existing.pageName || null,
             };
         } else {
             delete char.data.extensions.pygmalion;
         }
+    }
+
+    getListingName(hitData) {
+        return hitData?.displayName || hitData?.name || null;
     }
 
     // ── Link Stats ───────────────────────────────────────────
@@ -246,7 +252,11 @@ class PygmalionProvider extends ProviderBase {
         if (!linkInfo?.id) return null;
         try {
             const data = await fetchCharacterDetail(linkInfo.id, undefined, this.getToken());
-            if (data?.character) return buildV2FromDetail(data.character);
+            if (data?.character) {
+                const result = buildV2FromDetail(data.character);
+                if (result) result._listingName = this.getListingName(data.character);
+                return result;
+            }
             return null;
         } catch (e) {
             console.error('[PygmalionProvider] fetchRemoteCard failed:', linkInfo.id, e);
@@ -353,6 +363,7 @@ class PygmalionProvider extends ProviderBase {
             enrichedCard.data.extensions.pygmalion = {
                 ...(enrichedCard.data.extensions.pygmalion || {}),
                 linkedAt: new Date().toISOString(),
+                pageName: this.getListingName(detail.character),
             };
 
             // Preserve gallery_id from original card
@@ -531,6 +542,7 @@ class PygmalionProvider extends ProviderBase {
                 ownerUsername: char.owner?.username || null,
                 linkedAt: new Date().toISOString(),
                 tagline: char.description || '',
+                pageName: this.getListingName(char),
                 stars: char.stars || 0,
                 views: char.views || 0,
                 downloads: char.downloads || 0,

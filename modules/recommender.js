@@ -892,7 +892,7 @@ function buildCharacterList(chars, opts) {
     const lines = [];
     for (let i = 0; i < chars.length; i++) {
         const c = chars[i];
-        const parts = [`#${i + 1} "${(c.name || 'Unknown')}"`];
+        const parts = [`#${i + 1} "${(CoreAPI.getCharacterName(c) || 'Unknown')}"`];
 
         if (opts.includeTags) {
             const tags = CoreAPI.getCharacterTags(c);
@@ -1323,7 +1323,7 @@ async function generate(userPrompt, chars, opts, signal) {
 async function generateReduce(userPrompt, finalists, opts, signal) {
     const entries = finalists.map((f, i) => {
         const c = f.char;
-        const parts = [`#${i + 1} "${c.name || 'Unknown'}"`];
+        const parts = [`#${i + 1} "${CoreAPI.getCharacterName(c) || 'Unknown'}"`];
         const tags = CoreAPI.getCharacterTags(c);
         if (tags.length) parts.push(`[tags: ${tags.slice(0, 8).join(', ')}]`);
         if (c.data?.creator) parts.push(`[creator: ${c.data.creator}]`);
@@ -1675,7 +1675,7 @@ function renderResults(recommendations) {
                 </div>
                 <div class="recommender-result-info">
                     <div class="recommender-result-header">
-                        <a class="recommender-result-name-link" href="#" title="Open character details">${CoreAPI.escapeHtml(char.name || 'Unknown')}</a>
+                        <a class="recommender-result-name-link" href="#" title="Open character details">${CoreAPI.escapeHtml(CoreAPI.getCharacterName(char) || 'Unknown')}</a>
                         ${creator ? `<span class="recommender-result-creator">by ${CoreAPI.escapeHtml(creator)}</span>` : ''}
                         <button class="recommender-playlist-btn" title="Add to playlist"><i class="fa-solid fa-list-ul"></i></button>
                     </div>

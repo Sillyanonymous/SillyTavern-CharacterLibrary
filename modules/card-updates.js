@@ -33,6 +33,9 @@ const BASE_COMPARABLE_FIELDS = {
     'depth_prompt.depth': "Character's Note Depth",
     'depth_prompt.role': "Character's Note Role",
     'character_book': 'Embedded Lorebook',
+    // Virtual field: listing name lives in extensions.{provider}.pageName locally,
+    // and in remoteCard._listingName on the remote side.
+    'listing_name': 'Listing Name',
 };
 
 const BASE_FIELD_ICONS = {
@@ -54,6 +57,7 @@ const BASE_FIELD_ICONS = {
     'depth_prompt.depth': 'fa-solid fa-arrow-down-1-9',
     'depth_prompt.role': 'fa-solid fa-user-tag',
     'character_book': 'fa-solid fa-book',
+    'listing_name': 'fa-solid fa-store',
 };
 
 // Effective fields — rebuilt after providers register
@@ -471,6 +475,19 @@ function compareCards(localData, remoteCard, allowedFields = null) {
         if (allowedFields && !allowedFields.has(field)) {
             continue;
         }
+
+        // listing_name is a virtual field: local lives in extensions.{provider}.pageName,
+        // remote lives on the outer remoteCard._listingName (not inside .data)
+        if (field === 'listing_name') {
+            const remoteListingName = remoteCard?._listingName || '';
+            if (!remoteListingName) continue;
+            const localListingName = CoreAPI.getListingNameFromExtensions({ data: localData }) || '';
+            if (normalizeValue(localListingName) !== normalizeValue(remoteListingName)) {
+                diffs.push({ field, label, local: localListingName, remote: remoteListingName, isLongText: false });
+            }
+            continue;
+        }
+
         const localValue = getFieldValue(localData, field);
         const remoteValue = getFieldValue(remoteData, field);
 
@@ -584,7 +601,7 @@ function openCharModalAbove(char) {
  */
 function showSingleCheckModal(char) {
     const modal = document.getElementById('cardUpdateSingleModal');
-    const charName = char.data?.name || char.name || 'Unknown';
+    const charName = CoreAPI.getCharacterName(char) || 'Unknown';
     singleModalAvatar = char.avatar;
     
     const nameEl = document.getElementById('cardUpdateSingleCharName');
@@ -633,7 +650,7 @@ async function performSingleCheck(char) {
             statusEl.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Could not fetch remote card data';
             return;
         }
-        
+
         const localData = char.data || char;
 
         const diffs = compareCards(localData, remoteCard);
@@ -1536,6 +1553,24 @@ function viewBatchItemDiffs(avatar) {
 // APPLY UPDATES
 // ========================================
 
+async function applyListingName(char, remoteCard) {
+    const listingName = remoteCard?._listingName;
+    if (!listingName) return;
+    const match = CoreAPI.getCharacterProvider(char);
+    if (!match) return;
+    const { provider } = match;
+    const extKey = provider.id;
+    await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', {
+        avatar: char.avatar,
+        data: { extensions: { [extKey]: { pageName: listingName } } },
+    });
+    if (!char.data) char.data = {};
+    if (!char.data.extensions) char.data.extensions = {};
+    if (!char.data.extensions[extKey]) char.data.extensions[extKey] = {};
+    char.data.extensions[extKey].pageName = listingName;
+    char._lowerListingName = listingName.toLowerCase();
+}
+
 /**
  * Apply selected updates for a single character
  */
@@ -1558,8 +1593,10 @@ async function applySingleUpdates() {
     
     // Build updated data object
     const updatedFields = {};
+    let hasListingName = false;
     checkboxes.forEach(cb => {
         const field = cb.dataset.field;
+        if (field === 'listing_name') { hasListingName = true; return; }
         const remoteValue = getFieldValue(remoteData, field);
         // null means "clear this field" — undefined would be silently dropped by JSON
         updatedFields[field] = remoteValue ?? null;
@@ -1572,7 +1609,9 @@ async function applySingleUpdates() {
         if (versionsModule?.autoSnapshotBeforeChange) {
             try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
         }
-        const success = await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields);
+        if (hasListingName) await applyListingName(char, remoteCard);
+        const hasCardFields = Object.keys(updatedFields).length > 0;
+        const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields) : true;
         
         if (success) {
             CoreAPI.showToast(`Updated ${checkboxes.length} field${checkboxes.length > 1 ? 's' : ''}`, 'success');
@@ -1617,7 +1656,7 @@ function showPreApplySummary() {
     const fieldMap = new Map(); // field -> [{ avatar, charName, diff }]
     let totalFieldChanges = 0;
     for (const [avatar, checkData] of entries) {
-        const charName = checkData.char.data?.name || checkData.char.name || 'Unknown';
+        const charName = CoreAPI.getCharacterName(checkData.char) || 'Unknown';
         for (const diff of checkData.diffs) {
             if (!fieldMap.has(diff.field)) fieldMap.set(diff.field, []);
             fieldMap.get(diff.field).push({ avatar, charName, diff });
@@ -1665,7 +1704,7 @@ function showPreApplySummary() {
     `;
     
     for (const [avatar, checkData] of entries) {
-        const charName = checkData.char.data?.name || checkData.char.name || 'Unknown';
+        const charName = CoreAPI.getCharacterName(checkData.char) || 'Unknown';
         const fieldIconsHtml = checkData.diffs.map(d => fieldIcon(d.field)).join('');
         summaryHtml += `
             <div class="batch-summary-char-item" data-avatar="${CoreAPI.escapeHtml(avatar)}">
@@ -1763,7 +1802,9 @@ async function applyAllBatchUpdates() {
         
         // Apply all diffs for this character
         const updatedFields = {};
+        let hasListingName = false;
         for (const diff of diffs) {
+            if (diff.field === 'listing_name') { hasListingName = true; continue; }
             const remoteValue = getFieldValue(remoteData, diff.field);
             updatedFields[diff.field] = remoteValue ?? null;
         }
@@ -1774,7 +1815,9 @@ async function applyAllBatchUpdates() {
             if (versionsModule?.autoSnapshotBeforeChange) {
                 try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
             }
-            const success = await CoreAPI.applyCardFieldUpdates(avatar, updatedFields);
+            if (hasListingName) await applyListingName(char, remoteCard);
+            const hasCardFields = Object.keys(updatedFields).length > 0;
+            const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(avatar, updatedFields) : true;
             
             if (success) {
                 successCount++;
@@ -2051,7 +2094,7 @@ function startBatchCheck() {
     // Build initial list with checkboxes
     listEl.innerHTML = pendingBatchCharacters.map(char => {
         const providerLink = getProviderLinkInfo(char);
-        const name = char.data?.name || char.name || 'Unknown';
+        const name = CoreAPI.getCharacterName(char) || 'Unknown';
         const locked = CoreAPI.isUpdateLocked(char);
         if (!locked) batchSelectedAvatars.add(char.avatar);
         return `
