@@ -270,3 +270,70 @@
     }
 
 }
+
+/* ============================================
+   DataCat Bookmark Button — mirrors Janny conventions
+   ============================================ */
+
+/* Card-footer variant: rendered as a .browse-card-stat */
+.browse-card-footer .datacat-bookmark-btn {
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background: transparent;
+    margin-left: auto;
+}
+
+.browse-card-footer .datacat-bookmark-btn:hover {
+    background: rgba(255, 107, 107, 0.15);
+}
+
+.browse-card-footer .datacat-bookmark-btn i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.browse-card-footer .datacat-bookmark-btn:hover i {
+    transform: scale(1.15);
+}
+
+.browse-card-footer .datacat-bookmark-btn.favorited {
+    background: rgba(255, 107, 107, 0.12);
+}
+
+.browse-card-footer .datacat-bookmark-btn.favorited i {
+    font-weight: 900;
+}
+
+/* Modal variant: rendered as an .action-btn next to Open/Import. The
+   siblings have text labels so they grow taller than an icon-only button —
+   match their box dimensions explicitly. */
+#datacatCharBookmarkBtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    padding-left: 12px;
+    padding-right: 12px;
+    min-width: 44px;
+    line-height: 1;
+}
+
+#datacatCharBookmarkBtn i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+#datacatCharBookmarkBtn:hover i {
+    transform: scale(1.15);
+}
+
+#datacatCharBookmarkBtn.favorited i {
+    font-weight: 900;
+}
+
+#datacatCharBookmarkBtn.favorited {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.35);
+}

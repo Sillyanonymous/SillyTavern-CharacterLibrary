@@ -54,6 +54,21 @@ snapshots.
 **Cons:** one-shot import (no live sync), user has to repeat occasionally,
 relies on jannyai.com's HTML structure staying parseable.
 
+## Cross-provider note: DataCat auto-bookmark on extraction
+
+DataCat's web UI has its own bookmarks, and logged-in users who extract a
+card via DataCat get that card automatically added to their DataCat
+bookmarks. Character Library's extraction path (`/dc-extract` via
+`cl-helper`, in `datacat-api.js`) currently uses a cl-helper-managed
+session — effectively anonymous from the user's perspective — so the
+auto-bookmark never lands on the user's DataCat account.
+
+Revisiting this would mean adding a "log in with your DataCat account" UI
+mirroring Chub's token modal, plus a settings toggle to route extractions
+through the user's session instead of cl-helper's. Out of scope for the
+current bookmark-feature round (DataCat got the same local-only treatment
+as Janny); tracked here so it doesn't get lost.
+
 ## Why we're not doing either right now
 
 Local-only already solves the original "cards disappear and I lose them"
