@@ -69,6 +69,32 @@ through the user's session instead of cl-helper's. Out of scope for the
 current bookmark-feature round (DataCat got the same local-only treatment
 as Janny); tracked here so it doesn't get lost.
 
+## Cross-provider note: Character Tavern clickable likes/heart
+
+CT's card footer and preview modal both display a heart/likes counter
+sourced from `hit.likes` in the search API. Today it's display-only —
+no click handler — while Chub's equivalent
+(`chubCharFavoriteBtn` in `chub-browse.js:720`, wired to
+`toggleChubCharFavorite`) actually POSTs to Chub's GraphQL with the
+user's URQL token, so clicking the heart in the extension increments
+the like on chub.ai and shows up in their web account.
+
+Making CT's heart clickable would need:
+- A CT session token/cookie UI (or reuse of whatever the existing
+  cl-helper auth modal already captures for NSFW gating).
+- A `POST /characters/<path>/like` equivalent routed through
+  `cl-helper` to sidestep CORS/Cloudflare, matching the Janny proxy
+  pattern in `janny-api.js`.
+- Optimistic UI: toggle a `.liked` class + bump/decrement the counter,
+  reconcile on response.
+
+**Out of scope for the current bookmark round.** The local-only
+bookmark ribbon already solves the "don't lose cards" problem; the
+likes sync is pure parity-with-Chub QoL and the plumbing is
+non-trivial. Revisit alongside a broader CT auth refresh, or bundle
+with Option A above if `cl-helper` gets updated for an unrelated
+reason.
+
 ## Why we're not doing either right now
 
 Local-only already solves the original "cards disappear and I lose them"
