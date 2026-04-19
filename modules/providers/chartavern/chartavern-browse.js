@@ -3,6 +3,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     searchCards,
     fetchCharacterDetail,
@@ -87,13 +88,6 @@ let ctFilterHideOwned = false;
 let ctFilterHidePossible = false;
 let ctFilterHasLorebook = false;
 let ctFilterIsOC = false;
-
-// Bookmark state — local-only snapshots persisted in extension settings.
-// Map<path, snapshot> keyed by Character Tavern's stable "author/slug" path.
-/** @type {Map<string, object>} */
-let ctBookmarks = new Map();
-let ctFilterMyBookmarks = false;
-let ctBookmarksLoaded = false;
 
 // Tag filter state
 /** @type {Set<string>} Active include tags */
@@ -191,40 +185,19 @@ function applyTagsClamp(tagsEl) {
 }
 
 // ========================================
-// BOOKMARKS (local-only)
+// BOOKMARKS (local-only) — shared factory
 // ========================================
 
-function loadCtBookmarks() {
-    if (ctBookmarksLoaded) return;
-    const saved = getSetting('ctBookmarks') || [];
-    ctBookmarks = new Map();
-    if (Array.isArray(saved)) {
-        for (const entry of saved) {
-            if (entry && entry.path) {
-                ctBookmarks.set(String(entry.path), entry);
-            }
-        }
-    }
-    ctBookmarksLoaded = true;
-    debugLog('[ChartavernBrowse] Loaded', ctBookmarks.size, 'bookmarks from settings');
-}
-
-function persistCtBookmarks() {
-    setSetting('ctBookmarks', Array.from(ctBookmarks.values()));
-}
-
-function isCtBookmarked(path) {
-    return !!(path && ctBookmarks.has(String(path)));
-}
-
-/**
- * Pull a minimal-but-sufficient snapshot from a CharacterTavern hit so the
- * bookmark remains renderable even if the character is later removed.
- * Heavy fields (definition, first message, etc.) are intentionally omitted —
- * the modal refetches detail on open via the existing flow.
- */
-function snapshotCtHit(hit) {
-    return {
+const ctBookmarks = createBookmarkModule({
+    prefix: 'ct',
+    settingsKey: 'ctBookmarks',
+    logLabel: '[ChartavernBrowse]',
+    getId: (hit) => (hit && hit.path) ? String(hit.path) : '',
+    dataAttrKey: 'ctPath',
+    gridId: 'ctGrid',
+    modalBtnId: 'ctCharBookmarkBtn',
+    checkboxId: 'ctFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
         path: String(hit.path || ''),
         name: hit.name || '',
         author: hit.author || '',
@@ -238,123 +211,29 @@ function snapshotCtHit(hit) {
         isNSFW: !!hit.isNSFW,
         hasLorebook: !!hit.hasLorebook,
         isOC: !!hit.isOC,
-        bookmarkedAt: Date.now(),
-    };
-}
-
-/**
- * Toggle the bookmark state for a character. Accepts either a hit object
- * (for add) or just a path string (for remove from "My Bookmarks" view).
- * Returns the new bookmarked state (true = now bookmarked).
- */
-function toggleCtBookmark(hitOrPath) {
-    loadCtBookmarks();
-
-    const path = String((hitOrPath && hitOrPath.path) || hitOrPath || '');
-    if (!path) return false;
-
-    if (ctBookmarks.has(path)) {
-        ctBookmarks.delete(path);
-        persistCtBookmarks();
-        showToast('Removed from bookmarks', 'info');
-        syncCtBookmarkUI(path, false);
-        if (ctFilterMyBookmarks) renderCtBookmarksView();
-        return false;
-    }
-
-    let hit = (typeof hitOrPath === 'object' && hitOrPath) ? hitOrPath : null;
-    if (!hit) hit = ctCharacters.find(c => c.path === path) || null;
-    if (!hit) {
-        showToast('Could not bookmark: character data missing', 'error');
-        return false;
-    }
-
-    ctBookmarks.set(path, snapshotCtHit(hit));
-    persistCtBookmarks();
-    showToast('Bookmarked', 'success');
-    syncCtBookmarkUI(path, true);
-    return true;
-}
-
-/**
- * Keep every visible bookmark button (grid card + modal) in sync with the
- * underlying state after a toggle.
- */
-function syncCtBookmarkUI(path, favorited) {
-    const safePath = String(path);
-    document.querySelectorAll(`.ct-bookmark-btn[data-ct-path="${CSS.escape(safePath)}"]`).forEach(btn => {
-        btn.classList.toggle('favorited', favorited);
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-solid', favorited);
-            icon.classList.toggle('fa-regular', !favorited);
-        }
-    });
-
-    if (ctSelectedChar && String(ctSelectedChar.path) === safePath) {
-        const modalBtn = document.getElementById('ctCharBookmarkBtn');
-        if (modalBtn) {
-            modalBtn.classList.toggle('favorited', favorited);
-            const icon = modalBtn.querySelector('i');
-            if (icon) {
-                icon.classList.toggle('fa-solid', favorited);
-                icon.classList.toggle('fa-regular', !favorited);
-            }
-        }
-    }
-}
-
-/**
- * Render the grid from the local bookmark Map instead of hitting the
- * CharacterTavern search API. Applies the currently-selected sort mode.
- */
-function renderCtBookmarksView() {
-    loadCtBookmarks();
-    const snapshots = Array.from(ctBookmarks.values());
-
-    const sorted = sortCtBookmarkSnapshots(snapshots, ctSortMode);
-
-    ctCharacters = sorted;
-    ctHasMore = false;
-    ctCurrentPage = 1;
-
-    const grid = document.getElementById('ctGrid');
-    if (!grid) return;
-
-    if (sorted.length === 0) {
-        grid.innerHTML = `
-            <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                <i class="fa-regular fa-bookmark" style="font-size: 2rem; opacity: 0.5;"></i>
-                <p style="margin-top: 12px;">No bookmarks yet. Click the bookmark icon on any character to save it here.</p>
-            </div>
-        `;
+    }),
+    sortModes: {
+        oldest: (a, b) => (a.bookmarkedAt || 0) - (b.bookmarkedAt || 0),
+        most_popular: (a, b) => (b.likes || 0) - (a.likes || 0),
+        most_likes: (a, b) => (b.likes || 0) - (a.likes || 0),
+    },
+    getSortMode: () => ctSortMode,
+    getSelectedChar: () => ctSelectedChar,
+    resetBookmarkState: (sorted) => {
+        ctCharacters = sorted;
+        ctHasMore = false;
+        ctCurrentPage = 1;
         ctGridRenderedCount = 0;
-        updateLoadMore();
-        return;
-    }
-
-    ctGridRenderedCount = 0;
-    renderGrid(sorted, false);
-}
-
-function sortCtBookmarkSnapshots(list, mode) {
-    const sorted = list.slice();
-    switch (mode) {
-        case 'oldest':
-            sorted.sort((a, b) => (a.bookmarkedAt || 0) - (b.bookmarkedAt || 0));
-            break;
-        case 'most_popular':
-        case 'most_likes':
-            sorted.sort((a, b) => (b.likes || 0) - (a.likes || 0));
-            break;
-        case 'newest':
-        case 'trending':
-        default:
-            sorted.sort((a, b) => (b.bookmarkedAt || 0) - (a.bookmarkedAt || 0));
-            break;
-    }
-    return sorted;
-}
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updateCtFiltersButton();
+        ctCurrentPage = 1;
+        if (on) ctBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
 
 // ========================================
 // CARD RENDERING
@@ -389,10 +268,7 @@ function createCtCard(hit) {
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
     const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
-    const bookmarked = isCtBookmarked(hit.path);
-    const bookmarkBtn = hit.path
-        ? `<span class="browse-card-stat ct-bookmark-btn${bookmarked ? ' favorited' : ''}" data-ct-path="${escapeHtml(hit.path)}" title="${bookmarked ? 'Remove bookmark' : 'Bookmark this character'}"><i class="${bookmarked ? 'fa-solid' : 'fa-regular'} fa-bookmark"></i></span>`
-        : '';
+    const bookmarkBtn = ctBookmarks.renderCardBtn(hit);
 
     return `
         <div class="${cardClass}" data-ct-path="${escapeHtml(hit.path || '')}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -692,17 +568,7 @@ function openPreviewModal(hit) {
         }
 
         // Bookmark button state
-        const bookmarkBtn = document.getElementById('ctCharBookmarkBtn');
-        if (bookmarkBtn) {
-            const bookmarked = isCtBookmarked(hit.path);
-            bookmarkBtn.classList.toggle('favorited', bookmarked);
-            bookmarkBtn.title = bookmarked ? 'Remove bookmark' : 'Bookmark this character';
-            const icon = bookmarkBtn.querySelector('i');
-            if (icon) {
-                icon.classList.toggle('fa-solid', bookmarked);
-                icon.classList.toggle('fa-regular', !bookmarked);
-            }
-        }
+        ctBookmarks.syncModalState(hit);
 
         // Tags
         const tagsEl = document.getElementById('ctCharTags');
@@ -1209,7 +1075,7 @@ function updateCtFiltersButton() {
     const btn = document.getElementById('ctFiltersBtn');
     if (!btn) return;
 
-    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC || ctFilterMyBookmarks;
+    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC || ctBookmarks.filterMyBookmarks;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -1231,15 +1097,7 @@ function initCtView() {
     const grid = document.getElementById('ctGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
-            const bookmarkBtn = e.target.closest('.ct-bookmark-btn');
-            if (bookmarkBtn) {
-                e.stopPropagation();
-                const bPath = bookmarkBtn.dataset.ctPath;
-                if (!bPath) return;
-                const bHit = ctCharacters.find(c => c.path === bPath) || { path: bPath };
-                toggleCtBookmark(bHit);
-                return;
-            }
+            if (ctBookmarks.handleGridClick(e, ctCharacters)) return;
 
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
@@ -1310,8 +1168,8 @@ function initCtView() {
         const el = document.getElementById('ctSortSelect');
         if (el) ctSortMode = el.value;
         ctCurrentPage = 1;
-        if (ctFilterMyBookmarks) {
-            renderCtBookmarksView();
+        if (ctBookmarks.filterMyBookmarks) {
+            ctBookmarks.renderBookmarksView();
         } else {
             loadCharacters(false);
         }
@@ -1418,17 +1276,7 @@ function initCtView() {
         loadCharacters(false);
     });
 
-    on('ctFilterMyBookmarks', 'change', () => {
-        const el = document.getElementById('ctFilterMyBookmarks');
-        if (el) ctFilterMyBookmarks = el.checked;
-        updateCtFiltersButton();
-        ctCurrentPage = 1;
-        if (ctFilterMyBookmarks) {
-            renderCtBookmarksView();
-        } else {
-            loadCharacters(false);
-        }
-    });
+    ctBookmarks.attachFilterCheckbox();
 
     // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
     chartavernBrowseView._registerDropdownDismiss([
@@ -1458,9 +1306,7 @@ function initCtView() {
             if (ctSelectedChar) importCharacter(ctSelectedChar);
         });
 
-        on('ctCharBookmarkBtn', 'click', () => {
-            if (ctSelectedChar) toggleCtBookmark(ctSelectedChar);
-        });
+        ctBookmarks.attachModalBtn();
 
         const modalOverlay = document.getElementById('ctCharModal');
         if (modalOverlay) {
@@ -1857,7 +1703,7 @@ class ChartavernBrowseView extends BrowseView {
                     <label class="filter-checkbox"><input type="checkbox" id="ctFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Bookmarks:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="ctFilterMyBookmarks" ${ctFilterMyBookmarks ? 'checked' : ''}> <i class="fa-solid fa-bookmark" style="color: #ff6b6b;"></i> My Bookmarks</label>
+                    ${ctBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -2008,9 +1854,7 @@ class ChartavernBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
-                    <button id="ctCharBookmarkBtn" class="action-btn secondary ct-bookmark-btn" title="Bookmark this character">
-                        <i class="fa-regular fa-bookmark"></i>
-                    </button>
+                    ${ctBookmarks.renderModalBtn()}
                     <a id="ctOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on CharacterTavern">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -2127,14 +1971,13 @@ class ChartavernBrowseView extends BrowseView {
     init() {
         super.init();
         this.buildLocalLibraryLookup();
-        loadCtBookmarks();
         initCtView();
         const grid = document.getElementById('ctGrid');
         if (grid) this.observeImages(grid);
         // Check session silently — if logged in, update toggle and reload with NSFW
         tryCheckSession().then(() => {
-            if (ctFilterMyBookmarks) {
-                renderCtBookmarksView();
+            if (ctBookmarks.filterMyBookmarks) {
+                ctBookmarks.renderBookmarksView();
             } else {
                 loadCharacters(false);
             }

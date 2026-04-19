@@ -3,6 +3,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     JANNY_SEARCH_URL,
     JANNY_IMAGE_BASE,
@@ -21,7 +22,6 @@ const {
     escapeHtml,
     debugLog,
     getSetting,
-    setSettings,
     fetchCharacters,
     fetchAndAddCharacter,
     checkCharacterForDuplicatesAsync,
@@ -67,49 +67,22 @@ let jannyFilterHidePossible = false;
 let jannyIncludeTags = new Set();
 let jannyAuthorFilter = null;
 
-// Bookmark state — local-only snapshots persisted in extension settings.
-// Map<charId:string, snapshot> where snapshot is a frozen MeiliSearch hit
-// plus `bookmarkedAt` timestamp. See `loadJannyBookmarks` / `persistJannyBookmarks`.
-/** @type {Map<string, object>} */
-let jannyBookmarks = new Map();
-let jannyFilterMyBookmarks = false;
-let jannyBookmarksLoaded = false;
-
 let view; // module-scoped BrowseView instance reference (set once in constructor)
 
 // ========================================
-// BOOKMARKS (local-only)
+// BOOKMARKS (local-only, via shared factory)
 // ========================================
 
-function loadJannyBookmarks() {
-    if (jannyBookmarksLoaded) return;
-    const saved = getSetting('jannyBookmarks') || [];
-    jannyBookmarks = new Map();
-    if (Array.isArray(saved)) {
-        for (const entry of saved) {
-            if (entry && entry.id) {
-                jannyBookmarks.set(String(entry.id), entry);
-            }
-        }
-    }
-    jannyBookmarksLoaded = true;
-    debugLog('[JannyBrowse] Loaded', jannyBookmarks.size, 'bookmarks from settings');
-}
-
-function persistJannyBookmarks() {
-    setSettings({ jannyBookmarks: Array.from(jannyBookmarks.values()) });
-}
-
-function isJannyBookmarked(charId) {
-    return !!(charId && jannyBookmarks.has(String(charId)));
-}
-
-/**
- * Pull a minimal-but-sufficient snapshot from a MeiliSearch hit so the
- * bookmark remains renderable even if the character is later removed from Janny.
- */
-function snapshotJannyHit(hit) {
-    return {
+const jannyBookmarks = createBookmarkModule({
+    prefix: 'janny',
+    settingsKey: 'jannyBookmarks',
+    logLabel: '[JannyBrowse]',
+    getId: (hit) => hit?.id ? String(hit.id) : '',
+    dataAttrKey: 'jannyId',
+    gridId: 'jannyGrid',
+    modalBtnId: 'jannyCharBookmarkBtn',
+    checkboxId: 'jannyFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
         id: String(hit.id || ''),
         name: hit.name || '',
         description: hit.description || '',
@@ -122,129 +95,29 @@ function snapshotJannyHit(hit) {
         createdAtStamp: hit.createdAtStamp || 0,
         isNsfw: !!hit.isNsfw,
         isLowQuality: !!hit.isLowQuality,
-        bookmarkedAt: Date.now(),
-    };
-}
-
-/**
- * Toggle the bookmark state for a character. Accepts either a MeiliSearch
- * hit (for add) or just an id (for remove from the "My Bookmarks" view).
- * Returns the new bookmarked state (true = now bookmarked).
- */
-function toggleJannyBookmark(hitOrId) {
-    loadJannyBookmarks();
-
-    const id = String((hitOrId && hitOrId.id) || hitOrId || '');
-    if (!id) return false;
-
-    if (jannyBookmarks.has(id)) {
-        jannyBookmarks.delete(id);
-        persistJannyBookmarks();
-        showToast('Removed from bookmarks', 'info');
-        syncJannyBookmarkUI(id, false);
-        if (jannyFilterMyBookmarks) renderBookmarksView();
-        return false;
-    }
-
-    // Prefer the passed hit if it's object-shaped; otherwise try to resolve
-    // from the current in-memory character list.
-    let hit = (typeof hitOrId === 'object' && hitOrId) ? hitOrId : null;
-    if (!hit) hit = jannyCharacters.find(c => String(c.id) === id) || null;
-    if (!hit) {
-        showToast('Could not bookmark: character data missing', 'error');
-        return false;
-    }
-
-    jannyBookmarks.set(id, snapshotJannyHit(hit));
-    persistJannyBookmarks();
-    showToast('Bookmarked', 'success');
-    syncJannyBookmarkUI(id, true);
-    return true;
-}
-
-/**
- * Keep every visible bookmark button (grid card + modal) in sync with the
- * underlying state after a toggle.
- */
-function syncJannyBookmarkUI(id, favorited) {
-    const safeId = String(id);
-    document.querySelectorAll(`.janny-bookmark-btn[data-janny-id="${CSS.escape(safeId)}"]`).forEach(btn => {
-        btn.classList.toggle('favorited', favorited);
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-solid', favorited);
-            icon.classList.toggle('fa-regular', !favorited);
-        }
-    });
-
-    // Modal button (one at a time; only update when it matches the toggled char)
-    if (jannySelectedChar && String(jannySelectedChar.id) === safeId) {
-        const modalBtn = document.getElementById('jannyCharBookmarkBtn');
-        if (modalBtn) {
-            modalBtn.classList.toggle('favorited', favorited);
-            const icon = modalBtn.querySelector('i');
-            if (icon) {
-                icon.classList.toggle('fa-solid', favorited);
-                icon.classList.toggle('fa-regular', !favorited);
-            }
-        }
-    }
-}
-
-/**
- * Render the grid from the local bookmark Map instead of hitting MeiliSearch.
- * Applies the currently-selected sort mode to the snapshots.
- */
-function renderBookmarksView() {
-    loadJannyBookmarks();
-    const snapshots = Array.from(jannyBookmarks.values());
-
-    const sorted = sortBookmarkSnapshots(snapshots, jannySortMode);
-
-    jannyCharacters = sorted;
-    jannyHasMore = false;
-    jannyCurrentPage = 1;
-
-    const grid = document.getElementById('jannyGrid');
-    if (!grid) return;
-
-    if (sorted.length === 0) {
-        grid.innerHTML = `
-            <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                <i class="fa-regular fa-bookmark" style="font-size: 2rem; opacity: 0.5;"></i>
-                <p style="margin-top: 12px;">No bookmarks yet. Click the bookmark icon on any character to save it here.</p>
-            </div>
-        `;
+    }),
+    sortModes: {
+        oldest: (a, b) => (a.createdAtStamp || 0) - (b.createdAtStamp || 0),
+        tokens_desc: (a, b) => (b.totalToken || 0) - (a.totalToken || 0),
+        tokens_asc: (a, b) => (a.totalToken || 0) - (b.totalToken || 0),
+    },
+    getSortMode: () => jannySortMode,
+    getSelectedChar: () => jannySelectedChar,
+    resetBookmarkState: (sorted) => {
+        jannyCharacters = sorted;
+        jannyHasMore = false;
+        jannyCurrentPage = 1;
         jannyGridRenderedCount = 0;
-        updateLoadMore();
-        return;
-    }
-
-    jannyGridRenderedCount = 0;
-    renderGrid(sorted, false);
-}
-
-function sortBookmarkSnapshots(list, mode) {
-    const sorted = list.slice();
-    switch (mode) {
-        case 'oldest':
-            sorted.sort((a, b) => (a.createdAtStamp || 0) - (b.createdAtStamp || 0));
-            break;
-        case 'tokens_desc':
-            sorted.sort((a, b) => (b.totalToken || 0) - (a.totalToken || 0));
-            break;
-        case 'tokens_asc':
-            sorted.sort((a, b) => (a.totalToken || 0) - (b.totalToken || 0));
-            break;
-        case 'newest':
-        case 'relevant':
-        default:
-            // Default for bookmarks: most-recently-bookmarked first
-            sorted.sort((a, b) => (b.bookmarkedAt || 0) - (a.bookmarkedAt || 0));
-            break;
-    }
-    return sorted;
-}
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updateJannyFiltersButton();
+        jannyCurrentPage = 1;
+        if (on) jannyBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
 
 // ========================================
 // SEARCH API
@@ -427,10 +300,7 @@ function createJannyCard(hit) {
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
     const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
-    const bookmarked = isJannyBookmarked(charId);
-    const bookmarkBtn = charId
-        ? `<span class="browse-card-stat janny-bookmark-btn${bookmarked ? ' favorited' : ''}" data-janny-id="${escapeHtml(String(charId))}" title="${bookmarked ? 'Remove bookmark' : 'Bookmark this character'}"><i class="${bookmarked ? 'fa-solid' : 'fa-regular'} fa-bookmark"></i></span>`
-        : '';
+    const bookmarkBtn = jannyBookmarks.renderCardBtn(hit);
 
     return `
         <div class="${cardClass}" data-janny-id="${escapeHtml(String(charId))}" data-slug="${escapeHtml(slug)}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -702,17 +572,7 @@ function openPreviewModal(hit) {
     examplesSection.style.display = 'none';
 
     // Bookmark button state
-    const bookmarkBtn = document.getElementById('jannyCharBookmarkBtn');
-    if (bookmarkBtn) {
-        const bookmarked = isJannyBookmarked(charId);
-        bookmarkBtn.classList.toggle('favorited', bookmarked);
-        bookmarkBtn.title = bookmarked ? 'Remove bookmark' : 'Bookmark this character';
-        const icon = bookmarkBtn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-solid', bookmarked);
-            icon.classList.toggle('fa-regular', !bookmarked);
-        }
-    }
+    jannyBookmarks.syncModalState(hit);
 
     // Import button state
     const importBtn = document.getElementById('jannyImportBtn');
@@ -1089,7 +949,7 @@ function updateJannyFiltersButton() {
     const btn = document.getElementById('jannyFiltersBtn');
     if (!btn) return;
 
-    const active = jannyShowLowQuality || jannyFilterHideOwned || jannyFilterHidePossible || jannyFilterMyBookmarks;
+    const active = jannyShowLowQuality || jannyFilterHideOwned || jannyFilterHidePossible || jannyBookmarks.filterMyBookmarks;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -1112,15 +972,7 @@ function initJannyView() {
     const grid = document.getElementById('jannyGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
-            const bookmarkBtn = e.target.closest('.janny-bookmark-btn');
-            if (bookmarkBtn) {
-                e.stopPropagation();
-                const bId = bookmarkBtn.dataset.jannyId;
-                if (!bId) return;
-                const bHit = jannyCharacters.find(c => String(c.id) === bId) || { id: bId };
-                toggleJannyBookmark(bHit);
-                return;
-            }
+            if (jannyBookmarks.handleGridClick(e, jannyCharacters)) return;
 
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
@@ -1189,8 +1041,8 @@ function initJannyView() {
         if (input) jannyCurrentSearch = input.value.trim();
 
         jannyCurrentPage = 1;
-        if (jannyFilterMyBookmarks) {
-            renderBookmarksView();
+        if (jannyBookmarks.filterMyBookmarks) {
+            jannyBookmarks.renderBookmarksView();
         } else {
             loadCharacters(false);
         }
@@ -1286,17 +1138,7 @@ function initJannyView() {
         loadCharacters(false);
     });
 
-    on('jannyFilterMyBookmarks', 'change', () => {
-        const el = document.getElementById('jannyFilterMyBookmarks');
-        if (el) jannyFilterMyBookmarks = el.checked;
-        updateJannyFiltersButton();
-        jannyCurrentPage = 1;
-        if (jannyFilterMyBookmarks) {
-            renderBookmarksView();
-        } else {
-            loadCharacters(false);
-        }
-    });
+    jannyBookmarks.attachFilterCheckbox();
 
     // Close dropdowns when clicking outside
     jannyBrowseView._registerDropdownDismiss([
@@ -1336,9 +1178,7 @@ function initJannyView() {
             if (jannySelectedChar) importCharacter(jannySelectedChar);
         });
 
-        on('jannyCharBookmarkBtn', 'click', () => {
-            if (jannySelectedChar) toggleJannyBookmark(jannySelectedChar);
-        });
+        jannyBookmarks.attachModalBtn();
 
         const modalOverlay = document.getElementById('jannyCharModal');
         if (modalOverlay) {
@@ -1537,7 +1377,7 @@ class JannyBrowseView extends BrowseView {
                     <label class="filter-checkbox"><input type="checkbox" id="jannyFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Bookmarks:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="jannyFilterMyBookmarks" ${jannyFilterMyBookmarks ? 'checked' : ''}> <i class="fa-solid fa-bookmark" style="color: #ff6b6b;"></i> My Bookmarks</label>
+                    ${jannyBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -1614,9 +1454,7 @@ class JannyBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
-                    <button id="jannyCharBookmarkBtn" class="action-btn secondary janny-bookmark-btn" title="Bookmark this character">
-                        <i class="fa-regular fa-bookmark"></i>
-                    </button>
+                    ${jannyBookmarks.renderModalBtn()}
                     <a id="jannyOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on JannyAI">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -1700,12 +1538,11 @@ class JannyBrowseView extends BrowseView {
     init() {
         super.init();
         this.buildLocalLibraryLookup();
-        loadJannyBookmarks();
         initJannyView();
         const grid = document.getElementById('jannyGrid');
         if (grid) this.observeImages(grid);
-        if (jannyFilterMyBookmarks) {
-            renderBookmarksView();
+        if (jannyBookmarks.filterMyBookmarks) {
+            jannyBookmarks.renderBookmarksView();
         } else {
             loadCharacters(false);
         }

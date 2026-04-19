@@ -8,6 +8,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     DATACAT_API_BASE,
     DATACAT_IMAGE_BASE,
@@ -121,15 +122,6 @@ let extractionTargetUrl = null;
 let extractionTargetId = null;
 let extractionStartTime = null;
 
-// Bookmark state — local-only snapshots persisted in extension settings.
-// Map<character_id:string, snapshot> where snapshot is a frozen DataCat hit
-// plus `bookmarkedAt` timestamp. See `loadDatacatBookmarks` /
-// `persistDatacatBookmarks`.
-/** @type {Map<string, object>} */
-let datacatBookmarks = new Map();
-let datacatFilterMyBookmarks = false;
-let datacatBookmarksLoaded = false;
-
 // ========================================
 // FIELD HELPERS (handle camelCase/snake_case from different endpoints)
 // ========================================
@@ -188,39 +180,22 @@ function isCharPossibleMatchObj(c) {
 }
 
 // ========================================
-// BOOKMARKS (local-only)
+// BOOKMARKS (local-only) — shared factory
 // ========================================
 
-function loadDatacatBookmarks() {
-    if (datacatBookmarksLoaded) return;
-    const saved = getSetting('datacatBookmarks') || [];
-    datacatBookmarks = new Map();
-    if (Array.isArray(saved)) {
-        for (const entry of saved) {
-            if (entry && entry.character_id) {
-                datacatBookmarks.set(String(entry.character_id), entry);
-            }
-        }
-    }
-    datacatBookmarksLoaded = true;
-    debugLog('[DatacatBrowse] Loaded', datacatBookmarks.size, 'bookmarks from settings');
-}
-
-function persistDatacatBookmarks() {
-    setSetting('datacatBookmarks', Array.from(datacatBookmarks.values()));
-}
-
-function isDatacatBookmarked(charId) {
-    return !!(charId && datacatBookmarks.has(String(charId)));
-}
-
-/**
- * Pull a minimal-but-sufficient snapshot from a DataCat hit so the
- * bookmark remains renderable even if the character is later removed.
- * Canonical key is `character_id` (UUID); numeric `id` is environment-specific.
- */
-function snapshotDatacatHit(hit) {
-    return {
+const datacatBookmarks = createBookmarkModule({
+    prefix: 'datacat',
+    settingsKey: 'datacatBookmarks',
+    logLabel: '[DatacatBrowse]',
+    getId: (hit) => {
+        const id = hit && getCharId(hit);
+        return id ? String(id) : '';
+    },
+    dataAttrKey: 'datacatId',
+    gridId: 'datacatGrid',
+    modalBtnId: 'datacatCharBookmarkBtn',
+    checkboxId: 'datacatFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
         character_id: String(getCharId(hit)),
         name: hit.name || '',
         description: hit.description || '',
@@ -233,122 +208,28 @@ function snapshotDatacatHit(hit) {
         chat_count: getChatCount(hit),
         message_count: getMsgCount(hit),
         total_tokens: getTotalTokens(hit),
-        bookmarkedAt: Date.now(),
-    };
-}
-
-/**
- * Toggle the bookmark state for a character. Accepts either a DataCat hit
- * (for add) or just an id (for remove from the "My Bookmarks" view).
- * Returns the new bookmarked state (true = now bookmarked).
- */
-function toggleDatacatBookmark(hitOrId) {
-    loadDatacatBookmarks();
-
-    const id = String((hitOrId && getCharId(hitOrId)) || hitOrId || '');
-    if (!id) return false;
-
-    if (datacatBookmarks.has(id)) {
-        datacatBookmarks.delete(id);
-        persistDatacatBookmarks();
-        showToast('Removed from bookmarks', 'info');
-        syncDatacatBookmarkUI(id, false);
-        if (datacatFilterMyBookmarks) renderDatacatBookmarksView();
-        return false;
-    }
-
-    let hit = (typeof hitOrId === 'object' && hitOrId) ? hitOrId : null;
-    if (!hit) hit = datacatCharacters.find(c => String(getCharId(c)) === id) || null;
-    if (!hit) {
-        showToast('Could not bookmark: character data missing', 'error');
-        return false;
-    }
-
-    datacatBookmarks.set(id, snapshotDatacatHit(hit));
-    persistDatacatBookmarks();
-    showToast('Bookmarked', 'success');
-    syncDatacatBookmarkUI(id, true);
-    return true;
-}
-
-/**
- * Keep every visible bookmark button (grid card + modal) in sync with the
- * underlying state after a toggle.
- */
-function syncDatacatBookmarkUI(id, favorited) {
-    const safeId = String(id);
-    document.querySelectorAll(`.datacat-bookmark-btn[data-datacat-id="${CSS.escape(safeId)}"]`).forEach(btn => {
-        btn.classList.toggle('favorited', favorited);
-        const icon = btn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-solid', favorited);
-            icon.classList.toggle('fa-regular', !favorited);
-        }
-    });
-
-    if (datacatSelectedChar && String(getCharId(datacatSelectedChar)) === safeId) {
-        const modalBtn = document.getElementById('datacatCharBookmarkBtn');
-        if (modalBtn) {
-            modalBtn.classList.toggle('favorited', favorited);
-            const icon = modalBtn.querySelector('i');
-            if (icon) {
-                icon.classList.toggle('fa-solid', favorited);
-                icon.classList.toggle('fa-regular', !favorited);
-            }
-        }
-    }
-}
-
-/**
- * Render the grid from the local bookmark Map instead of hitting MeiliSearch
- * or the DataCat API. Applies the currently-selected sort mode to snapshots.
- */
-function renderDatacatBookmarksView() {
-    loadDatacatBookmarks();
-    const snapshots = Array.from(datacatBookmarks.values());
-
-    const sorted = sortDatacatBookmarkSnapshots(snapshots, datacatSortMode);
-
-    datacatCharacters = sorted;
-    datacatHasMore = false;
-    datacatCurrentOffset = 0;
-
-    const grid = document.getElementById('datacatGrid');
-    if (!grid) return;
-
-    if (sorted.length === 0) {
-        grid.innerHTML = `
-            <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                <i class="fa-regular fa-bookmark" style="font-size: 2rem; opacity: 0.5;"></i>
-                <p style="margin-top: 12px;">No bookmarks yet. Click the bookmark icon on any character to save it here.</p>
-            </div>
-        `;
+    }),
+    sortModes: {
+        oldest: (a, b) => (a.bookmarkedAt || 0) - (b.bookmarkedAt || 0),
+        chat_count: (a, b) => (b.chat_count || 0) - (a.chat_count || 0),
+    },
+    getSortMode: () => datacatSortMode,
+    getSelectedChar: () => datacatSelectedChar,
+    resetBookmarkState: (sorted) => {
+        datacatCharacters = sorted;
+        datacatHasMore = false;
+        datacatCurrentOffset = 0;
         datacatGridRenderedCount = 0;
-        updateLoadMore();
-        return;
-    }
-
-    datacatGridRenderedCount = 0;
-    renderGrid(sorted, false);
-}
-
-function sortDatacatBookmarkSnapshots(list, mode) {
-    const sorted = list.slice();
-    switch (mode) {
-        case 'oldest':
-            sorted.sort((a, b) => (a.bookmarkedAt || 0) - (b.bookmarkedAt || 0));
-            break;
-        case 'chat_count':
-            sorted.sort((a, b) => (b.chat_count || 0) - (a.chat_count || 0));
-            break;
-        case 'newest':
-        case 'recent':
-        default:
-            sorted.sort((a, b) => (b.bookmarkedAt || 0) - (a.bookmarkedAt || 0));
-            break;
-    }
-    return sorted;
-}
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updateDatacatFiltersButtonState();
+        datacatCurrentOffset = 0;
+        if (on) datacatBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
 
 // ========================================
 // CARD RENDERING
@@ -402,10 +283,7 @@ function createDatacatCard(hit) {
     }
 
     const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
-    const bookmarked = isDatacatBookmarked(charId);
-    const bookmarkBtn = charId
-        ? `<span class="browse-card-stat datacat-bookmark-btn${bookmarked ? ' favorited' : ''}" data-datacat-id="${escapeHtml(String(charId))}" title="${bookmarked ? 'Remove bookmark' : 'Bookmark this character'}"><i class="${bookmarked ? 'fa-solid' : 'fa-regular'} fa-bookmark"></i></span>`
-        : '';
+    const bookmarkBtn = datacatBookmarks.renderCardBtn(hit);
 
     return `
         <div class="${cardClass}" data-datacat-id="${escapeHtml(String(charId))}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -2062,17 +1940,7 @@ function openPreviewModal(hit) {
     window.currentBrowseAltGreetings = [];
 
     // Bookmark button state
-    const bookmarkBtn = document.getElementById('datacatCharBookmarkBtn');
-    if (bookmarkBtn) {
-        const bookmarked = isDatacatBookmarked(charId);
-        bookmarkBtn.classList.toggle('favorited', bookmarked);
-        bookmarkBtn.title = bookmarked ? 'Remove bookmark' : 'Bookmark this character';
-        const icon = bookmarkBtn.querySelector('i');
-        if (icon) {
-            icon.classList.toggle('fa-solid', bookmarked);
-            icon.classList.toggle('fa-regular', !bookmarked);
-        }
-    }
+    datacatBookmarks.syncModalState(hit);
 
     // Import button — neutral loading state until definition fetch resolves
     const importBtn = document.getElementById('datacatImportBtn');
@@ -2521,7 +2389,7 @@ function updateNsfwToggle() {
 function updateDatacatFiltersButtonState() {
     const btn = document.getElementById('datacatFiltersBtn');
     if (!btn) return;
-    const count = [datacatFilterHideOwned, datacatFilterHidePossible, datacatFilterMyBookmarks].filter(Boolean).length;
+    const count = [datacatFilterHideOwned, datacatFilterHidePossible, datacatBookmarks.filterMyBookmarks].filter(Boolean).length;
     btn.classList.toggle('has-filters', count > 0);
     btn.innerHTML = count > 0
         ? `<i class="fa-solid fa-sliders"></i> Features (${count})`
@@ -2555,15 +2423,7 @@ function initDatacatView() {
     const grid = document.getElementById('datacatGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
-            const bookmarkBtn = e.target.closest('.datacat-bookmark-btn');
-            if (bookmarkBtn) {
-                e.stopPropagation();
-                const bId = bookmarkBtn.dataset.datacatId;
-                if (!bId) return;
-                const bHit = datacatCharacters.find(c => String(getCharId(c)) === bId) || { character_id: bId };
-                toggleDatacatBookmark(bHit);
-                return;
-            }
+            if (datacatBookmarks.handleGridClick(e, datacatCharacters)) return;
 
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
@@ -2684,19 +2544,7 @@ function initDatacatView() {
     });
 
     // Bookmarks filter — switches the grid into local-only bookmark view
-    const bookmarksCb = document.getElementById('datacatFilterMyBookmarks');
-    if (bookmarksCb) bookmarksCb.checked = datacatFilterMyBookmarks;
-    on('datacatFilterMyBookmarks', 'change', () => {
-        const el = document.getElementById('datacatFilterMyBookmarks');
-        if (el) datacatFilterMyBookmarks = el.checked;
-        updateDatacatFiltersButtonState();
-        datacatCurrentOffset = 0;
-        if (datacatFilterMyBookmarks) {
-            renderDatacatBookmarksView();
-        } else {
-            loadCharacters(false);
-        }
-    });
+    datacatBookmarks.attachFilterCheckbox();
 
     // Sort mode
     on('datacatSortSelect', 'change', () => {
@@ -2717,8 +2565,8 @@ function initDatacatView() {
         datacatCurrentOffset = 0;
         updateSearchPlaceholder();
         updateTagsVisibility();
-        if (datacatFilterMyBookmarks) {
-            renderDatacatBookmarksView();
+        if (datacatBookmarks.filterMyBookmarks) {
+            datacatBookmarks.renderBookmarksView();
         } else {
             loadCharacters(false);
         }
@@ -2857,9 +2705,7 @@ function initDatacatView() {
             }
         });
 
-        on('datacatCharBookmarkBtn', 'click', () => {
-            if (datacatSelectedChar) toggleDatacatBookmark(datacatSelectedChar);
-        });
+        datacatBookmarks.attachModalBtn();
 
         const modalOverlay = document.getElementById('datacatCharModal');
         if (modalOverlay) {
@@ -3099,7 +2945,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
                     <div class="dropdown-section-title">Bookmarks:</div>
-                    <label class="filter-checkbox"><input type="checkbox" id="datacatFilterMyBookmarks" ${datacatFilterMyBookmarks ? 'checked' : ''}> <i class="fa-solid fa-bookmark" style="color: #ff6b6b;"></i> My Bookmarks</label>
+                    ${datacatBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -3221,9 +3067,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
-                    <button id="datacatCharBookmarkBtn" class="action-btn secondary datacat-bookmark-btn" title="Bookmark this character">
-                        <i class="fa-regular fa-bookmark"></i>
-                    </button>
+                    ${datacatBookmarks.renderModalBtn()}
                     <a id="datacatOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on DataCat">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -3337,7 +3181,6 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     init() {
         super.init();
         loadFollowedCreators();
-        loadDatacatBookmarks();
         this.buildLocalLibraryLookup();
         initDatacatView();
         const grid = document.getElementById('datacatGrid');
@@ -3362,8 +3205,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             const token = await initDcSession(savedToken);
             if (token) {
                 if (token !== savedToken) setSetting('datacatToken', token);
-                if (datacatFilterMyBookmarks) {
-                    renderDatacatBookmarksView();
+                if (datacatBookmarks.filterMyBookmarks) {
+                    datacatBookmarks.renderBookmarksView();
                 } else {
                     loadCharacters(false);
                 }
