@@ -1,0 +1,55 @@
+/* JannyAI Bookmark Button — mirrors .chub-favorite-btn-inline conventions */
+
+/* Card-footer variant: rendered as a .browse-card-stat */
+.browse-card-footer .janny-bookmark-btn {
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+    background: transparent;
+    margin-left: auto; /* push to the right of the footer stat row */
+}
+
+.browse-card-footer .janny-bookmark-btn:hover {
+    background: rgba(255, 107, 107, 0.15);
+}
+
+.browse-card-footer .janny-bookmark-btn i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.browse-card-footer .janny-bookmark-btn:hover i {
+    transform: scale(1.15);
+}
+
+.browse-card-footer .janny-bookmark-btn.favorited {
+    background: rgba(255, 107, 107, 0.12);
+}
+
+.browse-card-footer .janny-bookmark-btn.favorited i {
+    font-weight: 900;
+}
+
+/* Modal variant: rendered as an .action-btn next to Import/Open */
+#jannyCharBookmarkBtn {
+    min-width: 36px;
+}
+
+#jannyCharBookmarkBtn i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+#jannyCharBookmarkBtn:hover i {
+    transform: scale(1.15);
+}
+
+#jannyCharBookmarkBtn.favorited i {
+    font-weight: 900;
+}
+
+#jannyCharBookmarkBtn.favorited {
+    background: rgba(255, 107, 107, 0.12);
+    border-color: rgba(255, 107, 107, 0.35);
+}

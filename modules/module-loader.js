@@ -299,6 +299,7 @@ async function initModuleSystem() {
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');
     loadModuleCSS('./providers/chub/chub-browse.css');
+    loadModuleCSS('./providers/janny/janny-browse.css');
     loadModuleCSS('./providers/chartavern/chartavern-browse.css');
     loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
     loadModuleCSS('./providers/wyvern/wyvern-browse.css');
