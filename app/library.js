@@ -2343,7 +2343,150 @@ function setupSettingsModal() {
             }
         };
     }
-    
+
+    // ── Bookmarks Backup (export/import) ────────────────────
+    const BOOKMARK_KEYS = ['jannyBookmarks', 'datacatBookmarks', 'ctBookmarks', 'pygBookmarks', 'wyvernBookmarks'];
+    const BOOKMARK_ID_FIELDS = {
+        jannyBookmarks: 'id',
+        datacatBookmarks: 'id',
+        pygBookmarks: 'id',
+        wyvernBookmarks: 'id',
+        ctBookmarks: 'path',
+    };
+
+    const exportBookmarksBtn = document.getElementById('exportBookmarksBtn');
+    if (exportBookmarksBtn) {
+        exportBookmarksBtn.onclick = () => {
+            const bookmarks = {};
+            let total = 0;
+            for (const k of BOOKMARK_KEYS) {
+                const arr = getSetting(k) || [];
+                if (Array.isArray(arr) && arr.length) {
+                    bookmarks[k] = arr;
+                    total += arr.length;
+                }
+            }
+            if (total === 0) {
+                showToast('No bookmarks to export', 'info');
+                return;
+            }
+            const envelope = {
+                type: 'CharacterLibraryBookmarks',
+                version: 1,
+                exportedAt: new Date().toISOString(),
+                bookmarks,
+            };
+            const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `character-library-bookmarks-${new Date().toISOString().slice(0, 10)}.json`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast(`Exported ${total} bookmarks`, 'success');
+        };
+    }
+
+    const importBookmarksBtn = document.getElementById('importBookmarksBtn');
+    const importBookmarksFileInput = document.getElementById('importBookmarksFileInput');
+    if (importBookmarksBtn && importBookmarksFileInput) {
+        importBookmarksBtn.onclick = () => importBookmarksFileInput.click();
+        importBookmarksFileInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            importBookmarksFileInput.value = '';
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                let envelope;
+                try {
+                    envelope = JSON.parse(reader.result);
+                } catch (err) {
+                    showToast('Invalid bookmarks file: not valid JSON', 'error');
+                    return;
+                }
+                if (!envelope || envelope.type !== 'CharacterLibraryBookmarks') {
+                    showToast('Invalid bookmarks file: wrong type', 'error');
+                    return;
+                }
+                if (envelope.version !== 1) {
+                    showToast(`Unsupported bookmarks file version: ${envelope.version}`, 'error');
+                    return;
+                }
+                const imported = envelope.bookmarks || {};
+                const validKeys = Object.keys(imported).filter(k => BOOKMARK_KEYS.includes(k) && Array.isArray(imported[k]));
+                if (validKeys.length === 0) {
+                    showToast('Bookmarks file contains no recognized providers', 'error');
+                    return;
+                }
+                let totalIncoming = 0;
+                for (const k of validKeys) totalIncoming += imported[k].length;
+
+                const applyImport = (mode) => {
+                    if (mode === 'replace') {
+                        for (const k of validKeys) setSetting(k, imported[k]);
+                        showToast(`Replaced bookmarks for ${validKeys.length} provider${validKeys.length === 1 ? '' : 's'}`, 'success');
+                    } else {
+                        let added = 0;
+                        for (const k of validKeys) {
+                            const idField = BOOKMARK_ID_FIELDS[k];
+                            const existing = Array.isArray(getSetting(k)) ? getSetting(k) : [];
+                            const seen = new Set();
+                            const merged = [];
+                            for (const entry of existing) {
+                                const id = entry && entry[idField];
+                                if (id != null) seen.add(String(id));
+                                merged.push(entry);
+                            }
+                            for (const entry of imported[k]) {
+                                const id = entry && entry[idField];
+                                if (id == null) continue;
+                                const key = String(id);
+                                if (seen.has(key)) continue;
+                                seen.add(key);
+                                merged.push(entry);
+                                added++;
+                            }
+                            setSetting(k, merged);
+                        }
+                        showToast(`Imported ${added} new bookmark${added === 1 ? '' : 's'}`, 'success');
+                    }
+                    window.dispatchEvent(new CustomEvent('charlib:bookmarks-imported'));
+                };
+
+                const modal = document.createElement('div');
+                modal.className = 'confirm-modal';
+                modal.innerHTML = `
+                    <div class="confirm-modal-content" style="max-width: calc(450px * var(--modal-scale, 1));">
+                        <div class="confirm-modal-header">
+                            <h3><i class="fa-regular fa-bookmark"></i> Import Bookmarks</h3>
+                            <button class="close-confirm-btn" data-action="cancel">&times;</button>
+                        </div>
+                        <div class="confirm-modal-body">
+                            <p>Import <strong>${totalIncoming}</strong> bookmark${totalIncoming === 1 ? '' : 's'} across <strong>${validKeys.length}</strong> provider${validKeys.length === 1 ? '' : 's'}.</p>
+                            <p><strong>Merge</strong> keeps existing bookmarks and adds new ones. <strong>Replace</strong> overwrites existing per-provider lists.</p>
+                        </div>
+                        <div class="confirm-modal-footer">
+                            <button class="action-btn secondary" data-action="cancel">Cancel</button>
+                            <button class="action-btn danger" data-action="replace"><i class="fa-solid fa-rotate"></i> Replace</button>
+                            <button class="action-btn primary" data-action="merge"><i class="fa-solid fa-code-merge"></i> Merge</button>
+                        </div>
+                    </div>
+                `;
+                document.body.appendChild(modal);
+                modal.addEventListener('click', (ev) => {
+                    const action = ev.target.closest('[data-action]')?.dataset.action;
+                    if (!action) return;
+                    if (action === 'merge' || action === 'replace') applyImport(action);
+                    modal.remove();
+                });
+            };
+            reader.onerror = () => showToast('Failed to read file', 'error');
+            reader.readAsText(file);
+        });
+    }
+
     // Migration button handler
     if (migrateGalleryFoldersBtn) {
         migrateGalleryFoldersBtn.onclick = async () => {

@@ -266,6 +266,19 @@ export function createBookmarkModule(config) {
         });
     }
 
+    function reload() {
+        state.loaded = false;
+        load();
+        for (const [id] of state.bookmarks) syncUI(id, true);
+    }
+
+    if (typeof window !== 'undefined') {
+        window.addEventListener('charlib:bookmarks-imported', () => {
+            reload();
+            if (state.filterMyBookmarks) renderBookmarksView();
+        });
+    }
+
     return {
         load,
         persist,
@@ -282,6 +295,7 @@ export function createBookmarkModule(config) {
         handleGridClick,
         attachModalBtn,
         attachFilterCheckbox,
+        reload,
         get filterMyBookmarks() { return state.filterMyBookmarks; },
         set filterMyBookmarks(v) { state.filterMyBookmarks = !!v; },
         get size() { return state.bookmarks.size; },
