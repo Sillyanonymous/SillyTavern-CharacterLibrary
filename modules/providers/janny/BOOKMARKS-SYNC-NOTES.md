@@ -95,6 +95,37 @@ non-trivial. Revisit alongside a broader CT auth refresh, or bundle
 with Option A above if `cl-helper` gets updated for an unrelated
 reason.
 
+## Cross-provider note: Pygmalion clickable star/favorite
+
+On pygmalion.chat, the star icon on each card is the user's remote
+"favorite" — clicking it on the website POSTs to the user's account
+and persists across devices. Pygmalion also has its own bookmark
+feature on the site, distinct from the favorite. Today the extension
+shows the star count as a display-only stat in the card footer
+(sourced from `hit.stars`) and provides the local-only bookmark via
+the shared factory in `bookmark-module.js`.
+
+Making the star clickable in the extension would mirror Chub's
+favorite-button pattern (`chubCharFavoriteBtn` in
+`chub-browse.js:720`). It would need:
+- Pygmalion auth in the extension (token/cookie capture UI similar
+  to Chub's `chubToken` modal in `chub-browse.js:1306-1356`).
+- A `POST /characters/<id>/favorite` (or equivalent) call routed
+  either directly or through `cl-helper` if CORS/Cloudflare blocks
+  the browser-side request.
+- Optimistic UI: toggle a `.starred` class + bump/decrement the
+  counter, reconcile on response.
+- Decision on whether the local bookmark *also* syncs the favorite
+  by default, or whether they remain two independent toggles (the
+  pygmalion.chat UI keeps them separate, which argues for the
+  latter).
+
+**Out of scope for the current bookmark round.** The local bookmark
+already solves the "save this card" problem without needing
+Pygmalion auth. Revisit alongside any broader Pygmalion auth work,
+or bundle into Option A above if `cl-helper` gets updated for an
+unrelated reason.
+
 ## Why we're not doing either right now
 
 Local-only already solves the original "cards disappear and I lose them"
