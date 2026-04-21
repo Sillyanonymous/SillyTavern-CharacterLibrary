@@ -295,6 +295,34 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load playlists module:', err);
     }
 
+    // Gallery Extractors — lazy-loaded on first use to save memory
+    // All call sites guard with typeof window.extractGalleryImages === 'function'
+    let _extractorsLoaded = false;
+    async function ensureExtractorsLoaded() {
+        if (_extractorsLoaded) return;
+        _extractorsLoaded = true;
+        try {
+            const { findCharacterGalleryUrls, extractGalleryImages, isGalleryUrl, identifyGallerySources } = await import('./gallery-extractors/extractor-registry.js');
+            await Promise.all([
+                import('./gallery-extractors/imgchest.js'),
+                import('./gallery-extractors/imgbb.js'),
+                import('./gallery-extractors/gdrive.js'),
+                import('./gallery-extractors/catbox.js'),
+                import('./gallery-extractors/mega.js'),
+                import('./gallery-extractors/postimg.js')
+            ]);
+            window.findCharacterGalleryUrls = findCharacterGalleryUrls;
+            window.extractGalleryImages = extractGalleryImages;
+            window.isGalleryUrl = isGalleryUrl;
+            window.identifyGallerySources = identifyGallerySources;
+            console.log('[ModuleLoader] Gallery extractors loaded (on demand)');
+        } catch (err) {
+            _extractorsLoaded = false;
+            console.warn('[ModuleLoader] Could not load gallery extractors:', err);
+        }
+    }
+    window.ensureExtractorsLoaded = ensureExtractorsLoaded;
+
     // Providers — must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');

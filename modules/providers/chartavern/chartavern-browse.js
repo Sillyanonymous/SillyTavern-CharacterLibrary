@@ -904,14 +904,17 @@ async function importCharacter(charData) {
 
         // Show import summary if character has embedded media
         const mediaUrls = result.embeddedMediaUrls || [];
-        if (mediaUrls.length > 0 && getSetting('notifyAdditionalContent') !== false) {
+        const galleryPageUrls = result.galleryPageUrls || [];
+        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 mediaCharacters: [{
                     name: result.characterName,
                     avatar: result.fileName,
                     avatarUrl: result.avatarUrl,
                     mediaUrls: mediaUrls,
-                    galleryId: result.galleryId
+                    galleryPageUrls: galleryPageUrls,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData
                 }]
             });
         }
@@ -1287,6 +1290,11 @@ function initCtView() {
     // ── Preview modal events (attached once — modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
+
+        if (!window.matchMedia('(max-width: 768px)').matches) {
+            const ctOverlay = document.getElementById('ctCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('ctCharName'), ctOverlay, ctOverlay?.querySelector('.browse-char-modal'));
+        }
 
         on('ctCharClose', 'click', () => closePreviewModal());
 

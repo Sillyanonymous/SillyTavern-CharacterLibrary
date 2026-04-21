@@ -2,8 +2,15 @@
 //
 // Provides server-side request proxying for providers that require
 // custom headers (like Origin) that browsers forbid setting.
+// Also provides gallery thumbnail generation via ST's bundled jimp.
 
 import { randomUUID } from 'node:crypto';
+import { join, resolve, sep, dirname } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { stat, readFile, writeFile } from 'node:fs/promises';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const info = {
     id: 'cl-helper',
@@ -14,12 +21,197 @@ export const info = {
 const PYGMALION_AUTH_URL = 'https://auth.pygmalion.chat/session';
 const PYGMALION_ORIGIN = 'https://pygmalion.chat';
 
+// =========================================================
+// Gallery thumbnail generation
+// =========================================================
+
+const THUMB_QUALITY = 82;
+const THUMB_MAX_SIZE = 1024;
+const THUMB_EXTENSIONS = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
+const THUMB_CONCURRENCY = 2;
+
+let _cacheDir = null;
+let _Jimp = null;
+let _imagesDir = null;
+let _thumbsReady = false;
+let _thumbActive = 0;
+let _thumbQueue = [];
+
+function _thumbSemaphore() {
+    if (_thumbActive < THUMB_CONCURRENCY) {
+        _thumbActive++;
+        return Promise.resolve();
+    }
+    return new Promise(resolve => _thumbQueue.push(resolve));
+}
+
+function _thumbRelease() {
+    if (_thumbQueue.length > 0) {
+        _thumbQueue.shift()();
+    } else {
+        _thumbActive--;
+    }
+}
+
+function resolveImagesDir() {
+    const stRoot = process.cwd();
+    const dataDir = join(stRoot, 'data');
+    if (!existsSync(dataDir)) return null;
+
+    const defaultPath = join(dataDir, 'default-user', 'user', 'images');
+    if (existsSync(defaultPath)) return defaultPath;
+
+    try {
+        for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+            if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+            const candidate = join(dataDir, entry.name, 'user', 'images');
+            if (existsSync(candidate)) return candidate;
+        }
+    } catch {}
+
+    return null;
+}
+
+async function initImageLib() {
+    const stModules = join(process.cwd(), 'node_modules');
+    const stImport = async (pkg) => {
+        const pj = JSON.parse(await readFile(join(stModules, pkg, 'package.json'), 'utf8'));
+        const entry = pj.exports?.['.']?.import?.default || pj.module || 'index.js';
+        return import(pathToFileURL(join(stModules, pkg, entry)).href);
+    };
+
+    try {
+        const { createJimp } = await stImport('@jimp/core');
+        const jpeg = (await stImport('@jimp/wasm-jpeg')).default;
+        const png = (await stImport('@jimp/wasm-png')).default;
+        const resize = await stImport('@jimp/plugin-resize');
+        const crop = await stImport('@jimp/plugin-crop');
+        const cover = await stImport('@jimp/plugin-cover');
+
+        const formats = [jpeg, png];
+        try { formats.push((await stImport('@jimp/wasm-webp')).default); } catch (e) { console.log('[cl-helper] webp not available:', e.message); }
+        try { formats.push((await stImport('@jimp/js-gif')).default); } catch (e) { console.log('[cl-helper] gif not available:', e.message); }
+
+        _Jimp = createJimp({
+            plugins: [resize.methods, crop.methods, cover.methods],
+            formats,
+        });
+        return true;
+    } catch (err) {
+        console.log('[cl-helper] jimp not available:', err.message);
+        return false;
+    }
+}
+
 /**
  * @param {import('express').Router} router
  */
 export async function init(router) {
+    // ---- All routes registered synchronously (before any awaits) ----
+
     router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.0.0' });
+        res.json({ ok: true, version: '1.1.0', thumbnails: _thumbsReady });
+    });
+
+    // =================================================================
+    // Gallery thumbnail endpoint
+    // =================================================================
+
+    router.get('/gallery-thumb/:folder/:file', async (req, res) => {
+        if (!_Jimp || !_imagesDir) {
+            return res.status(503).json({ error: 'Thumbnails not available' });
+        }
+
+        const { folder, file } = req.params;
+        const size = Math.min(Math.max(parseInt(req.query.s) || 384, 64), THUMB_MAX_SIZE);
+
+        if (!folder || !file
+            || folder.includes('..') || file.includes('..')
+            || folder.includes('/') || folder.includes('\\')
+            || file.includes('/') || file.includes('\\')) {
+            return res.status(400).json({ error: 'Invalid path' });
+        }
+
+        if (!THUMB_EXTENSIONS.test(file)) {
+            return res.status(400).json({ error: 'Unsupported file type' });
+        }
+
+        const originalPath = resolve(_imagesDir, folder, file);
+        if (!originalPath.startsWith(_imagesDir + sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        let origStat;
+        try {
+            origStat = await stat(originalPath);
+        } catch {
+            console.log(`[cl-helper] 404: ${originalPath}`);
+            return res.status(404).json({ error: 'Not found' });
+        }
+
+        const cacheFolder = join(_cacheDir, folder);
+        const cachePath = join(cacheFolder, `${file}_${size}.jpg`);
+
+        try {
+            const cacheStat = await stat(cachePath);
+            if (cacheStat.mtimeMs > origStat.mtimeMs) {
+                res.set('Content-Type', 'image/jpeg');
+                res.set('Cache-Control', 'public, max-age=86400');
+                return res.send(await readFile(cachePath));
+            }
+        } catch { /* cache miss */ }
+
+        try {
+            await _thumbSemaphore();
+            const image = await _Jimp.read(originalPath);
+            image.cover({ w: size, h: size });
+            const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
+            _thumbRelease();
+
+            mkdirSync(cacheFolder, { recursive: true });
+            writeFile(cachePath, buffer).catch(() => {});
+
+            res.set('Content-Type', 'image/jpeg');
+            res.set('Cache-Control', 'public, max-age=86400');
+            res.send(buffer);
+        } catch (err) {
+            _thumbRelease();
+            console.error(`[cl-helper] Thumb error ${folder}/${file}:`, err.message);
+            res.status(500).json({ error: 'Generation failed' });
+        }
+    });
+
+    // =================================================================
+    // Thumbnail cache cleanup (per folder)
+    // =================================================================
+
+    router.post('/gallery-thumb-cleanup/:folder', (req, res) => {
+        if (!_cacheDir) {
+            return res.status(503).json({ error: 'Thumbnails not available' });
+        }
+
+        const { folder } = req.params;
+        if (!folder || folder.includes('..') || folder.includes('/') || folder.includes('\\')) {
+            return res.status(400).json({ error: 'Invalid folder' });
+        }
+
+        const cacheFolder = resolve(_cacheDir, folder);
+        if (!cacheFolder.startsWith(_cacheDir + sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        try {
+            if (existsSync(cacheFolder)) {
+                rmSync(cacheFolder, { recursive: true, force: true });
+                console.log(`[cl-helper] Cleaned thumb cache: ${folder}`);
+                res.json({ ok: true, deleted: true });
+            } else {
+                res.json({ ok: true, deleted: false });
+            }
+        } catch (err) {
+            console.error(`[cl-helper] Cache cleanup error ${folder}:`, err.message);
+            res.status(500).json({ error: 'Cleanup failed' });
+        }
     });
 
     router.post('/pyg-login', async (req, res) => {
@@ -495,5 +687,175 @@ export async function init(router) {
         }
     });
 
+    // =================================================================
+    // Imgchest — password-protected gallery unlock
+    // =================================================================
+
+    const IMGCHEST_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+    function extractImgchestCookies(headers) {
+        const result = { xsrfToken: null, session: null };
+        const setCookies = typeof headers.getSetCookie === 'function'
+            ? headers.getSetCookie()
+            : (headers.get('set-cookie') || '').split(/,\s*(?=[A-Z])/);
+        for (const sc of setCookies) {
+            const xsrf = sc.match(/XSRF-TOKEN=([^;]+)/);
+            if (xsrf) result.xsrfToken = xsrf[1];
+            const sess = sc.match(/image_chest_session=([^;]+)/);
+            if (sess) result.session = sess[1];
+        }
+        return result;
+    }
+
+    function parseImgchestImages(html) {
+        const match = html.match(/data-page="([^"]+)"/);
+        if (!match) return [];
+        try {
+            const decoded = match[1]
+                .replace(/&quot;/g, '"')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&#039;/g, "'");
+            const data = JSON.parse(decoded);
+            const files = data?.props?.post?.files;
+            if (!Array.isArray(files)) return [];
+            return files
+                .filter(f => f.link && typeof f.link === 'string')
+                .map(f => ({ url: f.link, filename: f.link.split('/').pop() }));
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * POST /imgchest-unlock
+     * Body: { url: "https://imgchest.com/p/{id}", password: "..." }
+     * Returns: { images: [{url, filename}] } or { error: "..." }
+     *
+     * Three-step flow:
+     * 1. GET /p/{id}/validate — obtain XSRF + session cookies
+     * 2. POST /p/{id}/validate — submit password, receive authenticated cookies
+     * 3. GET /p/{id} — fetch unlocked page, extract images from data-page JSON
+     */
+    router.post('/imgchest-unlock', async (req, res) => {
+        const { url, password } = req.body ?? {};
+
+        if (!url || typeof url !== 'string') return res.status(400).json({ error: 'url is required' });
+        if (!password || typeof password !== 'string') return res.status(400).json({ error: 'password is required' });
+        if (url.length > 512) return res.status(400).json({ error: 'URL too long' });
+        if (password.length > 256) return res.status(400).json({ error: 'Password too long' });
+
+        let postId;
+        try {
+            const parsed = new URL(url);
+            if (parsed.hostname !== 'imgchest.com') {
+                return res.status(400).json({ error: 'Only imgchest.com URLs are supported' });
+            }
+            const m = parsed.pathname.match(/^\/p\/([a-zA-Z0-9]+)/);
+            if (!m) return res.status(400).json({ error: 'Invalid imgchest post URL' });
+            postId = m[1];
+        } catch {
+            return res.status(400).json({ error: 'Invalid URL' });
+        }
+
+        const validateUrl = `https://imgchest.com/p/${postId}/validate`;
+        const postUrl = `https://imgchest.com/p/${postId}`;
+
+        try {
+            // Step 1: GET validate page for cookies + XSRF token
+            const step1 = await fetch(validateUrl, {
+                headers: { 'User-Agent': IMGCHEST_UA, 'Accept': 'text/html' },
+            });
+            if (!step1.ok) {
+                return res.json({ error: `Validate page returned HTTP ${step1.status}` });
+            }
+
+            const cookies1 = extractImgchestCookies(step1.headers);
+            if (!cookies1.xsrfToken || !cookies1.session) {
+                return res.json({ error: 'Failed to obtain session from imgchest' });
+            }
+
+            const html1 = await step1.text();
+            let inertiaVersion = '';
+            const dataPageMatch = html1.match(/data-page="([^"]+)"/);
+            if (dataPageMatch) {
+                const decoded = dataPageMatch[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+                const vm = decoded.match(/"version":"([^"]+)"/);
+                if (vm) inertiaVersion = vm[1];
+            }
+
+            // Step 2: POST password
+            const step2 = await fetch(validateUrl, {
+                method: 'POST',
+                headers: {
+                    'User-Agent': IMGCHEST_UA,
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/html, application/xhtml+xml',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-Inertia': 'true',
+                    ...(inertiaVersion ? { 'X-Inertia-Version': inertiaVersion } : {}),
+                    'X-XSRF-TOKEN': decodeURIComponent(cookies1.xsrfToken),
+                    'Cookie': `XSRF-TOKEN=${cookies1.xsrfToken}; image_chest_session=${cookies1.session}`,
+                    'Origin': 'https://imgchest.com',
+                    'Referer': validateUrl,
+                },
+                body: JSON.stringify({ password }),
+                redirect: 'manual',
+            });
+
+            if (step2.status === 422) {
+                return res.json({ error: 'Wrong password' });
+            }
+            if (step2.status !== 302) {
+                await step2.text().catch(() => {});
+                return res.json({ error: `Password validation failed (HTTP ${step2.status})` });
+            }
+
+            const cookies2 = extractImgchestCookies(step2.headers);
+            const finalXsrf = cookies2.xsrfToken || cookies1.xsrfToken;
+            const finalSession = cookies2.session || cookies1.session;
+
+            // Step 3: GET the unlocked post page
+            const step3 = await fetch(postUrl, {
+                headers: {
+                    'User-Agent': IMGCHEST_UA,
+                    'Accept': 'text/html',
+                    'Cookie': `XSRF-TOKEN=${finalXsrf}; image_chest_session=${finalSession}`,
+                },
+            });
+
+            if (!step3.ok) {
+                return res.json({ error: `Failed to fetch unlocked post (HTTP ${step3.status})` });
+            }
+
+            const images = parseImgchestImages(await step3.text());
+            if (images.length === 0) {
+                return res.json({ error: 'No images found after password validation' });
+            }
+
+            console.log(`[cl-helper] Imgchest unlocked ${postId}: ${images.length} images`);
+            res.json({ images });
+        } catch (err) {
+            console.error('[cl-helper] Imgchest unlock error:', err.message);
+            res.status(502).json({ error: 'Failed to reach imgchest' });
+        }
+    });
+
     console.log('[cl-helper] Character Library helper plugin loaded');
+
+    // ---- Async: discover image processing library (after all routes registered) ----
+    _imagesDir = resolveImagesDir();
+    if (_imagesDir) {
+        _cacheDir = join(_imagesDir, '..', 'cl_thumbs');
+        const ok = await initImageLib();
+        _thumbsReady = ok;
+        if (ok) {
+            console.log(`[cl-helper] Gallery thumbnails enabled (images: ${_imagesDir})`);
+        } else {
+            console.log('[cl-helper] Gallery thumbnails disabled (jimp not available)');
+        }
+    } else {
+        console.log('[cl-helper] Gallery thumbnails disabled (images directory not found)');
+    }
 }

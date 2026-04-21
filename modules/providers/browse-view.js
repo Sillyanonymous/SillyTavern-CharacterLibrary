@@ -372,8 +372,7 @@ export class BrowseView {
                 const img = entry.target;
                 const realSrc = img.dataset.src;
                 if (realSrc && !img.dataset.failed && img.src !== realSrc) {
-                    img.src = realSrc;
-                    BrowseView.adjustPortraitPosition(img);
+                    BrowseView.loadImage(img, realSrc);
                 }
             }
         }, { rootMargin: '600px' });
@@ -435,8 +434,7 @@ export class BrowseView {
             if (rect.bottom > -160 && rect.top < preloadBottom) {
                 const realSrc = img.dataset.src;
                 if (realSrc && img.src !== realSrc) {
-                    img.src = realSrc;
-                    BrowseView.adjustPortraitPosition(img);
+                    BrowseView.loadImage(img, realSrc);
                 }
             }
         }
@@ -455,8 +453,7 @@ export class BrowseView {
             if (img.dataset.failed) continue;
             const realSrc = img.dataset.src;
             if (realSrc && img.src !== realSrc) {
-                img.src = realSrc;
-                BrowseView.adjustPortraitPosition(img);
+                BrowseView.loadImage(img, realSrc);
                 loaded++;
             }
         }
@@ -1185,6 +1182,24 @@ export class BrowseView {
         viewer.remove();
     }
 
+    // ── Image loading ───────────────────────────────────────
+
+    static loadImage(img, src) {
+        img.src = src;
+        const container = img.closest('.browse-card-image');
+        if (!container || container.classList.contains('loaded')) return;
+        img.addEventListener('load', function onLoad() {
+            img.removeEventListener('load', onLoad);
+            container.classList.add('loaded');
+            container.classList.remove('load-failed');
+        });
+        img.addEventListener('error', function onError() {
+            img.removeEventListener('error', onError);
+            container.classList.add('load-failed');
+        });
+        BrowseView.adjustPortraitPosition(img);
+    }
+
     // ── Portrait-aware position ─────────────────────────────
 
     static adjustPortraitPosition(img) {
@@ -1202,6 +1217,91 @@ export class BrowseView {
                 img.removeEventListener('load', handler);
                 apply();
             });
+        }
+    }
+
+    // ── Title scroll-reveal on click ─────────────────────────
+
+    static wireTitleScroll(titleEl, overlayEl, glassEl) {
+        if (!titleEl) return;
+        let _anim = null;
+        let _inner = null;
+
+        function unwrap() {
+            if (_inner) {
+                titleEl.textContent = _inner.textContent;
+                _inner = null;
+            }
+        }
+
+        function cancel() {
+            if (!_anim) return;
+            if (_anim.animation) _anim.animation.cancel();
+            if (_anim.timeout) clearTimeout(_anim.timeout);
+            _anim = null;
+            unwrap();
+            titleEl.classList.remove('browse-title-scrolling', 'browse-title-scroll-start', 'browse-title-scroll-end');
+        }
+
+        titleEl.addEventListener('click', async () => {
+            if (_anim) { cancel(); return; }
+
+            const distance = titleEl.scrollWidth - titleEl.clientWidth;
+            if (distance <= 0) return;
+
+            const inner = document.createElement('span');
+            inner.className = 'browse-title-scroll-inner';
+            inner.textContent = titleEl.textContent;
+            titleEl.textContent = '';
+            titleEl.appendChild(inner);
+            _inner = inner;
+            _anim = { animation: null, timeout: null };
+
+            const speed = 80;
+            const fwdMs = Math.max(500, (distance / speed) * 1000);
+            const retMs = Math.max(350, fwdMs * 0.55);
+
+            titleEl.classList.add('browse-title-scrolling', 'browse-title-scroll-start');
+
+            const fwd = inner.animate(
+                [{ transform: 'translateX(0)' }, { transform: `translateX(${-distance}px)` }],
+                { duration: fwdMs, easing: 'cubic-bezier(0.25, 0.1, 0.25, 1)', fill: 'forwards', composite: 'replace' }
+            );
+            _anim.animation = fwd;
+            await fwd.finished;
+            if (!_anim) return;
+
+            titleEl.classList.remove('browse-title-scroll-start');
+            titleEl.classList.add('browse-title-scroll-end');
+
+            await new Promise(r => { _anim.timeout = setTimeout(r, 1200); });
+            if (!_anim) return;
+
+            titleEl.classList.remove('browse-title-scroll-end');
+
+            const ret = inner.animate(
+                [{ transform: `translateX(${-distance}px)` }, { transform: 'translateX(0)' }],
+                { duration: retMs, easing: 'cubic-bezier(0.4, 0, 0.2, 1)', fill: 'forwards', composite: 'replace' }
+            );
+            _anim.animation = ret;
+            await ret.finished;
+            if (_anim) {
+                _anim = null;
+                unwrap();
+                titleEl.classList.remove('browse-title-scrolling');
+            }
+        });
+
+        if (overlayEl) {
+            new MutationObserver(() => {
+                if (overlayEl.classList.contains('hidden')) cancel();
+            }).observe(overlayEl, { attributes: true, attributeFilter: ['class'] });
+        }
+
+        if (glassEl) {
+            new MutationObserver(() => {
+                if (glassEl.classList.contains('header-collapsed')) cancel();
+            }).observe(glassEl, { attributes: true, attributeFilter: ['class'] });
         }
     }
 }

@@ -118,7 +118,9 @@
     }
 
     /* Kill transitions on remaining scroll-visible elements */
-    .card-image,
+    .card-image {
+        transition: opacity 0.3s ease !important;
+    }
     .chat-card,
     .glass-btn,
     .glass-select,
@@ -1574,6 +1576,10 @@
         max-height: 30vh;
         font-size: var(--font-xs);
         padding: 8px;
+    }
+    .import-log-entry {
+        word-break: break-all;
+        overflow-wrap: anywhere;
     }
     .import-stats {
         flex-wrap: wrap;

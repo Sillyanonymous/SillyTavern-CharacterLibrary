@@ -65,8 +65,7 @@ let pygFollowedUsers = [];
 let pygFollowingCharacters = [];
 let pygFollowingLoading = false;
 let pygFollowingSort = 'newest';
-let _followingCreatorFilter = null;
-let _followingCssFiltered = false;
+let _returnToFollowing = false;
 
 // Auth state
 let pygPluginAvailable = false;
@@ -803,7 +802,7 @@ function renderPygGalleryGrid(galleryImages) {
         section.style.display = 'block';
         if (label) label.textContent = `(${galleryImages.length})`;
         grid.innerHTML = galleryImages.map(img =>
-            `<img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onerror="this.style.display='none'">`
+            `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
         ).join('');
     } else {
         section.style.display = 'none';
@@ -1070,7 +1069,8 @@ async function importCharacter(charData) {
 
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
-        if ((hasGallery || mediaUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
+        const galleryPageUrls = result.galleryPageUrls || [];
+        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 galleryCharacters: hasGallery ? [{
                     name: result.characterName,
@@ -1081,12 +1081,14 @@ async function importCharacter(charData) {
                     avatar: result.fileName,
                     galleryId: result.galleryId
                 }] : [],
-                mediaCharacters: mediaUrls.length > 0 ? [{
+                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
                     name: result.characterName,
                     avatar: result.fileName,
                     avatarUrl: result.avatarUrl,
                     mediaUrls: mediaUrls,
-                    galleryId: result.galleryId
+                    galleryPageUrls: galleryPageUrls,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData
                 }] : []
             });
         }
@@ -1186,6 +1188,12 @@ function clearAuthorFilter() {
 
     const followBtn = document.getElementById('pygFollowAuthorBtn');
     if (followBtn) followBtn.style.display = 'none';
+
+    if (_returnToFollowing) {
+        _returnToFollowing = false;
+        switchPygViewMode('following');
+        return;
+    }
 
     loadCharacters(false);
 }
@@ -1461,21 +1469,6 @@ function sortPygFollowingCharacters(characters) {
     }
 }
 
-function clearFollowingCreator() {
-    _followingCreatorFilter = null;
-    const banner = document.getElementById('pygFollowingCreatorBanner');
-    if (banner) banner.classList.add('hidden');
-    if (_followingCssFiltered) {
-        _followingCssFiltered = false;
-        const tempGrid = document.getElementById('pygCreatorGrid');
-        if (tempGrid) tempGrid.remove();
-        const grid = document.getElementById('pygFollowingGrid');
-        if (grid) grid.classList.remove('grid-suspended');
-    } else {
-        renderPygFollowing();
-    }
-}
-
 function _handleFollowingCardClick(e) {
     if (pygBookmarks.handleGridClick(e, pygFollowingCharacters)) return;
 
@@ -1499,15 +1492,8 @@ function _handleFollowingCardClick(e) {
 }
 
 function renderPygFollowing() {
-    const tempGrid = document.getElementById('pygCreatorGrid');
-    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('pygFollowingGrid');
     if (!grid) return;
-    grid.classList.remove('grid-suspended');
-    _followingCreatorFilter = null;
-    _followingCssFiltered = false;
-    const banner = document.getElementById('pygFollowingCreatorBanner');
-    if (banner) banner.classList.add('hidden');
 
     // Client-side tag + hide-owned filtering
     const includeTags = [...pygIncludeTags];
@@ -2121,6 +2107,7 @@ function initPygView() {
             }
 
             switchPygViewMode(newMode);
+            _returnToFollowing = false;
         });
     });
 
@@ -2279,13 +2266,18 @@ function initPygView() {
         followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
 
-    on('pygFollowingCreatorClose', 'click', () => clearFollowingCreator());
-
     pygBookmarks.attachFilterCheckbox();
+
 
     // ── Preview modal events (attached once — persist across provider switches)
     if (!modalEventsAttached) {
         modalEventsAttached = true;
+        const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
+
+        if (isDesktop) {
+            const pygOverlay = document.getElementById('pygCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('pygCharName'), pygOverlay, pygOverlay?.querySelector('.browse-char-modal'));
+        }
 
         on('pygCharClose', 'click', () => closePreviewModal());
         on('pygImportBtn', 'click', () => { if (pygSelectedChar) importCharacter(pygSelectedChar); });
@@ -2307,7 +2299,7 @@ function initPygView() {
 
         // Avatar click → full-size viewer (desktop only; mobile has its own handler)
         const avatar = document.getElementById('pygCharAvatar');
-        if (avatar && !window.matchMedia('(max-width: 768px)').matches) {
+        if (avatar && isDesktop) {
             avatar.style.cursor = 'pointer';
             avatar.addEventListener('click', () => {
                 const src = avatar.src;
@@ -2374,7 +2366,6 @@ function initPygView() {
         window.registerOverlay?.({ id: 'pygCharModal', tier: 7, close: () => closePreviewModal() });
         window.registerOverlay?.({ id: 'pygLoginModal', tier: 6, close: () => closePygTokenModal() });
         window.registerOverlay?.({ id: 'pygAuthorBanner', tier: 9, close: () => clearAuthorFilter() });
-        window.registerOverlay?.({ id: 'pygFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 }
 
@@ -2473,34 +2464,9 @@ class PygmalionBrowseView extends BrowseView {
     }
 
     browseCreatorFromManager(creator) {
-        _followingCreatorFilter = creator.id;
-        _followingCssFiltered = true;
-        const banner = document.getElementById('pygFollowingCreatorBanner');
-        const nameEl = document.getElementById('pygFollowingCreatorName');
-        if (banner && nameEl) {
-            nameEl.textContent = creator.name || creator.id;
-            banner.classList.remove('hidden');
-            window.pushOverlayGuard?.();
-        }
-        const grid = document.getElementById('pygFollowingGrid');
-        if (grid) {
-            grid.classList.add('grid-suspended');
-            let source = pygFollowingCharacters.filter(c => {
-                const ownerId = c._followedAuthorId || '';
-                return ownerId === creator.id;
-            });
-            if (pygFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
-            if (pygFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
-            if (!pygNsfwEnabled) source = source.filter(c => !c.isSensitive);
-            const sorted = sortPygFollowingCharacters(source);
-            const tempGrid = document.createElement('div');
-            tempGrid.id = 'pygCreatorGrid';
-            tempGrid.className = 'browse-grid';
-            tempGrid.innerHTML = sorted.map(c => createPygCard(c)).join('');
-            grid.after(tempGrid);
-            tempGrid.addEventListener('click', _handleFollowingCardClick);
-            pygmalionBrowseView.observeImages(tempGrid);
-        }
+        switchPygViewMode('browse');
+        _returnToFollowing = true;
+        filterByAuthor(creator.name || creator.id, creator.id);
     }
 
     get previewModalId() { return 'pygCharModal'; }
@@ -2697,17 +2663,6 @@ class PygmalionBrowseView extends BrowseView {
                     </div>
                 </div>
                 ${this.renderFollowingManagerPanel()}
-                <div id="pygFollowingCreatorBanner" class="browse-author-banner hidden">
-                    <div class="browse-author-banner-content">
-                        <i class="fa-solid fa-user"></i>
-                        <span>Showing characters by <strong id="pygFollowingCreatorName"></strong></span>
-                    </div>
-                    <div class="browse-author-banner-actions">
-                        <button id="pygFollowingCreatorClose" class="glass-btn icon-only" title="Back to timeline">
-                            <i class="fa-solid fa-times"></i>
-                        </button>
-                    </div>
-                </div>
                 <div id="pygFollowingGrid" class="browse-grid"></div>
                 <div class="browse-load-more" id="pygFollowingLoadMore" style="display: none;">
                     <button id="pygFollowingLoadMoreBtn" class="glass-btn">

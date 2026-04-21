@@ -89,8 +89,7 @@ let wyvernFilterHasAltGreetings = false;
 let wyvernViewMode = 'browse';
 let wyvernFollowingCharacters = [];
 let wyvernFollowingLoading = false;
-let _followingCreatorFilter = null;
-let _followingCssFiltered = false;
+let _returnToFollowing = false;
 let wyvernCreatorFilter = null; // { uid, displayName, vanityUrl }
 let wyvernCreatorSort = 'created_at';
 let wyvernIsFollowingCurrentCreator = false;
@@ -522,17 +521,6 @@ class WyvernBrowseView extends BrowseView {
                     </div>
                 </div>
                 ${this.renderFollowingManagerPanel()}
-                <div id="wyvernFollowingCreatorBanner" class="browse-author-banner hidden">
-                    <div class="browse-author-banner-content">
-                        <i class="fa-solid fa-user"></i>
-                        <span>Showing characters by <strong id="wyvernFollowingCreatorName"></strong></span>
-                    </div>
-                    <div class="browse-author-banner-actions">
-                        <button id="wyvernFollowingCreatorClose" class="glass-btn icon-only" title="Back to timeline">
-                            <i class="fa-solid fa-times"></i>
-                        </button>
-                    </div>
-                </div>
                 <div id="wyvernFollowingGrid" class="browse-grid"></div>
             </div>
         `;
@@ -892,33 +880,9 @@ class WyvernBrowseView extends BrowseView {
     }
 
     browseCreatorFromManager(creator) {
-        _followingCreatorFilter = creator.id;
-        _followingCssFiltered = true;
-        const banner = document.getElementById('wyvernFollowingCreatorBanner');
-        const nameEl = document.getElementById('wyvernFollowingCreatorName');
-        if (banner && nameEl) {
-            nameEl.textContent = creator.name || creator.id;
-            banner.classList.remove('hidden');
-            window.pushOverlayGuard?.();
-        }
-        const grid = document.getElementById('wyvernFollowingGrid');
-        if (grid) {
-            grid.classList.add('grid-suspended');
-            let source = wyvernFollowingCharacters.filter(c => {
-                const uid = c.creator?.uid || '';
-                return uid === creator.id;
-            });
-            if (wyvernFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
-            if (wyvernFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
-            const sorted = sortWyvernFollowingCharacters(source);
-            const tempGrid = document.createElement('div');
-            tempGrid.id = 'wyvernCreatorFollowingGrid';
-            tempGrid.className = 'browse-grid';
-            tempGrid.innerHTML = sorted.map(c => createWyvernCard(c)).join('');
-            grid.after(tempGrid);
-            tempGrid.addEventListener('click', _handleFollowingCardClick);
-            wyvernBrowseView.observeImages(tempGrid);
-        }
+        switchWyvernViewMode('browse');
+        _returnToFollowing = true;
+        loadWyvernCreatorCharacters(creator.id, creator.name || creator.id, creator.username || '');
     }
 
     getFollowingManagerSortOptions() {
@@ -977,6 +941,7 @@ function initWyvernView() {
                 return;
             }
             switchWyvernViewMode(mode);
+            _returnToFollowing = false;
         });
     });
 
@@ -1081,10 +1046,16 @@ function initWyvernView() {
     // Modal + document-level listeners — attach once (persist across provider switches)
     if (!wyvernModalEventsAttached) {
         wyvernModalEventsAttached = true;
+        const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
+
+        if (isDesktop) {
+            const wyvernOverlay = document.getElementById('wyvernCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('wyvernCharName'), wyvernOverlay, wyvernOverlay?.querySelector('.browse-char-modal'));
+        }
 
         // Avatar click → full-size
         const wyvernAvatar = document.getElementById('wyvernCharAvatar');
-        if (wyvernAvatar && !window.matchMedia('(max-width: 768px)').matches) {
+        if (wyvernAvatar && isDesktop) {
             wyvernAvatar.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (!wyvernAvatar.src) return;
@@ -1145,7 +1116,6 @@ function initWyvernView() {
         window.registerOverlay?.({ id: 'wyvernCharModal', tier: 7, close: () => hideModal('wyvernCharModal') });
         window.registerOverlay?.({ id: 'wyvernLoginModal', tier: 6, close: () => hideModal('wyvernLoginModal') });
         window.registerOverlay?.({ id: 'wyvernCreatorBanner', tier: 9, close: () => clearWyvernCreatorFilter() });
-        window.registerOverlay?.({ id: 'wyvernFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 
     loadWyvernToken();
@@ -2088,21 +2058,6 @@ function sortWyvernFollowingCharacters(characters) {
     return [...characters].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
 }
 
-function clearFollowingCreator() {
-    _followingCreatorFilter = null;
-    const banner = document.getElementById('wyvernFollowingCreatorBanner');
-    if (banner) banner.classList.add('hidden');
-    if (_followingCssFiltered) {
-        _followingCssFiltered = false;
-        const tempGrid = document.getElementById('wyvernCreatorFollowingGrid');
-        if (tempGrid) tempGrid.remove();
-        const grid = document.getElementById('wyvernFollowingGrid');
-        if (grid) grid.classList.remove('grid-suspended');
-    } else {
-        renderWyvernFollowing();
-    }
-}
-
 function _handleFollowingCardClick(e) {
     if (wyvernBookmarks.handleGridClick(e, wyvernFollowingCharacters)) return;
 
@@ -2126,15 +2081,8 @@ function _handleFollowingCardClick(e) {
 }
 
 function renderWyvernFollowing() {
-    const tempGrid = document.getElementById('wyvernCreatorFollowingGrid');
-    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('wyvernFollowingGrid');
     if (!grid) return;
-    grid.classList.remove('grid-suspended');
-    _followingCreatorFilter = null;
-    _followingCssFiltered = false;
-    const banner = document.getElementById('wyvernFollowingCreatorBanner');
-    if (banner) banner.classList.add('hidden');
 
     let filtered = wyvernFollowingCharacters;
     if (wyvernFilterHideOwned) {
@@ -2333,6 +2281,12 @@ function clearWyvernCreatorFilter() {
     const banner = document.getElementById('wyvernCreatorBanner');
     if (banner) banner.classList.add('hidden');
 
+    if (_returnToFollowing) {
+        _returnToFollowing = false;
+        switchWyvernViewMode('following');
+        return;
+    }
+
     wyvernCharacters = [];
     wyvernCurrentPage = 1;
     wyvernHasMore = true;
@@ -2456,8 +2410,6 @@ function setupWyvernGridDelegates() {
 
     const followingGrid = document.getElementById('wyvernFollowingGrid');
     if (followingGrid) followingGrid.addEventListener('click', _handleFollowingCardClick);
-
-    on('wyvernFollowingCreatorClose', 'click', () => clearFollowingCreator());
 
     wyvernDelegatesInitialized = true;
 }
@@ -2781,7 +2733,7 @@ async function openWyvernCharPreview(char) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${count})`;
                 galleryGrid.innerHTML = node.galleryImages.map(img =>
-                    `<img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.title || '')}" title="${escapeHtml(img.title || 'Gallery image')}" loading="lazy" onerror="this.style.display='none'">`
+                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.title || '')}" title="${escapeHtml(img.title || 'Gallery image')}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
                 ).join('');
             }
         } else if (node.galleryImages !== undefined) {
@@ -2981,8 +2933,9 @@ async function downloadWyvernCharacter() {
         const localAvatarFileName = result.fileName;
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
+        const galleryPageUrls = result.galleryPageUrls || [];
 
-        if ((hasGallery || mediaUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
+        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 galleryCharacters: hasGallery ? [{
                     name: result.characterName,
@@ -2993,12 +2946,14 @@ async function downloadWyvernCharacter() {
                     avatar: localAvatarFileName,
                     galleryId: result.galleryId
                 }] : [],
-                mediaCharacters: mediaUrls.length > 0 ? [{
+                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
                     name: result.characterName,
                     avatar: localAvatarFileName,
                     avatarUrl: result.avatarUrl,
                     mediaUrls: mediaUrls,
-                    galleryId: result.galleryId
+                    galleryPageUrls: galleryPageUrls,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData
                 }] : []
             });
         }
