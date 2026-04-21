@@ -108,8 +108,7 @@ let chubMaxTokens = 100000; // Maximum tokens
 // ChubAI View mode and author filter
 let chubViewMode = 'browse'; // 'browse' or 'timeline'
 let chubAuthorFilter = null; // Username to filter by
-let _timelineCreatorFilter = null;
-let _timelineCssFiltered = false;
+let _returnToTimeline = false;
 let chubAuthorSort = 'id'; // Sort for author view (id = newest)
 let chubTimelineCharacters = [];
 let chubTimelinePage = 1;
@@ -298,36 +297,8 @@ class ChubBrowseView extends BrowseView {
     }
 
     browseCreatorFromManager(creator) {
-        _timelineCreatorFilter = creator.id;
-        _timelineCssFiltered = true;
-        const banner = document.getElementById('chubTimelineCreatorBanner');
-        const nameEl = document.getElementById('chubTimelineCreatorName');
-        if (banner && nameEl) {
-            nameEl.textContent = creator.name || creator.id;
-            banner.classList.remove('hidden');
-            window.pushOverlayGuard?.();
-        }
-        const loadMoreEl = document.getElementById('chubTimelineLoadMore');
-        if (loadMoreEl) loadMoreEl.style.display = 'none';
-        const grid = document.getElementById('chubTimelineGrid');
-        if (grid) {
-            grid.classList.add('grid-suspended');
-            const filterLower = _timelineCreatorFilter.toLowerCase();
-            let source = chubTimelineCharacters.filter(c => {
-                const fp = getChubFullPath(c);
-                return fp && fp.split('/')[0].toLowerCase() === filterLower;
-            });
-            if (chubFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
-            if (chubFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
-            const sorted = sortTimelineCharacters(source);
-            const tempGrid = document.createElement('div');
-            tempGrid.id = 'chubCreatorGrid';
-            tempGrid.className = 'browse-grid';
-            tempGrid.innerHTML = sorted.map(c => createChubCard(c, true)).join('');
-            grid.after(tempGrid);
-            tempGrid.addEventListener('click', _handleTimelineCardClick);
-            chubBrowseView.observeImages(tempGrid);
-        }
+        _returnToTimeline = true;
+        filterByAuthor(creator.id);
     }
 
     get previewModalId() { return 'chubCharModal'; }
@@ -392,7 +363,7 @@ class ChubBrowseView extends BrowseView {
 
     canLoadMore() {
         if (chubViewMode === 'browse') return chubHasMore && !chubIsLoading;
-        if (chubViewMode === 'timeline') return !_timelineCreatorFilter && (chubTimelineHasMore || chubTimelineAuthorHasMore) && !chubTimelineLoadInFlight;
+        if (chubViewMode === 'timeline') return (chubTimelineHasMore || chubTimelineAuthorHasMore) && !chubTimelineLoadInFlight;
         return false;
     }
 
@@ -612,17 +583,6 @@ class ChubBrowseView extends BrowseView {
                     </div>
                 </div>
                 ${this.renderFollowingManagerPanel()}
-                <div id="chubTimelineCreatorBanner" class="browse-author-banner hidden">
-                    <div class="browse-author-banner-content">
-                        <i class="fa-solid fa-user"></i>
-                        <span>Showing characters by <strong id="chubTimelineCreatorName"></strong></span>
-                    </div>
-                    <div class="browse-author-banner-actions">
-                        <button id="chubTimelineCreatorClose" class="glass-btn icon-only" title="Back to timeline">
-                            <i class="fa-solid fa-times"></i>
-                        </button>
-                    </div>
-                </div>
                 <div id="chubTimelineGrid" class="browse-grid"></div>
                 <div class="browse-load-more" id="chubTimelineLoadMore" style="display: none;">
                     <button id="chubTimelineLoadMoreBtn" class="glass-btn">
@@ -886,8 +846,6 @@ class ChubBrowseView extends BrowseView {
         if (options.domRecreated) {
             chubCurrentSearch = '';
             chubAuthorFilter = null;
-            _timelineCreatorFilter = null;
-            _timelineCssFiltered = false;
             chubCharacters = [];
             chubTimelineCharacters = [];
             chubCurrentPage = 1;
@@ -1002,6 +960,7 @@ function initChubView() {
             }
             
             switchChubViewMode(newMode);
+            _returnToTimeline = false;
         });
     });
     
@@ -1009,7 +968,6 @@ function initChubView() {
     on('chubClearAuthorBtn', 'click', () => {
         clearAuthorFilter();
     });
-    on('chubTimelineCreatorClose', 'click', () => clearTimelineCreator());
     
     // Follow author button
     on('chubFollowAuthorBtn', 'click', () => {
@@ -1224,12 +1182,18 @@ function initChubView() {
     // persist in document.body across provider switches (DOM recreation)
     if (!chubModalEventsAttached) {
         chubModalEventsAttached = true;
+        const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
+
+        if (isDesktop) {
+            const chubOverlay = document.getElementById('chubCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('chubCharName'), chubOverlay, chubOverlay?.querySelector('.browse-char-modal'));
+        }
 
         on('chubCharFavoriteBtn', 'click', toggleChubCharFavorite);
 
         // Avatar click → full-size image viewer (desktop only; mobile has its own handler)
         const chubAvatar = document.getElementById('chubCharAvatar');
-        if (chubAvatar && !window.matchMedia('(max-width: 768px)').matches) {
+        if (chubAvatar && isDesktop) {
             chubAvatar.addEventListener('click', (e) => {
                 e.stopPropagation();
                 if (!chubAvatar.src) return;
@@ -1277,7 +1241,6 @@ function initChubView() {
         window.registerOverlay?.({ id: 'chubCharModal', tier: 7, close: () => hideModal('chubCharModal') });
         window.registerOverlay?.({ id: 'chubLoginModal', tier: 6, close: () => hideModal('chubLoginModal') });
         window.registerOverlay?.({ id: 'chubAuthorBanner', tier: 9, close: () => clearAuthorFilter() });
-        window.registerOverlay?.({ id: 'chubTimelineCreatorBanner', tier: 9, close: () => clearTimelineCreator() });
     }
 
     // Load saved token on init
@@ -2378,10 +2341,7 @@ function _handleTimelineCardClick(e) {
 }
 
 function renderChubTimeline(appendOnly = false) {
-    const tempGrid = document.getElementById('chubCreatorGrid');
-    if (tempGrid) tempGrid.remove();
     const grid = document.getElementById('chubTimelineGrid');
-    grid?.classList.remove('grid-suspended');
     
     // Build tag include/exclude sets for client-side filtering
     const includeTags = [];
@@ -2395,15 +2355,6 @@ function renderChubTimeline(appendOnly = false) {
     }
     
     let sourceChars = chubTimelineCharacters;
-    if (_timelineCreatorFilter) {
-        sourceChars = sourceChars.filter(c => {
-            const fullPath = getChubFullPath(c);
-            const creator = fullPath ? fullPath.split('/')[0] : '';
-            return creator.toLowerCase() === _timelineCreatorFilter.toLowerCase();
-        });
-        const loadMoreEl = document.getElementById('chubTimelineLoadMore');
-        if (loadMoreEl) loadMoreEl.style.display = 'none';
-    }
 
     const anyFilterActive = chubFilterImages || chubFilterLore || chubFilterExpressions ||
         chubFilterGreetings || chubFilterHideOwned || chubFilterHidePossible || (chubFilterFavorites && chubUserFavoriteIds.size > 0) ||
@@ -2437,7 +2388,6 @@ function renderChubTimeline(appendOnly = false) {
     if (sortedCharacters.length === 0 && chubTimelineCharacters.length > 0) {
         chubTimelineRenderToken++;
         chubTimelineLookup.clear();
-        _timelineCssFiltered = false;
         grid.innerHTML = `
             <div class="chub-timeline-empty">
                 <i class="fa-solid fa-filter"></i>
@@ -2465,7 +2415,6 @@ function renderChubTimeline(appendOnly = false) {
     }
 
     chubBrowseView.disconnectImageObserver();
-    _timelineCssFiltered = false;
 
     if (sortedCharacters.length > 180) {
         const token = ++chubTimelineRenderToken;
@@ -2767,26 +2716,15 @@ function clearAuthorFilter() {
     // Hide banner
     hide('chubAuthorBanner');
     
+    if (_returnToTimeline) {
+        _returnToTimeline = false;
+        switchChubViewMode('timeline');
+        return;
+    }
+
     chubCharacters = [];
     chubCurrentPage = 1;
     loadChubCharacters();
-}
-
-function clearTimelineCreator() {
-    _timelineCreatorFilter = null;
-    const banner = document.getElementById('chubTimelineCreatorBanner');
-    if (banner) banner.classList.add('hidden');
-    if (_timelineCssFiltered) {
-        _timelineCssFiltered = false;
-        const tempGrid = document.getElementById('chubCreatorGrid');
-        if (tempGrid) tempGrid.remove();
-        const grid = document.getElementById('chubTimelineGrid');
-        if (grid) grid.classList.remove('grid-suspended');
-        const loadMoreEl = document.getElementById('chubTimelineLoadMore');
-        if (loadMoreEl && chubTimelineHasMore) loadMoreEl.style.display = '';
-    } else {
-        renderChubTimeline();
-    }
 }
 
 function performChubSearch() {
@@ -3734,7 +3672,7 @@ async function openChubCharPreview(char) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${count})`;
                 galleryGrid.innerHTML = node.galleryImages.map(img =>
-                    `<img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onerror="this.style.display='none'">`
+                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
                 ).join('');
             }
         } else if (node.hasGallery && gallerySection && galleryGrid) {
@@ -4140,8 +4078,9 @@ async function downloadChubCharacter() {
         const localAvatarFileName = result.fileName;
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
+        const galleryPageUrls = result.galleryPageUrls || [];
         
-        if ((hasGallery || mediaUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
+        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 galleryCharacters: hasGallery ? [{
                     name: result.characterName,
@@ -4152,12 +4091,14 @@ async function downloadChubCharacter() {
                     avatar: localAvatarFileName,
                     galleryId: result.galleryId
                 }] : [],
-                mediaCharacters: mediaUrls.length > 0 ? [{
+                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
                     name: result.characterName,
                     avatar: localAvatarFileName,
                     avatarUrl: result.avatarUrl,
                     mediaUrls: mediaUrls,
-                    galleryId: result.galleryId
+                    galleryPageUrls: galleryPageUrls,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData
                 }] : []
             });
         }

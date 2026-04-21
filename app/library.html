@@ -615,8 +615,8 @@
                             <!-- User images for this character -->
                         </div>
                         <div class="upload-zone" id="uploadZone">
-                            <i class="fa-solid fa-cloud-upload"></i> Drop images here to add to gallery
-                            <input type="file" id="imageUploadInput" multiple accept="image/*" style="display: none;">
+                            <i class="fa-solid fa-cloud-upload"></i> Drop files here to add to gallery
+                            <input type="file" id="imageUploadInput" multiple accept="image/*,video/*,audio/*" style="display: none;">
                         </div>
                     </div>
 
@@ -765,18 +765,31 @@
             <div class="confirm-modal-body">
                 <p>The imported character(s) have additional content:</p>
                 <div id="importSummaryList" class="import-summary-list">
-                    <!-- Row for Embedded Media (first - takes precedence) -->
+                    <!-- Row for Embedded Media -->
                     <div id="importSummaryMediaRow" class="import-summary-row hidden">
                         <div class="import-summary-row-icon">
                             <i class="fa-solid fa-photo-film"></i>
+                            <span class="import-summary-badge" id="importSummaryMediaBadge"></span>
                         </div>
                         <div class="import-summary-row-info">
-                            <span class="import-summary-row-title">Embedded Remote Media</span>
-                            <span id="importSummaryMediaDesc" class="import-summary-row-desc">Remote files that can be saved locally</span>
+                            <span class="import-summary-row-title">Embedded Media</span>
+                            <span id="importSummaryMediaDesc" class="import-summary-row-desc">Images and files referenced in the card</span>
+                        </div>
+                    </div>
+
+                    <!-- Row for External Galleries (imgchest, postimg, etc.) -->
+                    <div id="importSummaryExtGalleryRow" class="import-summary-row hidden">
+                        <div class="import-summary-row-icon">
+                            <i class="fa-solid fa-layer-group"></i>
+                            <span class="import-summary-badge" id="importSummaryExtGalleryBadge"></span>
+                        </div>
+                        <div class="import-summary-row-info">
+                            <span class="import-summary-row-title">External Galleries</span>
+                            <span id="importSummaryExtGalleryDesc" class="import-summary-row-desc">Gallery pages linked in the card</span>
                         </div>
                     </div>
                     
-                    <!-- Row for Provider Gallery (second) -->
+                    <!-- Row for Provider Gallery -->
                     <div id="importSummaryGalleryRow" class="import-summary-row hidden">
                         <div class="import-summary-row-icon">
                             <i class="fa-solid fa-images"></i>
@@ -1817,6 +1830,14 @@ https://jannyai.com/characters/uuid_slug
                                 </div>
                             </div>
                             <div class="settings-row">
+                                <label for="settingsButtonStyle">Button Style:</label>
+                                <select id="settingsButtonStyle" class="glass-select">
+                                    <option value="glass" data-icon="fa-solid fa-droplet" selected>Glass (Default)</option>
+                                    <option value="solid" data-icon="fa-solid fa-square">Solid</option>
+                                </select>
+                                <span class="settings-hint">Glass uses translucent buttons, Solid uses opaque fills</span>
+                            </div>
+                            <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
                                 </label>
@@ -2317,6 +2338,12 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                             <div class="settings-row">
                                 <label>
+                                    <input type="checkbox" id="settingsIncludeExternalGalleries" checked> Include External Galleries
+                                </label>
+                                <span class="settings-hint">Detect and download images from external gallery pages (Imgchest, ImgBB) linked in character card text.</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
                                     <input type="checkbox" id="settingsFixFilenames" checked> Fix filenames during localization
                                 </label>
                                 <span class="settings-hint">Rename files to their correct prefix format when duplicates are detected.</span>
@@ -2332,6 +2359,22 @@ https://jannyai.com/characters/uuid_slug
                                     <input type="checkbox" id="settingsFastSkipValidateHeaders"> Validate file size on match
                                 </label>
                                 <span class="settings-hint">When a filename match is found, verify the file is at least 1 KB via a HEAD request. Catches empty or truncated files.</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-image"></i> Thumbnails</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsGalleryThumbnails" checked> Generate gallery thumbnails
+                                </label>
+                                <span class="settings-hint">Use cl-helper to generate smaller thumbnail images for gallery grids and the viewer strip. Requires the cl-helper plugin.</span>
+                            </div>
+                            <div class="settings-row" id="galleryThumbPrewarmRow" style="padding-left: 24px;">
+                                <label>
+                                    <input type="checkbox" id="settingsGalleryThumbPrewarm" checked> Pre-generate during download
+                                </label>
+                                <span class="settings-hint">Generate thumbnails immediately after downloading media, so galleries open instantly.</span>
                             </div>
                         </div>
                     </div>
@@ -2501,7 +2544,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.0.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.1.0</span>
                             </div>
                         </div>
                     </div>

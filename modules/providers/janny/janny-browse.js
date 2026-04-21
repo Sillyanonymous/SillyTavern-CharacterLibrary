@@ -756,7 +756,8 @@ async function importCharacter(charData) {
 
         // Show import summary before library refresh so modal appears immediately
         const mediaUrls = result.embeddedMediaUrls || [];
-        if (mediaUrls.length > 0 && getSetting('notifyAdditionalContent') !== false) {
+        const galleryPageUrls = result.galleryPageUrls || [];
+        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 mediaCharacters: [{
                     characterName: result.characterName,
@@ -764,7 +765,9 @@ async function importCharacter(charData) {
                     fileName: result.fileName,
                     avatar: result.fileName,
                     galleryId: result.galleryId,
-                    mediaUrls
+                    mediaUrls,
+                    galleryPageUrls,
+                    cardData: result.cardData
                 }]
             });
         }
@@ -1085,6 +1088,11 @@ function initJannyView() {
     // ── Preview modal events (only attach once — modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
+
+        if (!window.matchMedia('(max-width: 768px)').matches) {
+            const jannyOverlay = document.getElementById('jannyCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('jannyCharName'), jannyOverlay, jannyOverlay?.querySelector('.browse-char-modal'));
+        }
 
         on('jannyCharClose', 'click', () => closePreviewModal());
 

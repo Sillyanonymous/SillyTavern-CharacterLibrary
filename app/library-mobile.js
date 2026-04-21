@@ -2040,6 +2040,14 @@ window.registerOverlay = function(cfg) {
             if (!img) return;
             img.style.transition = 'none';
 
+            // Clear any residual swipe transform on the container
+            const imageContainer = container.querySelector('.gv-image-container');
+            if (imageContainer) {
+                imageContainer.style.transition = 'none';
+                imageContainer.style.transform = '';
+                imageContainer.style.opacity = '';
+            }
+
             if (e.touches.length !== 1) return;
 
             gestureOccurred = false; // reset — will be set true if finger moves
@@ -2116,8 +2124,13 @@ window.registerOverlay = function(cfg) {
             e.preventDefault();
             currentX = dx;
 
-            img.style.transform = `translateX(${dx}px)`;
-            img.style.opacity = Math.max(0.6, 1 - Math.abs(dx) / 400);
+            // Slide the container, dim the image
+            const imageContainer = container.querySelector('.gv-image-container');
+            if (imageContainer) {
+                imageContainer.style.transition = 'none';
+                imageContainer.style.transform = `translateX(${dx}px)`;
+                imageContainer.style.opacity = Math.max(0.6, 1 - Math.abs(dx) / 400);
+            }
         }, { passive: false });
 
         container.addEventListener('touchend', (e) => {
@@ -2139,34 +2152,40 @@ window.registerOverlay = function(cfg) {
 
             const prevBtn = document.getElementById('galleryViewerPrev');
             const nextBtn = document.getElementById('galleryViewerNext');
+            const imageContainer = container.querySelector('.gv-image-container');
 
             if (swiping && Math.abs(currentX) >= SWIPE_THRESHOLD) {
                 const dir = currentX < 0 ? -1 : 1;
 
-                // Navigate immediately so the new image is ready
-                recentTouch = false;
-                if (currentX < 0 && nextBtn) nextBtn.click();
-                else if (currentX > 0 && prevBtn) prevBtn.click();
+                // Animate the container off-screen in the swipe direction
+                if (imageContainer) {
+                    imageContainer.style.transition = 'transform 0.15s ease-in, opacity 0.15s ease-in';
+                    imageContainer.style.transform = `translateX(${dir * 120}px)`;
+                    imageContainer.style.opacity = '0';
+                }
 
-                // Animate the NEW image in from the swipe direction
-                requestAnimationFrame(() => {
-                    const newImg = getImageEl();
-                    if (newImg) {
-                        newImg.style.transition = 'none';
-                        newImg.style.transform = `translateX(${-dir * 80}px)`;
-                        newImg.style.opacity = '0.3';
+                // After the exit animation, navigate and slide the new content in
+                setTimeout(() => {
+                    recentTouch = false;
+                    if (currentX < 0 && nextBtn) nextBtn.click();
+                    else if (currentX > 0 && prevBtn) prevBtn.click();
+
+                    if (imageContainer) {
+                        imageContainer.style.transition = 'none';
+                        imageContainer.style.transform = `translateX(${-dir * 80}px)`;
+                        imageContainer.style.opacity = '1';
                         requestAnimationFrame(() => {
-                            newImg.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
-                            newImg.style.transform = 'translateX(0)';
-                            newImg.style.opacity = '1';
+                            imageContainer.style.transition = 'transform 0.15s ease-out';
+                            imageContainer.style.transform = 'translateX(0)';
                         });
                     }
-                });
+                }, 150);
             } else {
-                if (img) {
-                    img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
-                    img.style.transform = 'translateX(0)';
-                    img.style.opacity = '1';
+                // Below threshold — snap back
+                if (imageContainer) {
+                    imageContainer.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
+                    imageContainer.style.transform = 'translateX(0)';
+                    imageContainer.style.opacity = '1';
                 }
             }
             swiping = false;

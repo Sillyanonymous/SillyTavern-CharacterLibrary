@@ -263,18 +263,23 @@ export async function importFromPng({
     if (result.error) throw new Error('Import failed: Server returned error');
 
     const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
+    await window.ensureExtractorsLoaded?.();
+    const galleryPageUrls = typeof window.findCharacterGalleryUrls === 'function'
+        ? window.findCharacterGalleryUrls(characterCard) : [];
     const galleryId = characterCard.data.extensions?.gallery_id || null;
 
     return {
         success: true,
         fileName: result.file_name || fileName,
-        characterName,
+        characterName: characterCard.data?.name || characterName,
         hasGallery,
         providerCharId,
         fullPath,
         avatarUrl,
         embeddedMediaUrls: mediaUrls,
-        galleryId
+        galleryPageUrls,
+        galleryId,
+        cardData: characterCard.data
     };
 }
 

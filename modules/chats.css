@@ -239,6 +239,60 @@
     background: rgba(0, 0, 0, 0.3);
 }
 
+/* --- Avatar shimmer / fade-in --- */
+
+.chat-avatar-wrap {
+    position: relative;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid var(--glass-border);
+}
+
+.chat-avatar-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border: none;
+    border-radius: 0;
+    background: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.chat-avatar-wrap.loaded img {
+    opacity: 1;
+}
+
+.chat-avatar-wrap::before,
+.chat-group-composite::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: 50%;
+    background: linear-gradient(
+        110deg,
+        transparent 30%,
+        rgba(255, 255, 255, 0.06) 50%,
+        transparent 70%
+    );
+    background-size: 200% 100%;
+    animation: chat-avatar-shimmer 1.8s ease-in-out infinite;
+    pointer-events: none;
+}
+
+.chat-avatar-wrap.loaded::before,
+.chat-group-composite.loaded::before {
+    display: none;
+}
+
+@keyframes chat-avatar-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
 .chat-card-avatar-fallback {
     width: 50px;
     height: 50px;
@@ -261,9 +315,21 @@
 .chat-card-char-name {
     font-weight: 600;
     color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.chat-card-char-name-text {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+}
+
+.chat-card-char-name .chat-group-badge {
+    flex-shrink: 0;
 }
 
 /* Clickable character name in chats view */
@@ -395,6 +461,63 @@
 
 .chat-card {
     position: relative;
+}
+
+/* ========================================
+   Group Chat Badge & Styling
+   ======================================== */
+
+/* --- Composite group avatar grid --- */
+.chat-group-composite {
+    display: grid;
+    position: relative;
+    border-radius: 50%;
+    overflow: hidden;
+    flex-shrink: 0;
+    border: 2px solid var(--glass-border);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.chat-group-composite img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.chat-group-composite img.loaded {
+    opacity: 1;
+}
+
+.chat-group-composite-1 { grid-template: 1fr / 1fr; }
+.chat-group-composite-2 { grid-template: 1fr / 1fr 1fr; }
+.chat-group-composite-3 { grid-template: 1fr 1fr / 1fr 1fr; }
+.chat-group-composite-3 img:first-child { grid-row: 1 / -1; }
+.chat-group-composite-4 { grid-template: 1fr 1fr / 1fr 1fr; }
+
+/* Size variants matching existing avatar sizes */
+.chat-card-avatar-size { width: 50px; height: 50px; }
+.chat-group-avatar-size { width: 45px; height: 45px; }
+.chat-preview-avatar-size { width: 50px; height: 50px; }
+
+.chat-group-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: rgba(var(--accent-rgb, 100, 149, 237), 0.15);
+    color: var(--accent);
+    font-size: var(--font-3xs);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+.chat-group-badge i {
+    font-size: 0.65em;
 }
 
 /* ========================================
@@ -945,6 +1068,8 @@
         width: 36px;
         height: 36px;
     }
+    .chat-card-avatar-size,
+    .chat-card-header > .chat-avatar-wrap { width: 36px; height: 36px; }
     .chat-card-char-name {
         font-size: var(--font-md);
     }
@@ -1017,6 +1142,8 @@
     .chat-group-header:hover { background: rgba(0, 0, 0, 0.25); }
     .chat-group-avatar,
     .chat-group-avatar-fallback { width: 36px; height: 36px; }
+    .chat-group-avatar-size,
+    .chat-group-header > .chat-avatar-wrap { width: 36px; height: 36px; }
     .chat-group-name { font-size: var(--font-md); }
     .chat-group-count { font-size: var(--font-xs); }
     .chat-group-toggle { font-size: var(--font-sm); }
@@ -1080,6 +1207,7 @@
     .chat-preview-header-info { gap: var(--space-sm-md); min-width: 0; width: 100%; }
     .chat-preview-header-info > div { min-width: 0; }
     .chat-preview-avatar { width: 36px; height: 36px; }
+    .chat-preview-avatar-size { width: 36px; height: 36px; }
     .chat-preview-meta { font-size: var(--font-xs); }
     #chatPreviewOpenBtn span,
     #chatPreviewOpenBtn .btn-label {

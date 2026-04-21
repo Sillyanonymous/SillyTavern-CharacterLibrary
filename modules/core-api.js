@@ -206,6 +206,10 @@ export function getGalleryFolderName(char) {
     return window.getGalleryFolderName?.(char) ?? '';
 }
 
+export function getGalleryThumbUrl(folderName, fileName) {
+    return window.getGalleryThumbUrl?.(folderName, fileName) ?? null;
+}
+
 /**
  * Sanitize a folder name for safe use in paths
  * Removes illegal characters for Windows/file systems
@@ -585,6 +589,10 @@ export function evaluateChatAdvancedFilters(chat) {
     return window.evaluateChatAdvancedFilters?.(chat) ?? true;
 }
 
+export function resetChatFilterCaches() {
+    window.resetChatFilterCaches?.();
+}
+
 export function getAdvFilterRulesForChats() {
     return window.getAdvFilterRulesForChats?.() ?? [];
 }
@@ -766,6 +774,26 @@ export function getExistingFileIndex(folderName) {
  */
 export function extractSanitizedUrlName(url) {
     return window.extractSanitizedUrlName?.(url) || '';
+}
+
+/**
+ * Build shared dedup state for a gallery folder. Call once, pass to all download phases.
+ * @param {string} folderName
+ * @returns {Promise<Object>}
+ */
+export function buildDedupState(folderName) {
+    return window.buildDedupState?.(folderName);
+}
+
+/**
+ * Unified media download pipeline. Downloads all applicable media for a character.
+ * @param {Object} character
+ * @param {string} folderName
+ * @param {Object} [options]
+ * @returns {Promise<Object>} PipelineResult
+ */
+export function downloadCharacterMedia(character, folderName, options) {
+    return window.downloadCharacterMedia?.(character, folderName, options);
 }
 
 /**
@@ -1023,6 +1051,7 @@ export default {
     
     // Gallery
     getGalleryFolderName,
+    getGalleryThumbUrl,
     sanitizeFolderName,
     getCharacterGalleryInfo,
     getCharacterGalleryId,
@@ -1078,6 +1107,7 @@ export default {
     hydrateCharacter,
     performSearch,
     evaluateChatAdvancedFilters,
+    resetChatFilterCaches,
     getAdvFilterRulesForChats,
     
     // Creator Notes
@@ -1101,6 +1131,8 @@ export default {
     getExistingFileHashes,
     getExistingFileIndex,
     extractSanitizedUrlName,
+    buildDedupState,
+    downloadCharacterMedia,
     downloadMediaToMemory,
     calculateHash,
     arrayBufferToBase64,

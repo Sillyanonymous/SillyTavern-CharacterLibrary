@@ -67,8 +67,7 @@ let datacatBrowseMode = 'recent';
 // Creator browsing state
 let datacatCreatorId = null;
 let datacatCreatorName = '';
-let _followingCreatorFilter = null;
-let _followingCssFiltered = false;
+let _returnToFollowing = false;
 let datacatSortMode = 'recent';
 let datacatCreatorSortMode = 'chat_count';
 
@@ -97,6 +96,8 @@ let datacatFollowedCreators = [];
 let datacatFollowingCharacters = [];
 let datacatFollowingLoading = false;
 let datacatFollowingSort = 'newest';
+let datacatFollowingDisplayLimit = 60;
+let datacatFollowingFiltered = [];
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
 
@@ -846,24 +847,15 @@ function clearCreatorFilter() {
     const followBtn = document.getElementById('datacatFollowCreatorBtn');
     if (followBtn) followBtn.style.display = 'none';
 
+    if (_returnToFollowing) {
+        _returnToFollowing = false;
+        switchDatacatViewMode('following');
+        return;
+    }
+
     updateSortOptions();
 
     loadCharacters(false);
-}
-
-function clearFollowingCreator() {
-    _followingCreatorFilter = null;
-    const banner = document.getElementById('datacatFollowingCreatorBanner');
-    if (banner) banner.classList.add('hidden');
-    if (_followingCssFiltered) {
-        _followingCssFiltered = false;
-        const tempGrid = document.getElementById('datacatCreatorGrid');
-        if (tempGrid) tempGrid.remove();
-        const grid = document.getElementById('datacatFollowingGrid');
-        if (grid) grid.classList.remove('grid-suspended');
-    } else {
-        renderFollowing();
-    }
 }
 
 // ========================================
@@ -873,11 +865,19 @@ function clearFollowingCreator() {
 function updateSearchPlaceholder() {
     const input = document.getElementById('datacatSearchInput');
     if (!input) return;
-    input.placeholder = isHampterSortMode(datacatSortMode)
-        ? 'Search JanitorAI characters or paste a URL...'
-        : isJannySortMode(datacatSortMode)
-            ? 'Search JanitorAI characters or paste a URL...'
-            : 'Paste a DataCat or JanitorAI character URL...';
+    input.placeholder = 'Search characters or paste a URL...';
+}
+
+function switchToMeiliSearch(query) {
+    datacatSortMode = 'janny_relevant';
+    const sortEl = document.getElementById('datacatSortSelect');
+    if (sortEl) sortEl.value = 'janny_relevant';
+    meiliSearchQuery = query;
+    meiliCurrentPage = 1;
+    datacatCurrentOffset = 0;
+    updateSearchPlaceholder();
+    updateTagsVisibility();
+    loadCharacters(false);
 }
 
 function doSearch() {
@@ -950,7 +950,8 @@ function doSearch() {
         return;
     }
 
-    showToast('Paste a DataCat or JanitorAI character URL to browse', 'info');
+    // Text search from any other mode: switch to MeiliSearch relevance
+    switchToMeiliSearch(val);
 }
 
 function performDatacatCreatorSearch() {
@@ -1369,8 +1370,8 @@ async function startModalExtraction(charId) {
         const result = await submitExtraction(janitorUrl, { publicFeed: getSetting('datacatPublicFeed') === true });
 
         if (result.queued || result.started) {
+            importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Extracting...';
             const position = result.queued ? ` (${result.queuePosition || 1})` : '';
-            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Extracting...${position}`;
             updateInlineExtractionCTA('extracting', position.trim() ? `Queue position${position}` : '');
             startModalExtractionPolling(charId);
         } else if (result.requiresLogin) {
@@ -1403,7 +1404,6 @@ function startModalExtractionPolling(charId) {
         if (importBtn.disabled) {
             const phase = importBtn.dataset.extractPhase || 'Extracting';
             const label = `${phase}... (${elapsed}s)`;
-            importBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${label}`;
             updateInlineExtractionCTA('progress', label);
         }
     }, 1000);
@@ -1584,6 +1584,7 @@ async function loadFollowingCharacters(forceRefresh = false) {
 
     if (forceRefresh) {
         datacatFollowingCharacters = [];
+        datacatFollowingDisplayLimit = 60;
     }
 
     loadFollowedCreators();
@@ -1748,17 +1749,11 @@ function _handleFollowingCardClick(e) {
     if (hit) openPreviewModal(hit);
 }
 
-function renderFollowing() {
-    const tempGrid = document.getElementById('datacatCreatorGrid');
-    if (tempGrid) tempGrid.remove();
+function renderFollowing(append = false) {
     const grid = document.getElementById('datacatFollowingGrid');
     if (!grid) return;
-    grid.classList.remove('grid-suspended');
 
     let source = datacatFollowingCharacters;
-    if (_followingCreatorFilter) {
-        source = source.filter(c => getCreatorId(c) === _followingCreatorFilter);
-    }
 
     let filtered = datacatNsfwEnabled
         ? source
@@ -1781,9 +1776,9 @@ function renderFollowing() {
     }
 
     const sorted = sortFollowingCharacters(filtered);
+    datacatFollowingFiltered = sorted;
 
     if (sorted.length === 0 && datacatFollowingCharacters.length > 0) {
-        _followingCssFiltered = false;
         grid.innerHTML = `
             <div class="chub-timeline-empty">
                 <i class="fa-solid fa-filter"></i>
@@ -1791,13 +1786,25 @@ function renderFollowing() {
                 <p>No characters match your current NSFW filter setting.</p>
             </div>
         `;
+        datacatBrowseView.updateLoadMoreVisibility('datacatFollowingLoadMore', false, false);
         return;
     }
 
-    grid.innerHTML = sorted.map(c => createDatacatCard(c)).join('');
-    _followingCssFiltered = false;
-    const followingGrid = document.getElementById('datacatFollowingGrid');
-    if (followingGrid) datacatBrowseView.observeImages(followingGrid);
+    if (append) {
+        const existingCount = grid.querySelectorAll('.browse-card').length;
+        const newSlice = sorted.slice(existingCount, datacatFollowingDisplayLimit);
+        if (newSlice.length > 0) {
+            grid.insertAdjacentHTML('beforeend', newSlice.map(c => createDatacatCard(c)).join(''));
+            datacatBrowseView.observeImages(grid);
+        }
+    } else {
+        const page = sorted.slice(0, datacatFollowingDisplayLimit);
+        grid.innerHTML = page.map(c => createDatacatCard(c)).join('');
+        datacatBrowseView.observeImages(grid);
+    }
+
+    const hasMore = datacatFollowingDisplayLimit < sorted.length;
+    datacatBrowseView.updateLoadMoreVisibility('datacatFollowingLoadMore', hasMore, sorted.length > 0);
 }
 
 // ========================================
@@ -2256,7 +2263,8 @@ async function importCharacter(charData) {
         showToast(`Imported "${result.characterName}"`, 'success');
 
         const mediaUrls = result.embeddedMediaUrls || [];
-        if (mediaUrls.length > 0 && getSetting('notifyAdditionalContent') !== false) {
+        const galleryPageUrls = result.galleryPageUrls || [];
+        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
                 mediaCharacters: [{
                     characterName: result.characterName,
@@ -2264,7 +2272,9 @@ async function importCharacter(charData) {
                     fileName: result.fileName,
                     avatar: result.fileName,
                     galleryId: result.galleryId,
-                    mediaUrls
+                    mediaUrls,
+                    galleryPageUrls,
+                    cardData: result.cardData
                 }]
             });
         }
@@ -2440,6 +2450,11 @@ function initDatacatView() {
         loadCharacters(true);
     });
 
+    on('datacatFollowingLoadMoreBtn', 'click', () => {
+        datacatFollowingDisplayLimit += 60;
+        renderFollowing(true);
+    });
+
     // NSFW toggle
     on('datacatNsfwToggle', 'click', () => {
         datacatNsfwEnabled = !datacatNsfwEnabled;
@@ -2520,6 +2535,7 @@ function initDatacatView() {
     on('datacatRefreshBtn', 'click', () => {
         if (datacatViewMode === 'following') {
             datacatFollowingCharacters = [];
+            datacatFollowingDisplayLimit = 60;
             loadFollowingCharacters(true);
         } else {
             datacatCurrentOffset = 0;
@@ -2532,8 +2548,6 @@ function initDatacatView() {
 
     // Clear creator filter
     on('datacatClearCreatorBtn', 'click', () => clearCreatorFilter());
-    on('datacatFollowingCreatorClose', 'click', () => clearFollowingCreator());
-
     // Tags dropdown toggle
     on('datacatTagsBtn', 'click', () => {
         document.getElementById('datacatFiltersDropdown')?.classList.add('hidden');
@@ -2572,7 +2586,10 @@ function initDatacatView() {
     document.querySelectorAll('.datacat-view-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const mode = btn.dataset.datacatView;
-            if (mode && mode !== datacatViewMode) switchDatacatViewMode(mode);
+            if (mode && mode !== datacatViewMode) {
+                switchDatacatViewMode(mode);
+                _returnToFollowing = false;
+            }
         });
     });
 
@@ -2591,6 +2608,7 @@ function initDatacatView() {
         const el = document.getElementById('datacatFollowingSortSelect');
         if (!el) return;
         datacatFollowingSort = el.value;
+        datacatFollowingDisplayLimit = 60;
         renderFollowing();
     });
 
@@ -2604,6 +2622,11 @@ function initDatacatView() {
     // ---- Preview modal events (only attach once) ----
     if (!modalEventsAttached) {
         modalEventsAttached = true;
+
+        if (!window.matchMedia('(max-width: 768px)').matches) {
+            const datacatOverlay = document.getElementById('datacatCharModal');
+            BrowseView.wireTitleScroll(document.getElementById('datacatCharName'), datacatOverlay, datacatOverlay?.querySelector('.browse-char-modal'));
+        }
 
         on('datacatCharClose', 'click', () => closePreviewModal());
 
@@ -2647,7 +2670,6 @@ function initDatacatView() {
 
         window.registerOverlay?.({ id: 'datacatCharModal', tier: 7, close: () => closePreviewModal() });
         window.registerOverlay?.({ id: 'datacatCreatorBanner', tier: 9, close: () => clearCreatorFilter() });
-        window.registerOverlay?.({ id: 'datacatFollowingCreatorBanner', tier: 9, close: () => clearFollowingCreator() });
     }
 }
 
@@ -2736,31 +2758,9 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
     }
 
     browseCreatorFromManager(creator) {
-        _followingCreatorFilter = creator.id;
-        _followingCssFiltered = true;
-        const banner = document.getElementById('datacatFollowingCreatorBanner');
-        const nameEl = document.getElementById('datacatFollowingCreatorName');
-        if (banner && nameEl) {
-            nameEl.textContent = creator.name || creator.username || creator.id;
-            banner.classList.remove('hidden');
-            window.pushOverlayGuard?.();
-        }
-        const grid = document.getElementById('datacatFollowingGrid');
-        if (grid) {
-            grid.classList.add('grid-suspended');
-            let source = datacatFollowingCharacters.filter(c => getCreatorId(c) === creator.id);
-            if (!datacatNsfwEnabled) source = source.filter(c => !isNsfw(c));
-            if (datacatFilterHideOwned) source = source.filter(c => !isCharInLocalLibrary(c));
-            if (datacatFilterHidePossible) source = source.filter(c => !isCharPossibleMatchObj(c));
-            const sorted = sortFollowingCharacters(source);
-            const tempGrid = document.createElement('div');
-            tempGrid.id = 'datacatCreatorGrid';
-            tempGrid.className = 'browse-grid';
-            tempGrid.innerHTML = sorted.map(c => createDatacatCard(c)).join('');
-            grid.after(tempGrid);
-            tempGrid.addEventListener('click', _handleFollowingCardClick);
-            datacatBrowseView.observeImages(tempGrid);
-        }
+        switchDatacatViewMode('browse');
+        _returnToFollowing = true;
+        browseCreator(creator.id);
     }
 
     getFollowingManagerSortOptions() {
@@ -2962,18 +2962,12 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     </div>
                 </div>
                 ${this.renderFollowingManagerPanel()}
-                <div id="datacatFollowingCreatorBanner" class="browse-author-banner hidden">
-                    <div class="browse-author-banner-content">
-                        <i class="fa-solid fa-user"></i>
-                        <span>Showing characters by <strong id="datacatFollowingCreatorName"></strong></span>
-                    </div>
-                    <div class="browse-author-banner-actions">
-                        <button id="datacatFollowingCreatorClose" class="glass-btn icon-only" title="Back to all following">
-                            <i class="fa-solid fa-times"></i>
-                        </button>
-                    </div>
-                </div>
                 <div id="datacatFollowingGrid" class="browse-grid"></div>
+                <div class="browse-load-more" id="datacatFollowingLoadMore" style="display: none;">
+                    <button id="datacatFollowingLoadMoreBtn" class="glass-btn">
+                        <i class="fa-solid fa-plus"></i> Load More
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -3084,9 +3078,19 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
 
     _getImageGridIds() { return ['datacatGrid', 'datacatFollowingGrid']; }
 
-    canLoadMore() { return datacatHasMore && !datacatIsLoading && datacatViewMode === 'browse'; }
+    canLoadMore() {
+        if (datacatViewMode === 'following') {
+            return datacatFollowingDisplayLimit < datacatFollowingFiltered.length;
+        }
+        return datacatHasMore && !datacatIsLoading && datacatViewMode === 'browse';
+    }
 
     loadMore() {
+        if (datacatViewMode === 'following') {
+            datacatFollowingDisplayLimit += 60;
+            renderFollowing(true);
+            return;
+        }
         if (datacatBrowseMode === 'creator') {
             datacatCurrentOffset += PAGE_SIZE;
         } else if (isHampterSortMode(datacatSortMode)) {
@@ -3177,12 +3181,11 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             datacatGridRenderedCount = 0;
             datacatCreatorId = null;
             datacatCreatorName = '';
-            _followingCreatorFilter = null;
-            _followingCssFiltered = false;
             datacatActiveTagIds.clear();
             datacatTagsLoaded = false;
             datacatViewMode = 'browse';
             datacatFollowingCharacters = [];
+            datacatFollowingDisplayLimit = 60;
         }
         const wasInitialized = this._initialized;
         super.activate(container, options);

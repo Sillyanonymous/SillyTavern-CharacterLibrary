@@ -10,6 +10,10 @@ const ENDPOINTS = {
     CHATS_SAVE: '/chats/save',
     CHATS_DELETE: '/chats/delete',
     CHATS_RECENT: '/chats/recent',
+    GROUPS_ALL: '/groups/all',
+    CHATS_GROUP_GET: '/chats/group/get',
+    CHATS_GROUP_SAVE: '/chats/group/save',
+    CHATS_GROUP_DELETE: '/chats/group/delete',
 };
 
 // ========================================
@@ -17,6 +21,7 @@ const ENDPOINTS = {
 // ========================================
 
 let allChats = [];
+let allGroups = new Map();
 let currentGrouping = 'flat'; // 'flat' or 'grouped'
 let currentChatSort = 'recent';
 let currentPreviewChat = null;
@@ -62,7 +67,9 @@ function saveChatCache(chats) {
                 charName: c.charName,
                 charAvatar: c.charAvatar,
                 preview: c.preview,
-                models: c.models || null
+                models: c.models || null,
+                isGroup: c.isGroup || false,
+                groupId: c.groupId || null,
             }))
         };
         localStorage.setItem(CHATS_CACHE_KEY, JSON.stringify(cacheData));
@@ -181,18 +188,9 @@ async function openChat(char, chatFile) {
 
             if (characterIndex !== -1 && context) {
                 await context.selectCharacterById(characterIndex);
-                await new Promise(r => setTimeout(r, 200));
 
-                if (context.openChat) {
-                    await context.openChat(chatName);
-                } else if (host.jQuery) {
-                    const $ = host.jQuery;
-                    const chatItems = $('#past_chats_popup .select_chat_block_wrapper');
-                    chatItems.each(function() {
-                        if ($(this).attr('file_name') === chatName) {
-                            $(this).trigger('click');
-                        }
-                    });
+                if (context.openCharacterChat) {
+                    await context.openCharacterChat(chatName);
                 }
 
                 if (CoreAPI.getIsEmbedded()) {
@@ -363,7 +361,7 @@ function initChatsView() {
             if (!chat) return;
 
             const charNameEl = e.target.closest('.clickable-char-name');
-            if (charNameEl) {
+            if (charNameEl && !chat.isGroup) {
                 e.stopPropagation();
                 openCharacterDetailsFromChats(chat.character);
                 return;
@@ -391,7 +389,10 @@ function initChatsView() {
                 const charNameEl = e.target.closest('.clickable-char-name');
                 if (charNameEl) {
                     e.stopPropagation();
-                    const charAvatar = header.closest('.chat-group')?.dataset.charAvatar;
+                    const chatGroup = header.closest('.chat-group');
+                    const groupId = chatGroup?.dataset.groupId;
+                    if (groupId) return; // Group chats have no character detail page
+                    const charAvatar = chatGroup?.dataset.charAvatar;
                     const chars = CoreAPI.getAllCharacters();
                     const char = chars.find(c => c.avatar === charAvatar);
                     if (char) openCharacterDetailsFromChats(char);
@@ -404,10 +405,8 @@ function initChatsView() {
             // Chat items inside groups
             const item = e.target.closest('.chat-group-item');
             if (!item) return;
-            const group = item.closest('.chat-group');
-            const chatFile = item.dataset.chatFile;
-            const charAvatar = group?.dataset.charAvatar;
-            const chat = allChats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar);
+            const chatGroup = item.closest('.chat-group');
+            const chat = findChatByElement(item);
             if (!chat) return;
 
             const actionBtn = e.target.closest('.chat-card-action');
@@ -427,6 +426,11 @@ function initChatsView() {
 
 function findChatByElement(el) {
     const chatFile = el.dataset.chatFile;
+    if (!chatFile) return null;
+    const groupId = el.dataset.groupId;
+    if (groupId) {
+        return allChats.find(c => c.file_name === chatFile && c.isGroup && c.groupId === groupId) || null;
+    }
     const charAvatar = el.dataset.charAvatar;
     return allChats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar) || null;
 }
@@ -447,8 +451,22 @@ async function loadAllChats(forceRefresh = false) {
     if (isCacheValid && !forceRefresh) {
         CoreAPI.debugLog(`[ChatsCache] Using cached data (${Math.round(cacheAge/1000)}s old, ${cached.chats.length} chats)`);
 
-        // Reconstruct allChats from cache with character references
+        // Fetch groups so group chats can be reconstructed
+        await fetchGroups();
+
+        // Reconstruct allChats from cache with character/group references
         allChats = cached.chats.map(cachedChat => {
+            if (cachedChat.isGroup) {
+                const group = allGroups.get(cachedChat.groupId);
+                if (!group) return null;
+                return {
+                    ...cachedChat,
+                    group: group,
+                    character: null,
+                    charName: group.name,
+                    mes_count: cachedChat.chat_items
+                };
+            }
             const char = allCharacters.find(c => c.avatar === cachedChat.charAvatar);
             if (!char) return null;
             return {
@@ -494,6 +512,21 @@ function showRefreshIndicator(show) {
 
 let chatsFetchController = null;
 
+async function fetchGroups() {
+    try {
+        const response = await CoreAPI.apiRequest(ENDPOINTS.GROUPS_ALL, 'POST', {});
+        if (!response.ok) return;
+        const groups = await response.json();
+        allGroups.clear();
+        for (const group of groups) {
+            allGroups.set(group.id, group);
+        }
+        CoreAPI.debugLog(`[Chats] Fetched ${allGroups.size} groups`);
+    } catch (e) {
+        console.error('[Chats] Failed to fetch groups:', e);
+    }
+}
+
 async function fetchFreshChats(isBackground = false) {
     chatsFetchController?.abort();
     chatsFetchController = new AbortController();
@@ -503,6 +536,9 @@ async function fetchFreshChats(isBackground = false) {
     const allCharacters = CoreAPI.getAllCharacters();
 
     try {
+        await fetchGroups();
+        if (signal.aborted) return;
+
         const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_RECENT, 'POST', {});
         if (signal.aborted) return;
 
@@ -518,36 +554,73 @@ async function fetchFreshChats(isBackground = false) {
 
         const newChats = [];
         for (const chat of recentChats) {
-            if (!chat.avatar) continue;
-            const char = charMap.get(chat.avatar);
-            if (!char) continue;
+            if (chat.group) {
+                // Group chat entry
+                const group = allGroups.get(chat.group);
+                if (!group) continue;
 
-            const cachedChat = allChats.find(c =>
-                c.file_name === chat.file_name && c.charAvatar === chat.avatar
-            );
+                const cachedChat = allChats.find(c =>
+                    c.file_name === chat.file_name && c.isGroup && c.groupId === chat.group
+                );
 
-            const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
-            const newMsgCount = chat.chat_items || 0;
-            const canReuseCache = cachedChat && cachedMsgCount === newMsgCount;
+                const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
+                const newMsgCount = chat.chat_items || 0;
+                const canReuseCache = cachedChat && cachedMsgCount === newMsgCount;
 
-            let preview = null;
-            if (canReuseCache && cachedChat.preview) {
-                preview = cachedChat.preview;
-            } else if (chat.mes && chat.mes !== '[The chat is empty]' && chat.mes !== '[The message is empty]') {
-                const truncated = chat.mes.substring(0, 150);
-                preview = truncated + (chat.mes.length > 150 ? '...' : '');
+                let preview = null;
+                if (canReuseCache && cachedChat.preview) {
+                    preview = cachedChat.preview;
+                } else if (chat.mes && chat.mes !== '[The chat is empty]' && chat.mes !== '[The message is empty]') {
+                    const truncated = chat.mes.substring(0, 150);
+                    preview = truncated + (chat.mes.length > 150 ? '...' : '');
+                }
+
+                newChats.push({
+                    file_name: chat.file_name,
+                    last_mes: chat.last_mes,
+                    chat_items: chat.chat_items || 0,
+                    isGroup: true,
+                    groupId: chat.group,
+                    group: group,
+                    character: null,
+                    charName: group.name,
+                    charAvatar: null,
+                    preview: preview,
+                    models: canReuseCache ? (cachedChat.models || null) : null,
+                });
+            } else if (chat.avatar) {
+                // Individual character chat entry
+                const char = charMap.get(chat.avatar);
+                if (!char) continue;
+
+                const cachedChat = allChats.find(c =>
+                    c.file_name === chat.file_name && c.charAvatar === chat.avatar
+                );
+
+                const cachedMsgCount = cachedChat?.chat_items || cachedChat?.mes_count || 0;
+                const newMsgCount = chat.chat_items || 0;
+                const canReuseCache = cachedChat && cachedMsgCount === newMsgCount;
+
+                let preview = null;
+                if (canReuseCache && cachedChat.preview) {
+                    preview = cachedChat.preview;
+                } else if (chat.mes && chat.mes !== '[The chat is empty]' && chat.mes !== '[The message is empty]') {
+                    const truncated = chat.mes.substring(0, 150);
+                    preview = truncated + (chat.mes.length > 150 ? '...' : '');
+                }
+
+                newChats.push({
+                    file_name: chat.file_name,
+                    last_mes: chat.last_mes,
+                    chat_items: chat.chat_items || 0,
+                    isGroup: false,
+                    character: char,
+                    charName: char.name,
+                    charAvatar: chat.avatar,
+                    preview: preview,
+                    models: canReuseCache ? (cachedChat.models || null) : null,
+                });
             }
-
-            newChats.push({
-                file_name: chat.file_name,
-                last_mes: chat.last_mes,
-                chat_items: chat.chat_items || 0,
-                character: char,
-                charName: char.name,
-                charAvatar: chat.avatar,
-                preview: preview,
-                models: canReuseCache ? (cachedChat.models || null) : null,
-            });
         }
 
         if (signal.aborted) return;
@@ -581,7 +654,11 @@ async function fetchFreshChats(isBackground = false) {
 }
 
 function updateChatCardPreview(chat) {
-    const card = document.querySelector(`.chat-card[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
+    const secondarySelector = chat.isGroup
+        ? `[data-group-id="${CSS.escape(chat.groupId)}"]`
+        : `[data-char-avatar="${CSS.escape(chat.charAvatar)}"]`;
+
+    const card = document.querySelector(`.chat-card[data-chat-file="${CSS.escape(chat.file_name)}"]${secondarySelector}`);
     if (card) {
         const previewEl = card.querySelector('.chat-card-preview');
         if (previewEl) {
@@ -598,7 +675,7 @@ function updateChatCardPreview(chat) {
     }
 
     // Also update in grouped view
-    const groupItem = document.querySelector(`.chat-group-item[data-chat-file="${CSS.escape(chat.file_name)}"][data-char-avatar="${CSS.escape(chat.charAvatar)}"]`);
+    const groupItem = document.querySelector(`.chat-group-item[data-chat-file="${CSS.escape(chat.file_name)}"]${secondarySelector}`);
     if (groupItem) {
         const previewEl = groupItem.querySelector('.chat-group-item-preview');
         if (previewEl) {
@@ -633,6 +710,7 @@ function renderChats() {
 
     const chatRules = CoreAPI.getAdvFilterRulesForChats();
     if (chatRules.length > 0) {
+        CoreAPI.resetChatFilterCaches();
         filteredChats = filteredChats.filter(chat => CoreAPI.evaluateChatAdvancedFilters(chat));
     }
 
@@ -678,11 +756,16 @@ function sortChats(chats) {
             sorted.sort((a, b) => (a.chat_items || a.mes_count || 0) - (b.chat_items || b.mes_count || 0));
             break;
         case 'most_chats': {
-            const charChatCounts = {};
+            const entityChatCounts = {};
             sorted.forEach(c => {
-                charChatCounts[c.charAvatar] = (charChatCounts[c.charAvatar] || 0) + 1;
+                const key = c.isGroup ? `_group:${c.groupId}` : c.charAvatar;
+                entityChatCounts[key] = (entityChatCounts[key] || 0) + 1;
             });
-            sorted.sort((a, b) => (charChatCounts[b.charAvatar] || 0) - (charChatCounts[a.charAvatar] || 0));
+            sorted.sort((a, b) => {
+                const keyA = a.isGroup ? `_group:${a.groupId}` : a.charAvatar;
+                const keyB = b.isGroup ? `_group:${b.groupId}` : b.charAvatar;
+                return (entityChatCounts[keyB] || 0) - (entityChatCounts[keyA] || 0);
+            });
             break;
         }
     }
@@ -726,29 +809,32 @@ function renderGroupedChats(chats) {
     groupedView.classList.remove('hidden');
     disconnectObservers();
 
-    // Group by character
-    const groups = {};
+    // Group by entity (character or group chat)
+    const entities = {};
     chats.forEach(chat => {
-        const key = chat.charAvatar;
-        if (!groups[key]) {
-            groups[key] = {
+        const key = chat.isGroup ? `_group:${chat.groupId}` : chat.charAvatar;
+        if (!entities[key]) {
+            entities[key] = {
+                isGroup: chat.isGroup,
                 character: chat.character,
+                group: chat.group,
+                name: chat.charName,
                 chats: []
             };
         }
-        groups[key].chats.push(chat);
+        entities[key].chats.push(chat);
     });
 
-    let groupKeys = Object.keys(groups);
+    let entityKeys = Object.keys(entities);
     if (currentChatSort === 'most_chats') {
-        groupKeys.sort((a, b) => groups[b].chats.length - groups[a].chats.length);
+        entityKeys.sort((a, b) => entities[b].chats.length - entities[a].chats.length);
     } else if (currentChatSort === 'char_asc') {
-        groupKeys.sort((a, b) => (groups[a].character.name || '').localeCompare(groups[b].character.name || ''));
+        entityKeys.sort((a, b) => (entities[a].name || '').localeCompare(entities[b].name || ''));
     } else if (currentChatSort === 'char_desc') {
-        groupKeys.sort((a, b) => (groups[b].character.name || '').localeCompare(groups[a].character.name || ''));
+        entityKeys.sort((a, b) => (entities[b].name || '').localeCompare(entities[a].name || ''));
     }
 
-    if (groupKeys.length === 0) {
+    if (entityKeys.length === 0) {
         groupedView.innerHTML = `
             <div class="chats-empty">
                 <i class="fa-solid fa-search"></i>
@@ -759,28 +845,37 @@ function renderGroupedChats(chats) {
         return;
     }
 
-    // Grouped view renders all groups (pagination is per-group via collapse)
-    groupedView.innerHTML = groupKeys.map(key => {
-        const group = groups[key];
-        const char = group.character;
-        const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+    groupedView.innerHTML = entityKeys.map(key => {
+        const entity = entities[key];
 
-        const avatarHtml = avatarUrl
-            ? `<img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-group-avatar" onerror="this.src='/img/ai4.png'">`
-            : `<div class="chat-group-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
+        let avatarHtml, nameHtml, groupDataAttr;
+
+        if (entity.isGroup) {
+            avatarHtml = buildGroupAvatarHtml(entity.group, 'chat-group-avatar');
+            nameHtml = `<div class="chat-group-name">${CoreAPI.escapeHtml(entity.name)} <span class="chat-group-badge"><i class="fa-solid fa-users"></i></span></div>`;
+            groupDataAttr = `data-group-id="${CoreAPI.escapeHtml(entity.group.id)}"`;
+        } else {
+            const char = entity.character;
+            const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+            avatarHtml = avatarUrl
+                ? `<div class="chat-avatar-wrap chat-group-avatar-size"><img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-group-avatar" onload="this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'"></div>`
+                : `<div class="chat-group-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
+            nameHtml = `<div class="chat-group-name clickable-char-name" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}" title="View character details">${CoreAPI.escapeHtml(char.name)}</div>`;
+            groupDataAttr = `data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}"`;
+        }
 
         return `
-            <div class="chat-group" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}">
+            <div class="chat-group" ${groupDataAttr}>
                 <div class="chat-group-header">
                     ${avatarHtml}
                     <div class="chat-group-info">
-                        <div class="chat-group-name clickable-char-name" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}" title="View character details">${CoreAPI.escapeHtml(char.name)}</div>
-                        <div class="chat-group-count">${group.chats.length} chat${group.chats.length !== 1 ? 's' : ''}</div>
+                        ${nameHtml}
+                        <div class="chat-group-count">${entity.chats.length} chat${entity.chats.length !== 1 ? 's' : ''}</div>
                     </div>
                     <i class="fa-solid fa-chevron-down chat-group-toggle"></i>
                 </div>
                 <div class="chat-group-content">
-                    ${group.chats.map(chat => createGroupedChatItem(chat)).join('')}
+                    ${entity.chats.map(chat => createGroupedChatItem(chat)).join('')}
                 </div>
             </div>
         `;
@@ -869,20 +964,27 @@ function observeNewCards() {
 }
 
 async function lazyLoadPreview(el) {
-    const chatFile = el.dataset.chatFile;
-    const charAvatar = el.dataset.charAvatar;
-    const chat = allChats.find(c => c.file_name === chatFile && c.charAvatar === charAvatar);
-    if (!chat || (chat.preview !== null && chat.models)) return;
+    const chat = findChatByElement(el);
+    if (!chat || chat._previewLoading || (chat.preview !== null && chat.models)) return;
+    chat._previewLoading = true;
 
     el.removeAttribute('data-needs-preview');
 
     try {
         const chatFileName = chat.file_name.replace('.jsonl', '');
-        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
-            ch_name: chat.character.name,
-            file_name: chatFileName,
-            avatar_url: chat.character.avatar
-        });
+        let response;
+
+        if (chat.isGroup) {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GROUP_GET, 'POST', {
+                id: chatFileName
+            });
+        } else {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
+                ch_name: chat.character.name,
+                file_name: chatFileName,
+                avatar_url: chat.character.avatar
+            });
+        }
 
         if (response.ok) {
             const messages = await response.json();
@@ -904,6 +1006,8 @@ async function lazyLoadPreview(el) {
         }
     } catch {
         chat.preview = '';
+    } finally {
+        chat._previewLoading = false;
     }
 
     updateChatCardPreview(chat);
@@ -976,13 +1080,42 @@ function buildModelBadgeHtml(models) {
 // CARD / ITEM CREATION
 // ========================================
 
+function getGroupAvatarUrl(group) {
+    if (group.avatar_url) return group.avatar_url;
+    return null;
+}
+
+function buildGroupAvatarHtml(group, cssClass = 'chat-card-avatar') {
+    const activeMembers = (group.members || []).filter(m => m && !(group.disabled_members || []).includes(m));
+    const display = activeMembers.slice(0, 4);
+
+    if (display.length === 0) {
+        if (group.avatar_url) {
+            return `<div class="chat-avatar-wrap ${cssClass}-size"><img src="${CoreAPI.escapeHtml(group.avatar_url)}" alt="${CoreAPI.escapeHtml(group.name)}" class="${cssClass}" onload="this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'"></div>`;
+        }
+        return `<div class="${cssClass}-fallback"><i class="fa-solid fa-users"></i></div>`;
+    }
+
+    const count = display.length;
+    const imgs = display.map(avatar => {
+        const url = CoreAPI.escapeHtml(CoreAPI.getCharacterAvatarUrl(avatar) || '/img/ai4.png');
+        return `<img src="${url}" alt="" onload="this.classList.add('loaded');this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'">`;
+    }).join('');
+
+    return `<div class="chat-group-composite chat-group-composite-${count} ${cssClass}-size">${imgs}</div>`;
+}
+
+function chatDataAttrs(chat) {
+    if (chat.isGroup) {
+        return `data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-group-id="${CoreAPI.escapeHtml(chat.groupId)}"`;
+    }
+    return `data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(chat.charAvatar)}"`;
+}
+
 function createChatCard(chat) {
-    const char = chat.character;
-    const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
     const chatName = (chat.file_name || '').replace('.jsonl', '');
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
-    const isActive = char.chat === chatName;
     const needsPreview = chat.preview === null || !chat.models;
 
     let previewHtml;
@@ -994,16 +1127,32 @@ function createChatCard(chat) {
         previewHtml = '<span style="opacity: 0.5;">No messages</span>';
     }
 
-    const avatarHtml = avatarUrl
-        ? `<img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-card-avatar" onerror="this.src='/img/ai4.png'">`
-        : `<div class="chat-card-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
+    let avatarHtml, displayName, nameAttrs, isActive;
+
+    if (chat.isGroup) {
+        avatarHtml = buildGroupAvatarHtml(chat.group, 'chat-card-avatar');
+        displayName = chat.charName;
+        nameAttrs = '';
+        isActive = false;
+    } else {
+        const char = chat.character;
+        const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+        avatarHtml = avatarUrl
+            ? `<div class="chat-avatar-wrap chat-card-avatar-size"><img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-card-avatar" onload="this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'"></div>`
+            : `<div class="chat-card-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
+        displayName = char.name;
+        nameAttrs = `clickable-char-name" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}" title="View character details`;
+        isActive = char.chat === chatName;
+    }
+
+    const groupBadge = chat.isGroup ? '<span class="chat-group-badge"><i class="fa-solid fa-users"></i> Group</span>' : '';
 
     return `
-        <div class="chat-card ${isActive ? 'active' : ''}" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}"${needsPreview ? ' data-needs-preview="1"' : ''}>
+        <div class="chat-card ${isActive ? 'active' : ''} ${chat.isGroup ? 'group-chat' : ''}" ${chatDataAttrs(chat)}${needsPreview ? ' data-needs-preview="1"' : ''}>
             <div class="chat-card-header">
                 ${avatarHtml}
                 <div class="chat-card-char-info">
-                    <div class="chat-card-char-name clickable-char-name" data-char-avatar="${CoreAPI.escapeHtml(char.avatar)}" title="View character details">${CoreAPI.escapeHtml(char.name)}</div>
+                    <div class="chat-card-char-name ${nameAttrs}"><span class="chat-card-char-name-text">${CoreAPI.escapeHtml(displayName)}</span>${groupBadge}</div>
                     <div class="chat-card-chat-name">${CoreAPI.escapeHtml(chatName)}</div>
                 </div>
             </div>
@@ -1045,7 +1194,7 @@ function createGroupedChatItem(chat) {
     }
 
     return `
-        <div class="chat-group-item" data-chat-file="${CoreAPI.escapeHtml(chat.file_name)}" data-char-avatar="${CoreAPI.escapeHtml(chat.charAvatar)}"${needsPreview ? ' data-needs-preview="1"' : ''}>
+        <div class="chat-group-item" ${chatDataAttrs(chat)}${needsPreview ? ' data-needs-preview="1"' : ''}>
             <div class="chat-group-item-icon"><i class="fa-solid fa-message"></i></div>
             <div class="chat-group-item-info">
                 <div class="chat-group-item-name">${CoreAPI.escapeHtml(chatName)}</div>
@@ -1074,7 +1223,7 @@ function createGroupedChatItem(chat) {
 
 async function openChatPreview(chat) {
     currentPreviewChat = chat;
-    currentPreviewChar = chat.character;
+    currentPreviewChar = chat.isGroup ? null : chat.character;
 
     const modal = document.getElementById('chatPreviewModal');
     const avatarImg = document.getElementById('chatPreviewAvatar');
@@ -1085,22 +1234,48 @@ async function openChatPreview(chat) {
     const messagesContainer = document.getElementById('chatPreviewMessages');
 
     const chatName = (chat.file_name || '').replace('.jsonl', '');
-    const avatarUrl = CoreAPI.getCharacterAvatarUrl(chat.character.avatar) || '/img/ai4.png';
 
-    avatarImg.src = avatarUrl;
-    title.textContent = chatName;
-    charName.textContent = chat.character.name;
-    charName.className = 'clickable-char-name';
-    charName.title = 'View character details';
-    charName.style.cursor = 'pointer';
-    charName.onclick = (e) => {
-        e.preventDefault();
-        openCharacterDetailsFromChats(chat.character);
-    };
+    if (chat.isGroup) {
+        const avatarContainer = avatarImg.parentElement;
+        const compositeHtml = buildGroupAvatarHtml(chat.group, 'chat-preview-avatar');
+        if (compositeHtml.startsWith('<div')) {
+            avatarImg.style.display = 'none';
+            avatarContainer.querySelector('.chat-group-composite')?.remove();
+            avatarContainer.querySelector('.chat-avatar-wrap')?.remove();
+            avatarImg.insertAdjacentHTML('afterend', compositeHtml);
+        } else {
+            avatarImg.style.display = '';
+            avatarContainer.querySelector('.chat-group-composite')?.remove();
+            avatarContainer.querySelector('.chat-avatar-wrap')?.remove();
+            const srcMatch = compositeHtml.match(/src="([^"]+)"/);
+            avatarImg.src = srcMatch ? srcMatch[1] : '/img/ai4.png';
+        }
+        title.textContent = chatName;
+        charName.textContent = chat.charName;
+        charName.className = '';
+        charName.title = '';
+        charName.style.cursor = 'default';
+        charName.onclick = null;
+    } else {
+        avatarImg.style.display = '';
+        avatarImg.parentElement.querySelector('.chat-group-composite')?.remove();
+        avatarImg.parentElement.querySelector('.chat-avatar-wrap')?.remove();
+        const avatarUrl = CoreAPI.getCharacterAvatarUrl(chat.character.avatar) || '/img/ai4.png';
+        avatarImg.src = avatarUrl;
+        title.textContent = chatName;
+        charName.textContent = chat.character.name;
+        charName.className = 'clickable-char-name';
+        charName.title = 'View character details';
+        charName.style.cursor = 'pointer';
+        charName.onclick = (e) => {
+            e.preventDefault();
+            openCharacterDetailsFromChats(chat.character);
+        };
+    }
+
     messageCount.textContent = chat.chat_items || chat.mes_count || '?';
     date.textContent = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
 
-    // Show model badge in preview header if available
     let modelsContainer = document.getElementById('chatPreviewModels');
     if (!modelsContainer) {
         modelsContainer = document.createElement('span');
@@ -1108,22 +1283,28 @@ async function openChatPreview(chat) {
         const metaEl = document.querySelector('#chatPreviewModal .chat-preview-meta');
         if (metaEl) metaEl.appendChild(modelsContainer);
     }
-    modelsContainer.innerHTML = chat.models ? ' • ' + buildModelBadgeHtml(chat.models) : '';
+    modelsContainer.innerHTML = chat.models ? ' \u2022 ' + buildModelBadgeHtml(chat.models) : '';
 
     CoreAPI.renderLoadingState(messagesContainer, 'Loading messages...', 'chats-loading');
-
     modal.classList.remove('hidden');
 
     try {
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
+        let response;
 
-        CoreAPI.debugLog(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
-
-        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
-            ch_name: chat.character.name,
-            file_name: chatFileName,
-            avatar_url: chat.character.avatar
-        });
+        if (chat.isGroup) {
+            CoreAPI.debugLog(`[ChatPreview] Loading group chat: ${chatFileName} for group ${chat.charName}`);
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GROUP_GET, 'POST', {
+                id: chatFileName
+            });
+        } else {
+            CoreAPI.debugLog(`[ChatPreview] Loading chat: ${chatFileName} for ${chat.character.name}`);
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GET, 'POST', {
+                ch_name: chat.character.name,
+                file_name: chatFileName,
+                avatar_url: chat.character.avatar
+            });
+        }
 
         CoreAPI.debugLog(`[ChatPreview] Response status: ${response.status}`);
 
@@ -1136,15 +1317,14 @@ async function openChatPreview(chat) {
         const messages = await response.json();
         CoreAPI.debugLog(`[ChatPreview] Got ${messages?.length || 0} messages`);
 
-        // Update model stats from full message data (more accurate than cached)
         const freshModels = extractModelStats(messages);
         if (freshModels) {
             chat.models = freshModels;
             const mc = document.getElementById('chatPreviewModels');
-            if (mc) mc.innerHTML = ' • ' + buildModelBadgeHtml(freshModels);
+            if (mc) mc.innerHTML = ' \u2022 ' + buildModelBadgeHtml(freshModels);
         }
 
-        renderChatMessages(messages, chat.character);
+        renderChatMessages(messages, chat.isGroup ? null : chat.character, chat.isGroup);
 
     } catch (e) {
         console.error('Failed to load chat:', e);
@@ -1158,7 +1338,7 @@ async function openChatPreview(chat) {
     }
 }
 
-function renderChatMessages(messages, character) {
+function renderChatMessages(messages, character, isGroupChat = false) {
     const container = document.getElementById('chatPreviewMessages');
 
     if (!messages || messages.length === 0) {
@@ -1175,28 +1355,26 @@ function renderChatMessages(messages, character) {
 
     currentChatMessages = messages;
 
-    const avatarUrl = CoreAPI.getCharacterAvatarUrl(character.avatar) || '/img/ai4.png';
+    const charAvatarUrl = character ? (CoreAPI.getCharacterAvatarUrl(character.avatar) || '/img/ai4.png') : '/img/ai4.png';
+    const charName = character?.name || 'Character';
 
-    // Two-pass render: build structural HTML with empty text slots, then populate
-    // text via DOM so unbalanced </div> in message content can't break the structure
     const formattedTexts = [];
 
     container.innerHTML = messages.map((msg, index) => {
         const isUser = msg.is_user;
         const isSystem = msg.is_system;
-        const name = msg.name || (isUser ? 'User' : character.name);
+        const name = msg.name || (isUser ? 'User' : charName);
         const rawSwipeId = msg.swipe_id ?? 0;
         const swipeId = msg.swipes?.length > 1 ? Math.min(rawSwipeId, msg.swipes.length - 1) : 0;
         const text = msg.swipes?.length > 1 ? (msg.swipes[swipeId] || '') : (msg.mes || '');
         const time = getSwipeTimestamp(msg, swipeId);
 
-        // Skip rendering metadata-only messages (chat header)
         if (index === 0 && msg.chat_metadata && !msg.mes) {
             formattedTexts.push(null);
             return '';
         }
 
-        formattedTexts.push(CoreAPI.formatRichText(text, character.name, true));
+        formattedTexts.push(CoreAPI.formatRichText(text, charName, true));
 
         const isMetadata = msg.chat_metadata !== undefined;
         const actionButtons = isMetadata ? '' : `
@@ -1223,11 +1401,21 @@ function renderChatMessages(messages, character) {
             `;
         }
 
+        // Per-message avatar for group chats
+        let msgAvatarUrl = charAvatarUrl;
+        let nameClass = 'chat-message-name';
+        let nameDataAttr = '';
+        if (isGroupChat && !isUser && msg.original_avatar) {
+            msgAvatarUrl = CoreAPI.getCharacterAvatarUrl(msg.original_avatar) || '/img/ai4.png';
+            nameClass = 'chat-message-name clickable-char-name';
+            nameDataAttr = ` data-char-avatar="${CoreAPI.escapeHtml(msg.original_avatar)}" title="View character details"`;
+        }
+
         return `
             <div class="chat-message ${isUser ? 'user' : 'assistant'}" data-msg-index="${index}">
-                ${!isUser ? `<img src="${avatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
+                ${!isUser ? `<img src="${msgAvatarUrl}" alt="" class="chat-message-avatar" onerror="this.style.display='none'">` : ''}
                 <div class="chat-message-content">
-                    <div class="chat-message-name">${CoreAPI.escapeHtml(name)}</div>
+                    <div class="${nameClass}"${nameDataAttr}>${CoreAPI.escapeHtml(name)}</div>
                     <div class="chat-message-text"></div>
                     ${swipeNav}
                     ${time ? `<div class="chat-message-time">${time}</div>` : ''}
@@ -1237,13 +1425,11 @@ function renderChatMessages(messages, character) {
         `;
     }).join('');
 
-    // Populate text content in isolation so HTML in messages can't break the structure
     container.querySelectorAll('.chat-message-text').forEach(el => {
         const msgIndex = parseInt(el.closest('.chat-message').dataset.msgIndex, 10);
         if (formattedTexts[msgIndex]) el.innerHTML = formattedTexts[msgIndex];
     });
 
-    // Add event listeners for message actions
     container.querySelectorAll('.chat-msg-action-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1258,13 +1444,23 @@ function renderChatMessages(messages, character) {
         });
     });
 
-    // Add swipe navigation listeners
     container.querySelectorAll('.chat-swipe-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             const msgIndex = parseInt(btn.dataset.msgIndex, 10);
             const dir = parseInt(btn.dataset.dir, 10);
             navigateSwipe(msgIndex, dir, character);
+        });
+    });
+
+    container.querySelectorAll('.chat-message-name.clickable-char-name').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const charAvatar = el.dataset.charAvatar;
+            if (!charAvatar) return;
+            const allCharacters = CoreAPI.getAllCharacters();
+            const char = allCharacters.find(c => c.avatar === charAvatar);
+            if (char) openCharacterDetailsFromChats(char);
         });
     });
 
@@ -1352,7 +1548,59 @@ function navigateSwipe(msgIndex, dir, character) {
 // ========================================
 
 async function openChatInST(chat) {
+    if (chat.isGroup) {
+        openGroupChat(chat.groupId, chat.file_name);
+        return;
+    }
     openChat(chat.character, chat.file_name);
+}
+
+async function openGroupChat(groupId, chatFile) {
+    try {
+        const chatId = chatFile.replace('.jsonl', '');
+
+        CoreAPI.showToast('Opening group chat...', 'success');
+        CoreAPI.hideModal('chatPreviewModal');
+
+        const host = CoreAPI.getHostWindow();
+        if (!host) {
+            CoreAPI.showToast('Could not access SillyTavern window', 'error');
+            return;
+        }
+
+        const context = host.SillyTavern?.getContext?.();
+        if (!context?.openGroupChat) {
+            CoreAPI.showToast('SillyTavern context API not available', 'error');
+            return;
+        }
+
+        const group = context.groups?.find(g => g.id === groupId);
+        if (!group) {
+            CoreAPI.showToast('Group not found in SillyTavern', 'error');
+            return;
+        }
+
+        if (context.groupId === groupId) {
+            await context.openGroupChat(groupId, chatId);
+        } else {
+            const $ = host.jQuery;
+            const groupEl = $ ? $(`.group_select[data-grid="${groupId}"]`) : null;
+
+            if (groupEl?.length) {
+                group.chat_id = chatId;
+                groupEl.trigger('click');
+            } else {
+                await context.openGroupChat(groupId, chatId);
+            }
+        }
+
+        if (CoreAPI.getIsEmbedded()) {
+            CoreAPI.closeEmbeddedPanel();
+        }
+    } catch (e) {
+        console.error('openGroupChat error:', e);
+        CoreAPI.showToast('Could not open group chat: ' + e.message, 'error');
+    }
 }
 
 async function deleteChatFromView(chat) {
@@ -1361,15 +1609,24 @@ async function deleteChatFromView(chat) {
     }
 
     try {
-        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
-            chatfile: chat.file_name,
-            avatar_url: chat.character.avatar
-        });
+        let response;
+        if (chat.isGroup) {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GROUP_DELETE, 'POST', {
+                id: chat.file_name.replace('.jsonl', '')
+            });
+        } else {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_DELETE, 'POST', {
+                chatfile: chat.file_name,
+                avatar_url: chat.character.avatar
+            });
+        }
 
         if (response.ok) {
             CoreAPI.showToast('Chat deleted', 'success');
 
-            const idx = allChats.findIndex(c => c.file_name === chat.file_name && c.charAvatar === chat.charAvatar);
+            const idx = chat.isGroup
+                ? allChats.findIndex(c => c.file_name === chat.file_name && c.isGroup && c.groupId === chat.groupId)
+                : allChats.findIndex(c => c.file_name === chat.file_name && c.charAvatar === chat.charAvatar);
             if (idx !== -1) {
                 allChats.splice(idx, 1);
             }
@@ -1389,7 +1646,13 @@ async function deleteChatFromView(chat) {
 
 function openCharacterDetailsFromChats(char) {
     if (!char) return;
-    CoreAPI.openCharacterModal(char);
+    const chatPreviewModal = document.getElementById('chatPreviewModal');
+    const chatPreviewOpen = chatPreviewModal && !chatPreviewModal.classList.contains('hidden');
+    if (chatPreviewOpen) {
+        CoreAPI.openCharModalElevated(char);
+    } else {
+        CoreAPI.openCharacterModal(char);
+    }
 }
 
 // ========================================
@@ -1460,7 +1723,7 @@ async function editChatMessage(messageIndex) {
             if (success) {
                 CoreAPI.showToast('Message updated', 'success');
                 closeEditModal();
-                renderChatMessages(currentChatMessages, currentPreviewChat.character);
+                renderChatMessages(currentChatMessages, currentPreviewChat.isGroup ? null : currentPreviewChat.character, currentPreviewChat.isGroup);
                 clearChatCache();
             } else {
                 currentChatMessages[messageIndex].mes = currentText;
@@ -1505,7 +1768,7 @@ async function deleteChatMessage(messageIndex) {
 
         if (success) {
             CoreAPI.showToast('Message deleted', 'success');
-            renderChatMessages(currentChatMessages, currentPreviewChat.character);
+            renderChatMessages(currentChatMessages, currentPreviewChat.isGroup ? null : currentPreviewChat.character, currentPreviewChat.isGroup);
 
             const countEl = document.getElementById('chatPreviewMessageCount');
             if (countEl) {
@@ -1525,13 +1788,21 @@ async function deleteChatMessage(messageIndex) {
 async function saveChatToServer(chat, messages) {
     try {
         const chatFileName = (chat.file_name || '').replace('.jsonl', '');
+        let response;
 
-        const response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_SAVE, 'POST', {
-            ch_name: chat.character.name,
-            file_name: chatFileName,
-            avatar_url: chat.character.avatar,
-            chat: messages
-        });
+        if (chat.isGroup) {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_GROUP_SAVE, 'POST', {
+                id: chatFileName,
+                chat: messages
+            });
+        } else {
+            response = await CoreAPI.apiRequest(ENDPOINTS.CHATS_SAVE, 'POST', {
+                ch_name: chat.character.name,
+                file_name: chatFileName,
+                avatar_url: chat.character.avatar,
+                chat: messages
+            });
+        }
 
         if (response.ok) {
             const result = await response.json();

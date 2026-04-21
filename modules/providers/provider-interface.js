@@ -550,7 +550,7 @@ export class ProviderBase {
         const api = this._coreAPI;
         if (!api) return { success: 0, skipped: 0, errors: 0, filenameSkipped: 0, aborted: false };
 
-        const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal } = options;
+        const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, dedupState: externalDedup } = options;
         let successCount = 0, errorCount = 0, skippedCount = 0;
         let filenameSkippedCount = 0;
 
@@ -563,22 +563,33 @@ export class ProviderBase {
         }
         if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${galleryImages.length} gallery image(s)`, 'success');
 
-        const useFastSkip = api.getSetting?.('fastFilenameSkip') || false;
-        const validateHeaders = useFastSkip && (api.getSetting?.('fastSkipValidateHeaders') || false);
-        let fileNameIndex = null;
-        let existingHashMap = null;
+        // Use shared dedup state if provided, otherwise build our own
+        const dedup = externalDedup || await api.buildDedupState?.(folderName) || (() => {
+            // Fallback: build inline if buildDedupState not available
+            const useFastSkip = api.getSetting?.('fastFilenameSkip') || false;
+            const validateHeaders = useFastSkip && (api.getSetting?.('fastSkipValidateHeaders') || false);
+            let _fileNameIndex = null;
+            let _hashMap = null;
+            return {
+                useFastSkip,
+                validateHeaders,
+                get fileNameIndex() { return _fileNameIndex; },
+                set fileNameIndex(v) { _fileNameIndex = v; },
+                ensureHashMap: async () => {
+                    if (!_hashMap) _hashMap = await api.getExistingFileHashes?.(folderName) || new Map();
+                    return _hashMap;
+                }
+            };
+        })();
+        const { useFastSkip, validateHeaders, ensureHashMap } = dedup;
+        let { fileNameIndex } = dedup;
 
-        if (useFastSkip) {
+        if (useFastSkip && !fileNameIndex) {
             fileNameIndex = await api.getExistingFileIndex?.(folderName) || new Map();
-        } else {
-            existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
-        }
-
-        async function ensureHashMap() {
-            if (!existingHashMap) {
-                existingHashMap = await api.getExistingFileHashes?.(folderName) || new Map();
-            }
-            return existingHashMap;
+            dedup.fileNameIndex = fileNameIndex;
+        } else if (!useFastSkip && !fileNameIndex) {
+            // Pre-build hash map eagerly when not using fast skip
+            await ensureHashMap();
         }
 
         for (let i = 0; i < galleryImages.length; i++) {
@@ -641,6 +652,10 @@ export class ProviderBase {
             if (saveResult.success) {
                 successCount++;
                 hashMap.set(contentHash, { fileName: saveResult.filename });
+                if (fileNameIndex) {
+                    const savedSanitized = api.extractSanitizedUrlName?.(image.url) || '';
+                    if (savedSanitized) fileNameIndex.set(savedSanitized.toLowerCase(), { fileName: saveResult.filename, localPath: saveResult.localPath || '' });
+                }
                 if (onLogUpdate && imgLog) onLogUpdate(imgLog, `Saved: ${saveResult.filename}`, 'success');
             } else {
                 errorCount++;

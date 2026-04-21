@@ -455,10 +455,14 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationPerChar: {},
     completedMediaLocalizations: [],
     notifyAdditionalContent: true,
-    fastFilenameSkip: false,
+    fastFilenameSkip: true,
     fastSkipValidateHeaders: false,
+    includeExternalGalleries: true,
+    galleryThumbnails: true,
+    galleryThumbPrewarm: true,
 
     // ---- UI & Display ----
+    buttonStyle: 'glass',
     uiScale: 3,
     modalSize: 2,
     replaceUserPlaceholder: true,
@@ -822,6 +826,10 @@ function applyModalSize(level) {
     else if (level === 3) document.body.classList.add('modal-size-large');
 }
 
+function applyButtonStyle(style) {
+    document.documentElement.dataset.btnStyle = style === 'solid' ? 'solid' : 'glass';
+}
+
 function applyAnimateTagPills(enabled, keepName) {
     document.documentElement.classList.toggle('animate-tag-pills', !!enabled);
     document.documentElement.classList.toggle('animate-keep-name', !!enabled && !!keepName);
@@ -847,8 +855,12 @@ async function checkClHelperPlugin(...pairs) {
         if (resp.ok) {
             const data = await resp.json();
             available = data?.ok === true;
+            _galleryThumbsAvailable = available && data?.thumbnails === true;
+            debugLog('[cl-helper] health:', JSON.stringify(data), '| thumbnails:', _galleryThumbsAvailable);
+        } else {
+            debugLog('[cl-helper] health check failed:', resp.status);
         }
-    } catch { /* plugin not reachable */ }
+    } catch (e) { debugLog('[cl-helper] not reachable:', e.message); }
 
     for (let i = 0; i < pairs.length; i += 2) {
         const banner = pairs[i];
@@ -923,6 +935,10 @@ function setupSettingsModal() {
     const fastFilenameSkipCheckbox = document.getElementById('settingsFastFilenameSkip');
     const fastSkipValidateHeadersCheckbox = document.getElementById('settingsFastSkipValidateHeaders');
     const fastSkipValidateRow = document.getElementById('fastSkipValidateRow');
+    const includeExternalGalleriesCheckbox = document.getElementById('settingsIncludeExternalGalleries');
+    const galleryThumbnailsCheckbox = document.getElementById('settingsGalleryThumbnails');
+    const galleryThumbPrewarmCheckbox = document.getElementById('settingsGalleryThumbPrewarm');
+    const galleryThumbPrewarmRow = document.getElementById('galleryThumbPrewarmRow');
     
     // Notifications
     const notifyAdditionalContentCheckbox = document.getElementById('settingsNotifyAdditionalContent');
@@ -942,6 +958,7 @@ function setupSettingsModal() {
     // Appearance
     const uiScaleSelect = document.getElementById('settingsUiScale');
     const modalSizeSelect = document.getElementById('settingsModalSize');
+    const buttonStyleSelect = document.getElementById('settingsButtonStyle');
     const animateTagPillsCheckbox = document.getElementById('settingsAnimateTagPills');
     const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
     const animateKeepNameRow = document.getElementById('animateKeepNameRow');
@@ -1502,6 +1519,16 @@ function setupSettingsModal() {
         if (fastSkipValidateHeadersCheckbox) {
             fastSkipValidateHeadersCheckbox.checked = getSetting('fastSkipValidateHeaders') || false;
         }
+        if (includeExternalGalleriesCheckbox) {
+            includeExternalGalleriesCheckbox.checked = getSetting('includeExternalGalleries') !== false;
+        }
+        if (galleryThumbnailsCheckbox) {
+            galleryThumbnailsCheckbox.checked = getSetting('galleryThumbnails') !== false;
+            if (galleryThumbPrewarmRow) galleryThumbPrewarmRow.style.display = galleryThumbnailsCheckbox.checked ? '' : 'none';
+        }
+        if (galleryThumbPrewarmCheckbox) {
+            galleryThumbPrewarmCheckbox.checked = getSetting('galleryThumbPrewarm') !== false;
+        }
         
         // Notifications
         if (notifyAdditionalContentCheckbox) {
@@ -1547,6 +1574,10 @@ function setupSettingsModal() {
         if (modalSizeSelect) {
             modalSizeSelect.value = String(getSetting('modalSize') ?? 2);
             if (modalSizeSelect._customSelect) modalSizeSelect._customSelect.refresh();
+        }
+        if (buttonStyleSelect) {
+            buttonStyleSelect.value = getSetting('buttonStyle') || 'glass';
+            if (buttonStyleSelect._customSelect) buttonStyleSelect._customSelect.refresh();
         }
         if (animateTagPillsCheckbox) {
             animateTagPillsCheckbox.checked = getSetting('animateTagPills') || false;
@@ -1735,6 +1766,13 @@ function setupSettingsModal() {
             fastSkipValidateRow.style.display = fastFilenameSkipCheckbox.checked ? '' : 'none';
         });
     }
+
+    // Thumbnail pre-warm sub-option visibility
+    if (galleryThumbnailsCheckbox && galleryThumbPrewarmRow) {
+        galleryThumbnailsCheckbox.addEventListener('change', () => {
+            galleryThumbPrewarmRow.style.display = galleryThumbnailsCheckbox.checked ? '' : 'none';
+        });
+    }
     
     // UI Scale: apply immediately on change
     if (uiScaleSelect) {
@@ -1751,6 +1789,15 @@ function setupSettingsModal() {
             const level = parseInt(modalSizeSelect.value) || 2;
             setSetting('modalSize', level);
             applyModalSize(level);
+        });
+    }
+
+    // Button style: apply immediately on change
+    if (buttonStyleSelect) {
+        buttonStyleSelect.addEventListener('change', () => {
+            const style = buttonStyleSelect.value || 'glass';
+            setSetting('buttonStyle', style);
+            applyButtonStyle(style);
         });
     }
 
@@ -1802,6 +1849,9 @@ function setupSettingsModal() {
             includeLorebook: includeLorebookCheckbox ? includeLorebookCheckbox.checked : false,
             fastFilenameSkip: fastFilenameSkipCheckbox ? fastFilenameSkipCheckbox.checked : false,
             fastSkipValidateHeaders: fastSkipValidateHeadersCheckbox ? fastSkipValidateHeadersCheckbox.checked : false,
+            includeExternalGalleries: includeExternalGalleriesCheckbox ? includeExternalGalleriesCheckbox.checked : true,
+            galleryThumbnails: galleryThumbnailsCheckbox ? galleryThumbnailsCheckbox.checked : true,
+            galleryThumbPrewarm: galleryThumbPrewarmCheckbox ? galleryThumbPrewarmCheckbox.checked : true,
             notifyAdditionalContent: notifyAdditionalContentCheckbox ? notifyAdditionalContentCheckbox.checked : true,
             replaceUserPlaceholder: replaceUserPlaceholderCheckbox ? replaceUserPlaceholderCheckbox.checked : true,
             debugMode: debugModeCheckbox ? debugModeCheckbox.checked : false,
@@ -1812,6 +1862,7 @@ function setupSettingsModal() {
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : false,
             mobileProviderQuickSwitch: mobileProviderQuickSwitchCheckbox ? mobileProviderQuickSwitchCheckbox.checked : true,
+            buttonStyle: buttonStyleSelect ? buttonStyleSelect.value || 'glass' : 'glass',
             uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
             modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
@@ -4668,6 +4719,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         // Track as dismissed so it won't reappear on next scan
         // (ST has no directory deletion API — fs.unlinkSync can't remove dirs)
         addDismissedFolder(currentFolder.name);
+        cleanupThumbCache(currentFolder.name);
 
         const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${escapeHtml(currentFolder.name)}"]`);
         if (folderItem) {
@@ -5936,6 +5988,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveGallerySettings();
     }
     
+    // Fire-and-forget: check cl-helper for thumbnail support early
+    checkClHelperPlugin();
+
     // Apply saved highlight color
     applyHighlightColor(getSetting('highlightColor'));
 
@@ -5945,6 +6000,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         applyModalSize(getSetting('modalSize'));
     }
     
+    // Apply button style
+    applyButtonStyle(getSetting('buttonStyle'));
+
     // Apply animated tag pills setting
     applyAnimateTagPills(getSetting('animateTagPills'), getSetting('animateKeepName'));
     
@@ -7336,11 +7394,11 @@ function setupVirtualScrollListener(grid, scrollContainer) {
 
     currentScrollHandler = () => {
         if (!isScrolling) {
+            isScrolling = true;
             window.requestAnimationFrame(() => {
                 updateVisibleCards(grid, scrollContainer, false);
                 isScrolling = false;
             });
-            isScrolling = true;
         }
         
         // Debounce for scroll end — uses a single persistent timeout that
@@ -7385,14 +7443,18 @@ function setupCharacterGridDelegates() {
         openModal(char);
     });
 
-    // Delegated image error handler for card avatars — single listener instead of
-    // per-card inline onerror attributes (avoids per-card handler allocation)
+    grid.addEventListener('load', (e) => {
+        if (e.target.classList.contains('card-image')) {
+            e.target.closest('.char-card')?.classList.add('loaded');
+        }
+    }, true);
+
     grid.addEventListener('error', (e) => {
         if (e.target.classList.contains('card-image') && !e.target.dataset.fallback) {
-            e.target.dataset.fallback = '1'; // prevent infinite loop if placeholder also fails
+            e.target.dataset.fallback = '1';
             e.target.src = '/img/No-Image-Placeholder.svg';
         }
-    }, true); // useCapture: error events don't bubble, so we catch in capture phase
+    }, true);
 
     characterGridDelegatesInitialized = true;
 }
@@ -7638,7 +7700,46 @@ async function fetchCharacterImages(charOrName) {
 let _galleryImageObserver = null;
 
 const GALLERY_PAGE_SIZE = 100;
+const GALLERY_THUMB_SIZE = 384;
+const GALLERY_THUMB_CONCURRENCY = 6;
+const GALLERY_PREWARM_CONCURRENCY = 4;
+const PREWARM_EXTENSIONS = /\.(png|jpe?g|webp|bmp)$/i;
 let _galleryState = null;
+let _galleryThumbsAvailable = false;
+let _galleryThumbObserver = null;
+let _thumbActive = 0;
+let _thumbQueue = [];
+let _thumbBlobUrls = new Set();
+let _thumbAbort = null;
+
+function getGalleryThumbUrl(folderName, fileName) {
+    if (!_galleryThumbsAvailable || getSetting('galleryThumbnails') === false) return null;
+    return `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}?s=${GALLERY_THUMB_SIZE}`;
+}
+
+function cleanupThumbCache(folderName) {
+    if (!_galleryThumbsAvailable) return;
+    apiRequest(`/plugins/cl-helper/gallery-thumb-cleanup/${encodeURIComponent(folderName)}`, 'POST')
+        .catch(() => {});
+}
+
+function prewarmThumbnails(folderName, fileNames) {
+    if (!_galleryThumbsAvailable || getSetting('galleryThumbnails') === false || getSetting('galleryThumbPrewarm') === false) return;
+    const imageFiles = fileNames.filter(f => PREWARM_EXTENSIONS.test(f));
+    if (imageFiles.length === 0) return;
+    debugLog(`[Thumbs] Pre-warming ${imageFiles.length} thumbnails for ${folderName}`);
+    let active = 0;
+    let idx = 0;
+    function drain() {
+        while (active < GALLERY_PREWARM_CONCURRENCY && idx < imageFiles.length) {
+            const file = imageFiles[idx++];
+            active++;
+            const url = `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(folderName)}/${encodeURIComponent(file)}?s=${GALLERY_THUMB_SIZE}`;
+            apiRequest(url).then(() => { active--; drain(); }).catch(() => { active--; drain(); });
+        }
+    }
+    drain();
+}
 
 function getGalleryImageObserver() {
     if (_galleryImageObserver) return _galleryImageObserver;
@@ -7658,10 +7759,156 @@ function getGalleryImageObserver() {
     return _galleryImageObserver;
 }
 
+function _populateGalleryGrid(startIndex, endIndex) {
+    const state = _galleryState;
+    if (!state) return;
+
+    debugLog('[gallery] _populateGalleryGrid called, thumbsAvailable:', _galleryThumbsAvailable);
+
+    if (_galleryThumbsAvailable && getSetting('galleryThumbnails') !== false) {
+        debugLog('[gallery] Using cl-helper thumbnails for', endIndex - startIndex, 'items');
+        _populateGalleryGridThumb(startIndex, endIndex);
+        return;
+    }
+
+    const observer = getGalleryImageObserver();
+    const fragment = document.createDocumentFragment();
+    const gifImages = [];
+
+    for (let i = startIndex; i < endIndex; i++) {
+        const { fileName, type } = state.visualMedia[i];
+        const mediaUrl = state.galleryMedia[i].url;
+        const mediaContainer = document.createElement('div');
+        const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
+        mediaContainer.className = `sprite-item${mediaIsGif ? ' gif-thumb' : ''}`;
+        mediaContainer.dataset.galleryIndex = i;
+
+        if (type === 'video') {
+            mediaContainer.innerHTML = `
+                <div class="video-thumbnail" title="${escapeHtml(fileName)}">
+                    <video src="${mediaUrl}" preload="metadata" muted></video>
+                    <div class="video-play-overlay"><i class="fa-solid fa-play"></i></div>
+                </div>
+            `;
+        } else {
+            const img = document.createElement('img');
+            img.decoding = 'async';
+            img.title = fileName;
+            if (mediaIsGif) {
+                img.src = mediaUrl;
+                img.dataset.gif = '1';
+                gifImages.push(img);
+            } else {
+                img.dataset.src = mediaUrl;
+                img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
+                img.dataset.gif = '0';
+                observer.observe(img);
+            }
+            mediaContainer.appendChild(img);
+        }
+
+        fragment.appendChild(mediaContainer);
+    }
+
+    state.imagesGrid.appendChild(fragment);
+    if (gifImages.length > 0) _scheduleGifFreeze(gifImages);
+}
+
+function _populateGalleryGridThumb(startIndex, endIndex) {
+    const state = _galleryState;
+    if (!state) return;
+
+    if (!_galleryThumbObserver) {
+        _galleryThumbObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting) continue;
+                const img = entry.target;
+                _galleryThumbObserver.unobserve(img);
+                _enqueueThumb(img);
+            }
+        }, { rootMargin: '200px' });
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    for (let i = startIndex; i < endIndex; i++) {
+        const { fileName, type } = state.visualMedia[i];
+        const mediaUrl = state.galleryMedia[i].url;
+        const mediaContainer = document.createElement('div');
+        const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
+        mediaContainer.className = `sprite-item sprite-thumb-loading${mediaIsGif ? ' gif-thumb' : ''}`;
+        mediaContainer.dataset.galleryIndex = i;
+
+        if (type === 'video') {
+            mediaContainer.classList.remove('sprite-thumb-loading');
+            mediaContainer.innerHTML = `
+                <div class="video-thumbnail" title="${escapeHtml(fileName)}">
+                    <video src="${mediaUrl}" preload="metadata" muted></video>
+                    <div class="video-play-overlay"><i class="fa-solid fa-play"></i></div>
+                </div>
+            `;
+        } else {
+            const thumbUrl = `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(state.safeFolderName)}/${encodeURIComponent(fileName)}?s=${GALLERY_THUMB_SIZE}`;
+            const img = document.createElement('img');
+            img.decoding = 'async';
+            img.title = fileName;
+            img.dataset.gif = mediaIsGif ? '1' : '0';
+            img.dataset.thumbUrl = thumbUrl;
+            img.dataset.fullUrl = mediaUrl;
+            img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
+            _galleryThumbObserver.observe(img);
+            mediaContainer.appendChild(img);
+        }
+
+        fragment.appendChild(mediaContainer);
+    }
+
+    state.imagesGrid.appendChild(fragment);
+}
+
+function _enqueueThumb(img) {
+    if (_thumbActive < GALLERY_THUMB_CONCURRENCY) {
+        _thumbActive++;
+        _loadThumb(img);
+    } else {
+        _thumbQueue.push(img);
+    }
+}
+
+function _drainThumbQueue() {
+    _thumbActive = Math.max(0, _thumbActive - 1);
+    if (_thumbQueue.length > 0) {
+        _thumbActive++;
+        _loadThumb(_thumbQueue.shift());
+    }
+}
+
+async function _loadThumb(img) {
+    try {
+        const resp = await apiRequest(img.dataset.thumbUrl, 'GET', null, _thumbAbort ? { signal: _thumbAbort.signal } : {});
+        if (!resp.ok) throw new Error(resp.status);
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        _thumbBlobUrls.add(blobUrl);
+        img.src = blobUrl;
+    } catch (err) {
+        if (err?.name === 'AbortError') return;
+        img.src = img.dataset.fullUrl;
+    }
+    img.closest('.sprite-item')?.classList.remove('sprite-thumb-loading');
+    _drainThumbQueue();
+}
+
 function renderGalleryImages(files, folderName) {
     const grid = document.getElementById('spritesGrid');
     grid.innerHTML = '';
     if (_galleryImageObserver) { _galleryImageObserver.disconnect(); }
+    if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
+    if (_thumbAbort) _thumbAbort.abort();
+    _thumbAbort = new AbortController();
+    _thumbQueue = []; _thumbActive = 0;
+    _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
+    _thumbBlobUrls.clear();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
     _galleryState = null;
     // Reset grid class - we'll manage layout with sections inside
@@ -7810,58 +8057,11 @@ function _handleGalleryGridClick(e) {
     if (isNaN(index)) return;
     if (window.openGalleryViewerWithImages) {
         const charName = activeChar?.name || 'Gallery';
-        window.openGalleryViewerWithImages(_galleryState.galleryMedia, index, charName);
+        window.openGalleryViewerWithImages(_galleryState.galleryMedia, index, charName, _galleryState.safeFolderName);
     } else {
         const media = _galleryState.galleryMedia[index];
         if (media) window.open(media.url, '_blank');
     }
-}
-
-function _populateGalleryGrid(startIndex, endIndex) {
-    const state = _galleryState;
-    if (!state) return;
-
-    const observer = getGalleryImageObserver();
-    const fragment = document.createDocumentFragment();
-    const gifImages = [];
-
-    for (let i = startIndex; i < endIndex; i++) {
-        const { fileName, type } = state.visualMedia[i];
-        const mediaUrl = state.galleryMedia[i].url;
-        const mediaContainer = document.createElement('div');
-        const mediaIsGif = type === 'image' && /\.gif$/i.test(fileName);
-        mediaContainer.className = `sprite-item${mediaIsGif ? ' gif-thumb' : ''}`;
-        mediaContainer.dataset.galleryIndex = i;
-
-        if (type === 'video') {
-            mediaContainer.innerHTML = `
-                <div class="video-thumbnail" title="${escapeHtml(fileName)}">
-                    <video src="${mediaUrl}" preload="metadata" muted></video>
-                    <div class="video-play-overlay"><i class="fa-solid fa-play"></i></div>
-                </div>
-            `;
-        } else {
-            const img = document.createElement('img');
-            img.decoding = 'async';
-            img.title = fileName;
-            if (mediaIsGif) {
-                img.src = mediaUrl;
-                img.dataset.gif = '1';
-                gifImages.push(img);
-            } else {
-                img.dataset.src = mediaUrl;
-                img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
-                img.dataset.gif = '0';
-                observer.observe(img);
-            }
-            mediaContainer.appendChild(img);
-        }
-
-        fragment.appendChild(mediaContainer);
-    }
-
-    state.imagesGrid.appendChild(fragment);
-    if (gifImages.length > 0) _scheduleGifFreeze(gifImages);
 }
 
 const GIF_FREEZE_BATCH_SIZE = 4;
@@ -7891,6 +8091,12 @@ function _renderGalleryPage(page, scroll = true) {
 
     state.imagesGrid.innerHTML = '';
     if (_galleryImageObserver) _galleryImageObserver.disconnect();
+    if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
+    if (_thumbAbort) _thumbAbort.abort();
+    _thumbAbort = new AbortController();
+    _thumbQueue = []; _thumbActive = 0;
+    _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
+    _thumbBlobUrls.clear();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
 
     const start = page * GALLERY_PAGE_SIZE;
@@ -9924,6 +10130,7 @@ async function showDeleteConfirmation(char) {
             
             if (deleted > 0) {
                 debugLog(`[Delete] Deleted ${deleted} gallery image${deleted !== 1 ? 's' : ''}`);
+                cleanupThumbCache(safeFolderName);
             }
         }
         
@@ -12350,6 +12557,8 @@ const CHAT_ADV_FILTER_FIELDS = {
     messageCount: { label: 'Messages', type: 'number', operators: ['more_than', 'less_than', 'equals'] },
     lastMessage: { label: 'Last Message', type: 'date', operators: ['before', 'after', 'in_the_last'] },
     isActive: { label: 'Active Chat', type: 'boolean', operators: ['is_true', 'is_false'] },
+    isGroupChat: { label: 'Group Chat', type: 'boolean', operators: ['is_true', 'is_false'] },
+    groupMember: { label: 'Group Member', type: 'text', operators: ['contains', 'not_contains', 'equals'] },
     charFavorite: { label: 'Char Favorite', type: 'boolean', operators: ['is_true', 'is_false'] },
     charTags: { label: 'Char Tags', type: 'tag', operators: ['includes', 'excludes'] },
     charProviderLink: { label: 'Char Provider Link', type: 'provider', operators: ['is_linked', 'is_not_linked', 'linked_to', 'not_linked_to'] },
@@ -12817,6 +13026,12 @@ function evalNameOverrideOp(c, op) {
     return true;
 }
 
+let _groupMemberCharMap = null;
+
+function resetChatFilterCaches() {
+    _groupMemberCharMap = null;
+}
+
 function evaluateChatAdvancedFilters(chat) {
     for (const rule of chatAdvFilterRules) {
         const needsValue = !ADV_FILTER_NO_VALUE_OPS.has(rule.operator);
@@ -12845,6 +13060,22 @@ function evaluateChatAdvFilterRule(chat, rule) {
             const chatName = (chat.file_name || '').replace('.jsonl', '');
             const isActive = chat.character?.chat === chatName;
             return op === 'is_true' ? isActive : !isActive;
+        }
+        case 'isGroupChat':
+            return op === 'is_true' ? !!chat.isGroup : !chat.isGroup;
+        case 'groupMember': {
+            if (!chat.isGroup || !chat.group?.members) return false;
+            if (!_groupMemberCharMap) {
+                _groupMemberCharMap = new Map();
+                for (const c of allCharacters) _groupMemberCharMap.set(c.avatar, c);
+            }
+            const memberNames = chat.group.members.map(av => (_groupMemberCharMap.get(av)?.name || '').toLowerCase());
+            switch (op) {
+                case 'contains': return memberNames.some(n => n.includes(val));
+                case 'not_contains': return !memberNames.some(n => n.includes(val));
+                case 'equals': return memberNames.some(n => n === val);
+            }
+            return true;
         }
         case 'charFavorite':
             return op === 'is_true' ? isCharacterFavorite(chat.character) : !isCharacterFavorite(chat.character);
@@ -14471,8 +14702,8 @@ async function uploadImages(files) {
     const folderName = getGalleryFolderName(activeChar);
     
     for (let file of files) {
-        if (!file.type.startsWith('image/')) {
-            console.warn(`[Gallery] Skipping non-image file: ${file.name}`);
+        if (!file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+            console.warn(`[Gallery] Skipping unsupported file: ${file.name}`);
             continue;
         }
         
@@ -14504,11 +14735,11 @@ async function uploadImages(files) {
     }
     
     if (uploadedCount > 0) {
-        showToast(`Uploaded ${uploadedCount} image(s)`, 'success');
+        showToast(`Uploaded ${uploadedCount} file(s)`, 'success');
         // Refresh the gallery - pass character object for unique folder support
         fetchCharacterImages(activeChar);
     } else if (errorCount > 0) {
-        showToast(`Upload failed for ${errorCount} image(s)`, 'error');
+        showToast(`Upload failed for ${errorCount} file(s)`, 'error');
     }
 }
 
@@ -14850,6 +15081,11 @@ async function importLocalCharacter(file) {
         // Check for embedded media URLs (split by source)
         const { embeddedUrls: importEmbeddedUrls, lorebookUrls: importLorebookUrls } = findCharacterMediaUrls(cardData, { split: true });
         
+        // Check for external gallery page URLs (imgchest, imgbb, etc.)
+        await window.ensureExtractorsLoaded?.();
+        const importGalleryPageUrls = typeof window.findCharacterGalleryUrls === 'function'
+            ? window.findCharacterGalleryUrls(cardData) : [];
+        
         // Re-embed updated card data if enrichment or gallery_id changed it
         let pngToUpload = needsReembed ? embedCharacterDataInPng(arrayBuffer, cardData) : arrayBuffer;
         
@@ -14891,12 +15127,14 @@ async function importLocalCharacter(file) {
             characterName: characterName,
             embeddedMediaUrls: importEmbeddedUrls,
             lorebookMediaUrls: importLorebookUrls,
+            galleryPageUrls: importGalleryPageUrls,
             galleryId: galleryId,
             linkedProvider: providerResult?.providerId || null,
             providerCharId: providerResult?.charId || null,
             fullPath: providerResult?.fullPath || null,
             hasGallery: providerResult?.hasGallery || false,
             avatarUrl: providerResult?.avatarUrl || null,
+            cardData: cardData.data || null,
         };
         
     } catch (error) {
@@ -15511,90 +15749,9 @@ startImportBtn?.addEventListener('click', async () => {
                 debugLog('[Import] Using name-based folder:', folderName);
             }
             
-            // Auto-download embedded media if enabled
-            const totalImportMediaUrls = (result.embeddedMediaUrls?.length || 0) + (result.lorebookMediaUrls?.length || 0);
-            if (autoDownloadMedia && totalImportMediaUrls > 0) {
-                if (shouldStop()) { wasCancelled = true; break; }
-                
-                if (importMediaProgress) {
-                    importMediaProgress.classList.remove('hidden');
-                    importMediaProgressFill.style.width = '0%';
-                    importMediaProgressCount.textContent = `0/${totalImportMediaUrls}`;
-                }
-                
-                let importMediaDownloaded = 0;
-                let importMediaAborted = false;
-                
-                // Phase 1a: Embedded media
-                if (result.embeddedMediaUrls.length > 0) {
-                    const mediaLogEntry = addImportLogEntry(`  ↳ Embedded Media: downloading ${result.embeddedMediaUrls.length} file(s)...`, 'pending');
-                    const mediaResult = await downloadEmbeddedMediaForCharacter(folderName, result.embeddedMediaUrls, {
-                        onProgress: (current, total) => {
-                            if (importMediaProgressFill) {
-                                importMediaProgressFill.style.width = `${(current / totalImportMediaUrls) * 100}%`;
-                                importMediaProgressCount.textContent = `${current}/${totalImportMediaUrls}`;
-                            }
-                        },
-                        shouldAbort: shouldStop,
-                        abortSignal: importAbortState.controller.signal
-                    });
-                    importMediaDownloaded += mediaResult.success || 0;
-                    
-                    if (mediaResult.aborted) {
-                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: cancelled (${mediaResult.success || 0} downloaded before stop)`, 'warning');
-                        importMediaAborted = true;
-                    } else if (mediaResult.success > 0) {
-                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.success} downloaded, ${mediaResult.skipped || 0} skipped, ${mediaResult.errors || 0} failed`, 'success');
-                    } else if (mediaResult.skipped > 0) {
-                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: ${mediaResult.skipped} already exist`, 'info');
-                    } else {
-                        updateLogEntry(mediaLogEntry, `  ↳ Embedded Media: no files downloaded`, 'info');
-                    }
-                }
-                
-                // Phase 1b: Lorebook media
-                if (result.lorebookMediaUrls.length > 0 && !importMediaAborted && !shouldStop()) {
-                    const lbLogEntry = addImportLogEntry(`  ↳ Lorebook Media: downloading ${result.lorebookMediaUrls.length} file(s)...`, 'pending');
-                    const lbResult = await downloadEmbeddedMediaForCharacter(folderName, result.lorebookMediaUrls, {
-                        prefix: 'lorebook_media',
-                        onProgress: (current, total) => {
-                            if (importMediaProgressFill) {
-                                const totalDone = result.embeddedMediaUrls.length + current;
-                                importMediaProgressFill.style.width = `${(totalDone / totalImportMediaUrls) * 100}%`;
-                                importMediaProgressCount.textContent = `${totalDone}/${totalImportMediaUrls}`;
-                            }
-                        },
-                        shouldAbort: shouldStop,
-                        abortSignal: importAbortState.controller.signal
-                    });
-                    importMediaDownloaded += lbResult.success || 0;
-                    
-                    if (lbResult.aborted) {
-                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: cancelled (${lbResult.success || 0} downloaded before stop)`, 'warning');
-                        importMediaAborted = true;
-                    } else if (lbResult.success > 0) {
-                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: ${lbResult.success} downloaded, ${lbResult.skipped || 0} skipped, ${lbResult.errors || 0} failed`, 'success');
-                    } else if (lbResult.skipped > 0) {
-                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: ${lbResult.skipped} already exist`, 'info');
-                    } else {
-                        updateLogEntry(lbLogEntry, `  ↳ Lorebook Media: no files downloaded`, 'info');
-                    }
-                }
-                
-                mediaDownloadCount += importMediaDownloaded;
-                updateStats();
-                
-                if (importMediaAborted) {
-                    wasCancelled = true;
-                    break;
-                }
-            }
-            
-            // Auto-download provider gallery if enabled
-            // Determine which provider to use for gallery download
+            // Auto-download media via unified pipeline
             let galleryProvider = null;
             let galleryLinkInfo = null;
-            
             if (importSourceMode === 'url') {
                 galleryProvider = item.provider;
                 galleryLinkInfo = { id: result.providerCharId, fullPath: result.fullPath };
@@ -15602,41 +15759,87 @@ startImportBtn?.addEventListener('click', async () => {
                 galleryProvider = window.ProviderRegistry?.getProvider(result.linkedProvider) || null;
                 galleryLinkInfo = { id: result.providerCharId, fullPath: result.fullPath };
             }
-            
+
+            const importPhases = [];
+            if (autoDownloadMedia) {
+                if (result.embeddedMediaUrls?.length > 0) importPhases.push('embedded');
+                if (result.lorebookMediaUrls?.length > 0) importPhases.push('lorebook');
+            }
             if (autoDownloadGallery && result.hasGallery && galleryProvider?.supportsGallery && galleryLinkInfo) {
+                importPhases.push('providerGallery');
+            }
+            if (getSetting('includeExternalGalleries') !== false && result.galleryPageUrls?.length > 0) importPhases.push('extGallery');
+
+            if (importPhases.length > 0) {
                 if (shouldStop()) { wasCancelled = true; break; }
-                
-                if (importMediaProgress) {
-                    importMediaProgress.classList.remove('hidden');
-                    importMediaProgressFill.style.width = '0%';
-                    importMediaProgressCount.textContent = `0/?`;
-                }
-                
-                const providerLabel = galleryProvider.name || 'Provider';
-                const galleryLogEntry = addImportLogEntry(`  ↳ ${providerLabel} Gallery: downloading...`, 'pending');
-                const galleryResult = await galleryProvider.downloadGallery(galleryLinkInfo, folderName, {
-                    onProgress: (current, total) => {
-                        if (importMediaProgressFill) {
+
+                const pseudoChar = { avatar: result.fileName, name: result.characterName, data: result.cardData || { extensions: {} }, _slim: false };
+                const totalMediaUrls = (result.embeddedMediaUrls?.length || 0) + (result.lorebookMediaUrls?.length || 0);
+                const embeddedCount = result.embeddedMediaUrls?.length || 0;
+                const phaseLogEntries = {};
+                const phaseLabels = {
+                    embedded: 'Embedded Media',
+                    lorebook: 'Lorebook Media',
+                    providerGallery: `${galleryProvider?.name || 'Provider'} Gallery`,
+                    extGallery: 'External Galleries'
+                };
+
+                const pipelineResult = await downloadCharacterMedia(pseudoChar, folderName, {
+                    embeddedUrls: result.embeddedMediaUrls || [],
+                    lorebookUrls: result.lorebookMediaUrls || [],
+                    galleryPageUrls: result.galleryPageUrls || [],
+                    providerOverride: galleryProvider ? { provider: galleryProvider, linkInfo: galleryLinkInfo } : undefined,
+                    phases: importPhases,
+                    signal: importAbortState.controller.signal,
+                    shouldAbort: shouldStop,
+                    onPhaseStart: (phase, ctx) => {
+                        if (importMediaProgress) {
+                            importMediaProgress.classList.remove('hidden');
+                            importMediaProgressFill.style.width = '0%';
+                            importMediaProgressCount.textContent = (phase === 'embedded' || phase === 'lorebook')
+                                ? `0/${totalMediaUrls}` : `0/${ctx.count || '?'}`;
+                        }
+                        const label = phaseLabels[phase] || phase;
+                        const msg = phase === 'extGallery'
+                            ? `  ↳ ${label}: resolving ${ctx.count} URL(s)...`
+                            : `  ↳ ${label}: downloading${ctx.count ? ` ${ctx.count} file(s)` : ''}...`;
+                        phaseLogEntries[phase] = addImportLogEntry(msg, 'pending');
+                    },
+                    onPhaseEnd: (phase, pr) => {
+                        const entry = phaseLogEntries[phase];
+                        if (!entry) return;
+                        const label = phaseLabels[phase] || phase;
+                        if (pr.aborted) {
+                            updateLogEntry(entry, `  ↳ ${label}: cancelled (${pr.success || 0} downloaded before stop)`, 'warning');
+                        } else if (pr.success > 0) {
+                            updateLogEntry(entry, `  ↳ ${label}: ${pr.success} downloaded, ${pr.skipped || 0} skipped, ${pr.errors || 0} failed`, 'success');
+                        } else if (pr.skipped > 0) {
+                            updateLogEntry(entry, `  ↳ ${label}: ${pr.skipped} already exist`, 'info');
+                        } else {
+                            const noMsg = phase === 'providerGallery' ? 'no images available'
+                                : phase === 'extGallery' ? 'no images found' : 'no files downloaded';
+                            updateLogEntry(entry, `  ↳ ${label}: ${noMsg}`, 'info');
+                        }
+                    },
+                    onProgress: (phase, current, total) => {
+                        if (!importMediaProgressFill) return;
+                        if (phase === 'embedded' || phase === 'lorebook') {
+                            const done = (phase === 'lorebook' ? embeddedCount : 0) + current;
+                            importMediaProgressFill.style.width = `${(done / totalMediaUrls) * 100}%`;
+                            importMediaProgressCount.textContent = `${done}/${totalMediaUrls}`;
+                        } else {
                             importMediaProgressFill.style.width = `${(current / total) * 100}%`;
                             importMediaProgressCount.textContent = `${current}/${total}`;
                         }
-                    },
-                    shouldAbort: shouldStop,
-                    abortSignal: importAbortState.controller.signal
+                    }
                 });
-                mediaDownloadCount += galleryResult.success || 0;
+
+                mediaDownloadCount += pipelineResult.totals.success;
                 updateStats();
-                
-                if (galleryResult.aborted) {
-                    updateLogEntry(galleryLogEntry, `  ↳ ${providerLabel} Gallery: cancelled (${galleryResult.success || 0} downloaded before stop)`, 'warning');
+
+                if (pipelineResult.aborted) {
                     wasCancelled = true;
                     break;
-                } else if (galleryResult.success > 0) {
-                    updateLogEntry(galleryLogEntry, `  ↳ ${providerLabel} Gallery: ${galleryResult.success} downloaded, ${galleryResult.skipped || 0} skipped, ${galleryResult.errors || 0} failed`, 'success');
-                } else if (galleryResult.skipped > 0) {
-                    updateLogEntry(galleryLogEntry, `  ↳ ${providerLabel} Gallery: ${galleryResult.skipped} already exist`, 'info');
-                } else {
-                    updateLogEntry(galleryLogEntry, `  ↳ ${providerLabel} Gallery: no images available`, 'info');
                 }
             }
         } else {
@@ -15798,6 +16001,10 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
     const galleryDesc = document.getElementById('importSummaryGalleryDesc');
     const mediaRow = document.getElementById('importSummaryMediaRow');
     const mediaDesc = document.getElementById('importSummaryMediaDesc');
+    const mediaBadge = document.getElementById('importSummaryMediaBadge');
+    const extGalleryRow = document.getElementById('importSummaryExtGalleryRow');
+    const extGalleryDesc = document.getElementById('importSummaryExtGalleryDesc');
+    const extGalleryBadge = document.getElementById('importSummaryExtGalleryBadge');
     const downloadAllBtn = document.getElementById('importSummaryDownloadAllBtn');
     const progressWrap = document.getElementById('importSummaryProgress');
     const progressFill = document.getElementById('importSummaryProgressFill');
@@ -15814,6 +16021,7 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
     // Reset rows
     galleryRow?.classList.add('hidden');
     mediaRow?.classList.add('hidden');
+    extGalleryRow?.classList.add('hidden');
     
     const includeProviderGallery = getSetting('includeProviderGallery') !== false;
 
@@ -15821,7 +16029,7 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
     if (galleryCharacters.length > 0 && galleryRow) {
         const galleryTitle = document.getElementById('importSummaryGalleryTitle');
         const providerName = galleryCharacters[0]?.provider?.name || 'Provider';
-        if (galleryTitle) galleryTitle.textContent = `${providerName} Gallery Images`;
+        if (galleryTitle) galleryTitle.textContent = `${providerName} Gallery`;
 
         if (galleryCharacters.length === 1) {
             if (galleryDesc) {
@@ -15840,18 +16048,37 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
         galleryRow.classList.remove('hidden');
     }
     
-    // Show media row if there are media characters with actual files
-    if (mediaCharacters.length > 0 && mediaRow) {
-        // Calculate total file count
+    if (mediaCharacters.length > 0) {
         const totalFiles = mediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
-        
-        // Only show if there are actually files to download
-        if (totalFiles > 0) {
+        const allGalleryUrls = mediaCharacters.flatMap(c => c.galleryPageUrls || []);
+        const totalExtGalleries = allGalleryUrls.length;
+
+        // Embedded media row
+        if (totalFiles > 0 && mediaRow) {
+            if (mediaBadge) mediaBadge.textContent = totalFiles;
             if (mediaDesc) {
-                mediaDesc.textContent = `${totalFiles} remote file${totalFiles > 1 ? 's' : ''} that can be saved locally`;
+                mediaDesc.textContent = totalFiles === 1
+                    ? 'Image referenced in the card text'
+                    : `${totalFiles} images and files referenced in the card`;
             }
-            
             mediaRow.classList.remove('hidden');
+        }
+
+        // External galleries row
+        if (totalExtGalleries > 0 && extGalleryRow) {
+            if (extGalleryBadge) extGalleryBadge.textContent = totalExtGalleries;
+            if (extGalleryDesc) {
+                const sources = typeof window.identifyGallerySources === 'function'
+                    ? window.identifyGallerySources(allGalleryUrls) : [];
+                if (sources.length > 0) {
+                    extGalleryDesc.textContent = sources.join(', ');
+                } else {
+                    extGalleryDesc.textContent = totalExtGalleries === 1
+                        ? 'Gallery page linked in the card'
+                        : `${totalExtGalleries} gallery pages linked in the card`;
+                }
+            }
+            extGalleryRow.classList.remove('hidden');
         }
     }
     
@@ -15909,9 +16136,8 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     
     let totalGallerySuccess = 0;
     let totalMediaSuccess = 0;
+    let totalExtGallerySuccess = 0;
     let wasAborted = false;
-    let processedMediaFiles = 0;
-    const totalMediaFiles = pendingMediaCharacters.reduce((sum, c) => sum + (c.mediaUrls?.length || 0), 0);
 
     const setProgress = (label, current, total) => {
         if (!progressWrap || !progressFill || !progressLabel || !progressCount) return;
@@ -15926,63 +16152,54 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
             progressCount.textContent = current ? String(current) : '0';
         }
     };
-    
-    // Download embedded media FIRST (takes precedence for media localization matching)
-    if (hasMedia) {
-        setProgress('Embedded media', 0, totalMediaFiles || 0);
-        for (const charInfo of pendingMediaCharacters) {
-            if (importSummaryDownloadState.abort) {
-                wasAborted = true;
-                break;
-            }
-            const folderName = getImportSummaryFolderName(charInfo);
-            const result = await downloadEmbeddedMediaForCharacter(folderName, charInfo.mediaUrls || [], {
-                shouldAbort: () => importSummaryDownloadState.abort,
-                abortSignal: importSummaryDownloadState.controller.signal
-                ,
-                onProgress: () => {
-                    processedMediaFiles++;
-                    setProgress('Embedded media', processedMediaFiles, totalMediaFiles || 0);
-                }
-            });
-            if (result.aborted) {
-                wasAborted = true;
-                break;
-            }
-            totalMediaSuccess += result.success;
+
+    // Build unified per-character list from both pending arrays
+    const charMap = new Map();
+    for (const c of pendingMediaCharacters) {
+        const key = c.avatar || c.name;
+        charMap.set(key, { ...c });
+    }
+    for (const c of pendingGalleryCharacters) {
+        const key = c.avatar || c.name;
+        if (charMap.has(key)) {
+            const existing = charMap.get(key);
+            existing.provider = c.provider;
+            existing.linkInfo = c.linkInfo;
+        } else {
+            charMap.set(key, { ...c });
         }
     }
-    
-    // Download gallery images SECOND (will skip duplicates already downloaded as embedded media)
-    if (hasGallery && !wasAborted) {
-        for (const charInfo of pendingGalleryCharacters) {
-            if (importSummaryDownloadState.abort) {
-                wasAborted = true;
-                break;
+
+    for (const charInfo of charMap.values()) {
+        if (importSummaryDownloadState.abort) { wasAborted = true; break; }
+
+        const folderName = getImportSummaryFolderName(charInfo);
+        const pseudoChar = { avatar: charInfo.avatar, name: charInfo.name, data: charInfo.cardData || { extensions: {} }, _slim: false };
+
+        const phases = [];
+        if (charInfo.mediaUrls?.length > 0) phases.push('embedded');
+        if (hasGallery && charInfo.provider?.supportsGallery && charInfo.linkInfo) phases.push('providerGallery');
+        if (getSetting('includeExternalGalleries') !== false && charInfo.galleryPageUrls?.length > 0) phases.push('extGallery');
+        if (phases.length === 0) continue;
+
+        const pResult = await downloadCharacterMedia(pseudoChar, folderName, {
+            embeddedUrls: charInfo.mediaUrls || [],
+            lorebookUrls: [],
+            galleryPageUrls: charInfo.galleryPageUrls || [],
+            providerOverride: charInfo.provider ? { provider: charInfo.provider, linkInfo: charInfo.linkInfo } : undefined,
+            phases,
+            signal: importSummaryDownloadState.controller.signal,
+            shouldAbort: () => importSummaryDownloadState.abort,
+            onProgress: (phase, current, total) => {
+                const phaseLabel = { embedded: 'Embedded media', providerGallery: `${charInfo.provider?.name || 'Provider'} gallery`, extGallery: 'External galleries' }[phase] || phase;
+                setProgress(`${phaseLabel}: ${charInfo.name || 'files'}`, current, total);
             }
-            
-            // Determine provider for gallery download
-            let galleryProvider = charInfo.provider || null;
-            let galleryLinkInfo = charInfo.linkInfo || null;
-            
-            if (galleryProvider?.supportsGallery && galleryLinkInfo) {
-                const folderName = getImportSummaryFolderName(charInfo);
-                const providerLabel = galleryProvider.name || 'Provider';
-                const result = await galleryProvider.downloadGallery(galleryLinkInfo, folderName, {
-                    shouldAbort: () => importSummaryDownloadState.abort,
-                    abortSignal: importSummaryDownloadState.controller.signal,
-                    onProgress: (current, total) => {
-                        const labelName = charInfo.name || `${providerLabel} gallery`;
-                        setProgress(`${providerLabel} gallery: ${labelName}`, current, total);
-                    }
-                });
-                if (result.aborted) {
-                    wasAborted = true;
-                    break;
-                }
-                totalGallerySuccess += result.success;
-            }
-        }
+        });
+
+        totalMediaSuccess += (pResult.embedded?.success || 0);
+        totalGallerySuccess += (pResult.providerGallery?.success || 0);
+        totalExtGallerySuccess += (pResult.extGallery?.success || 0);
+        if (pResult.aborted) { wasAborted = true; break; }
     }
     
     importSummaryDownloadState.active = false;
@@ -16003,7 +16220,7 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
     btn.innerHTML = '<i class="fa-solid fa-check"></i> Done';
     btn.classList.add('success');
     
-    const totalDownloaded = totalGallerySuccess + totalMediaSuccess;
+    const totalDownloaded = totalGallerySuccess + totalMediaSuccess + totalExtGallerySuccess;
     if (totalDownloaded > 0) {
         showToast(`Downloaded ${totalDownloaded} file${totalDownloaded > 1 ? 's' : ''}`, 'success');
         fetchCharacters(true);
@@ -17926,7 +18143,7 @@ async function getExistingFileIndex(folderName) {
                 continue;
             }
 
-            const galleryMatch = nameNoExt.match(/^[a-z]+gallery_[a-f0-9]{8}_(.+)$/);
+            const galleryMatch = nameNoExt.match(/^[a-z]+gallery_[a-f0-9]+_(.+)$/);
             if (galleryMatch) {
                 index.set(galleryMatch[1].toLowerCase(), { fileName, localPath });
                 continue;
@@ -17951,6 +18168,37 @@ async function validateFileByHead(localPath) {
 }
 
 /**
+ * Build shared dedup state for a gallery folder. Call once per character, pass to all download phases.
+ * @param {string} folderName
+ * @returns {Promise<{fileNameIndex: Map|null, hashMap: Map|null, ensureHashMap: function, useFastSkip: boolean, validateHeaders: boolean}>}
+ */
+async function buildDedupState(folderName) {
+    const useFastSkip = getSetting('fastFilenameSkip') || false;
+    const validateHeaders = useFastSkip && (getSetting('fastSkipValidateHeaders') || false);
+
+    let fileNameIndex = null;
+    let hashMap = null;
+
+    if (useFastSkip) {
+        fileNameIndex = await getExistingFileIndex(folderName);
+        debugLog(`[DedupState] Fast skip: ${fileNameIndex.size} indexed files for ${folderName}`);
+    } else {
+        hashMap = await getExistingFileHashes(folderName);
+        debugLog(`[DedupState] Hash map: ${hashMap.size} entries for ${folderName}`);
+    }
+
+    async function ensureHashMap() {
+        if (!hashMap) {
+            hashMap = await getExistingFileHashes(folderName);
+            debugLog(`[DedupState] Lazy hash map built: ${hashMap.size} entries for ${folderName}`);
+        }
+        return hashMap;
+    }
+
+    return { fileNameIndex, hashMap, ensureHashMap, useFastSkip, validateHeaders };
+}
+
+/**
  * Download embedded media for a character (core function used by both localize button and import summary)
  * @param {string} folderName - The gallery folder name (use getGalleryFolderName() for unique folders)
  * @param {string[]} mediaUrls - Array of URLs to download
@@ -17958,7 +18206,7 @@ async function validateFileByHead(localPath) {
  * @returns {Promise<{success: number, skipped: number, errors: number, renamed: number}>}
  */
 async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options = {}) {
-    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, prefix = 'localized_media' } = options;
+    const { onProgress, onLog, onLogUpdate, shouldAbort, abortSignal, prefix = 'localized_media', dedupState: externalDedup, downloadFnMap } = options;
     
     let successCount = 0;
     let errorCount = 0;
@@ -17969,29 +18217,10 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         return { success: 0, skipped: 0, errors: 0, renamed: 0, aborted: false };
     }
     
-    const useFastSkip = getSetting('fastFilenameSkip') || false;
-    const validateHeaders = useFastSkip && (getSetting('fastSkipValidateHeaders') || false);
-    
-    // Fast skip: build lightweight filename index (no downloads)
-    // Lazy hash: only built if some URLs can't be matched by filename
-    let fileNameIndex = null;
-    let existingHashMap = null;
-    
-    if (useFastSkip) {
-        fileNameIndex = await getExistingFileIndex(folderName);
-        debugLog(`[EmbeddedMedia] Fast skip: ${fileNameIndex.size} indexed files for ${folderName}`);
-    } else {
-        existingHashMap = await getExistingFileHashes(folderName);
-        debugLog(`[EmbeddedMedia] Found ${existingHashMap.size} existing file hashes for ${folderName}`);
-    }
-    
-    async function ensureHashMap() {
-        if (!existingHashMap) {
-            existingHashMap = await getExistingFileHashes(folderName);
-            debugLog(`[EmbeddedMedia] Lazy hash map built: ${existingHashMap.size} entries for ${folderName}`);
-        }
-        return existingHashMap;
-    }
+    // Use shared dedup state if provided, otherwise build our own
+    const dedup = externalDedup || await buildDedupState(folderName);
+    const { useFastSkip, validateHeaders, ensureHashMap } = dedup;
+    let { fileNameIndex } = dedup;
     
     let startIndex = Date.now(); // Use timestamp as start index for unique filenames
     let filenameSkippedCount = 0;
@@ -18016,10 +18245,15 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
                 const match = fileNameIndex.get(sanitizedName.toLowerCase());
                 if (match) {
                     // If fixFilenames is on and the matched file has the wrong prefix, skip the fast path
-                    // so it falls through to hash-check where reclassification happens
+                    // so it falls through to hash-check where reclassification happens.
+                    // But never bypass for a higher-priority prefix (e.g. localized_media > extgallery).
                     const fixFilenames = getSetting('fixFilenames') !== false;
                     const hasCorrectPrefix = match.fileName.startsWith(prefix + '_');
-                    if (fixFilenames && !hasCorrectPrefix) {
+                    const PREFIX_PRIORITY_FS = { 'localized_media': 4, 'lorebook_media': 3, 'extgallery': 2 };
+                    const matchPriority = Object.entries(PREFIX_PRIORITY_FS).find(([p]) => match.fileName.startsWith(p + '_'))?.[1] || 0;
+                    const currentPriority = PREFIX_PRIORITY_FS[prefix] || 0;
+                    const wouldDowngrade = matchPriority >= currentPriority;
+                    if (fixFilenames && !hasCorrectPrefix && !wouldDowngrade) {
                         debugLog(`[EmbeddedMedia] Fast skip bypassed (wrong prefix): ${match.fileName} needs ${prefix}_*`);
                     } else {
                         let valid = true;
@@ -18042,7 +18276,20 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
         }
         
         // Download to memory first to check hash (with 30s timeout)
-        let downloadResult = await downloadMediaToMemory(url, 30000, abortSignal);
+        const customDownloadFn = downloadFnMap?.get(url);
+        let downloadResult;
+        if (customDownloadFn) {
+            try {
+                downloadResult = await customDownloadFn(abortSignal);
+            } catch (err) {
+                if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+                    return { success: successCount, skipped: skippedCount, errors: errorCount, renamed: renamedCount, filenameSkipped: filenameSkippedCount, aborted: true };
+                }
+                downloadResult = { success: false, error: err.message };
+            }
+        } else {
+            downloadResult = await downloadMediaToMemory(url, 30000, abortSignal);
+        }
         
         if (!downloadResult.success) {
             errorCount++;
@@ -18064,7 +18311,7 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             // Also rename if extension doesn't match actual content type (fixes corrupted files)
             const isProviderGalleryFile = (window.ProviderRegistry?.getAllProviders() || [])
                 .some(p => existingFile.fileName.startsWith(p.galleryFilePrefix + '_'));
-            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_') || existingFile.fileName.startsWith('lorebook_media_');
+            const isAlreadyLocalized = existingFile.fileName.startsWith('localized_media_') || existingFile.fileName.startsWith('lorebook_media_') || existingFile.fileName.startsWith('extgallery_');
             const hasCorrectPrefix = existingFile.fileName.startsWith(prefix + '_');
             
             // Check if extension matches detected content type
@@ -18092,7 +18339,13 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             }
             
             const fixFilenames = getSetting('fixFilenames') !== false;
-            const needsRename = isProviderGalleryFile || !isAlreadyLocalized || hasWrongExtension || (fixFilenames && !hasCorrectPrefix);
+            // Prefix priority: localized_media > lorebook_media > extgallery > provider gallery > unknown
+            // Never reclassify a higher-priority prefix to a lower one
+            const PREFIX_PRIORITY = { 'localized_media': 4, 'lorebook_media': 3, 'extgallery': 2 };
+            const existingPriority = Object.entries(PREFIX_PRIORITY).find(([p]) => existingFile.fileName.startsWith(p + '_'))?.[1] || (isProviderGalleryFile ? 1 : 0);
+            const currentPriority = PREFIX_PRIORITY[prefix] || (isProviderGalleryFile ? 1 : 0);
+            const wouldDowngrade = hasCorrectPrefix ? false : existingPriority >= currentPriority;
+            const needsRename = hasWrongExtension || (isProviderGalleryFile && currentPriority > 1) || (!isAlreadyLocalized && !isProviderGalleryFile) || (fixFilenames && !hasCorrectPrefix && !wouldDowngrade);
             
             if (needsRename) {
                 const renameResult = await renameToLocalizedFormat(existingFile, url, folderName, fileIndex, downloadResult, prefix);
@@ -18144,6 +18397,11 @@ async function downloadEmbeddedMediaForCharacter(folderName, mediaUrls, options 
             successCount++;
             // Add to hash map to avoid downloading same file twice in this session
             hashMap.set(contentHash, { fileName: result.filename, localPath: result.localPath });
+            // Update filename index for cross-phase fast-skip
+            if (fileNameIndex) {
+                const savedSanitized = extractSanitizedUrlName(url);
+                if (savedSanitized) fileNameIndex.set(savedSanitized.toLowerCase(), { fileName: result.filename, localPath: result.localPath });
+            }
             if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Saved: ${result.filename}`, 'success');
         } else {
             errorCount++;
@@ -18802,6 +19060,314 @@ async function saveMediaFromMemory(downloadResult, url, folderName, index, prefi
     }
 }
 
+/**
+ * Download images from external gallery pages found in a character's text fields.
+ * Phase 3 of the localization pipeline (after embedded + provider gallery).
+ * @param {Object} character - Character object (must be hydrated)
+ * @param {string} folderName - Gallery folder name
+ * @param {Object} [options]
+ * @param {function} [options.onLog] - Log entry callback
+ * @param {function} [options.onLogUpdate] - Log update callback
+ * @param {function} [options.onProgress] - Progress callback (current, total)
+ * @param {function} [options.shouldAbort] - Abort check callback
+ * @param {AbortSignal} [options.abortSignal] - Abort signal
+ * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
+ */
+async function downloadExternalGalleryForCharacter(character, folderName, options = {}) {
+    const { onLog, onLogUpdate, onProgress, shouldAbort, abortSignal, dedupState, galleryPageUrls: overrideUrls } = options;
+
+    const result = { success: 0, skipped: 0, errors: 0, aborted: false };
+
+    const galleryUrls = overrideUrls || (typeof window.findCharacterGalleryUrls === 'function'
+        ? window.findCharacterGalleryUrls(character)
+        : []);
+    if (galleryUrls.length === 0) return result;
+
+    let allImages = [];
+
+    for (let i = 0; i < galleryUrls.length; i++) {
+        if ((shouldAbort && shouldAbort()) || abortSignal?.aborted) {
+            result.aborted = true;
+            return result;
+        }
+
+        const gUrl = galleryUrls[i];
+        const displayUrl = gUrl.length > 60 ? gUrl.substring(0, 60) + '...' : gUrl;
+        const logEntry = onLog ? onLog(`Extracting: ${displayUrl}`, 'pending') : null;
+
+        try {
+            const extracted = await window.extractGalleryImages(gUrl, { signal: abortSignal, character });
+            if (extracted.aborted) {
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Aborted: ${displayUrl}`, 'error');
+                result.aborted = true;
+                return result;
+            }
+            if (extracted.error) {
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Failed to extract: ${displayUrl} (${extracted.error})`, 'error');
+                result.errors++;
+                continue;
+            }
+            if (extracted.images.length > 0) {
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Found ${extracted.images.length} image(s) from ${displayUrl}`, 'success');
+                allImages.push(...extracted.images);
+            } else {
+                if (onLogUpdate && logEntry) onLogUpdate(logEntry, `No images found at ${displayUrl}`, 'info');
+            }
+        } catch (err) {
+            if (err.name === 'AbortError') { result.aborted = true; return result; }
+            if (onLogUpdate && logEntry) onLogUpdate(logEntry, `Error extracting ${displayUrl}: ${err.message}`, 'error');
+            result.errors++;
+        }
+    }
+
+    if (allImages.length === 0) return result;
+
+    const imageUrls = allImages.map(img => img.url);
+    const downloadFnMap = new Map();
+    for (const img of allImages) {
+        if (typeof img.downloadFn === 'function') downloadFnMap.set(img.url, img.downloadFn);
+    }
+
+    const downloadResult = await downloadEmbeddedMediaForCharacter(folderName, imageUrls, {
+        prefix: 'extgallery',
+        onProgress,
+        onLog,
+        onLogUpdate,
+        shouldAbort,
+        abortSignal,
+        dedupState,
+        downloadFnMap
+    });
+
+    result.success += downloadResult.success;
+    result.skipped += downloadResult.skipped;
+    result.errors += downloadResult.errors;
+    result.aborted = !!downloadResult.aborted;
+
+    return result;
+}
+
+
+// ========================================================================
+// Unified Media Download Pipeline
+// ========================================================================
+
+/**
+ * @param {Object} character
+ * @param {string} folderName - Gallery folder name
+ * @param {Object} [options]
+ * @param {AbortSignal} [options.signal]
+ * @param {function} [options.shouldAbort]
+ * @param {function} [options.onPhaseStart] - (phaseName, context) => void
+ * @param {function} [options.onProgress] - (phase, current, total) => void
+ * @param {function} [options.onLog] - (message, status) => logEntry
+ * @param {function} [options.onLogUpdate] - (entry, message, status) => void
+ * @param {string[]} [options.embeddedUrls] - Pre-resolved embedded media URLs (skip scanning)
+ * @param {string[]} [options.lorebookUrls] - Pre-resolved lorebook media URLs (skip scanning)
+ * @param {string[]} [options.galleryPageUrls] - Pre-resolved gallery page URLs for extraction
+ * @param {string[]} [options.phases] - Restrict to these phases. Default: all applicable
+ * @returns {Promise<Object>} PipelineResult
+ */
+async function downloadCharacterMedia(character, folderName, options = {}) {
+    const {
+        signal, shouldAbort,
+        onPhaseStart, onPhaseEnd, onProgress, onLog, onLogUpdate,
+        embeddedUrls: overrideEmbedded,
+        lorebookUrls: overrideLorebook,
+        galleryPageUrls: overrideGalleryPages,
+        providerOverride,
+        phases: restrictPhases
+    } = options;
+
+    const emptyPhase = () => ({ success: 0, skipped: 0, errors: 0, renamed: 0, filenameSkipped: 0 });
+    const result = {
+        embedded: emptyPhase(),
+        lorebook: emptyPhase(),
+        providerGallery: { ...emptyPhase(), providerName: null },
+        extGallery: emptyPhase(),
+        totals: { success: 0, skipped: 0, errors: 0 },
+        aborted: false,
+        incomplete: false
+    };
+
+    const phaseAllowed = (name) => !restrictPhases || restrictPhases.includes(name);
+    const isAborted = () => signal?.aborted || shouldAbort?.();
+
+    // Hydrate if slim and we need to scan for URLs
+    const needsScan = !overrideEmbedded || !overrideLorebook || !overrideGalleryPages;
+    if (needsScan && character._slim) {
+        await hydrateCharacter(character);
+    }
+
+    // Resolve URLs: use overrides if provided, otherwise scan
+    let embeddedUrls, lorebookUrls;
+    if (overrideEmbedded !== undefined && overrideLorebook !== undefined) {
+        embeddedUrls = overrideEmbedded || [];
+        lorebookUrls = overrideLorebook || [];
+    } else if (overrideEmbedded !== undefined) {
+        embeddedUrls = overrideEmbedded || [];
+        const scanned = findCharacterMediaUrls(character, { split: true });
+        lorebookUrls = overrideLorebook !== undefined ? (overrideLorebook || []) : scanned.lorebookUrls;
+    } else {
+        const scanned = findCharacterMediaUrls(character, { split: true });
+        embeddedUrls = overrideEmbedded !== undefined ? (overrideEmbedded || []) : scanned.embeddedUrls;
+        lorebookUrls = overrideLorebook !== undefined ? (overrideLorebook || []) : scanned.lorebookUrls;
+    }
+
+    // Provider discovery (or use override for import flows)
+    let galleryProvider = null;
+    let providerLinkInfo = null;
+    if (providerOverride?.provider) {
+        galleryProvider = providerOverride.provider;
+        providerLinkInfo = providerOverride.linkInfo || null;
+    } else {
+        const allProviders = window.ProviderRegistry?.getAllProviders() || [];
+        for (const provider of allProviders) {
+            if (!provider.supportsGallery) continue;
+            const linkInfo = provider.getLinkInfo(character);
+            if (linkInfo?.id) {
+                galleryProvider = provider;
+                providerLinkInfo = linkInfo;
+                break;
+            }
+        }
+    }
+
+    // External gallery page URLs (bypass settings gate when phases are explicitly specified)
+    const bypassSettingsGates = !!restrictPhases;
+    const includeExtGalleries = bypassSettingsGates || getSetting('includeExternalGalleries') !== false;
+    if (includeExtGalleries) await window.ensureExtractorsLoaded?.();
+    let galleryPageUrls;
+    if (overrideGalleryPages !== undefined) {
+        galleryPageUrls = overrideGalleryPages || [];
+    } else if (includeExtGalleries && typeof window.findCharacterGalleryUrls === 'function') {
+        galleryPageUrls = window.findCharacterGalleryUrls(character);
+    } else {
+        galleryPageUrls = [];
+    }
+
+    // Settings
+    const includeProviderGallery = bypassSettingsGates || getSetting('includeProviderGallery') !== false;
+    const includeLorebook = lorebookUrls.length > 0; // findCharacterMediaUrls already gates on setting
+
+    // Early exit: nothing to do
+    const hasEmbedded = phaseAllowed('embedded') && embeddedUrls.length > 0;
+    const hasLorebook = phaseAllowed('lorebook') && includeLorebook;
+    const hasProviderGallery = phaseAllowed('providerGallery') && includeProviderGallery && galleryProvider;
+    const hasExtGallery = phaseAllowed('extGallery') && includeExtGalleries && galleryPageUrls.length > 0;
+
+    if (!hasEmbedded && !hasLorebook && !hasProviderGallery && !hasExtGallery) {
+        return result;
+    }
+
+    // Build shared dedup state once
+    const dedupState = await buildDedupState(folderName);
+
+    const sharedOpts = { shouldAbort, abortSignal: signal, dedupState };
+
+    // Phase 1: Embedded media
+    if (hasEmbedded && !isAborted()) {
+        onPhaseStart?.('embedded', { count: embeddedUrls.length });
+        const r = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
+            ...sharedOpts,
+            prefix: 'localized_media',
+            onProgress: onProgress ? (cur, tot) => onProgress('embedded', cur, tot) : undefined,
+            onLog,
+            onLogUpdate
+        });
+        result.embedded = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: r.renamed || 0, filenameSkipped: r.filenameSkipped || 0 };
+        onPhaseEnd?.('embedded', result.embedded);
+        if (r.aborted) { result.aborted = true; return sumTotals(result); }
+    }
+
+    // Phase 2: Lorebook media
+    if (hasLorebook && !isAborted()) {
+        onPhaseStart?.('lorebook', { count: lorebookUrls.length });
+        const r = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
+            ...sharedOpts,
+            prefix: 'lorebook_media',
+            onProgress: onProgress ? (cur, tot) => onProgress('lorebook', cur, tot) : undefined,
+            onLog,
+            onLogUpdate
+        });
+        result.lorebook = { success: r.success, skipped: r.skipped, errors: r.errors, renamed: r.renamed || 0, filenameSkipped: r.filenameSkipped || 0 };
+        onPhaseEnd?.('lorebook', result.lorebook);
+        if (r.aborted) { result.aborted = true; return sumTotals(result); }
+    }
+
+    // Phase 3: Provider gallery
+    if (hasProviderGallery && !isAborted()) {
+        const providerLabel = galleryProvider.name || 'Provider';
+        result.providerGallery.providerName = providerLabel;
+        onPhaseStart?.('providerGallery', { provider: providerLabel, linkInfo: providerLinkInfo });
+        try {
+            const r = await galleryProvider.downloadGallery(providerLinkInfo, folderName, {
+                ...sharedOpts,
+                onProgress: onProgress ? (cur, tot) => onProgress('providerGallery', cur, tot) : undefined,
+                onLog,
+                onLogUpdate
+            });
+            result.providerGallery.success = r.success || 0;
+            result.providerGallery.skipped = r.skipped || 0;
+            result.providerGallery.errors = r.errors || 0;
+            result.providerGallery.filenameSkipped = r.filenameSkipped || 0;
+            onPhaseEnd?.('providerGallery', result.providerGallery);
+            if (r.aborted) { result.aborted = true; return sumTotals(result); }
+        } catch (error) {
+            console.error('[MediaPipeline] Provider gallery error:', error);
+            result.providerGallery.errors++;
+            onPhaseEnd?.('providerGallery', result.providerGallery);
+        }
+    } else if (phaseAllowed('providerGallery') && galleryProvider && !includeProviderGallery) {
+        result.providerGallery.providerName = galleryProvider.name || 'Provider';
+    }
+
+    // Phase 4: External galleries
+    if (hasExtGallery && !isAborted()) {
+        onPhaseStart?.('extGallery', { count: galleryPageUrls.length });
+        const r = await downloadExternalGalleryForCharacter(character, folderName, {
+            ...sharedOpts,
+            galleryPageUrls,
+            onProgress: onProgress ? (cur, tot) => onProgress('extGallery', cur, tot) : undefined,
+            onLog,
+            onLogUpdate
+        });
+        result.extGallery = { success: r.success || 0, skipped: r.skipped || 0, errors: r.errors || 0, renamed: 0, filenameSkipped: 0 };
+        onPhaseEnd?.('extGallery', result.extGallery);
+        if (r.aborted) { result.aborted = true; return sumTotals(result); }
+    }
+
+    if (isAborted()) result.aborted = true;
+    const finalResult = sumTotals(result);
+
+    // Pre-warm thumbnails for any newly saved images
+    if (finalResult.totals.success > 0) {
+        try {
+            const safeFolderName = sanitizeFolderName(folderName);
+            const listResp = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: safeFolderName, type: 7 });
+            if (listResp.ok) {
+                const files = await listResp.json();
+                if (Array.isArray(files) && files.length > 0) {
+                    prewarmThumbnails(safeFolderName, files);
+                }
+            }
+        } catch { /* non-critical */ }
+    }
+
+    return finalResult;
+}
+
+function sumTotals(result) {
+    result.totals = {
+        success: result.embedded.success + result.lorebook.success + result.providerGallery.success + result.extGallery.success,
+        skipped: result.embedded.skipped + result.lorebook.skipped + result.providerGallery.skipped + result.extGallery.skipped,
+        errors: result.embedded.errors + result.lorebook.errors + result.providerGallery.errors + result.extGallery.errors
+    };
+    result.incomplete = result.totals.errors > 0;
+    return result;
+}
+
+
 // Convenience wrappers for localize log
 function addLocalizeLogEntry(message, status = 'pending') {
     return addLogEntry(localizeLog, message, status);
@@ -18821,6 +19387,7 @@ const localizeProgressCount = document.getElementById('localizeProgressCount');
 const localizeProgressFill = document.getElementById('localizeProgressFill');
 const localizeLog = document.getElementById('localizeLog');
 const localizeMediaBtn = document.getElementById('localizeMediaBtn');
+let localizeAbortController = null;
 
 // Per-character media localization toggle
 const charLocalizeToggle = document.getElementById('charLocalizeToggle');
@@ -18876,13 +19443,13 @@ charLocalizeToggle?.addEventListener('change', async () => {
 });
 
 // Close localize modal handlers
-closeLocalizeModal?.addEventListener('click', () => {
+function closeLocalizeModalHandler() {
+    localizeAbortController?.abort();
+    localizeAbortController = null;
     localizeModal.classList.add('hidden');
-});
-
-closeLocalizeBtn?.addEventListener('click', () => {
-    localizeModal.classList.add('hidden');
-});
+}
+closeLocalizeModal?.addEventListener('click', closeLocalizeModalHandler);
+closeLocalizeBtn?.addEventListener('click', closeLocalizeModalHandler);
 
 // Localize Media button click handler (embedded media + linked provider gallery)
 localizeMediaBtn?.addEventListener('click', async () => {
@@ -18898,198 +19465,144 @@ localizeMediaBtn?.addEventListener('click', async () => {
     localizeProgressFill.style.width = '0%';
     localizeProgressCount.textContent = '0/0';
     
-    // Get character name for folder (use unique folder if enabled)
-    const characterName = getCharacterName(activeChar, 'unknown');
     const folderName = getGalleryFolderName(activeChar);
+    const phasesStarted = new Set();
+    let isFirstPhase = true;
+    let totalUrlCount = 0;
+    const phaseDone = { embedded: 0, lorebook: 0, providerGallery: 0, extGallery: 0 };
+    const phaseTotal = { embedded: 0, lorebook: 0, providerGallery: 0, extGallery: 0 };
+
+    const updateProgressBar = () => {
+        const allDone = phaseDone.embedded + phaseDone.lorebook + phaseDone.providerGallery + phaseDone.extGallery;
+        localizeProgressFill.style.width = `${totalUrlCount > 0 ? (allDone / totalUrlCount) * 100 : 0}%`;
+        localizeProgressCount.textContent = `${allDone}/${totalUrlCount}`;
+    };
     
-    const { embeddedUrls, lorebookUrls } = findCharacterMediaUrls(activeChar, { split: true });
-    const mediaUrls = [...embeddedUrls, ...lorebookUrls];
-    
-    let galleryProvider = null;
-    let providerLinkInfo = null;
-    const allProviders = window.ProviderRegistry?.getAllProviders() || [];
-    for (const provider of allProviders) {
-        if (!provider.supportsGallery) continue;
-        const linkInfo = provider.getLinkInfo(activeChar);
-        if (linkInfo?.id) {
-            galleryProvider = provider;
-            providerLinkInfo = linkInfo;
-            break;
-        }
-    }
-    const hasGalleryLink = !!galleryProvider;
-    
-    if (mediaUrls.length === 0 && !hasGalleryLink) {
-        localizeStatus.textContent = 'No remote media found in this character card.';
-        addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
-        addLocalizeLogEntry('Provider Gallery: character not linked to any provider', 'info');
-        return;
-    }
-    
-    // Phase 1a: Download embedded media first (takes precedence for duplicate detection)
-    localizeStatus.textContent = embeddedUrls.length > 0 
-        ? `Downloading ${embeddedUrls.length} embedded media file(s)...`
-        : 'No embedded media found.';
-    localizeProgressCount.textContent = `0/${mediaUrls.length}`;
-    
-    let totalProgress = 0;
-    const totalFiles = mediaUrls.length;
-    
-    if (embeddedUrls.length > 0) {
-        addLocalizeLogEntry(`Embedded Media (${embeddedUrls.length} URL(s) found)`, 'info');
-    } else {
-        addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
-    }
-    
-    const result = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
-        onProgress: (current, total) => {
-            totalProgress = current;
-            const progress = (totalProgress / totalFiles) * 100;
-            localizeProgressFill.style.width = `${progress}%`;
-            localizeProgressCount.textContent = `${totalProgress}/${totalFiles}`;
+    localizeAbortController = new AbortController();
+
+    const result = await downloadCharacterMedia(activeChar, folderName, {
+        signal: localizeAbortController.signal,
+        onPhaseStart: (phase, ctx) => {
+            if (!isFirstPhase) addLocalizeLogEntry('', 'divider');
+            isFirstPhase = false;
+            phasesStarted.add(phase);
+            
+            if (phase === 'embedded') {
+                phaseTotal.embedded = ctx.count;
+                totalUrlCount += ctx.count;
+                addLocalizeLogEntry(`Embedded Media (${ctx.count} URL(s) found)`, 'info');
+                localizeStatus.textContent = `Downloading ${ctx.count} embedded media file(s)...`;
+                updateProgressBar();
+            } else if (phase === 'lorebook') {
+                phaseTotal.lorebook = ctx.count;
+                totalUrlCount += ctx.count;
+                addLocalizeLogEntry(`Lorebook Media (${ctx.count} URL(s) found)`, 'info');
+                localizeStatus.textContent = `Downloading ${ctx.count} lorebook media file(s)...`;
+                updateProgressBar();
+            } else if (phase === 'providerGallery') {
+                addLocalizeLogEntry(`${ctx.provider} Gallery (${ctx.linkInfo?.fullPath || ctx.linkInfo?.id || ''})`, 'info');
+                localizeStatus.textContent = `Downloading ${ctx.provider} gallery...`;
+            } else if (phase === 'extGallery') {
+                addLocalizeLogEntry(`External Galleries (${ctx.count} URL(s) found)`, 'info');
+                localizeStatus.textContent = 'Extracting external gallery images...';
+            }
+        },
+        onPhaseEnd: (phase, phaseResult) => {
+            const { success, skipped, errors } = phaseResult;
+            if (phase === 'providerGallery') {
+                if (success > 0) {
+                    addLocalizeLogEntry(`  ✓ ${success} downloaded, ${skipped} skipped, ${errors} failed`, 'success');
+                } else if (skipped > 0) {
+                    addLocalizeLogEntry(`  ✓ ${skipped} already exist`, 'info');
+                } else if (errors > 0) {
+                    addLocalizeLogEntry(`  ✗ Download failed`, 'error');
+                } else {
+                    addLocalizeLogEntry('  No gallery images found', 'info');
+                }
+            } else if (phase === 'extGallery') {
+                if (success > 0) {
+                    addLocalizeLogEntry(`  ✓ ${success} downloaded, ${skipped} skipped, ${errors} failed`, 'success');
+                } else if (skipped > 0) {
+                    addLocalizeLogEntry(`  ✓ ${skipped} already exist`, 'info');
+                } else if (errors > 0) {
+                    addLocalizeLogEntry(`  ✗ ${errors} failed`, 'error');
+                } else {
+                    addLocalizeLogEntry('  No images resolved from external galleries', 'info');
+                }
+            } else {
+                if (success > 0) {
+                    addLocalizeLogEntry(`  ✓ ${success} downloaded, ${skipped} skipped, ${errors} failed`, 'success');
+                } else if (skipped > 0) {
+                    addLocalizeLogEntry(`  ✓ ${skipped} already exist`, 'info');
+                } else if (errors > 0) {
+                    addLocalizeLogEntry(`  ✗ ${errors} failed to download`, 'error');
+                }
+            }
+        },
+        onProgress: (phase, current, total) => {
+            phaseDone[phase] = current;
+            if ((phase === 'providerGallery' || phase === 'extGallery') && phaseTotal[phase] === 0 && total > 0) {
+                phaseTotal[phase] = total;
+                totalUrlCount += total;
+            }
+            updateProgressBar();
         },
         onLog: (message, status) => addLocalizeLogEntry(message, status),
         onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
     });
     
-    if (embeddedUrls.length > 0) {
-        if (result.success > 0) {
-            addLocalizeLogEntry(`  ✓ ${result.success} downloaded, ${result.skipped || 0} skipped, ${result.errors || 0} failed`, 'success');
-        } else if (result.skipped > 0) {
-            addLocalizeLogEntry(`  ✓ ${result.skipped} already exist`, 'info');
-        } else if (result.errors > 0) {
-            addLocalizeLogEntry(`  ✗ ${result.errors} failed to download`, 'error');
+    // Show "not found" messages for phases that didn't start
+    if (!phasesStarted.has('embedded')) {
+        addLocalizeLogEntry('Embedded Media: none found in character card', 'info');
+        isFirstPhase = false;
+    }
+    if (!phasesStarted.has('providerGallery')) {
+        if (!isFirstPhase) addLocalizeLogEntry('', 'divider');
+        isFirstPhase = false;
+        if (result.providerGallery.providerName) {
+            addLocalizeLogEntry(`${result.providerGallery.providerName} Gallery`, 'info');
+            addLocalizeLogEntry('  ⚠ Skipped: disabled in settings (Include Gallery)', 'warning');
+        } else {
+            addLocalizeLogEntry('Provider Gallery: not available for this character', 'info');
         }
     }
     
-    // Phase 1b: Download lorebook media with lorebook_media prefix
-    if (lorebookUrls.length > 0) {
-        addLocalizeLogEntry('', 'divider');
-        addLocalizeLogEntry(`Lorebook Media (${lorebookUrls.length} URL(s) found)`, 'info');
-        localizeStatus.textContent = `Downloading ${lorebookUrls.length} lorebook media file(s)...`;
-        
-        const lorebookResult = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
-            prefix: 'lorebook_media',
-            onProgress: (current, total) => {
-                const progress = ((embeddedUrls.length + current) / totalFiles) * 100;
-                localizeProgressFill.style.width = `${progress}%`;
-                localizeProgressCount.textContent = `${embeddedUrls.length + current}/${totalFiles}`;
-            },
-            onLog: (message, status) => addLocalizeLogEntry(message, status),
-            onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
-        });
-        
-        result.success += lorebookResult.success;
-        result.skipped += lorebookResult.skipped;
-        result.errors += lorebookResult.errors;
-        result.renamed += lorebookResult.renamed || 0;
-        
-        if (lorebookResult.success > 0) {
-            addLocalizeLogEntry(`  ✓ ${lorebookResult.success} downloaded, ${lorebookResult.skipped || 0} skipped, ${lorebookResult.errors || 0} failed`, 'success');
-        } else if (lorebookResult.skipped > 0) {
-            addLocalizeLogEntry(`  ✓ ${lorebookResult.skipped} already exist`, 'info');
-        } else if (lorebookResult.errors > 0) {
-            addLocalizeLogEntry(`  ✗ ${lorebookResult.errors} failed to download`, 'error');
+    // Final status
+    localizeAbortController = null;
+
+    if (result.aborted) {
+        localizeStatus.textContent = 'Stopped.';
+        if (result.totals.success > 0) {
+            showToast(`Stopped. Downloaded ${result.totals.success} file(s) before stopping.`, 'warning');
+            if (activeChar?.avatar) clearMediaLocalizationCache(activeChar.avatar);
+            if (activeChar) fetchCharacterImages(activeChar);
         }
+        return;
     }
-    
-    // Done - show status
+
+    const { totals } = result;
+    const totalRenamed = (result.embedded.renamed || 0) + (result.lorebook.renamed || 0);
     let statusMsg = '';
-    if (result.success > 0) {
-        statusMsg = `Downloaded ${result.success} new file(s)`;
-    }
-    if (result.renamed > 0) {
-        statusMsg += (statusMsg ? ', ' : '') + `renamed ${result.renamed} file(s)`;
-    }
-    if (result.skipped > 0) {
-        statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} already existed`;
-    }
-    if (result.errors > 0) {
-        statusMsg += (statusMsg ? ', ' : '') + `${result.errors} failed`;
-    }
-    
+    if (totals.success > 0) statusMsg = `Downloaded ${totals.success} file(s)`;
+    if (totalRenamed > 0) statusMsg += (statusMsg ? ', ' : '') + `renamed ${totalRenamed} file(s)`;
+    if (totals.skipped > 0) statusMsg += (statusMsg ? ', ' : '') + `${totals.skipped} existed`;
+    if (totals.errors > 0) statusMsg += (statusMsg ? ', ' : '') + `${totals.errors} failed`;
     localizeStatus.textContent = statusMsg || 'No new files to download.';
     
-    if (result.success > 0 || result.renamed > 0) {
-        const msg = result.renamed > 0 
-            ? `Downloaded ${result.success}, renamed ${result.renamed} file(s)` 
-            : `Downloaded ${result.success} new media file(s)`;
+    if (totals.success > 0 || totalRenamed > 0) {
+        const msg = totalRenamed > 0
+            ? `Downloaded ${totals.success}, renamed ${totalRenamed} file(s)`
+            : `Downloaded ${totals.success} new media file(s)`;
         showToast(msg, 'success');
-        
-        // Clear the localization cache for this character so new files are picked up
-        if (activeChar?.avatar) {
-            clearMediaLocalizationCache(activeChar.avatar);
-        }
-        
-        // Refresh the sprites grid to show new images - pass character object for unique folder support
-        if (activeChar) {
-            fetchCharacterImages(activeChar);
-        }
-    } else if (result.skipped > 0 && result.errors === 0) {
+        if (activeChar?.avatar) clearMediaLocalizationCache(activeChar.avatar);
+        if (activeChar) fetchCharacterImages(activeChar);
+    } else if (totals.skipped > 0 && totals.errors === 0) {
         showToast('All files already exist', 'info');
-    } else if (result.errors > 0) {
+    } else if (totals.errors > 0) {
         showToast('Some downloads failed', 'error');
     }
     
-    // Mark character as complete for bulk localization if no errors (only if no gallery to process)
-    if (result.errors === 0 && !hasGalleryLink && activeChar?.avatar) {
-        markMediaLocalizationComplete(activeChar.avatar);
-    }
-    
-    // Phase 2: If character is linked to a provider with gallery, download it
-    if (hasGalleryLink) {
-        const includeGallery = getSetting('includeProviderGallery') !== false;
-        const providerLabel = galleryProvider.name || 'Provider';
-        if (!includeGallery) {
-            addLocalizeLogEntry('', 'divider');
-            addLocalizeLogEntry(`${providerLabel} Gallery (${providerLinkInfo.fullPath || providerLinkInfo.id})`, 'info');
-            addLocalizeLogEntry('  ⚠ Skipped: disabled in settings (Include Gallery)', 'warning');
-            localizeStatus.textContent = `${providerLabel} gallery skipped (disabled in settings).`;
-        } else {
-        addLocalizeLogEntry('', 'divider');
-        addLocalizeLogEntry(`${providerLabel} Gallery (${providerLinkInfo.fullPath || providerLinkInfo.id})`, 'info');
-        localizeStatus.textContent = `Downloading ${providerLabel} gallery...`;
-        
-        try {
-            const galleryResult = await galleryProvider.downloadGallery(providerLinkInfo, folderName, {
-                onLog: (message, status) => addLocalizeLogEntry(message, status),
-                onLogUpdate: (entry, message, status) => updateLocalizeLogEntry(entry, message, status)
-            });
-            
-            // Update totals
-            result.success += galleryResult.success || 0;
-            result.skipped += galleryResult.skipped || 0;
-            result.errors += galleryResult.errors || 0;
-            
-            if (galleryResult.success > 0) {
-                addLocalizeLogEntry(`  ✓ ${galleryResult.success} downloaded, ${galleryResult.skipped || 0} skipped, ${galleryResult.errors || 0} failed`, 'success');
-            } else if (galleryResult.skipped > 0) {
-                addLocalizeLogEntry(`  ✓ ${galleryResult.skipped} already exist`, 'info');
-            } else {
-                addLocalizeLogEntry(`  ✗ No images available on ${providerLabel}`, 'info');
-            }
-        } catch (error) {
-            console.error('[MediaLocalize] Gallery error:', error);
-            addLocalizeLogEntry(`  ✗ Download failed: ${error.message}`, 'error');
-            result.errors++;
-        }
-        
-        // Update final status
-        statusMsg = '';
-        if (result.success > 0) statusMsg = `Downloaded ${result.success} file(s)`;
-        if (result.skipped > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.skipped} existed`;
-        if (result.errors > 0) statusMsg += (statusMsg ? ', ' : '') + `${result.errors} failed`;
-        localizeStatus.textContent = statusMsg || 'Complete';
-        
-        // Refresh sprites grid - pass character object for unique folder support
-        if (result.success > 0 && activeChar) {
-            fetchCharacterImages(activeChar);
-        }
-        }
-    }
-    
-    // Mark character as complete for bulk localization if no errors
-    if (result.errors === 0 && activeChar?.avatar) {
+    if (totals.errors === 0 && activeChar?.avatar) {
         markMediaLocalizationComplete(activeChar.avatar);
     }
 });
@@ -19196,13 +19709,11 @@ function getFilteredBulkResults() {
     const search = (bulkSummarySearch?.value || '').toLowerCase().trim();
     
     return bulkLocalizeResults.filter(r => {
-        // Calculate combined totals for filtering
-        const totalDownloaded = (r.downloaded || 0) + (r.galleryDownloaded || 0);
-        const totalSkipped = (r.skipped || 0) + (r.gallerySkipped || 0);
-        const totalErrors = (r.errors || 0) + (r.galleryErrors || 0);
-        const hasAnyMedia = r.totalUrls > 0 || r.galleryDownloaded > 0 || r.gallerySkipped > 0 || r.galleryErrors > 0;
+        const totalDownloaded = (r.downloaded || 0) + (r.galleryDownloaded || 0) + (r.extGalleryDownloaded || 0);
+        const totalSkipped = (r.skipped || 0) + (r.gallerySkipped || 0) + (r.extGallerySkipped || 0);
+        const totalErrors = (r.errors || 0) + (r.galleryErrors || 0) + (r.extGalleryErrors || 0);
+        const hasAnyMedia = r.totalUrls > 0;
         
-        // Apply filter (includes both embedded and provider gallery)
         if (filter === 'localized' && (!hasAnyMedia || totalErrors > 0 || r.incomplete)) return false;
         if (filter === 'downloaded' && totalDownloaded === 0) return false;
         if (filter === 'skipped' && totalSkipped === 0) return false;
@@ -19289,9 +19800,10 @@ function renderBulkSummaryList() {
     } else {
         bulkSummaryList.innerHTML = pageResults.map(r => {
             const hasGalleryStats = r.galleryDownloaded > 0 || r.gallerySkipped > 0 || r.galleryErrors > 0;
+            const hasExtGalleryStats = (r.extGalleryDownloaded || 0) > 0 || (r.extGallerySkipped || 0) > 0 || (r.extGalleryErrors || 0) > 0;
             const totalEmbedded = (r.downloaded || 0) + (r.skipped || 0) + (r.errors || 0);
             const hasEmbeddedStats = totalEmbedded > 0;
-            const hasAnyMedia = hasEmbeddedStats || hasGalleryStats;
+            const hasAnyMedia = hasEmbeddedStats || hasGalleryStats || hasExtGalleryStats;
             
             // Build embedded stats section
             let embeddedHtml = '';
@@ -19314,6 +19826,15 @@ function renderBulkSummaryList() {
                 galleryHtml = `<div class="media-source-group gallery" title="Provider gallery images"><i class="fa-solid fa-images source-icon"></i>${parts.join('')}</div>`;
             }
             
+            let extGalleryHtml = '';
+            if (hasExtGalleryStats) {
+                const parts = [];
+                if (r.extGalleryDownloaded > 0) parts.push(`<span class="downloaded" title="${r.extGalleryDownloaded} image(s) downloaded from external galleries"><i class="fa-solid fa-download"></i>${r.extGalleryDownloaded}</span>`);
+                if (r.extGallerySkipped > 0) parts.push(`<span class="skipped" title="${r.extGallerySkipped} external gallery image(s) already local"><i class="fa-solid fa-check"></i>${r.extGallerySkipped}</span>`);
+                if (r.extGalleryErrors > 0) parts.push(`<span class="errors" title="${r.extGalleryErrors} external gallery image(s) failed"><i class="fa-solid fa-xmark"></i>${r.extGalleryErrors}</span>`);
+                extGalleryHtml = `<div class="media-source-group ext-gallery" title="External gallery pages (Imgchest, ImgBB, etc.)"><i class="fa-solid fa-globe source-icon"></i>${parts.join('')}</div>`;
+            }
+            
             return `
             <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
                 <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
@@ -19322,7 +19843,7 @@ function renderBulkSummaryList() {
                     ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
                     ${!hasAnyMedia 
                         ? '<span class="none" title="Character has no embedded remote media URLs and no linked provider gallery"><i class="fa-solid fa-minus"></i> No media</span>'
-                        : `${embeddedHtml}${galleryHtml}`
+                        : `${embeddedHtml}${galleryHtml}${extGalleryHtml}`
                     }
                 </div>
             </div>
@@ -19351,17 +19872,22 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
         acc.gallerySkipped += r.gallerySkipped || 0;
         acc.galleryErrors += r.galleryErrors || 0;
         acc.galleryFilenameSkipped += r.galleryFilenameSkipped || 0;
+        acc.extGalleryDownloaded += r.extGalleryDownloaded || 0;
+        acc.extGallerySkipped += r.extGallerySkipped || 0;
+        acc.extGalleryErrors += r.extGalleryErrors || 0;
         if (r.totalUrls > 0) acc.withMedia++;
         if (r.galleryDownloaded > 0 || r.gallerySkipped > 0 || r.galleryErrors > 0) acc.withGallery++;
+        if (r.extGalleryDownloaded > 0 || r.extGallerySkipped > 0 || r.extGalleryErrors > 0) acc.withExtGallery++;
         if (r.incomplete) acc.incomplete++;
         return acc;
-    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, filenameSkipped: 0, withMedia: 0, incomplete: 0, galleryDownloaded: 0, gallerySkipped: 0, galleryErrors: 0, galleryFilenameSkipped: 0, withGallery: 0 });
+    }, { characters: 0, downloaded: 0, skipped: 0, errors: 0, renamed: 0, filenameSkipped: 0, withMedia: 0, incomplete: 0, galleryDownloaded: 0, gallerySkipped: 0, galleryErrors: 0, galleryFilenameSkipped: 0, withGallery: 0, extGalleryDownloaded: 0, extGallerySkipped: 0, extGalleryErrors: 0, withExtGallery: 0 });
     
     const hasEmbedded = totals.downloaded > 0 || totals.skipped > 0 || totals.errors > 0;
     const hasGallery = totals.galleryDownloaded > 0 || totals.gallerySkipped > 0 || totals.galleryErrors > 0;
-    const totalDownloaded = totals.downloaded + totals.galleryDownloaded;
-    const totalSkipped = totals.skipped + totals.gallerySkipped;
-    const totalErrors = totals.errors + totals.galleryErrors;
+    const hasExtGallery = totals.extGalleryDownloaded > 0 || totals.extGallerySkipped > 0 || totals.extGalleryErrors > 0;
+    const totalDownloaded = totals.downloaded + totals.galleryDownloaded + totals.extGalleryDownloaded;
+    const totalSkipped = totals.skipped + totals.gallerySkipped + totals.extGallerySkipped;
+    const totalErrors = totals.errors + totals.galleryErrors + totals.extGalleryErrors;
     
     // Build the overview with two media source sections
     bulkSummaryOverview.innerHTML = `
@@ -19448,6 +19974,35 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
                 ${!hasGallery ? '<div class="source-empty">No provider galleries processed</div>' : ''}
                 ${hasGallery ? `<div class="source-footer">${totals.withGallery} character${totals.withGallery !== 1 ? 's' : ''} with gallery</div>` : ''}
             </div>
+            
+            <!-- External Gallery Column -->
+            ${hasExtGallery ? `
+            <div class="bulk-summary-source ext-gallery">
+                <div class="source-header">
+                    <i class="fa-solid fa-globe"></i>
+                    <span>External Galleries</span>
+                    <span class="source-hint" title="Images from external gallery pages (Imgchest, ImgBB) found in character card text fields.">?</span>
+                </div>
+                <div class="source-stats">
+                    <div class="source-stat downloaded" title="New images downloaded from external gallery pages">
+                        <i class="fa-solid fa-download"></i>
+                        <span class="value">${totals.extGalleryDownloaded}</span>
+                        <span class="label">Downloaded</span>
+                    </div>
+                    <div class="source-stat skipped" title="External gallery images already present locally">
+                        <i class="fa-solid fa-check"></i>
+                        <span class="value">${totals.extGallerySkipped}</span>
+                        <span class="label">Already Local</span>
+                    </div>
+                    <div class="source-stat errors" title="External gallery images that failed to download">
+                        <i class="fa-solid fa-xmark"></i>
+                        <span class="value">${totals.extGalleryErrors}</span>
+                        <span class="label">Failed</span>
+                    </div>
+                </div>
+                <div class="source-footer">${totals.withExtGallery} character${totals.withExtGallery !== 1 ? 's' : ''} with ext galleries</div>
+            </div>
+            ` : ''}
         </div>
         
         <!-- Grand totals row -->
@@ -19523,9 +20078,6 @@ async function runBulkLocalization() {
     bulkLocalizeAbortController = new AbortController();
     bulkLocalizeResults = [];
     
-    // Include provider gallery downloads for linked characters
-    const includeProviderGallery = getSetting('includeProviderGallery') !== false;
-    
     // Get previously completed characters
     const completedAvatars = getCompletedMediaLocalizations();
     
@@ -19583,14 +20135,10 @@ async function runBulkLocalization() {
         // Hydrate slim character — findCharacterMediaUrls reads description/first_mes/etc.
         await hydrateCharacter(char);
         
-        // Find media URLs for this character (split by source)
-        const { embeddedUrls, lorebookUrls } = findCharacterMediaUrls(char, { split: true });
-        const totalMediaUrls = embeddedUrls.length + lorebookUrls.length;
-        
         const result = {
             name: charName,
             avatar: char.avatar,
-            totalUrls: totalMediaUrls,
+            totalUrls: 0,
             downloaded: 0,
             skipped: 0,
             errors: 0,
@@ -19599,155 +20147,81 @@ async function runBulkLocalization() {
             incomplete: false
         };
         
-        if (totalMediaUrls > 0) {
-            bulkLocalizeFileCount.textContent = `0/${totalMediaUrls} files`;
-            bulkLocalizeFileFill.style.width = '0%';
-            
-            const progressCallback = (current, total, offset = 0) => {
-                if (!bulkLocalizeAborted) {
-                    bulkLocalizeFileCount.textContent = `${offset + current}/${totalMediaUrls} files`;
-                    bulkLocalizeFileFill.style.width = `${((offset + current) / totalMediaUrls) * 100}%`;
+        let currentPhaseLabel = '';
+        let fileTotalCount = 0;
+        const filePhaseDone = { embedded: 0, lorebook: 0, providerGallery: 0, extGallery: 0 };
+        const filePhaseTotal = { embedded: 0, lorebook: 0, providerGallery: 0, extGallery: 0 };
+
+        const updateFileProgress = () => {
+            const allDone = filePhaseDone.embedded + filePhaseDone.lorebook + filePhaseDone.providerGallery + filePhaseDone.extGallery;
+            bulkLocalizeFileFill.style.width = `${fileTotalCount > 0 ? (allDone / fileTotalCount) * 100 : 0}%`;
+            bulkLocalizeFileCount.textContent = `${allDone}/${fileTotalCount} files`;
+        };
+        
+        const pipelineResult = await downloadCharacterMedia(char, folderName, {
+            shouldAbort: () => bulkLocalizeAborted,
+            signal: bulkLocalizeAbortController.signal,
+            onPhaseStart: (phase, ctx) => {
+                if (phase === 'embedded' || phase === 'lorebook') {
+                    filePhaseTotal[phase] = ctx.count;
+                    fileTotalCount += ctx.count;
+                    updateFileProgress();
+                } else if (phase === 'providerGallery') {
+                    currentPhaseLabel = ctx.provider || 'Provider';
+                    bulkLocalizeFileCount.textContent = `Fetching ${currentPhaseLabel} gallery...`;
+                } else if (phase === 'extGallery') {
+                    bulkLocalizeFileCount.textContent = 'Extracting external galleries...';
                 }
-            };
-            
-            let downloadAborted = false;
-            
-            // Phase 1a: Embedded media
-            if (embeddedUrls.length > 0 && !bulkLocalizeAborted) {
-                const embeddedResult = await downloadEmbeddedMediaForCharacter(folderName, embeddedUrls, {
-                    onProgress: (current, total) => progressCallback(current, total, 0),
-                    shouldAbort: () => bulkLocalizeAborted,
-                    abortSignal: bulkLocalizeAbortController.signal
-                });
-                
-                result.downloaded += embeddedResult.success;
-                result.skipped += embeddedResult.skipped;
-                result.errors += embeddedResult.errors;
-                result.renamed = (result.renamed || 0) + (embeddedResult.renamed || 0);
-                result.filenameSkipped = (result.filenameSkipped || 0) + (embeddedResult.filenameSkipped || 0);
-                downloadAborted = !!embeddedResult.aborted;
-                
-                if (embeddedResult.aborted || embeddedResult.errors > 0) {
-                    result.incomplete = true;
+            },
+            onProgress: (phase, current, total) => {
+                if (bulkLocalizeAborted) return;
+                filePhaseDone[phase] = current;
+                if ((phase === 'providerGallery' || phase === 'extGallery') && filePhaseTotal[phase] === 0 && total > 0) {
+                    filePhaseTotal[phase] = total;
+                    fileTotalCount += total;
                 }
+                updateFileProgress();
             }
-            
-            // Phase 1b: Lorebook media
-            if (lorebookUrls.length > 0 && !bulkLocalizeAborted && !downloadAborted) {
-                const lorebookResult = await downloadEmbeddedMediaForCharacter(folderName, lorebookUrls, {
-                    prefix: 'lorebook_media',
-                    onProgress: (current, total) => progressCallback(current, total, embeddedUrls.length),
-                    shouldAbort: () => bulkLocalizeAborted,
-                    abortSignal: bulkLocalizeAbortController.signal
-                });
-                
-                result.downloaded += lorebookResult.success;
-                result.skipped += lorebookResult.skipped;
-                result.errors += lorebookResult.errors;
-                result.renamed = (result.renamed || 0) + (lorebookResult.renamed || 0);
-                result.filenameSkipped = (result.filenameSkipped || 0) + (lorebookResult.filenameSkipped || 0);
-                downloadAborted = !!lorebookResult.aborted;
-                
-                if (lorebookResult.aborted || lorebookResult.errors > 0) {
-                    result.incomplete = true;
-                }
-            }
-            
-            totalDownloaded += result.downloaded;
-            totalSkipped += result.skipped;
-            totalErrors += result.errors;
-            totalRenamed += result.renamed || 0;
-            
-            // Update stats
-            bulkStatDownloaded.textContent = totalDownloaded;
-            bulkStatSkipped.textContent = totalSkipped;
-            bulkStatErrors.textContent = totalErrors;
-            
-            // Clear cache for this character if we downloaded anything
-            if (result.downloaded > 0 && char.avatar) {
-                clearMediaLocalizationCache(char.avatar);
-            }
-            
-            // If download was aborted, stop the loop
-            if (downloadAborted) {
-                result.incomplete = true;
-                bulkLocalizeResults.push(result);
-                break;
-            }
-        } else {
-            bulkLocalizeFileCount.textContent = 'No remote media';
-            bulkLocalizeFileFill.style.width = '100%';
+        });
+        
+        // Map pipeline result to bulk result shape
+        result.totalUrls = fileTotalCount;
+        result.downloaded = pipelineResult.embedded.success + pipelineResult.lorebook.success;
+        result.skipped = pipelineResult.embedded.skipped + pipelineResult.lorebook.skipped;
+        result.errors = pipelineResult.embedded.errors + pipelineResult.lorebook.errors;
+        result.renamed = (pipelineResult.embedded.renamed || 0) + (pipelineResult.lorebook.renamed || 0);
+        result.filenameSkipped = (pipelineResult.embedded.filenameSkipped || 0) + (pipelineResult.lorebook.filenameSkipped || 0);
+        result.galleryDownloaded = pipelineResult.providerGallery.success;
+        result.gallerySkipped = pipelineResult.providerGallery.skipped;
+        result.galleryErrors = pipelineResult.providerGallery.errors;
+        result.galleryFilenameSkipped = pipelineResult.providerGallery.filenameSkipped || 0;
+        result.extGalleryDownloaded = pipelineResult.extGallery.success;
+        result.extGallerySkipped = pipelineResult.extGallery.skipped;
+        result.extGalleryErrors = pipelineResult.extGallery.errors;
+        result.incomplete = pipelineResult.incomplete || pipelineResult.aborted;
+        
+        // Update totals
+        totalDownloaded += pipelineResult.totals.success;
+        totalSkipped += pipelineResult.totals.skipped;
+        totalErrors += pipelineResult.totals.errors;
+        totalRenamed += result.renamed;
+        
+        bulkStatDownloaded.textContent = totalDownloaded;
+        bulkStatSkipped.textContent = totalSkipped;
+        bulkStatErrors.textContent = totalErrors;
+        
+        if (pipelineResult.totals.success > 0 && char.avatar) {
+            clearMediaLocalizationCache(char.avatar);
         }
         
-        // Phase 2: Provider gallery download (if enabled and character is linked)
-        if (includeProviderGallery && !bulkLocalizeAborted) {
-            // Find a provider with gallery support for this character
-            let bulkGalleryProvider = null;
-            let bulkGalleryLinkInfo = null;
-            const providers = window.ProviderRegistry?.getAllProviders() || [];
-            for (const provider of providers) {
-                if (!provider.supportsGallery) continue;
-                const linkInfo = provider.getLinkInfo(char);
-                if (linkInfo?.id) {
-                    bulkGalleryProvider = provider;
-                    bulkGalleryLinkInfo = linkInfo;
-                    break;
-                }
-            }
-            
-            if (bulkGalleryProvider && bulkGalleryLinkInfo) {
-                const galleryLabel = bulkGalleryProvider.name || 'Provider';
-                bulkLocalizeFileCount.textContent = `Fetching ${galleryLabel} gallery...`;
-                bulkLocalizeFileFill.style.width = '0%';
-                
-                try {
-                    const galleryResult = await bulkGalleryProvider.downloadGallery(bulkGalleryLinkInfo, folderName, {
-                        onProgress: (current, total) => {
-                            if (!bulkLocalizeAborted) {
-                                bulkLocalizeFileCount.textContent = `${galleryLabel}: ${current}/${total} files`;
-                                bulkLocalizeFileFill.style.width = `${(current / total) * 100}%`;
-                            }
-                        },
-                        shouldAbort: () => bulkLocalizeAborted,
-                        abortSignal: bulkLocalizeAbortController.signal
-                    });
-                    
-                    // Add gallery stats to result
-                    result.galleryDownloaded = galleryResult.success;
-                    result.gallerySkipped = galleryResult.skipped;
-                    result.galleryErrors = galleryResult.errors;
-                    result.galleryFilenameSkipped = galleryResult.filenameSkipped || 0;
-                    
-                    totalDownloaded += galleryResult.success;
-                    totalSkipped += galleryResult.skipped;
-                    totalErrors += galleryResult.errors;
-                    
-                    // Update stats
-                    bulkStatDownloaded.textContent = totalDownloaded;
-                    bulkStatSkipped.textContent = totalSkipped;
-                    bulkStatErrors.textContent = totalErrors;
-                    
-                    // Clear cache if we downloaded anything
-                    if (galleryResult.success > 0 && char.avatar) {
-                        clearMediaLocalizationCache(char.avatar);
-                    }
-                    
-                    if (galleryResult.aborted) {
-                        result.incomplete = true;
-                        bulkLocalizeResults.push(result);
-                        break;
-                    }
-                    
-                    if (galleryResult.errors > 0) {
-                        result.incomplete = true;
-                    }
-                } catch (err) {
-                    console.error(`[BulkLocalize] Gallery error for ${charName}:`, err);
-                    result.galleryErrors = 1;
-                    totalErrors++;
-                    bulkStatErrors.textContent = totalErrors;
-                }
-            }
+        if (pipelineResult.aborted) {
+            bulkLocalizeResults.push(result);
+            break;
+        }
+        
+        if (fileTotalCount === 0 && !pipelineResult.providerGallery.providerName) {
+            bulkLocalizeFileCount.textContent = 'No remote media';
+            bulkLocalizeFileFill.style.width = '100%';
         }
         
         // Mark as complete in persistent storage if no errors and not aborted
@@ -22063,7 +22537,7 @@ async function viewDupCharGallery(el) {
         }));
 
         if (window.openGalleryViewerWithImages) {
-            window.openGalleryViewerWithImages(images, 0, char.name || 'Gallery');
+            window.openGalleryViewerWithImages(images, 0, char.name || 'Gallery', info.folder);
         } else {
             showToast('Gallery viewer not available', 'error');
         }
@@ -22550,6 +23024,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
             
             if (deleted > 0) {
                 showToast(`Deleted ${deleted} image${deleted !== 1 ? 's' : ''}`, 'info');
+                cleanupThumbCache(safeFolderName);
             }
             if (errors > 0) {
                 showToast(`Failed to delete ${errors} image${errors !== 1 ? 's' : ''}`, 'error');
@@ -24042,6 +24517,17 @@ function closeThemeCustomizer() {
 // so overlays don't need their own individual keydown listeners for Escape.
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+
+    // When charModal is elevated above another modal, close it first
+    if (document.body.classList.contains('char-modal-above')) {
+        const charModal = document.getElementById('charModal');
+        if (charModal && !charModal.classList.contains('hidden')) {
+            e.stopPropagation();
+            closeModal();
+            return;
+        }
+    }
+
     const regs = [...(window._overlayRegistry || [])].sort((a, b) => a.tier - b.tier);
     for (const reg of regs) {
         if (reg.escape === false) continue;
@@ -24081,6 +24567,7 @@ window.hydrateCharacter = hydrateCharacter;
 window.getTags = getTags;
 window.getAllAvailableTags = getAllAvailableTags;
 window.getGalleryFolderName = getGalleryFolderName;
+window.getGalleryThumbUrl = getGalleryThumbUrl;
 window.getCharacterGalleryInfo = getCharacterGalleryInfo;
 window.getCharacterGalleryId = getCharacterGalleryId;
 window.removeGalleryFolderOverride = removeGalleryFolderOverride;
@@ -24121,6 +24608,7 @@ window.toggleFavoritesFilter = toggleFavoritesFilter;
 window.toggleAdvFilterPanel = toggleAdvFilterPanel;
 window.closeAdvFilterPanel = closeAdvFilterPanel;
 window.evaluateChatAdvancedFilters = evaluateChatAdvancedFilters;
+window.resetChatFilterCaches = resetChatFilterCaches;
 window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
 window.setPlaylistFilter = setPlaylistFilter;
 window.clearPlaylistFilter = clearPlaylistFilter;
@@ -24159,6 +24647,8 @@ window.calculateHash = calculateHash;
 window.getExistingFileHashes = getExistingFileHashes;
 window.getExistingFileIndex = getExistingFileIndex;
 window.extractSanitizedUrlName = extractSanitizedUrlName;
+window.buildDedupState = buildDedupState;
+window.downloadCharacterMedia = downloadCharacterMedia;
 window.arrayBufferToBase64 = arrayBufferToBase64;
 window.ENDPOINTS = ENDPOINTS;
 
