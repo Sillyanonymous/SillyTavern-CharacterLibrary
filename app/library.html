@@ -2284,6 +2284,25 @@ https://jannyai.com/characters/uuid_slug
                                 </button>
                             </div>
                         </div>
+
+                        <!-- Bookmarks Backup (shared across providers) -->
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-regular fa-bookmark"></i> Bookmarks Backup</div>
+                            <p class="settings-hint" style="margin-bottom: 12px;">Export or import your bookmarks across all providers. Useful for device migration or as a safety net.</p>
+                            <div class="settings-row">
+                                <button id="exportBookmarksBtn" class="settings-action-btn primary">
+                                    <i class="fa-solid fa-file-export"></i> Export All Bookmarks
+                                </button>
+                                <span class="settings-hint">Saves a JSON file with bookmarks from all providers.</span>
+                            </div>
+                            <div class="settings-row">
+                                <button id="importBookmarksBtn" class="settings-action-btn secondary">
+                                    <i class="fa-solid fa-file-import"></i> Import Bookmarks
+                                </button>
+                                <input type="file" id="importBookmarksFileInput" accept="application/json,.json" style="display: none;">
+                                <span class="settings-hint">Loads a previously-exported JSON file. You'll choose Merge or Replace.</span>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Media Section -->

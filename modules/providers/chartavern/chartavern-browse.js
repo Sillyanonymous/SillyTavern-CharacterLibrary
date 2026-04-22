@@ -3,6 +3,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     searchCards,
     fetchCharacterDetail,
@@ -184,6 +185,57 @@ function applyTagsClamp(tagsEl) {
 }
 
 // ========================================
+// BOOKMARKS (local-only) — shared factory
+// ========================================
+
+const ctBookmarks = createBookmarkModule({
+    prefix: 'ct',
+    settingsKey: 'ctBookmarks',
+    logLabel: '[ChartavernBrowse]',
+    getId: (hit) => (hit && hit.path) ? String(hit.path) : '',
+    dataAttrKey: 'ctPath',
+    gridId: 'ctGrid',
+    modalBtnId: 'ctCharBookmarkBtn',
+    checkboxId: 'ctFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
+        path: String(hit.path || ''),
+        name: hit.name || '',
+        author: hit.author || '',
+        tagline: hit.tagline || '',
+        pageDescription: hit.pageDescription || '',
+        tags: Array.isArray(hit.tags) ? hit.tags.slice() : hit.tags || [],
+        totalTokens: hit.totalTokens || 0,
+        downloads: hit.downloads || 0,
+        likes: hit.likes || 0,
+        createdAt: hit.createdAt || 0,
+        isNSFW: !!hit.isNSFW,
+        hasLorebook: !!hit.hasLorebook,
+        isOC: !!hit.isOC,
+    }),
+    sortModes: {
+        oldest: (a, b) => (a.bookmarkedAt || 0) - (b.bookmarkedAt || 0),
+        most_popular: (a, b) => (b.likes || 0) - (a.likes || 0),
+        most_likes: (a, b) => (b.likes || 0) - (a.likes || 0),
+    },
+    getSortMode: () => ctSortMode,
+    getSelectedChar: () => ctSelectedChar,
+    resetBookmarkState: (sorted) => {
+        ctCharacters = sorted;
+        ctHasMore = false;
+        ctCurrentPage = 1;
+        ctGridRenderedCount = 0;
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updateCtFiltersButton();
+        ctCurrentPage = 1;
+        if (on) ctBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
+
+// ========================================
 // CARD RENDERING
 // ========================================
 
@@ -216,6 +268,7 @@ function createCtCard(hit) {
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
     const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
+    const bookmarkBtn = ctBookmarks.renderCardBtn(hit);
 
     return `
         <div class="${cardClass}" data-ct-path="${escapeHtml(hit.path || '')}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -236,6 +289,7 @@ function createCtCard(hit) {
                 <span class="browse-card-stat" title="Downloads"><i class="fa-solid fa-download"></i> ${formatNumber(hit.downloads || 0)}</span>
                 <span class="browse-card-stat" title="Likes"><i class="fa-solid fa-heart"></i> ${formatNumber(hit.likes || 0)}</span>
                 ${dateInfo}
+                ${bookmarkBtn}
             </div>
         </div>
     `;
@@ -512,6 +566,9 @@ function openPreviewModal(hit) {
         if (lorebookStat) {
             lorebookStat.style.display = hit.hasLorebook ? 'flex' : 'none';
         }
+
+        // Bookmark button state
+        ctBookmarks.syncModalState(hit);
 
         // Tags
         const tagsEl = document.getElementById('ctCharTags');
@@ -1021,7 +1078,7 @@ function updateCtFiltersButton() {
     const btn = document.getElementById('ctFiltersBtn');
     if (!btn) return;
 
-    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC;
+    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC || ctBookmarks.filterMyBookmarks;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -1043,6 +1100,8 @@ function initCtView() {
     const grid = document.getElementById('ctGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
+            if (ctBookmarks.handleGridClick(e, ctCharacters)) return;
+
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
                 e.stopPropagation();
@@ -1112,7 +1171,11 @@ function initCtView() {
         const el = document.getElementById('ctSortSelect');
         if (el) ctSortMode = el.value;
         ctCurrentPage = 1;
-        loadCharacters(false);
+        if (ctBookmarks.filterMyBookmarks) {
+            ctBookmarks.renderBookmarksView();
+        } else {
+            loadCharacters(false);
+        }
     });
 
     // Refresh
@@ -1216,6 +1279,8 @@ function initCtView() {
         loadCharacters(false);
     });
 
+    ctBookmarks.attachFilterCheckbox();
+
     // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
     chartavernBrowseView._registerDropdownDismiss([
         { dropdownId: 'ctTagsDropdown', buttonId: 'ctTagsBtn' },
@@ -1248,6 +1313,8 @@ function initCtView() {
         on('ctImportBtn', 'click', () => {
             if (ctSelectedChar) importCharacter(ctSelectedChar);
         });
+
+        ctBookmarks.attachModalBtn();
 
         const modalOverlay = document.getElementById('ctCharModal');
         if (modalOverlay) {
@@ -1642,6 +1709,9 @@ class ChartavernBrowseView extends BrowseView {
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="ctFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                     <label class="filter-checkbox"><input type="checkbox" id="ctFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
+                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                    <div class="dropdown-section-title">Bookmarks:</div>
+                    ${ctBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -1792,6 +1862,7 @@ class ChartavernBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
+                    ${ctBookmarks.renderModalBtn()}
                     <a id="ctOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on CharacterTavern">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -1912,7 +1983,13 @@ class ChartavernBrowseView extends BrowseView {
         const grid = document.getElementById('ctGrid');
         if (grid) this.observeImages(grid);
         // Check session silently — if logged in, update toggle and reload with NSFW
-        tryCheckSession().then(() => loadCharacters(false));
+        tryCheckSession().then(() => {
+            if (ctBookmarks.filterMyBookmarks) {
+                ctBookmarks.renderBookmarksView();
+            } else {
+                loadCharacters(false);
+            }
+        });
     }
 
     applyDefaults(defaults) {

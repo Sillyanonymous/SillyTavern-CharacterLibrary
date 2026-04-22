@@ -6,6 +6,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     searchCharacters,
     fetchCharacterDetail,
@@ -84,6 +85,63 @@ const SEED_TAGS = [
 for (const t of SEED_TAGS) pygKnownTags.add(t);
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
+
+// ========================================
+// BOOKMARKS (local-only) — shared factory
+// ========================================
+
+const pygBookmarks = createBookmarkModule({
+    prefix: 'pyg',
+    settingsKey: 'pygBookmarks',
+    logLabel: '[PygmalionBrowse]',
+    getId: (hit) => (hit && hit.id) ? String(hit.id) : '',
+    dataAttrKey: 'pygId',
+    gridId: 'pygGrid',
+    modalBtnId: 'pygCharBookmarkBtn',
+    checkboxId: 'pygFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
+        id: String(hit.id || ''),
+        displayName: hit.displayName || hit.name || '',
+        name: hit.name || '',
+        description: hit.description || '',
+        avatarUrl: hit.avatarUrl || '',
+        tags: Array.isArray(hit.tags) ? hit.tags.slice() : [],
+        owner: hit.owner ? {
+            id: hit.owner.id || '',
+            username: hit.owner.username || '',
+            displayName: hit.owner.displayName || '',
+        } : null,
+        isSensitive: !!hit.isSensitive,
+        altAvatars: Array.isArray(hit.altAvatars) ? hit.altAvatars.slice() : [],
+        altImages: Array.isArray(hit.altImages) ? hit.altImages.slice() : [],
+        approvedAt: hit.approvedAt || 0,
+        downloads: hit.downloads || 0,
+        stars: hit.stars || 0,
+        chatCount: hit.chatCount || 0,
+    }),
+    sortModes: {
+        downloads: (a, b) => (b.downloads || 0) - (a.downloads || 0),
+        stars: (a, b) => (b.stars || 0) - (a.stars || 0),
+        approved_at: (a, b) => (parseInt(b.approvedAt, 10) || 0) - (parseInt(a.approvedAt, 10) || 0),
+        display_name: (a, b) => String(a.displayName || '').localeCompare(String(b.displayName || '')),
+    },
+    getSortMode: () => pygSortMode,
+    getSelectedChar: () => pygSelectedChar,
+    resetBookmarkState: (sorted) => {
+        pygCharacters = sorted;
+        pygHasMore = false;
+        pygCurrentPage = 0;
+        pygGridRenderedCount = 0;
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updatePygFiltersButton();
+        pygCurrentPage = 0;
+        if (on) pygBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
 
 // ========================================
 // PURIFY CONFIG (for formatRichText in modal)
@@ -226,6 +284,7 @@ function createPygCard(hit) {
                 <span class="browse-card-stat" title="Stars"><i class="fa-solid fa-star"></i> ${formatNumber(hit.stars || 0)}</span>
                 <span class="browse-card-stat" title="Chats"><i class="fa-solid fa-comments"></i> ${formatNumber(hit.chatCount || 0)}</span>
                 ${dateInfo}
+                ${pygBookmarks.renderCardBtn(hit)}
             </div>
         </div>
     `;
@@ -565,7 +624,7 @@ function updatePygTagsButton() {
 function updatePygFiltersButton() {
     const btn = document.getElementById('pygFiltersBtn');
     if (!btn) return;
-    btn.classList.toggle('has-filters', pygFilterHideOwned || pygFilterHidePossible || !pygSortDescending);
+    btn.classList.toggle('has-filters', pygFilterHideOwned || pygFilterHidePossible || !pygSortDescending || pygBookmarks.filterMyBookmarks);
 }
 
 // ========================================
@@ -623,6 +682,9 @@ function openPreviewModal(hit) {
         }
         const openBtn = document.getElementById('pygOpenInBrowserBtn');
         if (openBtn) openBtn.href = pygUrl;
+
+        // Bookmark button state
+        pygBookmarks.syncModalState(hit);
 
         // Tagline
         const taglineSection = document.getElementById('pygCharTaglineSection');
@@ -1408,6 +1470,8 @@ function sortPygFollowingCharacters(characters) {
 }
 
 function _handleFollowingCardClick(e) {
+    if (pygBookmarks.handleGridClick(e, pygFollowingCharacters)) return;
+
     const creatorLink = e.target.closest('.browse-card-creator-link');
     if (creatorLink) {
         e.stopPropagation();
@@ -1994,7 +2058,11 @@ function initPygView() {
         sortSelect.addEventListener('change', () => {
             pygSortMode = sortSelect.value;
             pygCurrentPage = 0;
-            loadCharacters(false);
+            if (pygBookmarks.filterMyBookmarks) {
+                pygBookmarks.renderBookmarksView();
+            } else {
+                loadCharacters(false);
+            }
         });
     }
 
@@ -2170,6 +2238,8 @@ function initPygView() {
     const grid = document.getElementById('pygGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
+            if (pygBookmarks.handleGridClick(e, pygCharacters)) return;
+
             // Creator link
             const creatorLink = e.target.closest('.browse-card-creator-link');
             if (creatorLink) {
@@ -2196,6 +2266,9 @@ function initPygView() {
         followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
 
+    pygBookmarks.attachFilterCheckbox();
+
+
     // ── Preview modal events (attached once — persist across provider switches)
     if (!modalEventsAttached) {
         modalEventsAttached = true;
@@ -2208,6 +2281,7 @@ function initPygView() {
 
         on('pygCharClose', 'click', () => closePreviewModal());
         on('pygImportBtn', 'click', () => { if (pygSelectedChar) importCharacter(pygSelectedChar); });
+        pygBookmarks.attachModalBtn();
 
         // Creator name → in-app author filter
         const creatorLink = document.getElementById('pygCharCreator');
@@ -2505,6 +2579,9 @@ class PygmalionBrowseView extends BrowseView {
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="pygFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                     <label class="filter-checkbox"><input type="checkbox" id="pygFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
+                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                    <div class="dropdown-section-title">Bookmarks:</div>
+                    ${pygBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -2676,6 +2753,7 @@ class PygmalionBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
+                    ${pygBookmarks.renderModalBtn()}
                     <a id="pygOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on Pygmalion">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>

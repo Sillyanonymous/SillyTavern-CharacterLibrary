@@ -3,6 +3,7 @@
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { createBookmarkModule } from '../bookmark-module.js';
 import {
     JANNY_SEARCH_URL,
     JANNY_IMAGE_BASE,
@@ -67,6 +68,56 @@ let jannyIncludeTags = new Set();
 let jannyAuthorFilter = null;
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
+
+// ========================================
+// BOOKMARKS (local-only, via shared factory)
+// ========================================
+
+const jannyBookmarks = createBookmarkModule({
+    prefix: 'janny',
+    settingsKey: 'jannyBookmarks',
+    logLabel: '[JannyBrowse]',
+    getId: (hit) => hit?.id ? String(hit.id) : '',
+    dataAttrKey: 'jannyId',
+    gridId: 'jannyGrid',
+    modalBtnId: 'jannyCharBookmarkBtn',
+    checkboxId: 'jannyFilterMyBookmarks',
+    buildSnapshot: (hit) => ({
+        id: String(hit.id || ''),
+        name: hit.name || '',
+        description: hit.description || '',
+        avatar: hit.avatar || '',
+        tagIds: Array.isArray(hit.tagIds) ? hit.tagIds.slice() : [],
+        totalToken: hit.totalToken || 0,
+        creatorId: hit.creatorId || '',
+        creatorUsername: hit.creatorUsername || '',
+        createdAt: hit.createdAt || '',
+        createdAtStamp: hit.createdAtStamp || 0,
+        isNsfw: !!hit.isNsfw,
+        isLowQuality: !!hit.isLowQuality,
+    }),
+    sortModes: {
+        oldest: (a, b) => (a.createdAtStamp || 0) - (b.createdAtStamp || 0),
+        tokens_desc: (a, b) => (b.totalToken || 0) - (a.totalToken || 0),
+        tokens_asc: (a, b) => (a.totalToken || 0) - (b.totalToken || 0),
+    },
+    getSortMode: () => jannySortMode,
+    getSelectedChar: () => jannySelectedChar,
+    resetBookmarkState: (sorted) => {
+        jannyCharacters = sorted;
+        jannyHasMore = false;
+        jannyCurrentPage = 1;
+        jannyGridRenderedCount = 0;
+    },
+    renderGrid: (items) => renderGrid(items, false),
+    onEmpty: () => updateLoadMore(),
+    onFilterToggle: (on) => {
+        updateJannyFiltersButton();
+        jannyCurrentPage = 1;
+        if (on) jannyBookmarks.renderBookmarksView();
+        else loadCharacters(false);
+    },
+});
 
 // ========================================
 // SEARCH API
@@ -249,6 +300,7 @@ function createJannyCard(hit) {
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
 
     const cardClass = inLibrary ? 'browse-card in-library' : possibleMatch ? 'browse-card possible-library' : 'browse-card';
+    const bookmarkBtn = jannyBookmarks.renderCardBtn(hit);
 
     return `
         <div class="${cardClass}" data-janny-id="${escapeHtml(String(charId))}" data-slug="${escapeHtml(slug)}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
@@ -266,6 +318,7 @@ function createJannyCard(hit) {
             <div class="browse-card-footer">
                 <span class="browse-card-stat" title="Tokens"><i class="fa-solid fa-font"></i> ${tokens}</span>
                 ${dateInfo}
+                ${bookmarkBtn}
             </div>
         </div>
     `;
@@ -517,6 +570,9 @@ function openPreviewModal(hit) {
     scenarioSection.style.display = 'none';
     firstMsgSection.style.display = 'none';
     examplesSection.style.display = 'none';
+
+    // Bookmark button state
+    jannyBookmarks.syncModalState(hit);
 
     // Import button state
     const importBtn = document.getElementById('jannyImportBtn');
@@ -896,7 +952,7 @@ function updateJannyFiltersButton() {
     const btn = document.getElementById('jannyFiltersBtn');
     if (!btn) return;
 
-    const active = jannyShowLowQuality || jannyFilterHideOwned || jannyFilterHidePossible;
+    const active = jannyShowLowQuality || jannyFilterHideOwned || jannyFilterHidePossible || jannyBookmarks.filterMyBookmarks;
     btn.classList.toggle('has-filters', active);
 }
 
@@ -919,6 +975,8 @@ function initJannyView() {
     const grid = document.getElementById('jannyGrid');
     if (grid) {
         grid.addEventListener('click', (e) => {
+            if (jannyBookmarks.handleGridClick(e, jannyCharacters)) return;
+
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
                 e.stopPropagation();
@@ -986,7 +1044,11 @@ function initJannyView() {
         if (input) jannyCurrentSearch = input.value.trim();
 
         jannyCurrentPage = 1;
-        loadCharacters(false);
+        if (jannyBookmarks.filterMyBookmarks) {
+            jannyBookmarks.renderBookmarksView();
+        } else {
+            loadCharacters(false);
+        }
     });
 
     // Refresh
@@ -1079,6 +1141,8 @@ function initJannyView() {
         loadCharacters(false);
     });
 
+    jannyBookmarks.attachFilterCheckbox();
+
     // Close dropdowns when clicking outside
     jannyBrowseView._registerDropdownDismiss([
         { dropdownId: 'jannyTagsDropdown', buttonId: 'jannyTagsBtn' },
@@ -1121,6 +1185,8 @@ function initJannyView() {
         on('jannyImportBtn', 'click', () => {
             if (jannySelectedChar) importCharacter(jannySelectedChar);
         });
+
+        jannyBookmarks.attachModalBtn();
 
         const modalOverlay = document.getElementById('jannyCharModal');
         if (modalOverlay) {
@@ -1317,6 +1383,9 @@ class JannyBrowseView extends BrowseView {
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="jannyFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                     <label class="filter-checkbox"><input type="checkbox" id="jannyFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
+                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                    <div class="dropdown-section-title">Bookmarks:</div>
+                    ${jannyBookmarks.renderFilterCheckbox()}
                 </div>
             </div>
 
@@ -1393,6 +1462,7 @@ class JannyBrowseView extends BrowseView {
                     </div>
                 </div>
                 <div class="modal-controls">
+                    ${jannyBookmarks.renderModalBtn()}
                     <a id="jannyOpenInBrowserBtn" href="#" target="_blank" class="action-btn secondary" title="Open on JannyAI">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -1479,7 +1549,11 @@ class JannyBrowseView extends BrowseView {
         initJannyView();
         const grid = document.getElementById('jannyGrid');
         if (grid) this.observeImages(grid);
-        loadCharacters(false);
+        if (jannyBookmarks.filterMyBookmarks) {
+            jannyBookmarks.renderBookmarksView();
+        } else {
+            loadCharacters(false);
+        }
     }
 
     applyDefaults(defaults) {
