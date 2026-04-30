@@ -188,18 +188,34 @@ export async function clearBotbooruToken() {
     return resp.ok;
 }
 
-export async function validateBotbooruSession(token = null) {
+async function clearBotbooruTokenQuietly() {
     try {
-        if (token) await setBotbooruToken(token);
+        await clearBotbooruToken();
+    } catch {
+        // Preserve the validation error; token cleanup is best-effort here.
+    }
+}
+
+export async function validateBotbooruSession(token = null) {
+    let tokenWasSet = false;
+    try {
+        if (token) {
+            await setBotbooruToken(token);
+            tokenWasSet = true;
+        }
 
         const apiRequest = requireApiRequest();
         const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-validate`);
         if (!resp.ok) {
             const body = await readBodySnippet(resp);
+            if (tokenWasSet) await clearBotbooruTokenQuietly();
             return { valid: false, reason: `HTTP ${resp.status}${body ? `: ${body}` : ''}` };
         }
-        return await resp.json();
+        const result = await resp.json();
+        if (tokenWasSet && result?.valid !== true) await clearBotbooruTokenQuietly();
+        return result;
     } catch (err) {
+        if (tokenWasSet) await clearBotbooruTokenQuietly();
         return { valid: false, reason: err.message };
     }
 }
@@ -231,10 +247,19 @@ export async function fetchBotbooruFavorites({
     };
 }
 
+function toBooleanFlag(value) {
+    if (value === true || value === 1) return true;
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return normalized === 'true' || normalized === '1';
+    }
+    return false;
+}
+
 function normalizeFavoriteState(data) {
     return {
         count: toInt(data?.count ?? data?.favorites ?? data?.favorite_count ?? data?.fav_count),
-        favorited: Boolean(data?.favorited ?? data?.is_favorited ?? data?.has_favorited ?? data?.active),
+        favorited: toBooleanFlag(data?.favorited ?? data?.is_favorited ?? data?.has_favorited ?? data?.active),
     };
 }
 
