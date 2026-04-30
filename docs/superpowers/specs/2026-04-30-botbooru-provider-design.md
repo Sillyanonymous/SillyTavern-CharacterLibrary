@@ -57,10 +57,39 @@ New provider files:
 Modified shared files:
 
 - `modules/module-loader.js`: load BotBooru CSS and register the provider.
+- `app/library.html`: add BotBooru settings/help UI, helper-required banner, token controls, and provider docs/search-help entries.
+- `app/library.js`: add BotBooru defaults, settings field wiring, helper availability checks, token validation/clear behavior, exclude-tag wiring, and Online view refresh after settings changes.
 - `index.js`: include `botbooru` in provider extension-key detection where needed.
 - `README.md`: document BotBooru, token setup, favorites, and helper requirement.
 - `extras/cl-helper/index.js`: add BotBooru proxy/auth/favorites routes.
 - `extras/cl-helper/package.json`: bump helper version if route behavior changes.
+
+Existing contracts to preserve:
+
+- `provider-registry.js` owns provider ordering, disabled-provider filtering, provider selector rendering, and activation.
+- `BrowseView` owns the common browse lifecycle and calls each provider's `renderFilterBar()`, `renderView()`, `renderModals()`, `activate()`, and `deactivate()`.
+- The Online tab shell is static in `app/library.html`: `#providerSelectorArea`, `#onlineFilterContent`, and `#onlineView`.
+- Individual providers inject their own filter bars, browse grids, previews, and modals when activated.
+
+## Browse Integration Audit
+
+The implementation should follow the current Online-provider path:
+
+1. `modules/module-loader.js` imports the provider module and provider CSS, then registers it with `ProviderRegistry`.
+2. `app/library.js` activates Online browsing through `activateOnlineProvider()`, which asks `ProviderRegistry` for enabled view providers and mounts the selector into `#providerSelectorArea`.
+3. `ProviderRegistry.activateProvider()` injects the active provider's filter bar into `#onlineFilterContent` and its main browse view into `#onlineView`.
+4. `BrowseView.activate()` injects provider modals into `document.body` and wires provider-specific events.
+
+This means BotBooru should not add a static browse grid to `app/library.html`. It should add static settings/help entries there, while the actual BotBooru browse UI lives in `botbooru-browse.js`.
+
+Settings integration needs explicit host-extension wiring:
+
+- Add `botbooruToken`, token visibility, validation, clear/session status, and `botbooruNsfw` defaults.
+- Keep BotBooru enabled by default rather than adding it to `disabledProviders`.
+- Add BotBooru to provider order/defaults through its provider `getSettingsConfig()`.
+- Add BotBooru to `EXCLUDE_TAG_PROVIDERS` if persistent exclude tags are supported.
+- Add BotBooru to the provider extension-key arrays used for linked-card detection/export/import behavior.
+- Add BotBooru URL recognition to the provider so the existing Import-by-URL flow can call `getProviderForUrl()` and `importCharacter(id)`.
 
 ## BotBooru API Shape
 
