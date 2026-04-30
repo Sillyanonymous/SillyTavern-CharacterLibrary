@@ -1,0 +1,79 @@
+.botbooru-card .browse-card-footer .fa-heart,
+.botbooru-favorite-btn.favorited {
+    color: #e85d75;
+}
+
+.botbooru-favorite-btn.favorited {
+    border-color: rgba(232, 93, 117, 0.5);
+}
+
+.botbooru-favorite-btn.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.botbooru-view-toggle {
+    display: flex;
+    gap: 6px;
+}
+
+.botbooru-view-btn {
+    min-width: 96px;
+}
+
+.botbooru-card .browse-card-image img {
+    object-position: center 20%;
+}
+
+.botbooru-result-count {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.botbooru-empty-state,
+.botbooru-state {
+    align-items: center;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    justify-content: center;
+    min-height: 220px;
+    padding: 40px;
+    text-align: center;
+}
+
+.botbooru-empty-state > i,
+.botbooru-state > i {
+    color: var(--accent);
+    font-size: 2rem;
+    opacity: 0.8;
+}
+
+.botbooru-nsfl-badge {
+    background: rgba(180, 35, 35, 0.92);
+}
+
+.botbooru-token-modal {
+    max-width: 520px;
+}
+
+.botbooru-token-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+.botbooru-token-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.botbooru-token-status {
+    color: var(--text-secondary);
+    margin: 0;
+}
