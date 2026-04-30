@@ -4,19 +4,20 @@ Date: 2026-04-30
 
 ## Goal
 
-Add BotBooru (`https://botbooru.com/`) as a first-class Online provider in Character Library. The provider should support public and authenticated browsing, importing character cards, linking local cards to BotBooru posts, update checks, a favorites view, and favorite/unfavorite actions.
+Add BotBooru (`https://botbooru.com/`) as a first-class Online provider in Character Library. The provider should support anonymous public browsing, importing character cards, linking local cards to BotBooru posts, update checks, and optional authenticated favorites.
 
-BotBooru does not expose browser CORS headers for its JSON/download endpoints, so Character Library will use the bundled `cl-helper` server plugin for BotBooru API access instead of relying on direct browser fetches.
+BotBooru public endpoints allow anonymous browsing and downloads, including NSFW results when `sfw_only=false`, but they do not expose browser CORS headers. Character Library will use the bundled `cl-helper` server plugin as a public proxy for BotBooru API access even when no token is configured.
 
 ## Selected Approach
 
-Implement a full provider plus `cl-helper` proxy support.
+Implement a full provider plus public-first `cl-helper` proxy support.
 
 This matches the existing provider architecture and keeps BotBooru-specific network behavior in one place:
 
 - Browser provider modules own UI state, card normalization, import/link/update behavior, and settings.
-- `cl-helper` owns server-side BotBooru requests that need to bypass browser CORS.
-- Authentication uses a pasted BotBooru bearer/access token, similar to Chub's token flow. Character Library will not store BotBooru username/password credentials.
+- `cl-helper` owns server-side BotBooru requests that need to bypass browser CORS, with or without a token.
+- Browsing, previewing, importing, and update checks are anonymous by default.
+- Authentication uses a pasted BotBooru bearer/access token only for account-specific features, similar to Chub's token flow. Character Library will not store BotBooru username/password credentials.
 
 ## Provider Scope
 
@@ -25,17 +26,18 @@ Provider identity:
 - `id`: `botbooru`
 - `name`: `BotBooru`
 - Enabled by default.
-- NSFW toggle defaults to enabled. If BotBooru denies account-gated content without a token, the UI should surface that login is required instead of silently downgrading results.
+- NSFW toggle defaults to enabled by sending `sfw_only=false`.
+- No token is required for normal browse, preview, import, or update-check flows.
 
 Initial provider capabilities:
 
-- Browse/search BotBooru posts through `/posts/`.
-- Fetch post detail through `/post/{id}`.
-- Import cards using `/download/png/{id}`.
-- Fetch V2 JSON for update comparison using `/download/json/{id}`.
+- Browse/search BotBooru posts anonymously through `/posts/`.
+- Fetch post detail anonymously through `/post/{id}`.
+- Import cards anonymously using `/download/png/{id}`.
+- Fetch V2 JSON anonymously for update comparison using `/download/json/{id}`.
 - Link local cards with `extensions.botbooru`.
 - Check linked cards for updates by comparing remote JSON against local V2 data.
-- Show an authenticated Favorites view.
+- Show an authenticated Favorites view when a token is configured.
 - Add/remove favorites from preview cards when authenticated.
 
 Out of scope for the first pass:
@@ -95,7 +97,7 @@ Settings integration needs explicit host-extension wiring:
 
 Observed endpoints:
 
-- `GET /posts/?sort=latest&limit=...&offset=...&sfw_only=true`
+- `GET /posts/?sort=latest&limit=...&offset=...&sfw_only=false`
 - `GET /post/{id}`
 - `GET /download/json/{id}`
 - `GET /download/png/{id}`
@@ -103,12 +105,20 @@ Observed endpoints:
 - `POST /interactions/{postId}/favorite`
 - `POST /auth/token` exists on BotBooru, but Character Library will not use it for username/password login in the first pass.
 
+Anonymous endpoint verification:
+
+- `/posts/?sort=latest&limit=20&offset=0&sfw_only=true` returned SFW-only public results.
+- `/posts/?sort=latest&limit=20&offset=0&sfw_only=false` returned mixed SFW/NSFW public results.
+- `/post/{id}`, `/download/json/{id}`, and `/download/png/{id}` returned `200` without a token for both SFW and NSFW sampled posts.
+- `HEAD /download/png/{id}` returned `405`; downloads should use `GET`.
+- These responses did not include CORS allow-origin headers, so browser code should still use `cl-helper`.
+
 Initial browse parameters:
 
 - `sort`: `latest`, `favorites`, `views`, `downloads`, `curated`, `random`
 - `q`: search text/tag query
 - `limit`, `offset`
-- `sfw_only=true` only when NSFW is disabled or auth is absent and BotBooru requires SFW-only results
+- `sfw_only=false` by default; `sfw_only=true` only when the user disables NSFW
 - `time_window` only for sort modes verified to support time windows
 
 Additional BotBooru filters, such as AI-content hiding or minimum token count, stay hidden until verified against the live API.
@@ -118,21 +128,21 @@ Additional BotBooru filters, such as AI-content hiding or minimum token count, s
 Add BotBooru support under the existing `cl-helper` plugin:
 
 - Reuse `GET /health` for helper availability; the provider can treat a successful `cl-helper` health response as BotBooru helper support once the helper version includes the BotBooru routes.
-- `GET /bb-proxy/*`: forwards read-only BotBooru GET requests to `https://botbooru.com`.
+- `GET /bb-proxy/*`: forwards read-only BotBooru GET requests to `https://botbooru.com`; works without a token.
 - `POST /bb-set-token`: stores a pasted bearer token in the helper process for the current SillyTavern server session.
 - `POST /bb-clear-token`: clears the stored token.
 - `GET /bb-session`: reports whether a token is currently configured.
 - `GET /bb-validate`: calls `/auth/me` with the token and returns validity/user summary.
-- `GET /bb-favorites`: validates the token, resolves the authenticated BotBooru user ID, and fetches that user's favorites.
-- `GET /bb-favorites/:postId`: returns favorite count and whether the current user favorited a post.
-- `POST /bb-favorite/:postId`: toggles favorite state for the current user.
+- `GET /bb-favorites`: requires a token, resolves the authenticated BotBooru user ID, and fetches that user's favorites.
+- `GET /bb-favorites/:postId`: returns public favorite count and authenticated `favorited` state when a token is configured.
+- `POST /bb-favorite/:postId`: requires a token and toggles favorite state for the current user.
 
 Proxy safety rules:
 
 - Only allow `botbooru.com` as the upstream host.
 - Only allow known read endpoints through the wildcard proxy, such as `/posts/`, `/post/{id}`, `/download/json/{id}`, `/download/png/{id}`, `/images/*`, `/images/preview/*`, `/tags/*`, and `/api/users/*/favorites` if needed.
 - Do not proxy arbitrary POST requests through `bb-proxy`.
-- Send `Authorization: Bearer <token>` only when a token is configured.
+- Send `Authorization: Bearer <token>` only when a token is configured and the upstream call benefits from auth.
 - Do not log token values.
 
 ## Data Model
@@ -176,17 +186,18 @@ Browse modes:
 - `browse`: normal search/latest/discovery results.
 - `favorites`: authenticated BotBooru favorites for the current token/account.
 
-If the user opens Favorites without a valid token, show a token-required empty state and a button to open the token modal.
+If the user opens Favorites without a valid token, show a token-required empty state and a button to open the token modal. Normal Browse remains available without any token.
 
 ## Auth UX
 
 Use a token modal similar to Chub:
 
 - Explain that users should copy the BotBooru token from their browser local storage after logging in on BotBooru.
-- Store the token in Character Library settings/local storage, matching existing provider conventions.
-- Push the token into `cl-helper` via `/bb-set-token` before authenticated calls.
+- Store the token in Character Library settings/local storage only when the user chooses to enable account features.
+- Push the token into `cl-helper` via `/bb-set-token` before authenticated favorites calls.
 - Validate with `/bb-validate`.
 - Provide clear states: not configured, helper missing, token invalid, authenticated.
+- Keep the token UI visually secondary so users understand BotBooru browsing/import works anonymously.
 
 No username/password collection is included.
 
@@ -211,10 +222,10 @@ Update flow:
 
 Expected cases:
 
-- Helper missing: show a provider-specific helper-required message for BotBooru.
-- Token missing: public browse still works where BotBooru allows it; Favorites and favorite actions show token-required UI.
+- Helper missing: show a provider-specific helper-required message for BotBooru because browser fetches are blocked by CORS even for public endpoints.
+- Token missing: public browse/import/update flows still work through `cl-helper`; Favorites and favorite actions show token-required UI.
 - Token invalid/expired: clear helper session state, keep saved token available for editing, and show a revalidate/login prompt.
-- BotBooru returns 401/403 for NSFW/NSFL: show an authenticated-content-required message.
+- BotBooru returns 401/403 for a future account-gated route: show an authenticated-content-required message for that action only.
 - Network/proxy failure: use existing provider loading/error states and toasts.
 - Download failure: surface which asset failed and keep the import modal usable.
 
@@ -223,13 +234,14 @@ Expected cases:
 Manual verification:
 
 - Provider loads in Online provider selector.
-- Public browse returns BotBooru cards.
-- NSFW default is on and authenticated browsing uses the token when available.
+- Public browse returns BotBooru cards through `cl-helper` without a token.
+- NSFW default is on and uses `sfw_only=false`.
+- SFW toggle sends `sfw_only=true`.
 - Token modal validates a pasted token and handles invalid token errors.
 - Favorites view loads with a valid token and blocks gracefully without one.
 - Favorite/unfavorite changes preview state and count.
-- Import creates a local card with `extensions.botbooru`.
-- Linked update check fetches remote JSON and reports field diffs.
+- Import creates a local card with `extensions.botbooru` without requiring a token.
+- Linked update check fetches remote JSON without requiring a token and reports field diffs.
 - Helper refuses disallowed proxy paths and never logs token values.
 
 Code verification:
