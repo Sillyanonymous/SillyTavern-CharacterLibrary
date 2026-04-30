@@ -164,9 +164,9 @@ function renderPluginMissingState() {
     );
 }
 
-function renderFavoritesTokenState() {
+function renderFavoritesTokenState(message = 'My Favorites requires a BotBooru bearer token.') {
     renderEmptyState(
-        'My Favorites requires a BotBooru bearer token.',
+        message,
         'fa-regular fa-heart',
         `<button class="glass-btn botbooru-open-token-btn" type="button">
             <i class="fa-solid fa-key"></i> Add Token
@@ -518,6 +518,7 @@ async function toggleSelectedFavorite() {
         }
     } catch (err) {
         showToast?.(`Favorite update failed: ${err.message}`, 'error');
+        if (/token|invalid|expired|401/i.test(err.message)) openBotbooruTokenModal();
     } finally {
         favoriteBtn?.classList.remove('loading');
     }
@@ -610,9 +611,8 @@ async function syncSavedTokenToHelper() {
     if (!botbooruToken || botbooruTokenSynced) return;
     const result = await validateBotbooruSession(botbooruToken);
     if (!result?.valid) {
-        botbooruToken = null;
         botbooruTokenSynced = false;
-        setSetting?.('botbooruToken', null);
+        await clearBotbooruToken().catch(err => CoreAPI.debugLog?.('[BotBooru] Invalid token cleanup failed:', err.message));
         throw new Error(result?.reason || 'BotBooru token is invalid or expired');
     }
     botbooruTokenSynced = true;
@@ -678,7 +678,7 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
         console.error('[BotBooru] Load failed:', err);
         showToast?.(`BotBooru load failed: ${err.message}`, 'error');
         if (botbooruViewMode === 'favorites' && /login|token|401/i.test(err.message)) {
-            renderFavoritesTokenState();
+            renderFavoritesTokenState('BotBooru token is invalid or expired. Revalidate or edit it to use My Favorites.');
         } else {
             renderEmptyState(`Load failed: ${err.message}`, 'fa-solid fa-triangle-exclamation');
         }
