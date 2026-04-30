@@ -110,7 +110,7 @@ export async function init(router) {
     // ---- All routes registered synchronously (before any awaits) ----
 
     router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.1.0', thumbnails: _thumbsReady });
+        res.json({ ok: true, version: '1.2.0', thumbnails: _thumbsReady });
     });
 
     // =================================================================
@@ -684,6 +684,226 @@ export async function init(router) {
         } catch (err) {
             console.error('[cl-helper] DC proxy error:', err.message);
             res.status(502).json({ error: 'Failed to reach DataCat' });
+        }
+    });
+
+    // =================================================================
+    // BotBooru - public API proxy + optional bearer-token favorites
+    // =================================================================
+
+    const BOTBOORU_BASE = 'https://botbooru.com';
+    const BOTBOORU_ORIGIN = 'https://botbooru.com';
+
+    let bbAccessToken = null;
+
+    function bbHeaders({ json = true, auth = false } = {}) {
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': json ? 'application/json' : '*/*',
+            'Origin': BOTBOORU_ORIGIN,
+            'Referer': BOTBOORU_ORIGIN + '/',
+        };
+        if (auth && bbAccessToken) {
+            headers.Authorization = `Bearer ${bbAccessToken}`;
+        }
+        return headers;
+    }
+
+    function normalizeBbToken(token) {
+        if (!token || typeof token !== 'string') return null;
+        let value = token.trim();
+        if (value.toLowerCase().startsWith('bearer ')) value = value.slice(7).trim();
+        if (!value || value.length > 4096 || /[\r\n]/.test(value)) return null;
+        return value;
+    }
+
+    const BB_ALLOWED_PATHS = [
+        /^\/posts\/?$/,
+        /^\/post\/\d+$/,
+        /^\/download\/json\/\d+$/,
+        /^\/download\/png\/\d+$/,
+        /^\/images\/.+$/,
+        /^\/tags\/?$/,
+        /^\/random\/?$/,
+        /^\/interactions\/\d+\/favorites$/,
+    ];
+
+    function bbIsAllowedPath(pathname) {
+        return BB_ALLOWED_PATHS.some(re => re.test(pathname));
+    }
+
+    function parsePositiveInt(value) {
+        const n = Number.parseInt(value, 10);
+        return Number.isSafeInteger(n) && n > 0 ? n : null;
+    }
+
+    async function bbFetchJson(path, { auth = false } = {}) {
+        const targetUrl = new URL(path, BOTBOORU_BASE);
+        const response = await fetch(targetUrl.toString(), {
+            method: 'GET',
+            headers: bbHeaders({ auth }),
+            redirect: 'follow',
+        });
+        const text = await response.text();
+        let data = null;
+        try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+        return { response, data, text };
+    }
+
+    async function bbResolveCurrentUserId() {
+        if (!bbAccessToken) return null;
+        const { response, data } = await bbFetchJson('/auth/me', { auth: true });
+        if (!response.ok) return null;
+        return data?.id || data?.user?.id || data?.user_id || null;
+    }
+
+    router.post('/bb-set-token', async (req, res) => {
+        const token = normalizeBbToken(req.body?.token);
+        if (!token) {
+            return res.status(400).json({ error: 'token string is required' });
+        }
+
+        bbAccessToken = token;
+        console.log('[cl-helper] BotBooru token stored');
+        res.json({ ok: true });
+    });
+
+    router.post('/bb-clear-token', (_req, res) => {
+        bbAccessToken = null;
+        console.log('[cl-helper] BotBooru token cleared');
+        res.json({ ok: true });
+    });
+
+    router.get('/bb-session', (_req, res) => {
+        res.json({ active: !!bbAccessToken });
+    });
+
+    router.get('/bb-validate', async (_req, res) => {
+        if (!bbAccessToken) {
+            return res.json({ valid: false, reason: 'no token stored' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJson('/auth/me', { auth: true });
+            if (!response.ok) {
+                return res.json({ valid: false, reason: `HTTP ${response.status}: ${text.slice(0, 200)}` });
+            }
+            res.json({
+                valid: true,
+                user: {
+                    id: data?.id || data?.user?.id || data?.user_id || null,
+                    username: data?.username || data?.user?.username || data?.name || null,
+                },
+            });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru validate error:', err.message);
+            res.json({ valid: false, reason: err.message });
+        }
+    });
+
+    router.get('/bb-proxy/*', async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const targetUrl = new URL(targetPath, BOTBOORU_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+
+        if (targetUrl.hostname !== 'botbooru.com') {
+            return res.status(403).json({ error: 'Proxy target must be botbooru.com' });
+        }
+        if (!bbIsAllowedPath(targetUrl.pathname)) {
+            console.warn(`[cl-helper] BotBooru proxy blocked: ${targetUrl.pathname}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        try {
+            const wantsJson = !targetUrl.pathname.startsWith('/download/png/') && !targetUrl.pathname.startsWith('/images/');
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers: bbHeaders({ json: wantsJson, auth: !!bbAccessToken }),
+                redirect: 'follow',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            res.status(response.status);
+            res.set('Content-Type', contentType);
+
+            if (contentType.includes('application/json') || contentType.startsWith('text/')) {
+                res.send(await response.text());
+            } else {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                res.send(buffer);
+            }
+        } catch (err) {
+            console.error('[cl-helper] BotBooru proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru' });
+        }
+    });
+
+    router.get('/bb-favorites', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '48', 10) || 48, 1), 100);
+        const offset = Math.max(Number.parseInt(req.query.offset || '0', 10) || 0, 0);
+        const sfwOnly = req.query.sfw_only === 'true' ? 'true' : 'false';
+        const q = typeof req.query.q === 'string' && req.query.q.trim()
+            ? `&q=${encodeURIComponent(req.query.q.trim())}`
+            : '';
+
+        try {
+            const userId = await bbResolveCurrentUserId();
+            if (!userId) {
+                return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
+            }
+
+            const path = `/api/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const { response, data, text } = await bbFetchJson(path, { auth: true });
+            res.status(response.status).json(data ?? { error: text });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorites error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
+        }
+    });
+
+    router.get('/bb-favorites/:postId', async (req, res) => {
+        const postId = parsePositiveInt(req.params.postId);
+        if (!postId) return res.status(400).json({ error: 'Invalid post id' });
+
+        try {
+            const { response, data, text } = await bbFetchJson(`/interactions/${postId}/favorites`, { auth: !!bbAccessToken });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json({
+                count: Number.parseInt(data?.count, 10) || 0,
+                favorited: data?.favorited === true,
+            });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorite-state error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru favorite state' });
+        }
+    });
+
+    router.post('/bb-favorite/:postId', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const postId = parsePositiveInt(req.params.postId);
+        if (!postId) return res.status(400).json({ error: 'Invalid post id' });
+
+        try {
+            const response = await fetch(`${BOTBOORU_BASE}/interactions/${postId}/favorite`, {
+                method: 'POST',
+                headers: bbHeaders({ auth: true }),
+                redirect: 'follow',
+            });
+            const text = await response.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+            res.status(response.status).json(data ?? { ok: response.ok });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorite-toggle error:', err.message);
+            res.status(502).json({ error: 'Failed to toggle BotBooru favorite' });
         }
     });
 
