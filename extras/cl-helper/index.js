@@ -856,43 +856,25 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            // Step 1: Fetch BotBooru's HTML to find JS bundle URLs
-            const { text: html } = await bbFetchJson('/', { auth: false });
-            const scriptUrls = [];
-            const scriptRe = /<script[^>]+src="([^"]+)"/g;
-            let m;
-            while ((m = scriptRe.exec(html)) !== null) {
-                scriptUrls.push(m[1]);
-            }
-            console.log(`[cl-helper] BB scripts found: ${scriptUrls.join(', ')}`);
+            // Fetch BotBooru's ui.js and extract the favorites fetch context
+            const uiUrl = new URL('/js/ui.js?v=53', BOTBOORU_BASE).toString();
+            const uiResp = await fetch(uiUrl, { headers: { 'User-Agent': bbHeaders()['User-Agent'] } });
+            const uiJs = uiResp.ok ? await uiResp.text() : '';
 
-            // Step 2: Fetch each JS bundle and search for favorites/API patterns
-            for (const scriptUrl of scriptUrls) {
-                try {
-                    const fullUrl = scriptUrl.startsWith('http')
-                        ? scriptUrl
-                        : new URL(scriptUrl, BOTBOORU_BASE).toString();
-                    const jsResp = await fetch(fullUrl, { headers: { 'User-Agent': bbHeaders()['User-Agent'] } });
-                    if (!jsResp.ok) continue;
-                    const js = await jsResp.text();
-                    // Search for favorites-related API patterns
-                    const patterns = [
-                        /["'`]\/[^"'`]*favorit[^"'`]*["'`]/gi,
-                        /["'`]\/api[^"'`]*["'`]/gi,
-                        /["'`]\/users\/[^"'`]*["'`]/gi,
-                    ];
-                    for (const pat of patterns) {
-                        const matches = js.match(pat);
-                        if (matches?.length) {
-                            console.log(`[cl-helper] BB JS ${scriptUrl.split('/').pop()}: ${pat.source} → ${[...new Set(matches)].slice(0, 15).join(', ')}`);
-                        }
-                    }
-                } catch (e) {
-                    console.log(`[cl-helper] BB JS fetch failed ${scriptUrl}: ${e.message}`);
-                }
+            // Extract ~500 chars around each "favorites" usage
+            const favContexts = [];
+            const favRe = /favorites/gi;
+            let fm;
+            while ((fm = favRe.exec(uiJs)) !== null) {
+                const start = Math.max(0, fm.index - 250);
+                const end = Math.min(uiJs.length, fm.index + 250);
+                favContexts.push(uiJs.slice(start, end).replace(/\n/g, ' '));
+            }
+            for (let i = 0; i < favContexts.length; i++) {
+                console.log(`[cl-helper] BB ui.js favorites ctx ${i}: ${favContexts[i]}`);
             }
 
-            res.status(404).json({ error: 'Could not find BotBooru favorites API endpoint' });
+            res.status(404).json({ error: 'Debugging: check server logs for BotBooru favorites context' });
         } catch (err) {
             console.error('[cl-helper] BotBooru favorites error:', err.message);
             res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
