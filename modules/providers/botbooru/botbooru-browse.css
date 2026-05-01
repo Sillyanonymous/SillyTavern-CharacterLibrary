@@ -12,15 +12,6 @@
     pointer-events: none;
 }
 
-.botbooru-view-toggle {
-    display: flex;
-    gap: 6px;
-}
-
-.botbooru-view-btn {
-    min-width: 96px;
-}
-
 .botbooru-card .browse-card-image img {
     object-position: center 20%;
 }

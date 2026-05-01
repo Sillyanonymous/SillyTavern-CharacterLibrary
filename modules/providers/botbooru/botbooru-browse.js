@@ -759,7 +759,7 @@ class BotbooruBrowseView extends BrowseView {
 
     renderFilterBar() {
         return `
-            <div class="botbooru-view-toggle">
+            <div class="chub-view-toggle">
                 <button class="botbooru-view-btn active" data-botbooru-view="browse" type="button" title="Browse public BotBooru posts">
                     <i class="fa-solid fa-compass"></i> <span>Browse</span>
                 </button>

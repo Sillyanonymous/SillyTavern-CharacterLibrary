@@ -10329,7 +10329,8 @@ details.settings-provider-section > .settings-provider-body {
 
     .chub-view-btn,
     .pyg-view-btn,
-    .wyvern-view-btn {
+    .wyvern-view-btn,
+    .botbooru-view-btn {
         padding: 6px 10px;
         font-size: var(--font-sm);
     }
@@ -10367,7 +10368,8 @@ details.settings-provider-section > .settings-provider-body {
     /* Online filter bar — collapse text labels to icon-only */
     .chub-view-btn span,
     .pyg-view-btn span,
-    .wyvern-view-btn span {
+    .wyvern-view-btn span,
+    .botbooru-view-btn span {
         display: none;
     }
 
