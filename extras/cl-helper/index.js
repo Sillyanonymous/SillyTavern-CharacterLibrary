@@ -856,10 +856,28 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            const path = `/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
-            const { response, data, text } = await bbFetchJson(path, { auth: true });
-            console.log(`[cl-helper] BotBooru favorites ${path} → ${response.status}, content-type=${response.headers.get('content-type')}, body(500)=${text?.slice(0, 500)}`);
-            res.status(response.status).json(data ?? { error: text });
+            const qs = `limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const candidates = [
+                `/posts?favorited_by=${userId}&${qs}`,
+                `/posts?favorites=true&${qs}`,
+                `/posts?user_id=${userId}&favorites=1&${qs}`,
+                `/favorites?${qs}`,
+                `/api/favorites?${qs}`,
+                `/interactions/favorites?${qs}`,
+            ];
+
+            for (const path of candidates) {
+                const { response, data, text } = await bbFetchJson(path, { auth: true });
+                const ct = response.headers.get('content-type') || '';
+                const isJson = ct.includes('json');
+                const hasData = isJson && data && !data?.raw;
+                console.log(`[cl-helper] BB fav probe ${path} → ${response.status} ${ct.split(';')[0]} json=${isJson} hasData=${hasData} ${hasData ? `keys=${Object.keys(data).join(',')} sample=${JSON.stringify(Array.isArray(data) ? data[0] : data?.posts?.[0])?.slice(0, 200)}` : ''}`);
+                if (response.ok && hasData) {
+                    return res.json(data);
+                }
+            }
+
+            res.status(404).json({ error: 'Could not find BotBooru favorites API endpoint' });
         } catch (err) {
             console.error('[cl-helper] BotBooru favorites error:', err.message);
             res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
