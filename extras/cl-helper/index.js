@@ -700,6 +700,7 @@ export async function init(router) {
         const headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': json ? 'application/json' : '*/*',
+            'X-Requested-With': 'XMLHttpRequest',
             'Origin': BOTBOORU_ORIGIN,
             'Referer': BOTBOORU_ORIGIN + '/',
         };
@@ -856,25 +857,17 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            // Fetch BotBooru's ui.js and extract the favorites fetch context
-            const uiUrl = new URL('/js/ui.js?v=53', BOTBOORU_BASE).toString();
-            const uiResp = await fetch(uiUrl, { headers: { 'User-Agent': bbHeaders()['User-Agent'] } });
-            const uiJs = uiResp.ok ? await uiResp.text() : '';
-
-            // Extract ~500 chars around each "favorites" usage
-            const favContexts = [];
-            const favRe = /favorites/gi;
-            let fm;
-            while ((fm = favRe.exec(uiJs)) !== null) {
-                const start = Math.max(0, fm.index - 250);
-                const end = Math.min(uiJs.length, fm.index + 250);
-                favContexts.push(uiJs.slice(start, end).replace(/\n/g, ' '));
+            const path = `/api/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const { response, data, text } = await bbFetchJson(path, { auth: true });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
             }
-            for (let i = 0; i < favContexts.length; i++) {
-                console.log(`[cl-helper] BB ui.js favorites ctx ${i}: ${favContexts[i]}`);
+            const ct = response.headers.get('content-type') || '';
+            if (!ct.includes('json')) {
+                console.error(`[cl-helper] BotBooru favorites returned ${ct} instead of JSON`);
+                return res.status(502).json({ error: 'BotBooru favorites endpoint returned non-JSON response' });
             }
-
-            res.status(404).json({ error: 'Debugging: check server logs for BotBooru favorites context' });
+            res.json(data);
         } catch (err) {
             console.error('[cl-helper] BotBooru favorites error:', err.message);
             res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
