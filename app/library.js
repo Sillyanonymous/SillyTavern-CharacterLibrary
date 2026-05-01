@@ -426,6 +426,7 @@ const DEFAULT_SETTINGS = {
     datacatReextractOnUpdate: false,
     ctCookie: null,
     botbooruToken: null,
+    civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
     pygmalionNsfw: false,
@@ -543,6 +544,50 @@ function getSTContext() {
         console.warn('[Settings] Cannot access main window context:', e);
     }
     return null;
+}
+
+/**
+ * Tell the ST main window to re-read the character data from disk so subsequent
+ * messages in an open chat pick up edits made in CL without requiring a refresh.
+ * Best-effort; silent if the opener is unreachable or the APIs are unavailable.
+ * Capped at 3s to avoid hanging on suspended mobile tabs.
+ * @param {string} avatar - The avatar filename of the edited character
+ */
+async function notifySTCharacterEdited(avatar) {
+    if (!avatar) return;
+    const run = async () => {
+        try {
+            const host = getHostWindow();
+            if (!host) return;
+
+            // Replace ST's in-memory characters array with fresh disk contents,
+            // so its next auto-persist doesn't overwrite our edit with stale data.
+            if (host.SillyTavern?.getContext) {
+                const ctx = host.SillyTavern.getContext();
+                if (typeof ctx?.getCharacters === 'function') {
+                    await ctx.getCharacters();
+                }
+            }
+
+            if (host.eventSource && host.event_types?.CHARACTER_EDITED) {
+                const charIndex = host.characters?.findIndex(c => c.avatar === avatar);
+                if (charIndex !== undefined && charIndex >= 0) {
+                    await host.eventSource.emit(
+                        host.event_types.CHARACTER_EDITED,
+                        { id: charIndex, character: host.characters[charIndex] }
+                    );
+                }
+            }
+
+            if (typeof host.printCharactersDebounced === 'function') {
+                host.printCharactersDebounced();
+            }
+        } catch (e) {
+            console.warn('[CL] Could not notify main window of edit (non-fatal):', e);
+        }
+    };
+    const timeout = new Promise(resolve => setTimeout(resolve, 3000));
+    await Promise.race([run(), timeout]);
 }
 
 // Uses explicit property assignment for cross-window write reliability
@@ -1458,6 +1503,8 @@ function setupSettingsModal() {
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
         if (botbooruTokenInput) botbooruTokenInput.value = getSetting('botbooruToken') || '';
         if (botbooruNsfwDefaultCheckbox) botbooruNsfwDefaultCheckbox.checked = getSetting('botbooruNsfw') !== false;
+        const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
+        if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
         const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
         if (datacatPublicFeedCheckbox) {
             datacatPublicFeedCheckbox.checked = getSetting('datacatPublicFeed') === true;
@@ -2453,6 +2500,97 @@ function setupSettingsModal() {
                 updateDatacatSessionStatus();
             } catch (err) {
                 showToast(`Clear error: ${err.message}`, 'error');
+            }
+        };
+    }
+
+    // ---- Civitai API Key ----
+    const civitaiApiKeyInputEl = document.getElementById('settingsCivitaiApiKey');
+    const toggleCivitaiKeyVisibilityBtn = document.getElementById('toggleCivitaiKeyVisibility');
+    const saveCivitaiKeyBtn = document.getElementById('saveCivitaiKeyBtn');
+    const clearCivitaiKeyBtn = document.getElementById('clearCivitaiKeyBtn');
+    const validateCivitaiKeyBtn = document.getElementById('validateCivitaiKeyBtn');
+
+    if (toggleCivitaiKeyVisibilityBtn && civitaiApiKeyInputEl) {
+        toggleCivitaiKeyVisibilityBtn.onclick = () => {
+            const isPassword = civitaiApiKeyInputEl.type === 'password';
+            civitaiApiKeyInputEl.type = isPassword ? 'text' : 'password';
+            toggleCivitaiKeyVisibilityBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+
+    if (saveCivitaiKeyBtn && civitaiApiKeyInputEl) {
+        saveCivitaiKeyBtn.onclick = async () => {
+            const key = (civitaiApiKeyInputEl.value || '').trim();
+            if (!key) {
+                showToast('Enter a key first', 'warning');
+                return;
+            }
+            setSetting('civitaiApiKey', key);
+            try {
+                const resp = await apiRequest('/plugins/cl-helper/civitai-set-key', 'POST', { key });
+                if (resp?.ok) {
+                    window.invalidateCivitaiAuthCache?.();
+                    showToast('Civitai key saved', 'success');
+                } else {
+                    showToast('Saved locally, cl-helper unavailable', 'warning');
+                }
+            } catch {
+                showToast('Saved locally, cl-helper unreachable', 'warning');
+            }
+        };
+    }
+
+    if (clearCivitaiKeyBtn) {
+        clearCivitaiKeyBtn.onclick = async () => {
+            setSetting('civitaiApiKey', null);
+            if (civitaiApiKeyInputEl) civitaiApiKeyInputEl.value = '';
+            try {
+                await apiRequest('/plugins/cl-helper/civitai-clear-key', 'POST', {});
+            } catch {}
+            window.invalidateCivitaiAuthCache?.();
+            showToast('Civitai key cleared', 'info');
+        };
+    }
+
+    if (validateCivitaiKeyBtn) {
+        validateCivitaiKeyBtn.onclick = async () => {
+            const originalHtml = validateCivitaiKeyBtn.innerHTML;
+            validateCivitaiKeyBtn.classList.remove('success', 'error');
+            validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateCivitaiKeyBtn.disabled = true;
+            try {
+                // Resync the stored key to cl-helper before validating. Covers the
+                // case where cl-helper lost it (plugin reload, ST restart, or the
+                // user upgrading the plugin after saving the setting).
+                const inputKey = (civitaiApiKeyInputEl?.value || '').trim();
+                const savedKey = getSetting('civitaiApiKey') || '';
+                const key = inputKey || savedKey;
+                if (key) {
+                    try { await apiRequest('/plugins/cl-helper/civitai-set-key', 'POST', { key }); } catch {}
+                    window.invalidateCivitaiAuthCache?.();
+                }
+                const resp = await apiRequest('/plugins/cl-helper/civitai-validate');
+                const data = resp ? await resp.json() : null;
+                if (data?.valid) {
+                    validateCivitaiKeyBtn.classList.add('success');
+                    validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    showToast('Civitai key is valid', 'success');
+                } else {
+                    validateCivitaiKeyBtn.classList.add('error');
+                    validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    showToast(data?.error || `Key invalid (status ${data?.status ?? '?'})`, 'error');
+                }
+            } catch (err) {
+                validateCivitaiKeyBtn.classList.add('error');
+                validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                showToast(`Validation error: ${err.message}`, 'error');
+            } finally {
+                validateCivitaiKeyBtn.disabled = false;
+                setTimeout(() => {
+                    validateCivitaiKeyBtn.classList.remove('success', 'error');
+                    validateCivitaiKeyBtn.innerHTML = originalHtml;
+                }, 3000);
             }
         };
     }
@@ -10839,6 +10977,10 @@ async function performSave() {
             setEditLock(true);
             pendingPayload = null;
             
+            // Tell ST to re-read the character so open chats pick up the edits
+            // without requiring a tab refresh. Best-effort, non-blocking.
+            notifySTCharacterEdited(activeChar.avatar);
+
             // Fetch from server for full sync (in background)
             // forceRefresh avoids stale opener data overwriting recent changes
             fetchCharacters(true);
@@ -18970,6 +19112,12 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
     try {
         let response;
         let usedProxy = false;
+
+        // Slow CDNs get a longer timeout window (extend to at least 60s)
+        const SLOW_HOSTS = /(?:^|\.)image\.civitai\.com$/i;
+        try {
+            if (SLOW_HOSTS.test(new URL(url).hostname)) timeoutMs = Math.max(timeoutMs, 60000);
+        } catch {}
 
         // Create abort controller for timeout and external abort
         const controller = new AbortController();

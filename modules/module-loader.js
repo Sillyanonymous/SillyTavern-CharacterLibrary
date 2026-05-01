@@ -309,7 +309,8 @@ async function initModuleSystem() {
                 import('./gallery-extractors/gdrive.js'),
                 import('./gallery-extractors/catbox.js'),
                 import('./gallery-extractors/mega.js'),
-                import('./gallery-extractors/postimg.js')
+                import('./gallery-extractors/postimg.js'),
+                import('./gallery-extractors/civitai.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;

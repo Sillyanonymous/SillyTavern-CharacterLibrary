@@ -900,7 +900,7 @@ body {
     border-color: var(--accent);
 }
 
-.char-card::before {
+.char-card::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -916,7 +916,7 @@ body {
     pointer-events: none;
 }
 
-.char-card.loaded::before {
+.char-card.loaded::after {
     display: none;
 }
 
