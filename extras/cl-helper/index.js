@@ -858,12 +858,12 @@ export async function init(router) {
 
             const qs = `limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
             const candidates = [
-                `/posts?favorited_by=${userId}&${qs}`,
-                `/posts?favorites=true&${qs}`,
-                `/posts?user_id=${userId}&favorites=1&${qs}`,
-                `/favorites?${qs}`,
-                `/api/favorites?${qs}`,
-                `/interactions/favorites?${qs}`,
+                `/posts/?favorited_by=${userId}&${qs}`,
+                `/posts/?favorites=true&${qs}`,
+                `/posts/?favorite=1&user=${userId}&${qs}`,
+                `/favorites/?${qs}`,
+                `/api/posts/?favorited_by=${userId}&${qs}`,
+                `/api/v1/favorites?${qs}`,
             ];
 
             for (const path of candidates) {
@@ -874,6 +874,17 @@ export async function init(router) {
                 console.log(`[cl-helper] BB fav probe ${path} → ${response.status} ${ct.split(';')[0]} json=${isJson} hasData=${hasData} ${hasData ? `keys=${Object.keys(data).join(',')} sample=${JSON.stringify(Array.isArray(data) ? data[0] : data?.posts?.[0])?.slice(0, 200)}` : ''}`);
                 if (response.ok && hasData) {
                     return res.json(data);
+                }
+            }
+
+            // Check if the user profile page embeds favorites as JSON data
+            const profilePath = `/users/${userId}/favorites`;
+            const { text: html } = await bbFetchJson(profilePath, { auth: true });
+            const dataPatterns = [/__NEXT_DATA__.*?<\/script>/s, /window\.__data__\s*=\s*(\{.+?\});/s, /window\.__INITIAL_STATE__\s*=\s*(\{.+?\});/s, /"favorites"\s*:\s*\[/];
+            for (const pat of dataPatterns) {
+                const match = html?.match(pat);
+                if (match) {
+                    console.log(`[cl-helper] BB fav HTML embed found: pattern=${pat.source.slice(0, 40)}, match(300)=${match[0]?.slice(0, 300)}`);
                 }
             }
 
