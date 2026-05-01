@@ -247,7 +247,9 @@ export async function fetchBotbooruFavorites({
     }
 
     const data = await resp.json();
-    const rawPosts = data?.posts || data?.favorites || data?.items || data?.list || [];
+    const rawPosts = Array.isArray(data)
+        ? data
+        : data?.posts || data?.favorites || data?.items || data?.list || [];
     return {
         total: toInt(data?.total ?? data?.total_count, rawPosts.length),
         posts: rawPosts.map(item => normalizeBotbooruPost(item?.post || item)).filter(Boolean),
