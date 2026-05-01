@@ -6,6 +6,7 @@ export const BOTBOORU_SITE_BASE = 'https://botbooru.com';
 export const BOTBOORU_PROVIDER_ID = 'botbooru';
 export const BOTBOORU_PAGE_RE = /^\/(?:character|post)\/(\d+)/i;
 export const BB_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/bb-proxy`;
+export const BB_PROXY_ASSET_BASE = `/api${BB_PROXY_BASE}`;
 
 let _apiRequest = null;
 
@@ -22,6 +23,12 @@ export function buildProxyPath(path, params = null) {
     const safePath = String(path || '').startsWith('/') ? String(path || '') : `/${path || ''}`;
     const qs = params ? new URLSearchParams(params).toString() : '';
     return `${BB_PROXY_BASE}${safePath}${qs ? `?${qs}` : ''}`;
+}
+
+export function buildProxyAssetUrl(path, params = null) {
+    const safePath = String(path || '').startsWith('/') ? String(path || '') : `/${path || ''}`;
+    const qs = params ? new URLSearchParams(params).toString() : '';
+    return `${BB_PROXY_ASSET_BASE}${safePath}${qs ? `?${qs}` : ''}`;
 }
 
 async function readBodySnippet(resp, maxLength = 200) {
@@ -65,12 +72,12 @@ export function getBotbooruPostUrl(id) {
 
 export function getBotbooruPreviewUrl(filename) {
     if (!filename) return null;
-    return buildProxyPath(`/images/preview/480/${encodeURIComponent(String(filename))}`);
+    return buildProxyAssetUrl(`/images/preview/480/${encodeURIComponent(String(filename))}`);
 }
 
 export function getBotbooruImageUrl(filename) {
     if (!filename) return null;
-    return buildProxyPath(`/images/${encodeURIComponent(String(filename))}`);
+    return buildProxyAssetUrl(`/images/${encodeURIComponent(String(filename))}`);
 }
 
 export function getTagNames(tags) {
