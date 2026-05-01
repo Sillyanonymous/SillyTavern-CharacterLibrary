@@ -1473,7 +1473,7 @@ async function localizeCharacterInfoPanels() {
 // Display Name Override in SillyTavern Chat
 // ==============================================
 
-const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat'];
+const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat', 'botbooru'];
 
 function getListingName(character) {
     const ext = character?.data?.extensions;
