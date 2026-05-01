@@ -906,10 +906,7 @@ class BotbooruBrowseView extends BrowseView {
         const nsfwBtn = document.getElementById('botbooruNsfwToggle');
         nsfwBtn?.classList.toggle('active', botbooruNsfw);
         const sortEl = document.getElementById('botbooruSortSelect');
-        if (sortEl) {
-            sortEl.value = botbooruSort;
-            CoreAPI.initCustomSelect?.(sortEl);
-        }
+        if (sortEl) sortEl.value = botbooruSort;
         setModeButtonState();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
@@ -923,6 +920,8 @@ class BotbooruBrowseView extends BrowseView {
 
     init() {
         super.init();
+        const sortEl = document.getElementById('botbooruSortSelect');
+        if (sortEl) CoreAPI.initCustomSelect?.(sortEl);
         this.attachEventListeners();
     }
 
