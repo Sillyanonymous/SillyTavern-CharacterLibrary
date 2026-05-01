@@ -43,7 +43,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
    SillyTavern/data/default-user/extensions/SillyTavern-CharacterLibrary
    ```
 2. Refresh SillyTavern's page
-3. Click SillyTavern's native "Character Management" button. A dropdown appears where you can select Character Library
+3. Click the new Character Library icon in SillyTavern's top bar (to the right of Character Management)
 4. *(Optional)* Switch to **Embedded Panel** mode in the extension settings for an integrated experience (see [Display Modes](#-display-modes))
 5. *(Optional)* For Pygmalion login, CharacterTavern NSFW access, and DataCat browsing, install the [cl-helper plugin](#cl-helper-plugin-not-detected)
 
@@ -64,7 +64,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Right-click context menu** on any character card for quick actions
 - **Version history & snapshots** with save/restore, remote version browsing, and full diff preview
 - **Playlists** for organizing characters into named, ordered virtual folders with icons and colors
-- **Filter presets** to save and restore your current filter configuration (tags, sort, search, advanced filters)
+- **Filter presets** to save and restore your current filter configuration (tags, sort, search, advanced filters). Open the **Presets** dropdown in the Advanced Filters panel to load, save, rename, or delete presets. Type a name in the input to save the current filter state; click an existing preset to load it. Presets are also available in the **Chats** tab for filtering chat history.
 - **Character Creator** with built-in AI Studio for assisted card authoring, brainstorming, and iterative refinement
 - **Animated card info** on hover with configurable visibility options
 
@@ -92,18 +92,23 @@ Character Library can run in two modes, configurable in SillyTavern's **Extensio
 
 | Mode | Description |
 |------|-------------|
-| **New Tab** (default) | Opens in a separate browser tab. The Characters button shows a dropdown to choose between SillyTavern's native character manager and Character Library. |
-| **Embedded Panel** | Runs inside SillyTavern as an overlay panel. The Characters button toggles CL directly without opening a new tab. |
+| **New Tab** (default) | Opens in a separate browser tab. |
+| **Embedded Panel** | Runs inside SillyTavern as an overlay panel. |
+
+### Launcher
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Show launcher dropdown on Characters button** | Off | When off, a separate Character Library icon is added to SillyTavern's top bar and the Characters button behaves normally. When on, the Characters button is hijacked: clicking it opens a small dropdown to choose between SillyTavern's native character manager and Character Library. |
 
 ### Embedded Panel Settings
 
-These options appear when Embedded Panel mode is selected:
+These options apply when Embedded Panel mode is selected:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | **Launch on startup** | Off | Automatically open the embedded panel when SillyTavern loads. |
-| **Show SillyTavern top bar** | Off | Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height. A "Back" button inside the panel returns you to your chat. |
-| **Show launcher dropdown** | Off | Show the choice dropdown (native manager vs. Character Library) instead of direct toggle. Useful if you frequently switch between both. |
+| **Show SillyTavern top bar** | On | Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height. A "Back" button inside the panel returns you to your chat. |
 | **Exclusive panels** | Off | When enabled, opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping. |
 
 ---
@@ -115,11 +120,16 @@ These options appear when Embedded Panel mode is selected:
 
 - **Gallery tab** for all character images, video, and audio in one place
 - **Embedded media downloads** for images linked in creator notes, descriptions, and greetings
+- **External image-host extractors** for content embedded as gallery/album links (not direct image URLs). Supports Civitai, Imgchest, Mega, Imgur, PostImg, ImgBB, Catbox, and Google Drive. The library walks each link, resolves the actual image URLs, and downloads them into the gallery folder
 - **Provider gallery downloads** from linked characters on ChubAI, Wyvern, or Pygmalion
 - **Audio & video support** including MP3, WAV, OGG, M4A with built-in player; video thumbnails with inline playback
 - **Full-screen viewer** with keyboard navigation (← → 0 Esc) and scroll-wheel zoom up to 5× with drag-to-pan
 - **Bulk localization** across your whole library from Settings, with progress tracking, abort, and history
 - **Optional provider gallery** inclusion in bulk localization
+
+> **Civitai API key** (optional): Required only for private or hidden Civitai posts. Public content extracts without a key. Configure in **Settings → Online → Civitai API Key**. Generate one at [civitai.com/user/account](https://civitai.com/user/account).
+
+> **Imgchest password-protected posts**: Card creators usually paste the password somewhere in the card text (creator's notes). The extractor scans these with a regex (matching common patterns like `password: ...`, `pw=...`, `pass is ...`) and submits it automatically. Authentication runs through the [cl-helper plugin](#cl-helper-plugin-not-detected); without cl-helper, only public posts are extractable.
 
 </details>
 
@@ -695,13 +705,6 @@ Some image hosts (Imgur, Catbox, etc.) block direct browser requests due to CORS
 5. Retry the download in Character Library
 
 This affects embedded media downloads, provider gallery downloads, and bulk localization.
-
-## Acknowledgements
-
-Some early endpoint and provider initialization research for the
-JannyAI and CharacterTavern integrations was cross-referenced with
-publicly available work in BotBrowser project, go check it out as they support a lot of online providers:
-https://github.com/mia13165/SillyTavern-BotBrowser
 
 ## License
 

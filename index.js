@@ -39,7 +39,7 @@ async function getCsrfToken() {
     return getCookie('X-CSRF-Token');
 }
 
-// Pre-fetch at load time — token is stable for the session
+// Pre-fetch at load time; token is stable for the session
 getCsrfToken().then(t => { _csrfToken = t; });
 
 // ==============================================
@@ -91,7 +91,10 @@ function setLaunchOnBoot(enabled) {
 function getShowTopBar() {
     try {
         const context = SillyTavern?.getContext?.();
-        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.showTopBar === true;
+        const v = context?.extensionSettings?.[CL_SETTINGS_KEY]?.showTopBar;
+        if (typeof v === 'boolean') return v;
+        // Default: On in embedded mode, Off in tab mode (tab mode doesn't use the panel).
+        return getDisplayMode() === 'embedded';
     } catch { return false; }
 }
 
@@ -137,7 +140,10 @@ function setShowDropdownInEmbedded(enabled) {
 function getExclusivePanes() {
     try {
         const context = SillyTavern?.getContext?.();
-        return context?.extensionSettings?.[CL_SETTINGS_KEY]?.exclusivePanes === true;
+        const v = context?.extensionSettings?.[CL_SETTINGS_KEY]?.exclusivePanes;
+        if (typeof v === 'boolean') return v;
+        // Default: On in embedded mode, Off in tab mode.
+        return getDisplayMode() === 'embedded';
     } catch { return false; }
 }
 
@@ -178,6 +184,21 @@ let _embeddedVisible = false;
 
 function isEmbeddedActive() {
     return _embeddedVisible;
+}
+
+// ST's drawer icons use closedIcon (opacity 0.3) vs openIcon (opacity 1.0) to indicate
+// the active pane. Mirror that for our standalone button only. The hijacked Characters
+// icon opens our dropdown (not CL directly), so it isn't a CL state indicator.
+function setActivePaneHighlight(active) {
+    const standalone = document.querySelector('#st-gallery-btn .drawer-icon');
+    if (!standalone) return;
+    if (active) {
+        standalone.classList.remove('closedIcon');
+        standalone.classList.add('openIcon');
+    } else {
+        standalone.classList.remove('openIcon');
+        standalone.classList.add('closedIcon');
+    }
 }
 
 function buildIframeUrl() {
@@ -225,8 +246,17 @@ function closeAllSTDrawers() {
     const sheld = document.getElementById('sheld');
     if (sheld) sheld.click();
 
-    // Some top-bar panes are not tied to #sheld and track state via openDrawer.
-    // Toggle any open pane controls off so embedded CL becomes exclusive.
+    // Close every open drawer (including Character Management, whose toggle
+    // #unimportantYes lacks .interactable/.menu_button) by clicking the toggle
+    // sibling of each .drawer-content.openDrawer.
+    document.querySelectorAll('.drawer-content.openDrawer').forEach((panel) => {
+        const drawer = panel.closest('.drawer');
+        const toggle = drawer?.querySelector('.drawer-toggle');
+        if (toggle && typeof toggle.click === 'function') toggle.click();
+    });
+
+    // Legacy pane controls that use .openDrawer directly on menu_button/interactable
+    // elements (not inside a .drawer wrapper).
     const openPaneControls = document.querySelectorAll(
         '#top-bar .openDrawer.interactable, #top-settings-holder .openDrawer.interactable, #top-bar .menu_button.openDrawer, #top-settings-holder .menu_button.openDrawer'
     );
@@ -243,6 +273,7 @@ function showEmbedded() {
     if (getExclusivePanes()) closeAllSTDrawers();
     _iframeContainer.style.display = 'block';
     _embeddedVisible = true;
+    setActivePaneHighlight(true);
     if (shouldHideTopBar()) {
         _iframeContainer.style.top = '0';
         _iframeContainer.style.height = '100dvh';
@@ -260,6 +291,7 @@ function hideEmbedded() {
     if (!_iframeContainer) return;
     _iframeContainer.style.display = 'none';
     _embeddedVisible = false;
+    setActivePaneHighlight(false);
     _iframeContainer.style.top = 'var(--topBarBlockSize, 37px)';
     _iframeContainer.style.height = '';
     for (const id of ['top-bar', 'top-settings-holder']) {
@@ -275,7 +307,11 @@ function setupExclusivePanesWatcher() {
     _exclusivePanesObserver = new MutationObserver((mutations) => {
         if (!isEmbeddedActive() || !getExclusivePanes()) return;
         for (const m of mutations) {
-            if (m.target.id && m.target.classList?.contains('openDrawer')) {
+            const t = m.target;
+            if (!t.classList?.contains('openDrawer')) continue;
+            // .drawer-content.openDrawer is the actual panel; older controls apply
+            // openDrawer directly to the toggle. Either means a pane opened.
+            if (t.classList.contains('drawer-content') || t.id) {
                 hideEmbedded();
                 return;
             }
@@ -380,7 +416,7 @@ function openGallery() {
 }
 
 // ==============================================
-// Launcher Dropdown — hijacks ST's Characters button, offers both native characters and characterlibrary options
+// Launcher Dropdown: hijacks ST's Characters button, offers both native characters and characterlibrary options
 // ==============================================
 
 function injectLauncherStyles() {
@@ -462,6 +498,12 @@ function injectLauncherStyles() {
             pointer-events: none;
             color: var(--SmartThemeBodyColor, #dcdfe4);
         }
+        /* Standalone CL top-bar button: fa-layer-group's glyph fills nearly the
+           whole em-box while siblings (address-card, sliders, cog) only fill ~75%,
+           so vertical-align: middle renders it ~1px above the others' optical center. */
+        #st-gallery-btn .drawer-icon {
+            transform: translateY(1px);
+        }
         /* Scrim overlay */
         .charlib-launcher-scrim {
             position: fixed;
@@ -519,9 +561,7 @@ function setupLauncherDropdown() {
     }
     const chevron = document.createElement('i');
     chevron.className = 'fa-solid fa-caret-down charlib-chevron-badge';
-    if (getDisplayMode() === 'embedded' && !getShowDropdownInEmbedded()) {
-        chevron.style.display = 'none';
-    }
+    if (!getShowDropdownInEmbedded()) chevron.style.display = 'none';
     drawerIcon.appendChild(chevron);
 
     // ---- State ----
@@ -561,12 +601,10 @@ function setupLauncherDropdown() {
             return;                                          // Let through to ST
         }
 
-        // Embedded mode without dropdown: toggle CL directly
-        if (getDisplayMode() === 'embedded' && !getShowDropdownInEmbedded()) {
-            e.stopPropagation();
-            e.preventDefault();
+        // Dropdown disabled: don't intercept. ST's native Characters button works as normal,
+        // and a separate CL button (see ensureStandaloneGalleryButton) handles library access.
+        if (!getShowDropdownInEmbedded()) {
             if (isOpen) hide();
-            toggleEmbedded();
             return;
         }
 
@@ -623,12 +661,26 @@ function setupLauncherDropdown() {
 }
 
 /**
- * Fallback: create a standalone gallery button in the top bar
+ * Create/remove a standalone Character Library button in the top bar.
+ * Used when the launcher dropdown is disabled, and as a fallback if the Characters
+ * button can't be found for hijacking.
  */
-function createStandaloneGalleryButton() {
+function ensureStandaloneGalleryButton(shouldExist) {
+    const existing = document.getElementById('st-gallery-btn');
+    if (!shouldExist) {
+        if (existing) existing.remove();
+        return;
+    }
+    if (existing) return;
+
+    // Mirror ST's native top-bar drawer structure so the icon inherits --topBarIconSize,
+    // fa-fw width normalization, and theme hover/opacity. Using a plain .menu_button looks
+    // visibly different (wrong size, no dim-when-closed behavior).
     const galleryBtn = $(`
-    <div id="st-gallery-btn" class="interactable" title="Open Character Library" style="cursor: pointer; display: flex; align-items: center; justify-content: center; height: 100%; padding: 0 10px;">
-        <i class="fa-solid fa-photo-film" style="font-size: 1.2em;"></i>
+    <div id="st-gallery-btn" class="drawer">
+        <div class="drawer-toggle drawer-header">
+            <div class="drawer-icon fa-solid fa-layer-group fa-fw closedIcon" title="Open Character Library"></div>
+        </div>
     </div>
     `);
 
@@ -676,6 +728,8 @@ function createStandaloneGalleryButton() {
         });
         $('body').append(galleryBtn);
     }
+
+    if (isEmbeddedActive()) setActivePaneHighlight(true);
 }
 
 // ==============================================
@@ -711,6 +765,10 @@ function injectExtensionSettings() {
                             <option value="embedded"${currentMode === 'embedded' ? ' selected' : ''}>Embedded Panel</option>
                         </select>
                     </div>
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="When on, clicking SillyTavern's Characters icon opens a dropdown to pick between Character Management and Character Library. When off, the Characters icon behaves normally and a separate Character Library button is added to the top bar.">
+                        <input type="checkbox" id="charlib-show-dropdown"${getShowDropdownInEmbedded() ? ' checked' : ''} />
+                        <span>Show launcher dropdown on Characters button</span>
+                    </label>
                     <div id="charlib-embedded-options" style="${currentMode === 'embedded' ? '' : 'display: none;'}">
                     <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Automatically open the embedded panel when SillyTavern loads">
                         <input type="checkbox" id="charlib-launch-on-boot"${getLaunchOnBoot() ? ' checked' : ''} />
@@ -719,10 +777,6 @@ function injectExtensionSettings() {
                     <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height and a Back button inside the panel returns you to your chat.">
                         <input type="checkbox" id="charlib-show-topbar"${getShowTopBar() ? ' checked' : ''} />
                         <span>Show SillyTavern top bar</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Show the choice dropdown (Character Management vs. Character Library) instead of toggling the panel directly. Useful if you frequently switch between both.">
-                        <input type="checkbox" id="charlib-show-dropdown"${getShowDropdownInEmbedded() ? ' checked' : ''} />
-                        <span>Show launcher dropdown</span>
                     </label>
                     <label style="display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;" title="Opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping.">
                         <input type="checkbox" id="charlib-exclusive-panes"${getExclusivePanes() ? ' checked' : ''} />
@@ -769,9 +823,8 @@ function injectExtensionSettings() {
         document.getElementById('charlib-show-dropdown').addEventListener('change', (e) => {
             setShowDropdownInEmbedded(e.target.checked);
             const chev = document.querySelector('.charlib-chevron-badge');
-            if (chev) {
-                chev.style.display = (getDisplayMode() === 'embedded' && !e.target.checked) ? 'none' : '';
-            }
+            if (chev) chev.style.display = e.target.checked ? '' : 'none';
+            ensureStandaloneGalleryButton(!e.target.checked);
         });
 
         document.getElementById('charlib-exclusive-panes').addEventListener('change', (e) => {
@@ -785,12 +838,6 @@ function injectExtensionSettings() {
             // Show/hide embedded-specific options
             const embeddedOpts = document.getElementById('charlib-embedded-options');
             if (embeddedOpts) embeddedOpts.style.display = mode === 'embedded' ? '' : 'none';
-
-            // Update chevron visibility
-            const chev = document.querySelector('.charlib-chevron-badge');
-            if (chev) {
-                chev.style.display = (mode === 'embedded' && !getShowDropdownInEmbedded()) ? 'none' : '';
-            }
 
             if (mode !== 'embedded' && isEmbeddedActive()) {
                 hideEmbedded();
@@ -839,10 +886,11 @@ jQuery(async () => {
 
     // Try to hijack ST's Characters button with a launcher dropdown
     const hijacked = setupLauncherDropdown();
-    
-    if (!hijacked) {
-        // Fallback: standalone button in the top bar
-        createStandaloneGalleryButton();
+
+    // When the dropdown is disabled (or the hijack failed), add a separate CL button
+    // to the top bar so users still have a way to reach the library.
+    if (!hijacked || !getShowDropdownInEmbedded()) {
+        ensureStandaloneGalleryButton(true);
     }
     
     // Slash command fallback
@@ -1103,7 +1151,7 @@ function lookupLocalizedMediaForChat(urlMap, remoteUrl) {
     const localPath = urlMap[`__sanitized__${sanitizedName}`];
     if (localPath) return localPath;
 
-    // CDN-aware fallback — files saved with parent+variant naming
+    // CDN-aware fallback: files saved with parent+variant naming
     const cdnAwareName = extractSanitizedUrlNameForChat(remoteUrl);
     if (cdnAwareName && cdnAwareName !== sanitizedName) {
         return urlMap[`__sanitized__${cdnAwareName}`] || null;
@@ -1474,6 +1522,8 @@ async function localizeCharacterInfoPanels() {
 // ==============================================
 
 const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat'];
+let _displayNameUiObserver = null;
+let _displayNameUiRaf = 0;
 
 function getListingName(character) {
     const ext = character?.data?.extensions;
@@ -1505,6 +1555,91 @@ function applyNameToMessage(messageElement, displayName) {
         || messageElement.querySelector('.name_text');
     if (nameEl && nameEl.textContent !== displayName) {
         nameEl.textContent = displayName;
+    }
+}
+
+function applyNameText(nameEl, displayName) {
+    if (!nameEl) return;
+
+    if (displayName) {
+        if (!nameEl.dataset.clOriginalName) {
+            nameEl.dataset.clOriginalName = nameEl.textContent || '';
+        }
+        if (nameEl.textContent !== displayName) {
+            nameEl.textContent = displayName;
+        }
+        return;
+    }
+
+    const originalName = nameEl.dataset.clOriginalName;
+    if (originalName !== undefined && nameEl.textContent !== originalName) {
+        nameEl.textContent = originalName;
+    }
+}
+
+function extractAvatarFromImageSrc(src) {
+    if (!src) return null;
+
+    try {
+        const parsed = new URL(src, window.location.origin);
+        const qpAvatar = parsed.searchParams.get('avatar') || parsed.searchParams.get('avatar_url');
+        if (qpAvatar) {
+            return decodeURIComponent(qpAvatar.split('/').pop() || qpAvatar);
+        }
+        const match = parsed.pathname.match(/\/characters\/([^/?#]+)/i);
+        if (match?.[1]) {
+            return decodeURIComponent(match[1]);
+        }
+    } catch {
+        const match = src.match(/\/characters\/([^/?#]+)/i);
+        if (match?.[1]) {
+            try { return decodeURIComponent(match[1]); } catch { return match[1]; }
+        }
+    }
+
+    return null;
+}
+
+function findCharacterForSidepaneItem(item, characters) {
+    if (!item || !Array.isArray(characters) || characters.length === 0) return null;
+
+    const rawId = item.dataset.id ?? item.dataset.chid ?? item.getAttribute('chid');
+    const numericId = Number(rawId);
+    if (Number.isInteger(numericId) && numericId >= 0 && numericId < characters.length) {
+        return characters[numericId] || null;
+    }
+
+    const imgEl = item.querySelector('img[src]');
+    const avatar = extractAvatarFromImageSrc(imgEl?.getAttribute('src') || '');
+    if (avatar) {
+        const byAvatar = characters.find(c => c?.avatar === avatar);
+        if (byAvatar) return byAvatar;
+    }
+
+    const nameEl = item.querySelector('.ch_name .name_text')
+        || item.querySelector('.ch_name')
+        || item.querySelector('.name_text');
+    const visibleName = (nameEl?.dataset.clOriginalName || nameEl?.textContent || '').trim();
+    if (!visibleName) return null;
+
+    const exactMatches = characters.filter(c => (c?.name || '').trim() === visibleName);
+    if (exactMatches.length === 1) return exactMatches[0];
+
+    return null;
+}
+
+function applyDisplayNameToCharacterSidepane(characters) {
+    if (!Array.isArray(characters) || characters.length === 0) return;
+
+    const items = document.querySelectorAll('#rm_print_characters_block .character_select, #rm_characters_block .character_select, .character_select');
+    for (const item of items) {
+        const character = findCharacterForSidepaneItem(item, characters);
+        if (!character?.avatar) continue;
+        const displayName = getDisplayNameForCharacter(character);
+        const nameEl = item.querySelector('.ch_name .name_text')
+            || item.querySelector('.ch_name')
+            || item.querySelector('.name_text');
+        applyNameText(nameEl, displayName);
     }
 }
 
@@ -1541,32 +1676,61 @@ function initDisplayNameOverride() {
         const applyDisplayNameToUI = () => {
             try {
                 const ctx = SillyTavern.getContext();
+                const allCharacters = Array.isArray(ctx?.characters) ? ctx.characters : [];
                 const charId = ctx?.characterId;
-                if (charId === undefined || charId === null) return;
-                const character = ctx.characters[charId];
+                const character = (charId === undefined || charId === null) ? null : allCharacters[charId];
                 const displayName = getDisplayNameForCharacter(character);
-                if (!displayName) return;
-                document.querySelectorAll('#chat .mes:not([is_user])').forEach(el => {
-                    applyNameToMessage(el, displayName);
-                });
-                const headerEl = document.querySelector('#rm_button_selected_ch h2');
-                if (headerEl && headerEl.textContent !== displayName) {
-                    headerEl.textContent = displayName;
+
+                if (displayName) {
+                    document.querySelectorAll('#chat .mes:not([is_user])').forEach(el => {
+                        applyNameToMessage(el, displayName);
+                    });
                 }
+
+                const headerEl = document.querySelector('#rm_button_selected_ch h2');
+                applyNameText(headerEl, displayName);
+
+                applyDisplayNameToCharacterSidepane(allCharacters);
             } catch (e) {
                 console.error('[CharLib] Display name override error:', e);
             }
         };
 
+        const scheduleApplyDisplayNameToUI = () => {
+            if (_displayNameUiRaf) return;
+            _displayNameUiRaf = requestAnimationFrame(() => {
+                _displayNameUiRaf = 0;
+                applyDisplayNameToUI();
+            });
+        };
+
         eventSource.on(event_types.CHAT_CHANGED, () => {
-            setTimeout(applyDisplayNameToUI, 300);
+            setTimeout(scheduleApplyDisplayNameToUI, 300);
         });
 
         if (event_types.CHARACTER_EDITOR_OPENED) {
             eventSource.on(event_types.CHARACTER_EDITOR_OPENED, () => {
-                setTimeout(applyDisplayNameToUI, 100);
+                setTimeout(scheduleApplyDisplayNameToUI, 100);
             });
         }
+
+        if (!_displayNameUiObserver) {
+            _displayNameUiObserver = new MutationObserver((mutations) => {
+                for (const m of mutations) {
+                    if (m.type === 'childList' && (m.addedNodes.length > 0 || m.removedNodes.length > 0)) {
+                        scheduleApplyDisplayNameToUI();
+                        return;
+                    }
+                }
+            });
+
+            _displayNameUiObserver.observe(document.body, {
+                subtree: true,
+                childList: true,
+            });
+        }
+
+        scheduleApplyDisplayNameToUI();
 
         console.log('[CharLib] Display name override initialized');
     } catch (e) {

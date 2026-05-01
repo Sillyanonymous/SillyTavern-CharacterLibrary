@@ -1146,17 +1146,22 @@ https://jannyai.com/characters/uuid_slug
                             <h4><i class="fa-solid fa-window-maximize"></i> Display Modes</h4>
                             <p>Character Library can run in two modes, configurable in SillyTavern's <strong>Extensions</strong> panel under <strong>Character Library</strong>:</p>
                             <ul>
-                                <li><strong>New Tab</strong> (default): Opens in a separate browser tab. The Characters button shows a dropdown to choose between SillyTavern's native character manager and Character Library.</li>
-                                <li><strong>Embedded Panel</strong>: Runs inside SillyTavern as an overlay panel. The Characters button toggles the panel directly without opening a new tab.</li>
+                                <li><strong>New Tab</strong> (default): Opens in a separate browser tab.</li>
+                                <li><strong>Embedded Panel</strong>: Runs inside SillyTavern as an overlay panel.</li>
+                            </ul>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-layer-group"></i> Launcher</h4>
+                            <ul>
+                                <li><strong>Show launcher dropdown on Characters button</strong> (default off): When off, a separate Character Library icon appears in SillyTavern's top bar and the Characters button behaves normally. When on, clicking the Characters button opens a dropdown to choose between SillyTavern's native character manager and Character Library.</li>
                             </ul>
                         </div>
                         <div class="info-section">
                             <h4><i class="fa-solid fa-sliders"></i> Embedded Panel Settings</h4>
-                            <p>These options appear when Embedded Panel mode is selected:</p>
+                            <p>These options apply when Embedded Panel mode is selected:</p>
                             <ul>
                                 <li><strong>Launch on startup</strong>: Automatically open the embedded panel when SillyTavern loads.</li>
                                 <li><strong>Show SillyTavern top bar</strong>: Keep SillyTavern's top navigation bar visible above the panel. When off, the panel takes the full viewport height and a "Back" button inside the panel returns you to your chat.</li>
-                                <li><strong>Show launcher dropdown</strong>: Show the choice dropdown (native character manager vs. Character Library) instead of toggling the panel directly. Useful if you frequently switch between both.</li>
                                 <li><strong>Exclusive panels</strong>: Opening the embedded panel closes any open SillyTavern drawers, and opening an ST drawer closes the panel. Prevents panels from overlapping.</li>
                             </ul>
                         </div>
@@ -1277,9 +1282,19 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Type new tags to add, or click existing tags to remove them</li>
                             </ul>
                         </div>
+                        <div class="info-section">
+                            <h4><i class="fa-regular fa-bookmark"></i> Filter Presets</h4>
+                            <p>Save your current filter configuration and reload it later with one click:</p>
+                            <ul>
+                                <li>Click <strong>Presets</strong> in the Advanced Filters panel to open the dropdown</li>
+                                <li>Type a name in the input and click <strong>Save</strong> to capture the current filter state (tags, sort, search, advanced filters, NSFW toggle, etc.)</li>
+                                <li>Click any saved preset to load it. Use the input as a search box to filter the preset list when you have many</li>
+                                <li>Hover a preset to rename or delete it</li>
+                                <li>Presets are also available in the <strong>Chats</strong> tab for filtering chat history with the same UI</li>
+                            </ul>
+                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Useful for switching between focused workflows: a "sfw fantasy" preset, a "my tagged characters" preset, a "recently created" preset, etc.</p>
+                        </div>
                     </div>
-
-                    <!-- Providers -->
                     <div class="help-panel" data-section="providers">
                         <div class="info-section">
                             <h4><i class="fa-solid fa-link"></i> Provider Linking</h4>
@@ -1360,6 +1375,7 @@ https://jannyai.com/characters/uuid_slug
                             <p><strong>Across all modes:</strong> Pasting a <strong>JanitorAI character URL</strong> into the search bar will look up the character on DataCat. If it's found, the preview opens directly. If not, an extraction panel appears letting you request the character from DataCat's cloud service.</p>
                             <p><strong>Extraction:</strong> When a character only exists on JanitorAI and hasn't been indexed by DataCat yet, the Import button changes to <strong>Extract</strong>. This sends a request to DataCat's cloud service, which visits the JanitorAI page and retrieves the full character definition. You can also paste a JanitorAI URL directly into the search bar to look up and extract specific characters.</p>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
+                            <p class="info-tip"><i class="fa-solid fa-arrows-rotate"></i> <strong>Re-extract on update checks:</strong> Toggle in Settings → Online → DataCat to force DataCat to pull fresh data from JanitorAI before each update check. Slower, but avoids comparisons against stale cached data on DataCat's side.</p>
                         </div>
                     </div>
 
@@ -1420,6 +1436,17 @@ https://jannyai.com/characters/uuid_slug
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> <strong>TL;DR:</strong> Updates only change the card's embedded data. Your World Info file (the copy that matters for chats) is never modified.</p>
                         </div>
                         <div class="info-section">
+                            <h4><i class="fa-solid fa-tag"></i> Display Name Override</h4>
+                            <p>For characters linked to a provider, you can choose whether the library shows the <strong>card's own name</strong> or the <strong>provider listing name</strong> (the title used on the provider's page). The card data is never modified; this is purely a display preference.</p>
+                            <ul>
+                                <li>Open a character &rarr; click the <strong>name type toggle</strong> in the details header to switch between card name and listing name for that character</li>
+                                <li>Set the global default in <strong>Settings &rarr; General &rarr; Display name source</strong> (Card name or Listing name)</li>
+                                <li>Find characters with a listing name available using the Advanced Filters panel</li>
+                                <li><strong>SillyTavern integration:</strong> When enabled in Settings, the resolved display name (whichever you've chosen) is also pushed into ST's chat header, character panel, and Character Management sidepane</li>
+                            </ul>
+                            <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Useful when a creator's listing title differs from the card's internal <code>name</code> field, e.g. <em>"Ada (Cyberpunk Bartender)"</em> on the listing vs. just <em>"Ada"</em> on the card.</p>
+                        </div>
+                        <div class="info-section">
                             <h4><i class="fa-solid fa-clone"></i> Duplicate Detection</h4>
                             <p>Find potential duplicates in your library:</p>
                             <ul>
@@ -1465,6 +1492,21 @@ https://jannyai.com/characters/uuid_slug
                                 <li>View the audit status from <strong>More Options (⋮) → Gallery Sync Status</strong></li>
                                 <li>Can auto-repair missing IDs and mappings</li>
                             </ul>
+                        </div>
+                        <div class="info-section">
+                            <h4><i class="fa-solid fa-link"></i> External Gallery Extractors</h4>
+                            <p>Some character cards can link to galleries on external image hosts instead of embedding direct image URLs. Character Library walks these links, resolves the underlying images, and downloads them into the character's gallery folder.</p>
+                            <p><strong>Supported hosts:</strong></p>
+                            <ul>
+                                <li><strong>Civitai</strong>: posts and image collections (public out-of-the-box; private/hidden posts require an API key)</li>
+                                <li><strong>Imgchest</strong>: public and password-protected posts (passwords are auto-detected from the card's creator notes / description via regex; password-protected posts require cl-helper)</li>
+                                <li><strong>Mega.nz</strong>: public folder shares with multi-pass folder traversal</li>
+                                <li><strong>Imgur, PostImg, ImgBB</strong>: albums and individual images</li>
+                                <li><strong>Catbox</strong>: direct file URLs</li>
+                                <li><strong>Google Drive</strong>: shared folders and individual files</li>
+                            </ul>
+                            <p>Extractors run automatically when you trigger <strong>Download Embedded Media</strong> from the Gallery tab or use Bulk Localization. No configuration is required for public content.</p>
+                            <p class="info-tip"><i class="fa-solid fa-key"></i> <strong>Civitai API key:</strong> Required only for private or hidden Civitai posts. Configure in Settings → Online → Civitai. Generate at <code>civitai.com/user/account</code>. The key is stored persistently and pushed to the cl-helper plugin at startup, so it stays server-side at request time.</p>
                         </div>
                     </div>
 
@@ -2396,6 +2438,35 @@ https://jannyai.com/characters/uuid_slug
                                 <span class="settings-hint">Generate thumbnails immediately after downloading media, so galleries open instantly.</span>
                             </div>
                         </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-key"></i> Civitai API Key</div>
+                            <div class="settings-row">
+                                <label>Key:</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="settingsCivitaiApiKey" placeholder="Paste Civitai API key" autocomplete="off" spellcheck="false" data-sensitive="true">
+                                    <button id="toggleCivitaiKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                    <button id="validateCivitaiKeyBtn" class="settings-verify-btn" title="Test Connection">
+                                        <i class="fa-solid fa-check"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <span class="settings-hint">
+                                    Required to extract images from private or hidden Civitai posts. Public content works without a key. Stored persistently in extension settings and pushed to the cl-helper plugin at startup. Generate one at <a href="https://civitai.com/user/account" target="_blank" rel="noopener">civitai.com/user/account</a>.
+                                </span>
+                            </div>
+                            <div class="settings-row" style="gap: 8px;">
+                                <button id="saveCivitaiKeyBtn" class="settings-action-btn primary">
+                                    <i class="fa-solid fa-floppy-disk"></i> Save Key
+                                </button>
+                                <button id="clearCivitaiKeyBtn" class="settings-action-btn danger">
+                                    <i class="fa-solid fa-trash-can"></i> Clear Key
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     
                     <!-- Gallery Folders Section -->
@@ -2563,7 +2634,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.1.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.1.1</span>
                             </div>
                         </div>
                     </div>

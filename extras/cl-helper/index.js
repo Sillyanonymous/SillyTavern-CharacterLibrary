@@ -1,4 +1,4 @@
-// cl-helper — SillyTavern server plugin for Character Library
+// cl-helper: SillyTavern server plugin for Character Library
 //
 // Provides server-side request proxying for providers that require
 // custom headers (like Origin) that browsers forbid setting.
@@ -110,7 +110,7 @@ export async function init(router) {
     // ---- All routes registered synchronously (before any awaits) ----
 
     router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.1.0', thumbnails: _thumbsReady });
+        res.json({ ok: true, version: '1.2.0', thumbnails: _thumbsReady });
     });
 
     // =================================================================
@@ -251,18 +251,18 @@ export async function init(router) {
     });
 
     // =================================================================
-    // CharacterTavern — cookie-based session auth
+    // CharacterTavern: cookie-based session auth
     // =================================================================
 
     // In-memory session store (cookies persist until logout or server restart)
-    let ctSessionCookies = null; // string — raw cookie header value
+    let ctSessionCookies = null; // string: raw cookie header value
 
     /**
      * POST /ct-set-cookie
      * Body: { cookie: "session=VALUE" } or { cookie: "VALUE" }
      *
      * Stores the provided session cookie for use in proxied requests.
-     * Only the `session` cookie is accepted — rejects input containing
+     * Only the `session` cookie is accepted; rejects input containing
      * multiple cookies or unexpected keys to limit stored scope.
      */
     router.post('/ct-set-cookie', async (req, res) => {
@@ -377,7 +377,7 @@ export async function init(router) {
     router.get('/ct-proxy/*', async (req, res) => {
         const targetPath = '/' + req.params[0]; // everything after /ct-proxy/
 
-        // Normalize and allowlist check — only known read-only API paths
+        // Normalize and allowlist check: only known read-only API paths
         const normalizedPath = new URL(targetPath, 'https://character-tavern.com/').pathname;
         if (!CT_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
             console.warn(`[cl-helper] CT proxy blocked: ${normalizedPath}`);
@@ -426,7 +426,7 @@ export async function init(router) {
     });
 
     // =================================================================
-    // DataCat — token-based session + read-only API proxy
+    // DataCat: token-based session + read-only API proxy
     // =================================================================
 
     const DATACAT_BASE = 'https://datacat.run';
@@ -688,7 +688,7 @@ export async function init(router) {
     });
 
     // =================================================================
-    // Imgchest — password-protected gallery unlock
+    // Imgchest: password-protected gallery unlock
     // =================================================================
 
     const IMGCHEST_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
@@ -734,9 +734,9 @@ export async function init(router) {
      * Returns: { images: [{url, filename}] } or { error: "..." }
      *
      * Three-step flow:
-     * 1. GET /p/{id}/validate — obtain XSRF + session cookies
-     * 2. POST /p/{id}/validate — submit password, receive authenticated cookies
-     * 3. GET /p/{id} — fetch unlocked page, extract images from data-page JSON
+     * 1. GET /p/{id}/validate: obtain XSRF + session cookies
+     * 2. POST /p/{id}/validate: submit password, receive authenticated cookies
+     * 3. GET /p/{id}: fetch unlocked page, extract images from data-page JSON
      */
     router.post('/imgchest-unlock', async (req, res) => {
         const { url, password } = req.body ?? {};
@@ -763,7 +763,6 @@ export async function init(router) {
         const postUrl = `https://imgchest.com/p/${postId}`;
 
         try {
-            // Step 1: GET validate page for cookies + XSRF token
             const step1 = await fetch(validateUrl, {
                 headers: { 'User-Agent': IMGCHEST_UA, 'Accept': 'text/html' },
             });
@@ -785,7 +784,7 @@ export async function init(router) {
                 if (vm) inertiaVersion = vm[1];
             }
 
-            // Step 2: POST password
+            // POST the password, expecting a 302 redirect on success.
             const step2 = await fetch(validateUrl, {
                 method: 'POST',
                 headers: {
@@ -816,7 +815,7 @@ export async function init(router) {
             const finalXsrf = cookies2.xsrfToken || cookies1.xsrfToken;
             const finalSession = cookies2.session || cookies1.session;
 
-            // Step 3: GET the unlocked post page
+            // Re-fetch the post page now that we hold authenticated cookies.
             const step3 = await fetch(postUrl, {
                 headers: {
                     'User-Agent': IMGCHEST_UA,
@@ -839,6 +838,107 @@ export async function init(router) {
         } catch (err) {
             console.error('[cl-helper] Imgchest unlock error:', err.message);
             res.status(502).json({ error: 'Failed to reach imgchest' });
+        }
+    });
+
+    // =================================================================
+    // Civitai: gallery extractor auth proxy
+    // =================================================================
+
+    const CIVITAI_HOSTS = new Set(['civitai.com', 'civitai.red']);
+    const CIVITAI_ALLOWED_PATHS = [
+        /^\/api\/v1\/images\/?$/,
+        /^\/api\/v1\/images\/[a-zA-Z0-9_-]+\/?$/,
+        /^\/posts\/[0-9]+\/?$/,
+        /^\/images\/[0-9]+\/?$/,
+    ];
+    const CIVITAI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+    let civitaiApiKey = null;
+
+    router.post('/civitai-set-key', (req, res) => {
+        const { key } = req.body ?? {};
+        if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key is required' });
+        if (key.length > 256) return res.status(400).json({ error: 'key too long' });
+        civitaiApiKey = key.trim();
+        console.log('[cl-helper] Civitai API key stored');
+        res.json({ ok: true });
+    });
+
+    router.post('/civitai-clear-key', (_req, res) => {
+        civitaiApiKey = null;
+        res.json({ ok: true });
+    });
+
+    router.get('/civitai-session', (_req, res) => {
+        res.json({ active: !!civitaiApiKey });
+    });
+
+    router.get('/civitai-validate', async (_req, res) => {
+        if (!civitaiApiKey) return res.json({ valid: false, error: 'No API key configured' });
+        try {
+            const response = await fetch('https://civitai.com/api/v1/models?limit=1', {
+                headers: {
+                    'Authorization': `Bearer ${civitaiApiKey}`,
+                    'User-Agent': CIVITAI_UA,
+                    'Accept': 'application/json',
+                },
+            });
+            res.json({ valid: response.ok, status: response.status });
+        } catch (err) {
+            console.error('[cl-helper] Civitai validate error:', err.message);
+            res.status(502).json({ valid: false, error: 'Failed to reach Civitai' });
+        }
+    });
+
+    router.get('/civitai-proxy/:host/*', async (req, res) => {
+        const host = req.params.host;
+        if (!CIVITAI_HOSTS.has(host)) {
+            return res.status(400).json({ error: 'host must be civitai.com or civitai.red' });
+        }
+
+        const targetPath = '/' + req.params[0];
+        const base = `https://${host}`;
+        const normalizedPath = new URL(targetPath, base).pathname;
+        if (!CIVITAI_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            console.warn(`[cl-helper] Civitai proxy blocked: ${normalizedPath}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, base);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+
+        if (!CIVITAI_HOSTS.has(targetUrl.hostname)) {
+            return res.status(403).json({ error: 'Proxy target must be civitai.com or civitai.red' });
+        }
+
+        const headers = {
+            'User-Agent': CIVITAI_UA,
+            'Accept': targetPath.startsWith('/api/') ? 'application/json' : 'text/html',
+        };
+        if (civitaiApiKey) headers['Authorization'] = `Bearer ${civitaiApiKey}`;
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers,
+                redirect: 'follow',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            res.status(response.status);
+            res.set('Content-Type', contentType);
+
+            if (contentType.includes('application/json')) {
+                res.send(await response.text());
+            } else if (contentType.includes('text/')) {
+                res.send(await response.text());
+            } else {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                res.send(buffer);
+            }
+        } catch (err) {
+            console.error('[cl-helper] Civitai proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach Civitai' });
         }
     });
 
