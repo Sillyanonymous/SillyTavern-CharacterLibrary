@@ -45,7 +45,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 2. Refresh SillyTavern's page
 3. Click SillyTavern's native "Character Management" button. A dropdown appears where you can select Character Library
 4. *(Optional)* Switch to **Embedded Panel** mode in the extension settings for an integrated experience (see [Display Modes](#-display-modes))
-5. *(Optional)* For Pygmalion login, CharacterTavern NSFW access, and DataCat browsing, install the [cl-helper plugin](#cl-helper-plugin-not-detected)
+5. *(Optional)* For Pygmalion login, CharacterTavern NSFW access, DataCat browsing, and BotBooru public proxying, install the [cl-helper plugin](#cl-helper-plugin-not-detected)
 
 
 
@@ -422,16 +422,16 @@ Providers with Following support include a **Followed Creators Manager** panel f
 
 ### Provider Feature Matrix
 
-| Feature | ChubAI | JanitorAI | CharacterTavern | Pygmalion | Wyvern | DataCat |
-|---------|--------|-----------|-----------------|-----------|--------|----------|
-| Browse & Search | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Card Updates | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Character Linking | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Gallery Downloads | ✅ | -- | -- | ✅ | ✅ | -- |
-| Remote Version History | ✅ | -- | -- | -- | -- | -- |
-| Following / Timeline | ✅ | -- | -- | ✅ | ✅ | ✅ |
-| Favorites | ✅ | -- | -- | -- | -- | -- |
-| Auth Required | Optional | None | Optional | Optional | Optional | None |
+| Feature | ChubAI | JanitorAI | CharacterTavern | Pygmalion | Wyvern | DataCat | BotBooru |
+|---------|--------|-----------|-----------------|-----------|--------|---------|----------|
+| Browse & Search | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Card Updates | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Character Linking | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Gallery Downloads | ✅ | -- | -- | ✅ | ✅ | -- | -- |
+| Remote Version History | ✅ | -- | -- | -- | -- | -- | -- |
+| Following / Timeline | ✅ | -- | -- | ✅ | ✅ | ✅ | -- |
+| Favorites | ✅ | -- | -- | -- | -- | -- | ✅ |
+| Auth Required | Optional | None | Optional | Optional | Optional | None | Optional |
 
 <details>
 <summary><h3>ChubAI</h3></summary>
@@ -589,6 +589,32 @@ Extraction is handled entirely by DataCat's servers. The `appearOnPublicFeed` op
 
 </details>
 
+<details>
+<summary><h3>BotBooru</h3></summary>
+
+**Auth:** Optional bearer token for favorites. Requires the [cl-helper plugin](#cl-helper-plugin-not-detected) for public proxying.
+
+BotBooru is available in the Online tab as a public-first provider. Browsing, previewing, importing, URL import, and update checks work without a BotBooru token. The `cl-helper` server plugin is still required because BotBooru does not expose browser CORS headers for its public JSON and PNG endpoints.
+
+- Browse public BotBooru posts with search, sort, and NSFW controls
+- Preview cards with stats, tags, favorite count, description, and first-message snippets
+- Import public character cards without a token
+- Link local cards to BotBooru for update checks
+- Use My Favorites and favorite/unfavorite actions when a bearer token is configured
+
+#### Optional Account Features
+
+- Paste a BotBooru bearer token in Settings > Online Providers > BotBooru to enable My Favorites.
+- Favorite and unfavorite actions require the token.
+- Normal browsing remains available after clearing the token.
+
+#### Supported URLs
+
+- `https://botbooru.com/character/1234`
+- `https://botbooru.com/post/1234`
+
+</details>
+
 ### Character Linking
 
 Link your local characters to their online source for updates, gallery downloads, and version history:
@@ -623,6 +649,7 @@ Type these prefixes in the search bar for targeted filtering:
 | `pygmalion:` | `pygmalion:yes` or `pygmalion:no` | Pygmalion link specifically |
 | `wyvern:` | `wyvern:yes` or `wyvern:no` | Wyvern link specifically |
 | `datacat:` | `datacat:yes` or `datacat:no` | DataCat link specifically (also `dc:`) |
+| `botbooru:` | `botbooru:yes` or `bb:no` | BotBooru link specifically |
 | `version:` | `version:1.0` | Match character version string |
 | `gallery:` | `gallery:aB3x` or `gallery:none` | Match gallery ID (or `none` for unassigned) |
 | `uid:` | `uid:abc123` or `uid:none` | Match version UID (or `none` for unassigned) |
@@ -669,7 +696,7 @@ The full app is optimized for mobile with:
 
 ### cl-helper plugin not detected
 
-The **cl-helper** plugin is required for Pygmalion login, CharacterTavern NSFW access, and DataCat session proxying. It ships with Character Library in the `extras/cl-helper/` folder but needs to be placed in SillyTavern's plugins directory:
+The **cl-helper** plugin is required for Pygmalion login, CharacterTavern NSFW access, DataCat session proxying, and BotBooru public proxying. It ships with Character Library in the `extras/cl-helper/` folder but needs to be placed in SillyTavern's plugins directory:
 
 1. Copy (or symlink) the `extras/cl-helper` folder into your SillyTavern **plugins** directory:
    ```
@@ -682,7 +709,7 @@ The **cl-helper** plugin is required for Pygmalion login, CharacterTavern NSFW a
 3. **Restart SillyTavern** (plugins only load at startup)
 4. Verify in the login/auth modal (appears when enabling NSFW). You should see "cl-helper plugin detected"
 
-> The plugin runs server-side to handle auth flows that browsers can't do directly (e.g. Origin headers for Pygmalion, cookie proxying for CharacterTavern, session token management for DataCat). It only communicates with the specific provider APIs and only forwards GET requests through its read-only proxies. See the [plugin source](extras/cl-helper/index.js) for details.
+> The plugin runs server-side to handle auth and proxy flows that browsers can't do directly (e.g. Origin headers for Pygmalion, cookie proxying for CharacterTavern, session token management for DataCat, and CORS-safe BotBooru public requests). It only communicates with the specific provider APIs and only forwards GET requests through its read-only proxies. See the [plugin source](extras/cl-helper/index.js) for details.
 
 ### Media downloads fail with CORS errors
 
