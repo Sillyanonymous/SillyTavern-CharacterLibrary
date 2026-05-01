@@ -856,9 +856,22 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            const path = `/api/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
-            const { response, data, text } = await bbFetchJson(path, { auth: true });
-            res.status(response.status).json(data ?? { error: text });
+            const qs = `limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const candidates = [
+                `/users/${userId}/favorites?${qs}`,
+                `/api/users/${userId}/favorites?${qs}`,
+                `/posts?favorited_by=${userId}&${qs}`,
+            ];
+
+            for (const path of candidates) {
+                const { response, data } = await bbFetchJson(path, { auth: true });
+                console.log(`[cl-helper] BotBooru favorites probe ${path} → ${response.status}`);
+                if (response.ok && data && !data?.error) {
+                    return res.json(data);
+                }
+            }
+
+            res.status(404).json({ error: 'Could not resolve BotBooru favorites endpoint' });
         } catch (err) {
             console.error('[cl-helper] BotBooru favorites error:', err.message);
             res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
