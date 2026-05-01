@@ -856,7 +856,7 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            const path = `/api/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const path = `/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
             const { response, data, text } = await bbFetchJson(path, { auth: true });
             res.status(response.status).json(data ?? { error: text });
         } catch (err) {
