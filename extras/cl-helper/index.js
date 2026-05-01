@@ -858,6 +858,7 @@ export async function init(router) {
 
             const path = `/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
             const { response, data, text } = await bbFetchJson(path, { auth: true });
+            console.log(`[cl-helper] BotBooru favorites ${path} → ${response.status}, isArray=${Array.isArray(data)}, keys=${data && typeof data === 'object' ? Object.keys(data).slice(0, 10).join(',') : typeof data}, length=${Array.isArray(data) ? data.length : 'N/A'}, sample=${JSON.stringify(data?.[0] || data?.posts?.[0] || data?.favorites?.[0])?.slice(0, 300)}`);
             res.status(response.status).json(data ?? { error: text });
         } catch (err) {
             console.error('[cl-helper] BotBooru favorites error:', err.message);
