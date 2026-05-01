@@ -856,35 +856,39 @@ export async function init(router) {
                 return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
             }
 
-            const qs = `limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
-            const candidates = [
-                `/posts/?favorited_by=${userId}&${qs}`,
-                `/posts/?favorites=true&${qs}`,
-                `/posts/?favorite=1&user=${userId}&${qs}`,
-                `/favorites/?${qs}`,
-                `/api/posts/?favorited_by=${userId}&${qs}`,
-                `/api/v1/favorites?${qs}`,
-            ];
-
-            for (const path of candidates) {
-                const { response, data, text } = await bbFetchJson(path, { auth: true });
-                const ct = response.headers.get('content-type') || '';
-                const isJson = ct.includes('json');
-                const hasData = isJson && data && !data?.raw;
-                console.log(`[cl-helper] BB fav probe ${path} → ${response.status} ${ct.split(';')[0]} json=${isJson} hasData=${hasData} ${hasData ? `keys=${Object.keys(data).join(',')} sample=${JSON.stringify(Array.isArray(data) ? data[0] : data?.posts?.[0])?.slice(0, 200)}` : ''}`);
-                if (response.ok && hasData) {
-                    return res.json(data);
-                }
+            // Step 1: Fetch BotBooru's HTML to find JS bundle URLs
+            const { text: html } = await bbFetchJson('/', { auth: false });
+            const scriptUrls = [];
+            const scriptRe = /<script[^>]+src="([^"]+)"/g;
+            let m;
+            while ((m = scriptRe.exec(html)) !== null) {
+                scriptUrls.push(m[1]);
             }
+            console.log(`[cl-helper] BB scripts found: ${scriptUrls.join(', ')}`);
 
-            // Check if the user profile page embeds favorites as JSON data
-            const profilePath = `/users/${userId}/favorites`;
-            const { text: html } = await bbFetchJson(profilePath, { auth: true });
-            const dataPatterns = [/__NEXT_DATA__.*?<\/script>/s, /window\.__data__\s*=\s*(\{.+?\});/s, /window\.__INITIAL_STATE__\s*=\s*(\{.+?\});/s, /"favorites"\s*:\s*\[/];
-            for (const pat of dataPatterns) {
-                const match = html?.match(pat);
-                if (match) {
-                    console.log(`[cl-helper] BB fav HTML embed found: pattern=${pat.source.slice(0, 40)}, match(300)=${match[0]?.slice(0, 300)}`);
+            // Step 2: Fetch each JS bundle and search for favorites/API patterns
+            for (const scriptUrl of scriptUrls) {
+                try {
+                    const fullUrl = scriptUrl.startsWith('http')
+                        ? scriptUrl
+                        : new URL(scriptUrl, BOTBOORU_BASE).toString();
+                    const jsResp = await fetch(fullUrl, { headers: { 'User-Agent': bbHeaders()['User-Agent'] } });
+                    if (!jsResp.ok) continue;
+                    const js = await jsResp.text();
+                    // Search for favorites-related API patterns
+                    const patterns = [
+                        /["'`]\/[^"'`]*favorit[^"'`]*["'`]/gi,
+                        /["'`]\/api[^"'`]*["'`]/gi,
+                        /["'`]\/users\/[^"'`]*["'`]/gi,
+                    ];
+                    for (const pat of patterns) {
+                        const matches = js.match(pat);
+                        if (matches?.length) {
+                            console.log(`[cl-helper] BB JS ${scriptUrl.split('/').pop()}: ${pat.source} → ${[...new Set(matches)].slice(0, 15).join(', ')}`);
+                        }
+                    }
+                } catch (e) {
+                    console.log(`[cl-helper] BB JS fetch failed ${scriptUrl}: ${e.message}`);
                 }
             }
 
