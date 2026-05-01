@@ -31,12 +31,12 @@ const {
 const PAGE_SIZE = 48;
 const DEFAULT_SORT = 'latest';
 const SORT_OPTIONS = [
-    { value: 'latest', label: 'Newest' },
-    { value: 'favorites', label: 'Most Favorited' },
-    { value: 'views', label: 'Most Viewed' },
-    { value: 'downloads', label: 'Most Downloaded' },
-    { value: 'curated', label: 'Curated' },
-    { value: 'random', label: 'Random' },
+    { value: 'latest', label: '🆕 Newest' },
+    { value: 'favorites', label: '❤️ Most Favorited' },
+    { value: 'views', label: '👁️ Most Viewed' },
+    { value: 'downloads', label: '📥 Most Downloaded' },
+    { value: 'curated', label: '⭐ Curated' },
+    { value: 'random', label: '🎲 Random' },
 ];
 
 let botbooruCharacters = [];
@@ -906,7 +906,10 @@ class BotbooruBrowseView extends BrowseView {
         const nsfwBtn = document.getElementById('botbooruNsfwToggle');
         nsfwBtn?.classList.toggle('active', botbooruNsfw);
         const sortEl = document.getElementById('botbooruSortSelect');
-        if (sortEl) sortEl.value = botbooruSort;
+        if (sortEl) {
+            sortEl.value = botbooruSort;
+            CoreAPI.initCustomSelect?.(sortEl);
+        }
         setModeButtonState();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
