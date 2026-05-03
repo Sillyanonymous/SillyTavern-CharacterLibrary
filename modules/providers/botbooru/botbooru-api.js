@@ -96,6 +96,48 @@ export function getRating(tags) {
     return 'unrated';
 }
 
+const TAG_CATEGORY_ALIASES = {
+    char: 'Characters',
+    character: 'Characters',
+    characters: 'Characters',
+    artist: 'Artist',
+    writer: 'Writer',
+    scen: 'Scenarios',
+    scens: 'Scenarios',
+    scenario: 'Scenarios',
+    scenarios: 'Scenarios',
+    copy: 'Copyright',
+    copyright: 'Copyright',
+    meta: 'Meta',
+    nsfl: 'NSFL',
+    language: 'Language',
+    lang: 'Language',
+    general: 'General',
+};
+
+export function parseBotbooruTagInput(input) {
+    const raw = String(input || '').trim();
+    if (!raw) return { error: 'Please enter a tag.' };
+
+    let category = 'General';
+    let tagPart = raw;
+    if (raw.includes(':')) {
+        const [prefix, ...rest] = raw.split(':');
+        const alias = prefix.trim().toLowerCase();
+        tagPart = rest.join(':');
+        category = TAG_CATEGORY_ALIASES[alias] || (alias ? alias.charAt(0).toUpperCase() + alias.slice(1) : 'General');
+    }
+
+    const tagName = tagPart.trim().toLowerCase().replace(/\s+/g, '_');
+    if (!tagName) return { error: 'Please enter a tag.' };
+
+    const maxLength = category === 'Copyright' || category === 'Writer' || category === 'Characters' ? 30 : 20;
+    if (tagName.length < 2) return { error: 'Tag must be at least 2 characters.' };
+    if (tagName.length > maxLength) return { error: 'Tag name is too long for this category.' };
+
+    return { tag_name: tagName, category };
+}
+
 function toInt(value, fallback = 0) {
     const n = Number.parseInt(value, 10);
     return Number.isFinite(n) ? n : fallback;
@@ -254,6 +296,62 @@ export async function fetchBotbooruFavorites({
         total: toInt(data?.total ?? data?.total_count, rawPosts.length),
         posts: rawPosts.map(item => normalizeBotbooruPost(item?.post || item)).filter(Boolean),
     };
+}
+
+function normalizeBotbooruFollowedTag(item) {
+    if (!item) return null;
+    const id = Number.parseInt(item.id, 10);
+    const tagName = String(item.tag_name || item.name || '').trim();
+    if (!Number.isFinite(id) || !tagName) return null;
+    return {
+        ...item,
+        id,
+        tag_name: tagName,
+        category: item.category || 'General',
+    };
+}
+
+export async function fetchBotbooruFollowedTags() {
+    const apiRequest = requireApiRequest();
+    const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-followed-tags`);
+    if (!resp.ok) {
+        const body = await readBodySnippet(resp);
+        throw new Error(`BotBooru followed tags failed (${resp.status})${body ? `: ${body}` : ''}`);
+    }
+    const data = await resp.json();
+    const rawTags = Array.isArray(data)
+        ? data
+        : data?.tags || data?.items || data?.followed_tags || [];
+    return rawTags.map(normalizeBotbooruFollowedTag).filter(Boolean);
+}
+
+export async function followBotbooruTag(input) {
+    const parsed = typeof input === 'string' ? parseBotbooruTagInput(input) : input;
+    if (!parsed || parsed.error) throw new Error(parsed?.error || 'Invalid BotBooru tag');
+
+    const apiRequest = requireApiRequest();
+    const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-followed-tags`, 'POST', {
+        tag_name: parsed.tag_name,
+        category: parsed.category || 'General',
+    });
+    if (!resp.ok) {
+        const body = await readBodySnippet(resp);
+        throw new Error(`BotBooru follow tag failed (${resp.status})${body ? `: ${body}` : ''}`);
+    }
+    return normalizeBotbooruFollowedTag(await resp.json());
+}
+
+export async function unfollowBotbooruTag(entryId) {
+    const id = Number.parseInt(entryId, 10);
+    if (!Number.isSafeInteger(id) || id <= 0) throw new Error('Invalid followed tag id');
+
+    const apiRequest = requireApiRequest();
+    const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-followed-tags/${id}`, 'DELETE');
+    if (!resp.ok && resp.status !== 404) {
+        const body = await readBodySnippet(resp);
+        throw new Error(`BotBooru unfollow tag failed (${resp.status})${body ? `: ${body}` : ''}`);
+    }
+    return true;
 }
 
 function toBooleanFlag(value) {

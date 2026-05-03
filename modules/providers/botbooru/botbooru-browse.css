@@ -50,6 +50,10 @@
     max-width: 520px;
 }
 
+.botbooru-tags-modal {
+    max-width: 560px;
+}
+
 .botbooru-token-body {
     display: flex;
     flex-direction: column;
@@ -67,4 +71,78 @@
 .botbooru-token-status {
     color: var(--text-secondary);
     margin: 0;
+}
+
+.botbooru-tags-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+.botbooru-tags-copy,
+.botbooru-followed-tags-status,
+.botbooru-followed-tags-empty {
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.botbooru-followed-tags-status.error {
+    color: var(--danger, #e85d75);
+}
+
+.botbooru-followed-tags-add {
+    display: flex;
+    gap: 10px;
+}
+
+.botbooru-followed-tags-add .glass-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.botbooru-followed-tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 34px;
+}
+
+.botbooru-followed-tag-pill {
+    align-items: center;
+    background: rgba(80, 120, 190, 0.18);
+    border: 1px solid rgba(120, 160, 220, 0.35);
+    border-radius: 999px;
+    display: inline-flex;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 8px 6px 10px;
+}
+
+.botbooru-followed-tag-category {
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.botbooru-followed-tag-name {
+    color: var(--text-primary);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.botbooru-followed-tag-remove {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 2px;
+}
+
+.botbooru-followed-tag-remove:hover {
+    color: #e85d75;
 }

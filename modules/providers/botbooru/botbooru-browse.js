@@ -9,11 +9,14 @@ import {
     fetchBotbooruCardJson,
     fetchBotbooruFavoriteState,
     fetchBotbooruFavorites,
+    fetchBotbooruFollowedTags,
     fetchBotbooruPost,
     fetchBotbooruPosts,
+    followBotbooruTag,
     getBotbooruPostUrl,
     setBotbooruToken,
     toggleBotbooruFavorite,
+    unfollowBotbooruTag,
     validateBotbooruSession,
 } from './botbooru-api.js';
 
@@ -30,6 +33,7 @@ const {
 
 const PAGE_SIZE = 48;
 const DEFAULT_SORT = 'latest';
+const CURATED_SORT = 'curated';
 const SORT_OPTIONS = [
     { value: 'latest', label: '🆕 Newest' },
     { value: 'favorites', label: '❤️ Most Favorited' },
@@ -50,6 +54,7 @@ let botbooruLoadToken = 0;
 let botbooruSelectedChar = null;
 let botbooruViewMode = 'browse';
 let botbooruSort = DEFAULT_SORT;
+let botbooruLastBrowseSort = DEFAULT_SORT;
 let botbooruSearch = '';
 let botbooruNsfw = true;
 let botbooruPluginOk = false;
@@ -99,6 +104,37 @@ function buildSortOptionsHtml(selected = botbooruSort) {
     return SORT_OPTIONS
         .map(option => `<option value="${safe(option.value)}" ${option.value === selected ? 'selected' : ''}>${safe(option.label)}</option>`)
         .join('');
+}
+
+function getActiveBotbooruSort() {
+    return botbooruViewMode === 'curated' ? CURATED_SORT : botbooruSort;
+}
+
+function syncBotbooruModeButtons() {
+    document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.botbooruView === botbooruViewMode);
+    });
+}
+
+function syncBotbooruSortSelect() {
+    const sortEl = document.getElementById('botbooruSortSelect');
+    if (sortEl) sortEl.value = getActiveBotbooruSort();
+}
+
+function setBotbooruViewMode(mode) {
+    if (mode === 'curated') {
+        if (botbooruSort && botbooruSort !== CURATED_SORT) botbooruLastBrowseSort = botbooruSort;
+        botbooruViewMode = 'curated';
+    } else {
+        botbooruViewMode = mode === 'favorites' ? 'favorites' : 'browse';
+        if (botbooruViewMode === 'browse' && botbooruSort === CURATED_SORT) {
+            botbooruSort = botbooruLastBrowseSort || DEFAULT_SORT;
+        }
+    }
+
+    syncBotbooruModeButtons();
+    syncBotbooruSortSelect();
+    syncFilterCheckboxState();
 }
 
 function applyPersistentExcludeTags(characters) {
@@ -233,7 +269,12 @@ function renderBotbooruGrid() {
     if (!grid) return;
 
     if (botbooruCharacters.length === 0) {
-        renderEmptyState(botbooruViewMode === 'favorites' ? 'No BotBooru favorites found.' : 'No BotBooru characters found.');
+        const message = botbooruViewMode === 'favorites'
+            ? 'No BotBooru favorites found.'
+            : botbooruViewMode === 'curated'
+                ? 'No BotBooru curated characters found.'
+                : 'No BotBooru characters found.';
+        renderEmptyState(message);
         return;
     }
 
@@ -260,6 +301,8 @@ function syncFilterCheckboxState() {
     if (favCb) favCb.checked = botbooruViewMode === 'favorites';
     if (ownedCb) ownedCb.checked = botbooruFilterHideOwned;
     if (possibleCb) possibleCb.checked = botbooruFilterHidePossible;
+    syncBotbooruModeButtons();
+    syncBotbooruSortSelect();
 }
 
 function setFavoriteButtonState(favorited, count) {
@@ -650,7 +693,14 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
 
     const token = ++botbooruLoadToken;
     botbooruLoading = true;
-    if (reset) setLoadingGrid(botbooruViewMode === 'favorites' ? 'Loading BotBooru favorites...' : 'Loading BotBooru...');
+    if (reset) {
+        const message = botbooruViewMode === 'favorites'
+            ? 'Loading BotBooru favorites...'
+            : botbooruViewMode === 'curated'
+                ? 'Loading BotBooru curated...'
+                : 'Loading BotBooru...';
+        setLoadingGrid(message);
+    }
 
     const loadMoreBtn = document.getElementById('botbooruLoadMoreBtn');
     if (loadMoreBtn) {
@@ -676,7 +726,7 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
         };
         const data = botbooruViewMode === 'favorites'
             ? await fetchBotbooruFavorites(params)
-            : await fetchBotbooruPosts({ ...params, sort: botbooruSort });
+            : await fetchBotbooruPosts({ ...params, sort: getActiveBotbooruSort() });
 
         if (token !== botbooruLoadToken) return;
 
@@ -713,6 +763,92 @@ function closeTokenModal() {
     document.getElementById('botbooruTokenModal')?.classList.add('hidden');
 }
 
+function closeFollowedTagsModal() {
+    document.getElementById('botbooruFollowedTagsModal')?.classList.add('hidden');
+}
+
+function renderFollowedTagsStatus(message = '', type = 'info') {
+    const status = document.getElementById('botbooruFollowedTagsStatus');
+    if (!status) return;
+    status.textContent = message;
+    status.className = `botbooru-followed-tags-status ${type}`;
+}
+
+function renderFollowedTagsList(tags) {
+    const list = document.getElementById('botbooruFollowedTagsList');
+    if (!list) return;
+    if (!tags.length) {
+        list.innerHTML = '<p class="botbooru-followed-tags-empty">No followed tags yet.</p>';
+        return;
+    }
+
+    list.innerHTML = tags.map(tag => `
+        <span class="botbooru-followed-tag-pill" data-entry-id="${safe(tag.id)}">
+            <span class="botbooru-followed-tag-category">${safe(tag.category || 'Tag')}</span>
+            <span class="botbooru-followed-tag-name">${safe(tag.tag_name || tag.name || '')}</span>
+            <button class="botbooru-followed-tag-remove" type="button" title="Unfollow tag">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </span>
+    `).join('');
+}
+
+async function loadBotbooruFollowedTags() {
+    renderFollowedTagsStatus('Loading followed tags...');
+    try {
+        await syncSavedTokenToHelper();
+        const tags = await fetchBotbooruFollowedTags();
+        renderFollowedTagsList(tags);
+        renderFollowedTagsStatus(tags.length ? '' : 'Curated uses the tags you follow on BotBooru.');
+    } catch (err) {
+        renderFollowedTagsList([]);
+        renderFollowedTagsStatus(err.message || 'Failed to load followed tags.', 'error');
+    }
+}
+
+async function openFollowedTagsModal() {
+    if (!botbooruToken) {
+        showToast?.('Add a BotBooru token to manage followed tags.', 'warning');
+        openBotbooruTokenModal();
+        return;
+    }
+    document.getElementById('botbooruFollowedTagsModal')?.classList.remove('hidden');
+    await loadBotbooruFollowedTags();
+}
+
+async function addBotbooruFollowedTag() {
+    const input = document.getElementById('botbooruFollowedTagsInput');
+    const addBtn = document.getElementById('botbooruFollowedTagsAddBtn');
+    const query = input?.value?.trim();
+    if (!query) return;
+
+    if (addBtn) addBtn.disabled = true;
+    renderFollowedTagsStatus('Following tag...');
+    try {
+        await syncSavedTokenToHelper();
+        await followBotbooruTag(query);
+        if (input) input.value = '';
+        await loadBotbooruFollowedTags();
+        if (botbooruViewMode === 'curated') loadBotbooruCharacters({ reset: true });
+    } catch (err) {
+        renderFollowedTagsStatus(err.message || 'Failed to follow tag.', 'error');
+    } finally {
+        if (addBtn) addBtn.disabled = false;
+    }
+}
+
+async function removeBotbooruFollowedTag(entryId) {
+    renderFollowedTagsStatus('Removing tag...');
+    try {
+        await syncSavedTokenToHelper();
+        await unfollowBotbooruTag(entryId);
+        await loadBotbooruFollowedTags();
+        if (botbooruViewMode === 'curated') loadBotbooruCharacters({ reset: true });
+    } catch (err) {
+        renderFollowedTagsStatus(err.message || 'Failed to unfollow tag.', 'error');
+    }
+}
+
 class BotbooruBrowseView extends BrowseView {
     constructor() {
         super({ id: 'botbooru', name: 'BotBooru' });
@@ -725,22 +861,31 @@ class BotbooruBrowseView extends BrowseView {
 
     get previewModalId() { return 'botbooruCharModal'; }
 
-    get hasModeToggle() { return false; }
+    get hasModeToggle() { return true; }
 
     getSettingsConfig() {
         return {
             browseSortOptions: SORT_OPTIONS,
             defaultBrowseSort: DEFAULT_SORT,
+            viewModes: [
+                { value: 'browse', label: 'Browse' },
+                { value: 'curated', label: 'Curated' },
+            ],
         };
     }
 
     get mobileFilterIds() {
         return {
             sort: 'botbooruSortSelect',
-            tags: null,
+            timelineSort: 'botbooruSortSelect',
+            tags: 'botbooruTagsBtn',
             filters: 'botbooruFiltersBtn',
             nsfw: 'botbooruNsfwToggle',
             refresh: 'botbooruRefreshBtn',
+            modeBrowseSelector: '.botbooru-view-btn[data-botbooru-view="browse"]',
+            modeFollowSelector: '.botbooru-view-btn[data-botbooru-view="curated"]',
+            modeFollowLabel: 'Curated',
+            modeFollowIcon: 'fa-solid fa-star',
         };
     }
 
@@ -764,11 +909,24 @@ class BotbooruBrowseView extends BrowseView {
 
     renderFilterBar() {
         return `
+            <div class="chub-view-toggle">
+                <button class="botbooru-view-btn active" data-botbooru-view="browse" type="button" title="Browse all BotBooru characters">
+                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
+                </button>
+                <button class="botbooru-view-btn" data-botbooru-view="curated" type="button" title="Characters from your followed BotBooru tags">
+                    <i class="fa-solid fa-star"></i> <span>Curated</span>
+                </button>
+            </div>
+
             <div class="browse-sort-container">
                 <select id="botbooruSortSelect" class="glass-select" title="Sort order">
                     ${buildSortOptionsHtml()}
                 </select>
             </div>
+
+            <button id="botbooruTagsBtn" class="glass-btn" type="button" title="Manage followed BotBooru tags">
+                <i class="fa-solid fa-tags"></i> <span>Tags</span>
+            </button>
 
             <!-- Feature Filters -->
             <div class="browse-more-filters" style="position: relative;">
@@ -884,15 +1042,32 @@ class BotbooruBrowseView extends BrowseView {
                 </div>
             </div>
         </div>
+    </div>
+    <div id="botbooruFollowedTagsModal" class="modal-overlay hidden">
+        <div class="modal-glass botbooru-tags-modal">
+            <div class="modal-header">
+                <h2><i class="fa-solid fa-tags"></i> Followed Tags</h2>
+                <button class="close-btn" id="botbooruFollowedTagsClose" type="button">&times;</button>
+            </div>
+            <div class="botbooru-tags-body">
+                <p class="botbooru-tags-copy">Followed tags feed BotBooru's Curated sort.</p>
+                <div class="botbooru-followed-tags-add">
+                    <input type="search" id="botbooruFollowedTagsInput" class="glass-input" placeholder='artist:cinnabus or character:name' autocomplete="off">
+                    <button id="botbooruFollowedTagsAddBtn" class="action-btn primary" type="button">
+                        <i class="fa-solid fa-plus"></i> Follow
+                    </button>
+                </div>
+                <div id="botbooruFollowedTagsStatus" class="botbooru-followed-tags-status"></div>
+                <div id="botbooruFollowedTagsList" class="botbooru-followed-tags-list"></div>
+            </div>
+        </div>
     </div>`;
     }
 
     applyDefaults(defaults = {}) {
-        const nextView = defaults.view === 'favorites' ? 'favorites' : 'browse';
-        botbooruViewMode = nextView;
         botbooruSort = defaults.sort || defaults.browseSort || botbooruSort || DEFAULT_SORT;
-        const sortEl = document.getElementById('botbooruSortSelect');
-        if (sortEl) sortEl.value = botbooruSort;
+        if (botbooruSort !== CURATED_SORT) botbooruLastBrowseSort = botbooruSort;
+        setBotbooruViewMode(defaults.view === 'curated' || botbooruSort === CURATED_SORT ? 'curated' : 'browse');
         syncFilterCheckboxState();
     }
 
@@ -904,6 +1079,10 @@ class BotbooruBrowseView extends BrowseView {
         botbooruToken = savedToken;
         botbooruNsfw = getSetting?.('botbooruNsfw') !== false;
         if (options.defaults?.browseSort) botbooruSort = options.defaults.browseSort;
+        if (botbooruSort !== CURATED_SORT) botbooruLastBrowseSort = botbooruSort;
+        if (options.defaults?.view === 'curated' || botbooruSort === CURATED_SORT) {
+            botbooruViewMode = 'curated';
+        }
         if (options.domRecreated) {
             botbooruCharacters = [];
             botbooruOffset = 0;
@@ -919,7 +1098,7 @@ class BotbooruBrowseView extends BrowseView {
         const nsfwBtn = document.getElementById('botbooruNsfwToggle');
         nsfwBtn?.classList.toggle('active', botbooruNsfw);
         const sortEl = document.getElementById('botbooruSortSelect');
-        if (sortEl) sortEl.value = botbooruSort;
+        if (sortEl) sortEl.value = getActiveBotbooruSort();
         syncFilterCheckboxState();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
@@ -951,13 +1130,28 @@ class BotbooruBrowseView extends BrowseView {
             document.getElementById('botbooruFiltersDropdown')?.classList.toggle('hidden');
         }, listenerOptions);
 
+        document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const nextMode = btn.dataset.botbooruView === 'curated' ? 'curated' : 'browse';
+                if (botbooruViewMode === nextMode) return;
+                if (botbooruViewMode === 'favorites') {
+                    const favCb = document.getElementById('botbooruFilterFavorites');
+                    if (favCb) favCb.checked = false;
+                }
+                setBotbooruViewMode(nextMode);
+                loadBotbooruCharacters({ reset: true });
+            }, listenerOptions);
+        });
+
+        on('botbooruTagsBtn', 'click', openFollowedTagsModal, listenerOptions);
+
         on('botbooruFilterFavorites', 'change', (e) => {
             if (e.target.checked && !botbooruToken) {
                 e.target.checked = false;
                 openBotbooruTokenModal();
                 return;
             }
-            botbooruViewMode = e.target.checked ? 'favorites' : 'browse';
+            setBotbooruViewMode(e.target.checked ? 'favorites' : 'browse');
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);
 
@@ -973,6 +1167,12 @@ class BotbooruBrowseView extends BrowseView {
 
         on('botbooruSortSelect', 'change', e => {
             botbooruSort = e.target.value || DEFAULT_SORT;
+            if (botbooruSort === CURATED_SORT) {
+                setBotbooruViewMode('curated');
+            } else {
+                botbooruLastBrowseSort = botbooruSort;
+                if (botbooruViewMode !== 'favorites') setBotbooruViewMode('browse');
+            }
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);
         on('botbooruNsfwToggle', 'click', () => {
@@ -1002,6 +1202,20 @@ class BotbooruBrowseView extends BrowseView {
         on('botbooruTokenClose', 'click', closeTokenModal, listenerOptions);
         on('botbooruSaveTokenBtn', 'click', saveBotbooruTokenFromModal, listenerOptions);
         on('botbooruClearTokenBtn', 'click', clearBotbooruTokenFromModal, listenerOptions);
+        on('botbooruFollowedTagsClose', 'click', closeFollowedTagsModal, listenerOptions);
+        on('botbooruFollowedTagsAddBtn', 'click', addBotbooruFollowedTag, listenerOptions);
+        on('botbooruFollowedTagsInput', 'keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addBotbooruFollowedTag();
+            }
+        }, listenerOptions);
+        document.getElementById('botbooruFollowedTagsList')?.addEventListener('click', e => {
+            const removeBtn = e.target.closest('.botbooru-followed-tag-remove');
+            if (!removeBtn) return;
+            const pill = removeBtn.closest('.botbooru-followed-tag-pill');
+            if (pill?.dataset.entryId) removeBotbooruFollowedTag(pill.dataset.entryId);
+        }, listenerOptions);
 
         getGrid()?.addEventListener('click', e => {
             if (e.target.closest('.botbooru-open-token-btn')) {
@@ -1038,6 +1252,7 @@ const botbooruBrowseView = new BotbooruBrowseView();
 
 window.openBotbooruCharPreview = openBotbooruCharPreview;
 window.openBotbooruTokenModal = openBotbooruTokenModal;
+window.openBotbooruFollowedTagsModal = openFollowedTagsModal;
 window.botbooruValidateSession = validateBotbooruSession;
 window.botbooruClearSession = clearBotbooruSession;
 window.botbooruSetToken = setBotbooruSessionToken;

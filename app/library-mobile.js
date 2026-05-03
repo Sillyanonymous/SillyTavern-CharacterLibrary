@@ -834,6 +834,16 @@ window.registerOverlay = function(cfg) {
             return window.ProviderRegistry?.getActiveMobileFilterIds?.();
         }
 
+        function syncModeLabels() {
+            const ids = getIds();
+            const browseIcon = ids?.modeBrowseIcon || 'fa-solid fa-compass';
+            const followIcon = ids?.modeFollowIcon || 'fa-solid fa-users';
+            const browseLabel = ids?.modeBrowseLabel || 'Browse';
+            const followLabel = ids?.modeFollowLabel || 'Following';
+            browseChip.innerHTML = `<i class="${browseIcon}"></i> ${browseLabel}`;
+            followChip.innerHTML = `<i class="${followIcon}"></i> ${followLabel}`;
+        }
+
         function syncMode() {
             const ids = getIds();
             if (!ids?.modeBrowseSelector) return;
@@ -1144,6 +1154,7 @@ window.registerOverlay = function(cfg) {
                 }
 
                 if (hasModeToggle) {
+                    syncModeLabels();
                     const realBrowseSort = ids?.sort ? document.getElementById(ids.sort) : null;
                     if (realBrowseSort) {
                         const curProviderId = reg?.getActiveProvider?.()?.id;

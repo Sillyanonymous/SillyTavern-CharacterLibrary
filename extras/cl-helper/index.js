@@ -738,17 +738,24 @@ export async function init(router) {
         return Number.isSafeInteger(n) && n > 0 ? n : null;
     }
 
-    async function bbFetchJson(path, { auth = false } = {}) {
+    async function bbFetchJsonRequest(path, { method = 'GET', auth = false, body = null } = {}) {
         const targetUrl = new URL(path, BOTBOORU_BASE);
+        const headers = bbHeaders({ auth });
+        if (body != null) headers['Content-Type'] = 'application/json';
         const response = await fetch(targetUrl.toString(), {
-            method: 'GET',
-            headers: bbHeaders({ auth }),
+            method,
+            headers,
+            body: body == null ? undefined : JSON.stringify(body),
             redirect: 'follow',
         });
         const text = await response.text();
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
         return { response, data, text };
+    }
+
+    async function bbFetchJson(path, { auth = false } = {}) {
+        return bbFetchJsonRequest(path, { auth });
     }
 
     async function bbResolveCurrentUserId() {
@@ -913,6 +920,73 @@ export async function init(router) {
         } catch (err) {
             console.error('[cl-helper] BotBooru favorite-toggle error:', err.message);
             res.status(502).json({ error: 'Failed to toggle BotBooru favorite' });
+        }
+    });
+
+    router.get('/bb-followed-tags', async (_req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJson('/auth/me/follows/tags', { auth: true });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru followed-tags error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru followed tags' });
+        }
+    });
+
+    router.post('/bb-followed-tags', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const tagName = typeof req.body?.tag_name === 'string' ? req.body.tag_name.trim() : '';
+        const category = typeof req.body?.category === 'string' && req.body.category.trim()
+            ? req.body.category.trim()
+            : 'General';
+        if (!tagName) {
+            return res.status(400).json({ error: 'tag_name is required' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest('/auth/me/follows/tags', {
+                method: 'POST',
+                auth: true,
+                body: { tag_name: tagName, category },
+            });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru follow-tag error:', err.message);
+            res.status(502).json({ error: 'Failed to follow BotBooru tag' });
+        }
+    });
+
+    router.delete('/bb-followed-tags/:entryId', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const entryId = parsePositiveInt(req.params.entryId);
+        if (!entryId) return res.status(400).json({ error: 'Invalid followed tag id' });
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest(`/auth/me/follows/tags/${entryId}`, {
+                method: 'DELETE',
+                auth: true,
+            });
+            if (!response.ok && response.status !== 404) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data ?? { ok: true });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru unfollow-tag error:', err.message);
+            res.status(502).json({ error: 'Failed to unfollow BotBooru tag' });
         }
     });
 
