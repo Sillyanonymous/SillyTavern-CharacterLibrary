@@ -100,7 +100,12 @@ function getGrid() {
     return document.getElementById('botbooruGrid');
 }
 
-function buildSortOptionsHtml(selected = botbooruSort) {
+export function getBotbooruSortSelectValue(sort = botbooruSort) {
+    const value = sort || DEFAULT_SORT;
+    return value === CURATED_SORT ? (botbooruLastBrowseSort || DEFAULT_SORT) : value;
+}
+
+function buildSortOptionsHtml(selected = getBotbooruSortSelectValue()) {
     return SORT_OPTIONS
         .map(option => `<option value="${safe(option.value)}" ${option.value === selected ? 'selected' : ''}${option.hidden ? ' hidden' : ''}>${safe(option.label)}</option>`)
         .join('');
@@ -111,7 +116,7 @@ function getActiveBotbooruSort() {
 }
 
 export function shouldSyncBotbooruTokenForLoad(mode, sort) {
-    return mode === 'favorites' || sort === CURATED_SORT;
+    return mode === 'favorites' || mode === 'curated' || sort === CURATED_SORT;
 }
 
 function syncBotbooruModeButtons() {
@@ -122,7 +127,7 @@ function syncBotbooruModeButtons() {
 
 function syncBotbooruSortSelect() {
     const sortEl = document.getElementById('botbooruSortSelect');
-    if (sortEl) sortEl.value = getActiveBotbooruSort();
+    if (sortEl) sortEl.value = getBotbooruSortSelectValue();
 }
 
 function setBotbooruViewMode(mode) {
@@ -1101,8 +1106,7 @@ class BotbooruBrowseView extends BrowseView {
 
         const nsfwBtn = document.getElementById('botbooruNsfwToggle');
         nsfwBtn?.classList.toggle('active', botbooruNsfw);
-        const sortEl = document.getElementById('botbooruSortSelect');
-        if (sortEl) sortEl.value = getActiveBotbooruSort();
+        syncBotbooruSortSelect();
         syncFilterCheckboxState();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
@@ -1170,12 +1174,14 @@ class BotbooruBrowseView extends BrowseView {
         }, listenerOptions);
 
         on('botbooruSortSelect', 'change', e => {
-            botbooruSort = e.target.value || DEFAULT_SORT;
-            if (botbooruSort === CURATED_SORT) {
+            const selectedSort = e.target.value || DEFAULT_SORT;
+            if (selectedSort === CURATED_SORT) {
+                botbooruSort = botbooruLastBrowseSort || DEFAULT_SORT;
                 setBotbooruViewMode('curated');
             } else {
+                botbooruSort = selectedSort;
                 botbooruLastBrowseSort = botbooruSort;
-                if (botbooruViewMode !== 'favorites') setBotbooruViewMode('browse');
+                syncBotbooruSortSelect();
             }
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);

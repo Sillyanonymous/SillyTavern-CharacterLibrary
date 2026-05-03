@@ -93,8 +93,19 @@ test('BotBooru syncs saved token for personalized loads without gating Curated',
 
     assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'latest'), false);
     assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'curated'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('curated', 'latest'), true);
     assert.equal(shouldSyncBotbooruTokenForLoad('curated', 'curated'), true);
     assert.equal(shouldSyncBotbooruTokenForLoad('favorites', 'latest'), true);
+});
+
+test('BotBooru Curated mode keeps Sort By on normal order values', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruSortSelectValue } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sort-select-${Date.now()}`);
+
+    assert.equal(getBotbooruSortSelectValue('latest'), 'latest');
+    assert.equal(getBotbooruSortSelectValue('favorites'), 'favorites');
+    assert.equal(getBotbooruSortSelectValue('curated'), 'latest');
+    assert.equal(getBotbooruSortSelectValue(''), 'latest');
 });
 
 test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
