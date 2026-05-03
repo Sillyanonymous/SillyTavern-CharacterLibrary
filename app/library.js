@@ -162,14 +162,17 @@ function initCustomSelect(select) {
         menu.innerHTML = '';
         for (const child of select.children) {
             if (child.tagName === 'OPTGROUP') {
+                const visibleOptions = Array.from(child.children).filter(opt => !opt.hidden);
+                if (visibleOptions.length === 0) continue;
                 const title = document.createElement('div');
                 title.className = 'dropdown-section-title';
                 title.textContent = child.label;
                 menu.appendChild(title);
-                for (const opt of child.children) {
+                for (const opt of visibleOptions) {
                     menu.appendChild(createItem(opt));
                 }
             } else if (child.tagName === 'OPTION') {
+                if (child.hidden) continue;
                 menu.appendChild(createItem(child));
             }
         }

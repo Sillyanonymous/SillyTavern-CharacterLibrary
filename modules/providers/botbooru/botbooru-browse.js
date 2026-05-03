@@ -39,7 +39,7 @@ const SORT_OPTIONS = [
     { value: 'favorites', label: '❤️ Most Favorited' },
     { value: 'views', label: '👁️ Most Viewed' },
     { value: 'downloads', label: '📥 Most Downloaded' },
-    { value: 'curated', label: '⭐ Curated' },
+    { value: 'curated', label: '⭐ Curated', hidden: true },
     { value: 'random', label: '🎲 Random' },
 ];
 
@@ -102,7 +102,7 @@ function getGrid() {
 
 function buildSortOptionsHtml(selected = botbooruSort) {
     return SORT_OPTIONS
-        .map(option => `<option value="${safe(option.value)}" ${option.value === selected ? 'selected' : ''}>${safe(option.label)}</option>`)
+        .map(option => `<option value="${safe(option.value)}" ${option.value === selected ? 'selected' : ''}${option.hidden ? ' hidden' : ''}>${safe(option.label)}</option>`)
         .join('');
 }
 

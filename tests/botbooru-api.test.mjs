@@ -99,6 +99,7 @@ test('BotBooru syncs saved token for personalized loads without gating Curated',
 
 test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
     globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
     const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=${Date.now()}`);
 
     const html = browseView.renderFilterBar();
@@ -107,4 +108,5 @@ test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => 
     assert.match(html, /data-botbooru-view="curated"/);
     assert.match(html, />\s*Browse\s*</);
     assert.match(html, />\s*Curated\s*</);
+    assert.match(html, /<option value="curated"[^>]*hidden/);
 });
