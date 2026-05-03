@@ -87,14 +87,39 @@ test('followed tag helpers use the BotBooru helper routes', async () => {
     ]);
 });
 
-test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
+test('BotBooru exposes Curated as a sort option without a mode toggle', async () => {
     globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
     const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=${Date.now()}`);
 
     const html = browseView.renderFilterBar();
 
-    assert.match(html, /data-botbooru-view="browse"/);
-    assert.match(html, /data-botbooru-view="curated"/);
-    assert.match(html, />\s*Browse\s*</);
-    assert.match(html, />\s*Curated\s*</);
+    assert.equal(browseView.hasModeToggle, false);
+    assert.match(html, /<option value="curated"/);
+    assert.doesNotMatch(html, /data-botbooru-view="browse"/);
+    assert.doesNotMatch(html, /data-botbooru-view="curated"/);
+    assert.equal(browseView.mobileFilterIds.timelineSort, undefined);
+    assert.equal(browseView.mobileFilterIds.tags, 'botbooruTagsBtn');
+});
+
+test('BotBooru maps legacy Curated view defaults to the Curated sort', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+
+    const elements = {
+        botbooruSortSelect: { value: '' },
+        botbooruFilterFavorites: { checked: false },
+        botbooruFilterHideOwned: { checked: false },
+        botbooruFilterHidePossible: { checked: false },
+    };
+    globalThis.document = {
+        getElementById: id => elements[id] || null,
+    };
+
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=legacy-curated-${Date.now()}`);
+
+    browseView.applyDefaults({ view: 'curated' });
+
+    assert.equal(elements.botbooruSortSelect.value, 'curated');
+    assert.equal(elements.botbooruFilterFavorites.checked, false);
 });
