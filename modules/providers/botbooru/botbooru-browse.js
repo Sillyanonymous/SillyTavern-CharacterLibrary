@@ -44,6 +44,8 @@ let botbooruOffset = 0;
 let botbooruTotal = 0;
 let botbooruHasMore = true;
 let botbooruLoading = false;
+let botbooruFilterHideOwned = false;
+let botbooruFilterHidePossible = false;
 let botbooruLoadToken = 0;
 let botbooruSelectedChar = null;
 let botbooruViewMode = 'browse';
@@ -235,17 +237,29 @@ function renderBotbooruGrid() {
         return;
     }
 
-    grid.innerHTML = botbooruCharacters.map(renderBotbooruCard).join('');
+    let filtered = botbooruCharacters;
+    if (botbooruFilterHideOwned) filtered = filtered.filter(c => !isCharInLocalLibrary(c));
+    if (botbooruFilterHidePossible) filtered = filtered.filter(c => !isCharPossibleMatch(c));
+
+    if (filtered.length === 0) {
+        renderEmptyState('All characters hidden by filters.', 'fa-solid fa-filter');
+        return;
+    }
+
+    grid.innerHTML = filtered.map(renderBotbooruCard).join('');
     botbooruBrowseView.observeImages(grid);
     botbooruBrowseView.refreshInLibraryBadges();
     updateResultCount();
     updateLoadMore();
 }
 
-function setModeButtonState() {
-    document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.botbooruView === botbooruViewMode);
-    });
+function syncFilterCheckboxState() {
+    const favCb = document.getElementById('botbooruFilterFavorites');
+    const ownedCb = document.getElementById('botbooruFilterHideOwned');
+    const possibleCb = document.getElementById('botbooruFilterHidePossible');
+    if (favCb) favCb.checked = botbooruViewMode === 'favorites';
+    if (ownedCb) ownedCb.checked = botbooruFilterHideOwned;
+    if (possibleCb) possibleCb.checked = botbooruFilterHidePossible;
 }
 
 function setFavoriteButtonState(favorited, count) {
@@ -711,17 +725,12 @@ class BotbooruBrowseView extends BrowseView {
 
     get previewModalId() { return 'botbooruCharModal'; }
 
-    get hasModeToggle() { return true; }
+    get hasModeToggle() { return false; }
 
     getSettingsConfig() {
         return {
             browseSortOptions: SORT_OPTIONS,
             defaultBrowseSort: DEFAULT_SORT,
-            followingSortOptions: SORT_OPTIONS,
-            viewModes: [
-                { value: 'browse', label: 'Browse' },
-                { value: 'favorites', label: 'Favorites' },
-            ],
         };
     }
 
@@ -729,13 +738,9 @@ class BotbooruBrowseView extends BrowseView {
         return {
             sort: 'botbooruSortSelect',
             tags: null,
-            filters: null,
+            filters: 'botbooruFiltersBtn',
             nsfw: 'botbooruNsfwToggle',
             refresh: 'botbooruRefreshBtn',
-            timelineSort: 'botbooruSortSelect',
-            modeBrowseSelector: '.botbooru-view-btn[data-botbooru-view="browse"]',
-            modeFollowSelector: '.botbooru-view-btn[data-botbooru-view="favorites"]',
-            modeBtnClass: 'botbooru-view-btn',
         };
     }
 
@@ -759,19 +764,27 @@ class BotbooruBrowseView extends BrowseView {
 
     renderFilterBar() {
         return `
-            <div class="chub-view-toggle">
-                <button class="botbooru-view-btn active" data-botbooru-view="browse" type="button" title="Browse public BotBooru posts">
-                    <i class="fa-solid fa-compass"></i> <span>Browse</span>
-                </button>
-                <button class="botbooru-view-btn" data-botbooru-view="favorites" type="button" title="My BotBooru favorites">
-                    <i class="fa-regular fa-heart"></i> <span>Favorites</span>
-                </button>
-            </div>
             <div class="browse-sort-container">
                 <select id="botbooruSortSelect" class="glass-select" title="Sort order">
                     ${buildSortOptionsHtml()}
                 </select>
             </div>
+
+            <!-- Feature Filters -->
+            <div class="browse-more-filters" style="position: relative;">
+                <button id="botbooruFiltersBtn" class="glass-btn" title="Filter by character features">
+                    <i class="fa-solid fa-sliders"></i> <span>Features</span>
+                </button>
+                <div id="botbooruFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
+                    <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires token)</span>:</div>
+                    <label class="filter-checkbox"><input type="checkbox" id="botbooruFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
+                    <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                    <div class="dropdown-section-title">Library:</div>
+                    <label class="filter-checkbox"><input type="checkbox" id="botbooruFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
+                    <label class="filter-checkbox"><input type="checkbox" id="botbooruFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
+                </div>
+            </div>
+
             <button id="botbooruNsfwToggle" class="glass-btn nsfw-toggle active" type="button" title="Toggle NSFW content">
                 <i class="fa-solid fa-shield-halved"></i> <span>NSFW</span>
             </button>
@@ -880,7 +893,7 @@ class BotbooruBrowseView extends BrowseView {
         botbooruSort = defaults.sort || defaults.browseSort || botbooruSort || DEFAULT_SORT;
         const sortEl = document.getElementById('botbooruSortSelect');
         if (sortEl) sortEl.value = botbooruSort;
-        setModeButtonState();
+        syncFilterCheckboxState();
     }
 
     activate(container, options = {}) {
@@ -907,7 +920,7 @@ class BotbooruBrowseView extends BrowseView {
         nsfwBtn?.classList.toggle('active', botbooruNsfw);
         const sortEl = document.getElementById('botbooruSortSelect');
         if (sortEl) sortEl.value = botbooruSort;
-        setModeButtonState();
+        syncFilterCheckboxState();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
             this.buildLocalLibraryLookup();
@@ -922,6 +935,9 @@ class BotbooruBrowseView extends BrowseView {
         super.init();
         const sortEl = document.getElementById('botbooruSortSelect');
         if (sortEl) CoreAPI.initCustomSelect?.(sortEl);
+        this._registerDropdownDismiss([
+            { dropdownId: 'botbooruFiltersDropdown', buttonId: 'botbooruFiltersBtn' },
+        ]);
         this.attachEventListeners();
     }
 
@@ -930,15 +946,30 @@ class BotbooruBrowseView extends BrowseView {
         this._listenerController = new AbortController();
         const listenerOptions = { signal: this._listenerController.signal };
 
-        document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const nextMode = btn.dataset.botbooruView === 'favorites' ? 'favorites' : 'browse';
-                if (nextMode === botbooruViewMode) return;
-                botbooruViewMode = nextMode;
-                setModeButtonState();
-                loadBotbooruCharacters({ reset: true });
-            }, listenerOptions);
-        });
+        on('botbooruFiltersBtn', 'click', (e) => {
+            e.stopPropagation();
+            document.getElementById('botbooruFiltersDropdown')?.classList.toggle('hidden');
+        }, listenerOptions);
+
+        on('botbooruFilterFavorites', 'change', (e) => {
+            if (e.target.checked && !botbooruToken) {
+                e.target.checked = false;
+                openBotbooruTokenModal();
+                return;
+            }
+            botbooruViewMode = e.target.checked ? 'favorites' : 'browse';
+            loadBotbooruCharacters({ reset: true });
+        }, listenerOptions);
+
+        on('botbooruFilterHideOwned', 'change', (e) => {
+            botbooruFilterHideOwned = e.target.checked;
+            renderBotbooruGrid();
+        }, listenerOptions);
+
+        on('botbooruFilterHidePossible', 'change', (e) => {
+            botbooruFilterHidePossible = e.target.checked;
+            renderBotbooruGrid();
+        }, listenerOptions);
 
         on('botbooruSortSelect', 'change', e => {
             botbooruSort = e.target.value || DEFAULT_SORT;
