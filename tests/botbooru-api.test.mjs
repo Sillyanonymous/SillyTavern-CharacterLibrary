@@ -126,6 +126,45 @@ test('BotBooru NSFW toggle mirrors provider label states', async () => {
     });
 });
 
+test('BotBooru preview exposes downloaded card sections', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruPreviewSections } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-sections-${Date.now()}`);
+    const sections = getBotbooruPreviewSections({
+        data: {
+            description: 'Description text',
+            personality: 'Personality text',
+            scenario: 'Scenario text',
+            first_mes: 'First message text',
+            mes_example: 'Example dialog text',
+            creator_notes: 'Creator notes text',
+        },
+    });
+
+    assert.deepEqual(sections.map(section => [section.id, section.label, section.content]), [
+        ['botbooruCharCreatorNotes', "Creator's Notes", 'Creator notes text'],
+        ['botbooruCharDescription', 'Description', 'Description text'],
+        ['botbooruCharPersonality', 'Personality', 'Personality text'],
+        ['botbooruCharScenario', 'Scenario', 'Scenario text'],
+        ['botbooruCharExamples', 'Example Dialogs', 'Example dialog text'],
+        ['botbooruCharFirstMsg', 'First Message', 'First message text'],
+    ]);
+});
+
+test('BotBooru preview section headings are expandable', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-expand-${Date.now()}`);
+
+    const html = browseView.renderModals();
+
+    assert.match(html, /data-section="botbooruCharCreatorNotes"/);
+    assert.match(html, /data-section="botbooruCharDescription"/);
+    assert.match(html, /data-section="botbooruCharPersonality"/);
+    assert.match(html, /data-section="botbooruCharScenario"/);
+    assert.match(html, /data-section="botbooruCharExamples"/);
+    assert.match(html, /data-section="botbooruCharFirstMsg"/);
+});
+
 test('BotBooru personalized modes apply selected sort locally', async () => {
     globalThis.window = globalThis.window || {};
     const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);

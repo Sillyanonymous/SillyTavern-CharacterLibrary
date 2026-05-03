@@ -43,6 +43,45 @@ const SORT_OPTIONS = [
     { value: 'random', label: '🎲 Random' },
 ];
 
+const PREVIEW_SECTIONS = [
+    {
+        id: 'botbooruCharCreatorNotes',
+        label: "Creator's Notes",
+        icon: 'fa-solid fa-feather-pointed',
+        keys: ['creator_notes', 'data.creator_notes'],
+    },
+    {
+        id: 'botbooruCharDescription',
+        label: 'Description',
+        icon: 'fa-solid fa-scroll',
+        keys: ['description', 'data.description'],
+    },
+    {
+        id: 'botbooruCharPersonality',
+        label: 'Personality',
+        icon: 'fa-solid fa-brain',
+        keys: ['personality', 'data.personality'],
+    },
+    {
+        id: 'botbooruCharScenario',
+        label: 'Scenario',
+        icon: 'fa-solid fa-theater-masks',
+        keys: ['scenario', 'data.scenario'],
+    },
+    {
+        id: 'botbooruCharExamples',
+        label: 'Example Dialogs',
+        icon: 'fa-solid fa-comments',
+        keys: ['mes_example', 'data.mes_example'],
+    },
+    {
+        id: 'botbooruCharFirstMsg',
+        label: 'First Message',
+        icon: 'fa-solid fa-message',
+        keys: ['first_message', 'first_mes', 'data.first_message', 'data.first_mes'],
+    },
+];
+
 let botbooruCharacters = [];
 let botbooruOffset = 0;
 let botbooruTotal = 0;
@@ -410,30 +449,104 @@ function getCardPreviewText(char, keys) {
     return '';
 }
 
+export function getBotbooruPreviewSections(char) {
+    return PREVIEW_SECTIONS
+        .map(section => ({
+            id: section.id,
+            label: section.label,
+            icon: section.icon,
+            content: getCardPreviewText(char, section.keys),
+        }))
+        .filter(section => section.content);
+}
+
+function getBotbooruAltGreetings(char) {
+    const greetings = char?.alternate_greetings || char?.data?.alternate_greetings;
+    if (!Array.isArray(greetings)) return [];
+    return greetings
+        .filter(greeting => typeof greeting === 'string' && greeting.trim())
+        .map(greeting => greeting.trim());
+}
+
+function renderBotbooruAltGreetings(char) {
+    const section = document.getElementById('botbooruCharAltGreetingsSection');
+    const list = document.getElementById('botbooruCharAltGreetings');
+    const count = document.getElementById('botbooruCharAltGreetingsCount');
+    if (!section || !list) return;
+
+    const greetings = getBotbooruAltGreetings(char);
+    if (greetings.length === 0) {
+        section.style.display = 'none';
+        list.innerHTML = '';
+        if (count) count.textContent = '';
+        window.currentBrowseAltGreetings = [];
+        return;
+    }
+
+    const buildPreview = (text) => {
+        const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+        if (!cleaned) return 'No content';
+        return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
+    };
+
+    section.style.display = '';
+    list.innerHTML = greetings.map((greeting, index) => `
+        <details class="browse-alt-greeting" data-greeting-idx="${index}">
+            <summary>
+                <span class="browse-alt-greeting-index">#${index + 1}</span>
+                <span class="browse-alt-greeting-preview">${safe(buildPreview(greeting))}</span>
+                <span class="browse-alt-greeting-chevron"><i class="fa-solid fa-chevron-down"></i></span>
+            </summary>
+            <div class="browse-alt-greeting-body"></div>
+        </details>
+    `).join('');
+
+    list.querySelectorAll('details.browse-alt-greeting').forEach(details => {
+        details.addEventListener('toggle', function onToggle() {
+            if (!details.open) return;
+            const body = details.querySelector('.browse-alt-greeting-body');
+            if (!body || body.dataset.rendered) return;
+            const index = Number.parseInt(details.dataset.greetingIdx, 10);
+            body.textContent = greetings[index] || '';
+            body.dataset.rendered = '1';
+        }, { once: true });
+    });
+
+    if (count) count.textContent = `(${greetings.length})`;
+    window.currentBrowseAltGreetings = greetings;
+}
+
 function renderPreviewSections(char) {
-    const description = getCardPreviewText(char, ['description', 'data.description', 'data.personality', 'personality']);
-    const firstMessage = getCardPreviewText(char, ['first_message', 'first_mes', 'data.first_message', 'data.first_mes']);
+    const sectionsById = new Map(getBotbooruPreviewSections(char).map(section => [section.id, section]));
 
-    const descSection = document.getElementById('botbooruCharDescriptionSection');
-    const descEl = document.getElementById('botbooruCharDescription');
-    if (descSection && descEl) {
-        descSection.style.display = description ? '' : 'none';
-        descEl.textContent = description;
+    for (const sectionConfig of PREVIEW_SECTIONS) {
+        const wrapper = document.getElementById(`${sectionConfig.id}Section`);
+        const contentEl = document.getElementById(sectionConfig.id);
+        const section = sectionsById.get(sectionConfig.id);
+        if (!wrapper || !contentEl) continue;
+
+        wrapper.style.display = section ? '' : 'none';
+        contentEl.textContent = section?.content || '';
+        if (section?.content) {
+            contentEl.dataset.fullContent = section.content;
+        } else {
+            delete contentEl.dataset.fullContent;
+        }
     }
 
-    const firstSection = document.getElementById('botbooruCharFirstMsgSection');
-    const firstEl = document.getElementById('botbooruCharFirstMsg');
-    if (firstSection && firstEl) {
-        firstSection.style.display = firstMessage ? '' : 'none';
-        firstEl.textContent = firstMessage;
-    }
+    renderBotbooruAltGreetings(char);
 }
 
 function applyCardPreviewData(char, card) {
     if (!char || !card?.data) return;
     char.data = { ...(char.data || {}), ...card.data };
-    char.description = char.description || card.data.description || card.data.personality || '';
+    for (const key of ['description', 'personality', 'scenario', 'mes_example', 'creator_notes']) {
+        if (!char[key] && card.data[key]) char[key] = card.data[key];
+    }
     char.first_mes = char.first_mes || card.data.first_mes || card.data.first_message || '';
+    if (!Array.isArray(char.alternate_greetings) && Array.isArray(card.data.alternate_greetings)) {
+        char.alternate_greetings = card.data.alternate_greetings;
+    }
     if ((!char.name || /^BotBooru\s+\d+/i.test(char.name)) && card.data.name) char.name = card.data.name;
     if ((!char.creator || char.creator === 'Unknown') && card.data.creator) char.creator = card.data.creator;
     char._cardLoaded = true;
@@ -1098,13 +1211,47 @@ class BotbooruBrowseView extends BrowseView {
                     </div>
                     <div class="browse-char-tags" id="botbooruCharTags"></div>
                 </div>
+                <div class="browse-char-section" id="botbooruCharCreatorNotesSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="botbooruCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
+                        <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
+                    </h3>
+                    <div id="botbooruCharCreatorNotes" class="scrolling-text"></div>
+                </div>
                 <div class="browse-char-section" id="botbooruCharDescriptionSection" style="display: none;">
-                    <h3 class="browse-section-title"><i class="fa-solid fa-scroll"></i> Description</h3>
+                    <h3 class="browse-section-title" data-section="botbooruCharDescription" data-label="Description" data-icon="fa-solid fa-scroll" title="Click to expand">
+                        <i class="fa-solid fa-scroll"></i> Description
+                    </h3>
                     <div id="botbooruCharDescription" class="scrolling-text"></div>
                 </div>
+                <div class="browse-char-section" id="botbooruCharPersonalitySection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="botbooruCharPersonality" data-label="Personality" data-icon="fa-solid fa-brain" title="Click to expand">
+                        <i class="fa-solid fa-brain"></i> Personality
+                    </h3>
+                    <div id="botbooruCharPersonality" class="scrolling-text"></div>
+                </div>
+                <div class="browse-char-section" id="botbooruCharScenarioSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="botbooruCharScenario" data-label="Scenario" data-icon="fa-solid fa-theater-masks" title="Click to expand">
+                        <i class="fa-solid fa-theater-masks"></i> Scenario
+                    </h3>
+                    <div id="botbooruCharScenario" class="scrolling-text"></div>
+                </div>
+                <div class="browse-char-section" id="botbooruCharExamplesSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="botbooruCharExamples" data-label="Example Dialogs" data-icon="fa-solid fa-comments" title="Click to expand">
+                        <i class="fa-solid fa-comments"></i> Example Dialogs
+                    </h3>
+                    <div id="botbooruCharExamples" class="scrolling-text"></div>
+                </div>
                 <div class="browse-char-section" id="botbooruCharFirstMsgSection" style="display: none;">
-                    <h3 class="browse-section-title"><i class="fa-solid fa-message"></i> First Message</h3>
+                    <h3 class="browse-section-title" data-section="botbooruCharFirstMsg" data-label="First Message" data-icon="fa-solid fa-message" title="Click to expand">
+                        <i class="fa-solid fa-message"></i> First Message
+                    </h3>
                     <div id="botbooruCharFirstMsg" class="scrolling-text first-message-preview"></div>
+                </div>
+                <div class="browse-char-section" id="botbooruCharAltGreetingsSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="browseAltGreetings" data-label="Alternate Greetings" data-icon="fa-solid fa-comments" title="Click to expand">
+                        <i class="fa-solid fa-comments"></i> Alternate Greetings <span class="browse-section-count" id="botbooruCharAltGreetingsCount"></span>
+                    </h3>
+                    <div id="botbooruCharAltGreetings" class="browse-alt-greetings-list"></div>
                 </div>
             </div>
         </div>
