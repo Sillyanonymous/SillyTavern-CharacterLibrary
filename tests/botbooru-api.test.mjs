@@ -108,6 +108,21 @@ test('BotBooru Curated mode keeps Sort By on normal order values', async () => {
     assert.equal(getBotbooruSortSelectValue(''), 'latest');
 });
 
+test('BotBooru Curated mode applies selected sort locally', async () => {
+    globalThis.window = globalThis.window || {};
+    const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);
+    const posts = [
+        { id: 1, name: 'Bowsette', favorites: 1, views: 35, downloads: 3, createdAt: '2026-01-01T00:00:00Z' },
+        { id: 2, name: 'Osana Robin', favorites: 2, views: 25, downloads: 4, createdAt: '2026-01-02T00:00:00Z' },
+        { id: 3, name: 'Bowsette Alt', favorites: 0, views: 7, downloads: 5, createdAt: '2026-01-03T00:00:00Z' },
+    ];
+
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'favorites').map(post => post.id), [2, 1, 3]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'downloads').map(post => post.id), [3, 2, 1]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'latest').map(post => post.id), [3, 2, 1]);
+    assert.equal(sortBotbooruCharactersForView(posts, 'browse', 'favorites'), posts);
+});
+
 test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
     globalThis.window = globalThis.window || {};
     globalThis.window.escapeHtml = value => String(value ?? '');

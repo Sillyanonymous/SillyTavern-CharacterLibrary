@@ -119,6 +119,56 @@ export function shouldSyncBotbooruTokenForLoad(mode, sort) {
     return mode === 'favorites' || mode === 'curated' || sort === CURATED_SORT;
 }
 
+function getSortNumber(value) {
+    const n = Number.parseInt(value, 10);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function getSortTime(char) {
+    const time = Date.parse(char?.createdAt || char?.created_at || char?.uploaded_at || '');
+    return Number.isFinite(time) ? time : 0;
+}
+
+function getLocalSortValue(char, sort) {
+    if (sort === 'favorites') return getSortNumber(char?.favorites ?? char?.favorite_count ?? char?.fav_count);
+    if (sort === 'views') return getSortNumber(char?.views);
+    if (sort === 'downloads') return getSortNumber(char?.downloads);
+    return getSortTime(char);
+}
+
+function shuffleCharacters(characters) {
+    const shuffled = characters.slice();
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
+export function sortBotbooruCharactersForView(characters, mode, sort) {
+    if (!Array.isArray(characters) || mode !== 'curated') return characters;
+
+    const selectedSort = getBotbooruSortSelectValue(sort);
+    if (selectedSort === 'random') return shuffleCharacters(characters);
+    if (!['latest', 'favorites', 'views', 'downloads'].includes(selectedSort)) return characters;
+
+    return characters
+        .map((char, index) => ({ char, index }))
+        .sort((a, b) => {
+            const sortDelta = getLocalSortValue(b.char, selectedSort) - getLocalSortValue(a.char, selectedSort);
+            if (sortDelta) return sortDelta;
+
+            if (selectedSort !== 'latest') {
+                const timeDelta = getSortTime(b.char) - getSortTime(a.char);
+                if (timeDelta) return timeDelta;
+            }
+
+            const idDelta = getSortNumber(b.char?.id) - getSortNumber(a.char?.id);
+            return idDelta || a.index - b.index;
+        })
+        .map(item => item.char);
+}
+
 function syncBotbooruModeButtons() {
     document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.botbooruView === botbooruViewMode);
@@ -741,7 +791,8 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
 
         const rawPosts = data.posts || [];
         const posts = applyPersistentExcludeTags(rawPosts);
-        botbooruCharacters = reset ? posts : botbooruCharacters.concat(posts);
+        const nextCharacters = reset ? posts : botbooruCharacters.concat(posts);
+        botbooruCharacters = sortBotbooruCharactersForView(nextCharacters, botbooruViewMode, botbooruSort);
         botbooruTotal = data.total || botbooruCharacters.length;
         botbooruOffset += rawPosts.length;
         botbooruHasMore = botbooruOffset < botbooruTotal && rawPosts.length > 0;
