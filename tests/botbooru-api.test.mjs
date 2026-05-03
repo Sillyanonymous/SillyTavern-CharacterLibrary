@@ -87,6 +87,16 @@ test('followed tag helpers use the BotBooru helper routes', async () => {
     ]);
 });
 
+test('BotBooru syncs saved token for personalized loads without gating Curated', async () => {
+    globalThis.window = globalThis.window || {};
+    const { shouldSyncBotbooruTokenForLoad } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sync-token-${Date.now()}`);
+
+    assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'latest'), false);
+    assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'curated'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('curated', 'curated'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('favorites', 'latest'), true);
+});
+
 test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
     globalThis.window = globalThis.window || {};
     const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=${Date.now()}`);

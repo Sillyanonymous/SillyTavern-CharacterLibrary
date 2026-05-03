@@ -110,6 +110,10 @@ function getActiveBotbooruSort() {
     return botbooruViewMode === 'curated' ? CURATED_SORT : botbooruSort;
 }
 
+export function shouldSyncBotbooruTokenForLoad(mode, sort) {
+    return mode === 'favorites' || sort === CURATED_SORT;
+}
+
 function syncBotbooruModeButtons() {
     document.querySelectorAll('.botbooru-view-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.botbooruView === botbooruViewMode);
@@ -714,7 +718,7 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
             return;
         }
 
-        if (botbooruViewMode === 'favorites') {
+        if (shouldSyncBotbooruTokenForLoad(botbooruViewMode, getActiveBotbooruSort())) {
             await syncSavedTokenToHelper();
         }
 
