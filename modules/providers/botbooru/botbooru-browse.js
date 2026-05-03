@@ -119,6 +119,32 @@ export function shouldSyncBotbooruTokenForLoad(mode, sort) {
     return mode === 'favorites' || mode === 'curated' || sort === CURATED_SORT;
 }
 
+export function getBotbooruNsfwToggleState(enabled) {
+    return enabled
+        ? {
+            active: true,
+            icon: 'fa-solid fa-fire',
+            label: 'NSFW On',
+            title: 'NSFW content enabled - click to show SFW only',
+        }
+        : {
+            active: false,
+            icon: 'fa-solid fa-shield-halved',
+            label: 'SFW Only',
+            title: 'Showing SFW only - click to include NSFW',
+        };
+}
+
+function updateBotbooruNsfwToggle() {
+    const btn = document.getElementById('botbooruNsfwToggle');
+    if (!btn) return;
+
+    const state = getBotbooruNsfwToggleState(botbooruNsfw);
+    btn.classList.toggle('active', state.active);
+    btn.innerHTML = `<i class="${state.icon}"></i> <span>${safe(state.label)}</span>`;
+    btn.title = state.title;
+}
+
 function getSortNumber(value) {
     const n = Number.parseInt(value, 10);
     return Number.isFinite(n) ? n : 0;
@@ -1003,8 +1029,8 @@ class BotbooruBrowseView extends BrowseView {
                 </div>
             </div>
 
-            <button id="botbooruNsfwToggle" class="glass-btn nsfw-toggle active" type="button" title="Toggle NSFW content">
-                <i class="fa-solid fa-shield-halved"></i> <span>NSFW</span>
+            <button id="botbooruNsfwToggle" class="glass-btn nsfw-toggle active" type="button" title="NSFW content enabled - click to show SFW only">
+                <i class="fa-solid fa-fire"></i> <span>NSFW On</span>
             </button>
             <button id="botbooruRefreshBtn" class="glass-btn icon-only" type="button" title="Refresh">
                 <i class="fa-solid fa-sync"></i>
@@ -1155,8 +1181,7 @@ class BotbooruBrowseView extends BrowseView {
         const wasInitialized = this._initialized;
         super.activate(container, options);
 
-        const nsfwBtn = document.getElementById('botbooruNsfwToggle');
-        nsfwBtn?.classList.toggle('active', botbooruNsfw);
+        updateBotbooruNsfwToggle();
         syncBotbooruSortSelect();
         syncFilterCheckboxState();
 
@@ -1239,7 +1264,7 @@ class BotbooruBrowseView extends BrowseView {
         on('botbooruNsfwToggle', 'click', () => {
             botbooruNsfw = !botbooruNsfw;
             setSetting?.('botbooruNsfw', botbooruNsfw);
-            document.getElementById('botbooruNsfwToggle')?.classList.toggle('active', botbooruNsfw);
+            updateBotbooruNsfwToggle();
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);
         on('botbooruRefreshBtn', 'click', () => loadBotbooruCharacters({ reset: true }), listenerOptions);
@@ -1260,10 +1285,19 @@ class BotbooruBrowseView extends BrowseView {
         on('botbooruImportBtn', 'click', importSelectedBotbooruCharacter, listenerOptions);
         on('botbooruFavoriteBtn', 'click', toggleSelectedFavorite, listenerOptions);
         on('botbooruCharClose', 'click', closePreviewModal, listenerOptions);
+        on('botbooruCharModal', 'click', (e) => {
+            if (e.target.id === 'botbooruCharModal') closePreviewModal();
+        }, listenerOptions);
         on('botbooruTokenClose', 'click', closeTokenModal, listenerOptions);
+        on('botbooruTokenModal', 'click', (e) => {
+            if (e.target.id === 'botbooruTokenModal') closeTokenModal();
+        }, listenerOptions);
         on('botbooruSaveTokenBtn', 'click', saveBotbooruTokenFromModal, listenerOptions);
         on('botbooruClearTokenBtn', 'click', clearBotbooruTokenFromModal, listenerOptions);
         on('botbooruFollowedTagsClose', 'click', closeFollowedTagsModal, listenerOptions);
+        on('botbooruFollowedTagsModal', 'click', (e) => {
+            if (e.target.id === 'botbooruFollowedTagsModal') closeFollowedTagsModal();
+        }, listenerOptions);
         on('botbooruFollowedTagsAddBtn', 'click', addBotbooruFollowedTag, listenerOptions);
         on('botbooruFollowedTagsInput', 'keydown', e => {
             if (e.key === 'Enter') {
@@ -1289,6 +1323,10 @@ class BotbooruBrowseView extends BrowseView {
             const char = botbooruCharacters.find(item => String(item.id) === String(id));
             if (char) openBotbooruCharPreview(char);
         }, listenerOptions);
+
+        window.registerOverlay?.({ id: 'botbooruCharModal', tier: 7, close: () => closePreviewModal() });
+        window.registerOverlay?.({ id: 'botbooruTokenModal', tier: 6, close: () => closeTokenModal() });
+        window.registerOverlay?.({ id: 'botbooruFollowedTagsModal', tier: 6, close: () => closeFollowedTagsModal() });
     }
 
     closePreview() {

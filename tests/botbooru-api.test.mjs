@@ -108,6 +108,24 @@ test('BotBooru Curated mode keeps Sort By on normal order values', async () => {
     assert.equal(getBotbooruSortSelectValue(''), 'latest');
 });
 
+test('BotBooru NSFW toggle mirrors provider label states', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruNsfwToggleState } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=nsfw-toggle-${Date.now()}`);
+
+    assert.deepEqual(getBotbooruNsfwToggleState(true), {
+        active: true,
+        icon: 'fa-solid fa-fire',
+        label: 'NSFW On',
+        title: 'NSFW content enabled - click to show SFW only',
+    });
+    assert.deepEqual(getBotbooruNsfwToggleState(false), {
+        active: false,
+        icon: 'fa-solid fa-shield-halved',
+        label: 'SFW Only',
+        title: 'Showing SFW only - click to include NSFW',
+    });
+});
+
 test('BotBooru personalized modes apply selected sort locally', async () => {
     globalThis.window = globalThis.window || {};
     const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);
