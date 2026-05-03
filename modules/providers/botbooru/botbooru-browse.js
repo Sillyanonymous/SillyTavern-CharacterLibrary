@@ -146,7 +146,7 @@ function shuffleCharacters(characters) {
 }
 
 export function sortBotbooruCharactersForView(characters, mode, sort) {
-    if (!Array.isArray(characters) || mode !== 'curated') return characters;
+    if (!Array.isArray(characters) || !['curated', 'favorites'].includes(mode)) return characters;
 
     const selectedSort = getBotbooruSortSelectValue(sort);
     if (selectedSort === 'random') return shuffleCharacters(characters);

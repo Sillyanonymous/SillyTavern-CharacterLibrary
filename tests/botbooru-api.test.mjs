@@ -108,7 +108,7 @@ test('BotBooru Curated mode keeps Sort By on normal order values', async () => {
     assert.equal(getBotbooruSortSelectValue(''), 'latest');
 });
 
-test('BotBooru Curated mode applies selected sort locally', async () => {
+test('BotBooru personalized modes apply selected sort locally', async () => {
     globalThis.window = globalThis.window || {};
     const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);
     const posts = [
@@ -120,6 +120,8 @@ test('BotBooru Curated mode applies selected sort locally', async () => {
     assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'favorites').map(post => post.id), [2, 1, 3]);
     assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'downloads').map(post => post.id), [3, 2, 1]);
     assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'latest').map(post => post.id), [3, 2, 1]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'favorites', 'favorites').map(post => post.id), [2, 1, 3]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'favorites', 'downloads').map(post => post.id), [3, 2, 1]);
     assert.equal(sortBotbooruCharactersForView(posts, 'browse', 'favorites'), posts);
 });
 
