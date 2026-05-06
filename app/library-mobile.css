@@ -14,7 +14,7 @@
         max-width: 100vw !important;
         overflow-x: hidden !important;
         height: 100vh !important;
-        height: 100dvh !important; /* dynamic viewport — tracks browser chrome */
+        height: 100dvh !important; /* dynamic viewport - tracks browser chrome */
     }
 
     /* --- Global touch optimizations --- */
@@ -717,7 +717,7 @@
         z-index: 1;
     }
 
-    /* Collapsing animation — scoped to charModal only */
+    /* Collapsing animation - scoped to charModal only */
     #charModal .modal-header {
         max-height: 80px;
         overflow: hidden;
@@ -789,7 +789,7 @@
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
     }
 
-    /* Browse gallery viewer — mobile overrides */
+    /* Browse gallery viewer - mobile overrides */
     .browse-avatar-viewer .browse-av-nav {
         display: none;
     }
@@ -931,7 +931,7 @@
 
     /* Make .modal-body the scroll container instead of individual tab panes.
        Tab panes inherit flex:1 + overflow-y:auto from desktop which creates
-       inner scroll surfaces — preventing the modal-body scroll listener from
+       inner scroll surfaces - preventing the modal-body scroll listener from
        ever seeing a non-zero scrollTop. */
     #charModal .modal-content-tabs {
         flex: none;
@@ -939,6 +939,12 @@
     #charModal .tab-pane {
         overflow: visible !important;
         flex: none !important;
+    }
+    /* Info tab content: defer scroll to modal-body (desktop caps height) */
+    #charModal .info-tab-content {
+        max-height: none;
+        overflow: visible;
+        padding-right: 0;
     }
 
     /* Tab strip sticky below the header so it never scrolls away */
@@ -1122,7 +1128,7 @@
 
     /* ---------------------------------------------------
        EXPANDED MODAL BODIES – minimal padding + default zoom
-       CSS zoom applied directly — no JS button-clicking needed.
+       CSS zoom applied directly - no JS button-clicking needed.
        The JS just updates the zoom display label to match.
        --------------------------------------------------- */
     .section-expand-body {
@@ -1200,6 +1206,62 @@
     .confirm-modal-header h3 { font-size: var(--font-md-lg); }
     .confirm-modal-body { padding: 14px 16px; font-size: var(--font-md); }
     .confirm-modal-footer { padding: 10px 16px; }
+
+    /* Canonical confirm overlay → bottom sheet on mobile.
+       Uses .cl-confirm-overlay wrapper to scope this behavior, leaving
+       legacy .confirm-modal-content usages (full-viewport modals) untouched.
+       Visual goals: clean unified surface, generous breathing room, no
+       internal dividers, equal-flex pill buttons. */
+    .cl-confirm-overlay {
+        align-items: flex-end !important;
+        padding: 0 !important;
+        animation: clConfirmFadeIn 0.18s ease !important;
+    }
+    .cl-confirm-overlay .confirm-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        max-height: 88vh !important;
+        border-radius: 20px 20px 0 0 !important;
+        animation: clConfirmSheetSlideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1) !important;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5) !important;
+        position: relative;
+    }
+    .cl-confirm-overlay .confirm-modal-header {
+        padding: 20px 20px 6px !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        border-bottom: none !important;
+        text-align: left;
+    }
+    .cl-confirm-overlay .confirm-modal-header h3 {
+        font-size: var(--font-lg) !important;
+        font-weight: 600;
+    }
+    .cl-confirm-overlay .confirm-modal-body {
+        padding: 4px 20px 18px !important;
+    }
+    .cl-confirm-overlay .confirm-modal-body p {
+        font-size: var(--font-md);
+        line-height: 1.5;
+    }
+    .cl-confirm-overlay .confirm-modal-footer {
+        padding: 8px 16px 12px !important;
+        padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)) !important;
+        gap: 10px;
+        border-top: none !important;
+    }
+    .cl-confirm-overlay .confirm-modal-footer .action-btn {
+        min-height: 48px;
+        flex: 1;
+        border-radius: 12px;
+        font-size: var(--font-base);
+        font-weight: 600;
+    }
+    @keyframes clConfirmSheetSlideUp {
+        from { transform: translateY(100%); }
+        to { transform: translateY(0); }
+    }
 
     /* ---------------------------------------------------
        TOAST NOTIFICATIONS – top-anchored on mobile
@@ -2199,49 +2261,111 @@
     .settings-row > label { font-size: var(--font-sm); }
     .color-preview-label { font-size: var(--font-sm); }
 
-    /* --- Provider Order & Defaults --- */
-    .provider-order-item {
-        flex-wrap: wrap;
-        padding: 10px 12px;
+    /* --- Provider Order & Defaults ---
+       Restructured as stacked cards on mobile.
+       Header row: drag handle, icon, name, badges, toggle button (right).
+       Body rows: View / Sort selects on their own labeled lines, full width. */
+    .provider-order-list {
         gap: var(--space-sm);
+    }
+    .provider-order-item {
+        display: grid;
+        grid-template-columns: auto auto auto auto 1fr auto auto;
+        grid-template-areas:
+            "handle icon name beta spacer default toggle"
+            "body   body body body body    body    body";
+        align-items: center;
+        gap: var(--space-xs) var(--space-sm);
+        padding: 10px 12px;
+        border-radius: 10px !important;
+        border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        background: rgba(255, 255, 255, 0.04);
         min-height: 44px;
         touch-action: manipulation;
+        cursor: default;
     }
     .provider-order-item:hover {
-        background: rgba(255, 255, 255, 0.03);
+        background: rgba(255, 255, 255, 0.04);
     }
     .provider-order-item .drag-handle {
-        opacity: 0.5;
+        grid-area: handle;
+        opacity: 0.55;
         font-size: var(--font-md-lg);
-        padding: 6px;
+        padding: 8px 4px;
+        min-width: 24px;
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: grab;
+    }
+    .provider-order-item .provider-toggle-btn {
+        grid-area: toggle;
+        font-size: var(--font-md);
+        padding: 8px;
+        min-width: 36px;
+        min-height: 36px;
+        opacity: 0.7;
+    }
+    .provider-order-item .provider-order-icon {
+        grid-area: icon;
+        font-size: var(--font-md-lg);
+        width: auto;
     }
     .provider-order-item .provider-order-name {
+        grid-area: name;
         font-size: var(--font-md);
-        flex: 1 1 0;
         min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .provider-order-item .provider-beta-badge {
+        grid-area: beta;
+        justify-self: start;
+    }
+    .provider-order-item .provider-order-badge {
+        grid-area: default;
+        justify-self: end;
     }
     .provider-order-item .provider-order-defaults {
-        width: 100%;
+        grid-area: body;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-xs);
         margin-left: 0;
-        padding-left: 30px;
-        gap: var(--space-xs-sm);
-        flex-wrap: nowrap;
+        padding-top: var(--space-xs);
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        margin-top: var(--space-xs);
+        width: 100%;
+    }
+    .provider-order-item .provider-order-defaults:empty {
+        display: none;
     }
     .provider-order-item .provider-order-defaults select {
-        font-size: 16px !important;
-        padding: 4px 6px;
+        font-size: var(--font-sm) !important;
+        padding: 4px 8px;
         min-height: 32px;
+        flex: 1 1 calc(50% - var(--space-xs));
+        min-width: 130px;
         max-width: none;
-        flex: 1 1 0;
-        min-width: 0;
+        width: auto;
         border-radius: 6px;
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-primary);
     }
     .provider-order-defaults-label {
         display: none;
     }
-    .provider-order-badge {
-        font-size: var(--font-3xs);
-        padding: 2px 5px;
+    .provider-order-item.provider-disabled {
+        opacity: 0.55;
+    }
+    .provider-order-item:active {
+        cursor: default;
     }
 
     /* ---------------------------------------------------
@@ -2261,12 +2385,22 @@
     .loading-spinner {
         position: static;
         transform: none;
-        display: flex;
-        align-items: center;
-        justify-content: center;
         width: 100%;
         height: 100%;
-        font-size: var(--font-pre-base);
+        padding: var(--space-xl);
+    }
+    .loading-spinner .loading-icon {
+        width: 72px;
+        height: 72px;
+    }
+    .loading-spinner .loading-icon i {
+        font-size: 1.75rem;
+    }
+    .loading-spinner .loading-title {
+        font-size: var(--font-lg);
+    }
+    .loading-spinner .loading-progress {
+        width: 160px;
     }
     .character-grid {
         grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -2358,22 +2492,25 @@
     }
 
 
-    /* Provider order — compact for phones */
+    /* Provider order - compact for phones */
     .provider-order-item {
         padding: 8px 10px;
-        gap: var(--space-xs-sm);
+        gap: var(--space-2xs) var(--space-xs-sm);
+        grid-template-columns: auto auto auto 1fr auto auto;
+        grid-template-areas:
+            "handle name beta spacer default toggle"
+            "body   body body body   body    body";
     }
     .provider-order-item .provider-order-icon {
         display: none;
     }
     .provider-order-item .provider-order-defaults {
-        padding-left: 26px;
         gap: var(--space-xs);
     }
     .provider-order-item .provider-order-defaults select {
         font-size: 16px !important;
-        padding: 3px 4px;
-        min-height: 28px;
+        padding: 6px 8px;
+        min-height: 36px;
     }
 
     /* ---- Inline Tags Row in Edit tab ---- */
@@ -2520,7 +2657,7 @@
         display: flex;
     }
 
-    /* Suggestion pills — dashed border, accent tint */
+    /* Suggestion pills - dashed border, accent tint */
     #tagEditorSheetAutocomplete .tag-autocomplete-item {
         display: inline-flex;
         align-items: center;
@@ -2543,7 +2680,7 @@
         transform: scale(0.95);
     }
 
-    /* "Create new tag" pill — green tint */
+    /* "Create new tag" pill - green tint */
     #tagEditorSheetAutocomplete .tag-autocomplete-item.create-new {
         border-color: rgba(100, 210, 100, 0.4);
         color: rgba(100, 210, 100, 0.95);
@@ -2595,7 +2732,7 @@
         overflow-y: auto;
     }
 
-    /* Help nav — icon-only on phones */
+    /* Help nav - icon-only on phones */
     .help-nav-item span { display: none !important; }
     .help-nav-item i { font-size: var(--font-base) !important; margin: 0 !important; }
 

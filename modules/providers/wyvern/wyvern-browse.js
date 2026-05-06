@@ -1,4 +1,4 @@
-// WyvernBrowseView — Wyvern browse/search UI for the Online tab
+// WyvernBrowseView - Wyvern browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
@@ -27,6 +27,7 @@ const {
     debugLog,
     showToast,
     escapeHtml,
+    safePurify,
     formatRichText,
     sanitizeTaglineHtml,
     renderLoadingState,
@@ -816,6 +817,10 @@ class WyvernBrowseView extends BrowseView {
     deactivate() {
         super.deactivate();
         wyvernDelegatesInitialized = false;
+        // Reset in-flight flags so a stuck flag from a hung fetch can't block
+        // the next view re-entry from kicking off a fresh load.
+        wyvernIsLoading = false;
+        wyvernFollowingLoading = false;
         this.disconnectImageObserver();
         if (wyvernDetailFetchController) {
             try { wyvernDetailFetchController.abort(); } catch (e) { /* ignore */ }
@@ -956,7 +961,7 @@ function initWyvernView() {
     });
     on('wyvernCreatorSearchBtn', 'click', () => performWyvernCreatorSearch());
 
-    // Modal + document-level listeners — attach once (persist across provider switches)
+    // Modal + document-level listeners - attach once (persist across provider switches)
     if (!wyvernModalEventsAttached) {
         wyvernModalEventsAttached = true;
         const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
@@ -1235,13 +1240,13 @@ async function attemptWyvernTokenRecovery() {
 
 async function tryWyvernAutoLogin() {
     if (wyvernToken && getTokenTTL(wyvernToken) > 60) {
-        // Token is valid — schedule refresh
+        // Token is valid - schedule refresh
         const refreshToken = getSetting('wyvernRefreshToken');
         if (refreshToken) scheduleWyvernTokenRefresh(wyvernToken, refreshToken);
         return;
     }
 
-    // Token expired or missing — try recovery silently
+    // Token expired or missing - try recovery silently
     const recovered = await attemptWyvernTokenRecovery();
     if (recovered) {
         updateWyvernNsfwToggle();
@@ -1666,7 +1671,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
             params.set('tags', includeTags.join(','));
         }
 
-        // Search — omit sort so results are global, not restricted to a trending/votes pool
+        // Search - omit sort so results are global, not restricted to a trending/votes pool
         if (wyvernCurrentSearch) {
             params.set('q', wyvernCurrentSearch);
         } else {
@@ -2228,7 +2233,7 @@ function renderWyvernGrid(appendOnly = false) {
     if (wyvernFilterHidePossible) {
         displayCharacters = displayCharacters.filter(c => !isCharPossibleMatchObj(c));
     }
-    // Exclude tags — client-side filter (Wyvern API has no server-side exclude)
+    // Exclude tags - client-side filter (Wyvern API has no server-side exclude)
     const excludeTags = [];
     for (const [tag, state] of wyvernTagFilters) {
         if (state === 'exclude') excludeTags.push(tag);
@@ -2292,7 +2297,7 @@ function setupWyvernGridDelegates() {
             return;
         }
 
-        // Creator link click — load creator's characters
+        // Creator link click - load creator's characters
         const creatorLink = e.target.closest('.browse-card-creator-link');
         if (creatorLink) {
             e.stopPropagation();
@@ -2396,6 +2401,7 @@ async function openWyvernCharPreview(char) {
     wyvernSelectedChar = char;
 
     const modal = document.getElementById('wyvernCharModal');
+    window.resetBrowseSectionCollapseState?.(modal);
     const avatarImg = document.getElementById('wyvernCharAvatar');
     const nameEl = document.getElementById('wyvernCharName');
     const creatorEl = document.getElementById('wyvernCharCreator');
@@ -2490,7 +2496,7 @@ async function openWyvernCharPreview(char) {
         greetingsStat.style.display = 'none';
     }
 
-    // Reset definition sections — show loading indicator until detail fetch completes
+    // Reset definition sections - show loading indicator until detail fetch completes
     const defLoading = document.getElementById('wyvernCharDefinitionLoading');
     descSection.style.display = 'none';
     personalitySection.style.display = 'none';
@@ -2563,7 +2569,7 @@ async function openWyvernCharPreview(char) {
                 if (body && !body.dataset.rendered) {
                     const idx = parseInt(details.dataset.greetingIdx, 10);
                     if (greetings[idx] != null) {
-                        body.innerHTML = DOMPurify.sanitize(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
+                        body.innerHTML = safePurify(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
                     }
                     body.dataset.rendered = '1';
                 }
@@ -2589,35 +2595,35 @@ async function openWyvernCharPreview(char) {
         // Description
         if (node.description) {
             descSection.style.display = 'block';
-            descEl.innerHTML = DOMPurify.sanitize(formatRichText(node.description, char.name, true), BROWSE_PURIFY_CONFIG);
+            descEl.innerHTML = safePurify(formatRichText(node.description, char.name, true), BROWSE_PURIFY_CONFIG);
             descEl.dataset.fullContent = node.description;
         }
 
         // Personality
         if (node.personality) {
             personalitySection.style.display = 'block';
-            personalityEl.innerHTML = DOMPurify.sanitize(formatRichText(node.personality, char.name, true), BROWSE_PURIFY_CONFIG);
+            personalityEl.innerHTML = safePurify(formatRichText(node.personality, char.name, true), BROWSE_PURIFY_CONFIG);
             personalityEl.dataset.fullContent = node.personality;
         }
 
         // Scenario
         if (node.scenario) {
             scenarioSection.style.display = 'block';
-            scenarioEl.innerHTML = DOMPurify.sanitize(formatRichText(node.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
+            scenarioEl.innerHTML = safePurify(formatRichText(node.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
             scenarioEl.dataset.fullContent = node.scenario;
         }
 
         // Example Dialogs
         if (node.mes_example) {
             examplesSection.style.display = 'block';
-            examplesEl.innerHTML = DOMPurify.sanitize(formatRichText(node.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
+            examplesEl.innerHTML = safePurify(formatRichText(node.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
             examplesEl.dataset.fullContent = node.mes_example;
         }
 
         // First message
         if (node.first_mes) {
             firstMsgSection.style.display = 'block';
-            firstMsgEl.innerHTML = DOMPurify.sanitize(formatRichText(node.first_mes, char.name, true), BROWSE_PURIFY_CONFIG);
+            firstMsgEl.innerHTML = safePurify(formatRichText(node.first_mes, char.name, true), BROWSE_PURIFY_CONFIG);
             firstMsgEl.dataset.fullContent = node.first_mes;
         }
 
@@ -2669,7 +2675,7 @@ async function openWyvernCharPreview(char) {
         applyDetailData(inlineDetail);
     }
 
-    // Check detail cache — if cached, apply immediately (replaces spinner)
+    // Check detail cache - if cached, apply immediately (replaces spinner)
     const cachedDetail = charId ? wyvernDetailCache.get(charId) : null;
     if (cachedDetail) {
         wyvernDetailCache.delete(charId);

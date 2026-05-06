@@ -1,4 +1,4 @@
-// ChartavernBrowseView — CharacterTavern browse/search UI for the Online tab
+// ChartavernBrowseView - CharacterTavern browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
@@ -23,6 +23,7 @@ const {
     onElement: on,
     showToast,
     escapeHtml,
+    safePurify,
     debugLog,
     getSetting,
     setSetting,
@@ -38,6 +39,7 @@ const {
     apiRequest,
     cleanupCreatorNotesContainer,
     getProviderExcludeTags,
+    renderLoadingState,
 } = CoreAPI;
 
 // ========================================
@@ -288,12 +290,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('ctLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching CharacterTavern...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Searching CharacterTavern...', 'browse-loading');
     }
 
     if (loadMoreBtn) {
@@ -428,6 +425,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('ctCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.name || 'Unknown';
     const author = hit.author || hit.path?.split('/')[0] || 'Unknown';
@@ -472,7 +470,7 @@ function openPreviewModal(hit) {
         const openBtn = document.getElementById('ctOpenInBrowserBtn');
         if (openBtn) openBtn.href = ctUrl;
 
-        // Tagline (above meta grid, no section header — matches Chub pattern)
+        // Tagline (above meta grid, no section header - matches Chub pattern)
         const taglineSection = document.getElementById('ctCharTaglineSection');
         const taglineEl = document.getElementById('ctCharTagline');
         if (taglineSection) {
@@ -520,7 +518,7 @@ function openPreviewModal(hit) {
             requestAnimationFrame(() => applyTagsClamp(tagsEl));
         }
 
-        // Creator's Notes (public listing description — always visible)
+        // Creator's Notes (public listing description - always visible)
         const creatorNotesEl = document.getElementById('ctCharCreatorNotes');
         if (creatorNotesEl) {
             if (creatorNotes) {
@@ -568,7 +566,7 @@ function openPreviewModal(hit) {
             }
         }
 
-        // Alternate Greetings — collapsible details with lazy rendering (matches Chub pattern)
+        // Alternate Greetings - collapsible details with lazy rendering (matches Chub pattern)
         const altGreetingsSection = document.getElementById('ctCharAltGreetingsSection');
         const altGreetingsEl = document.getElementById('ctCharAltGreetings');
         const altGreetingsCountEl = document.getElementById('ctCharAltGreetingsCount');
@@ -604,7 +602,7 @@ function openPreviewModal(hit) {
                             if (body && !body.dataset.rendered) {
                                 const idx = parseInt(details.dataset.greetingIdx, 10);
                                 if (altGreetings[idx] != null) {
-                                    body.innerHTML = DOMPurify.sanitize(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
+                                    body.innerHTML = safePurify(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
                                 }
                                 body.dataset.rendered = '1';
                             }
@@ -1092,7 +1090,7 @@ function initCtView() {
         loadCharacters(true);
     });
 
-    // NSFW toggle — requires active session for NSFW
+    // NSFW toggle - requires active session for NSFW
     on('ctNsfwToggle', 'click', () => {
         if (!isCtSessionActive()) {
             showToast('Login required for NSFW content. Use the login option in Settings or click here to log in.', 'warning');
@@ -1216,13 +1214,13 @@ function initCtView() {
         loadCharacters(false);
     });
 
-    // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
+    // Close dropdowns when clicking outside (uses .contains() - works after mobile relocation to body)
     chartavernBrowseView._registerDropdownDismiss([
         { dropdownId: 'ctTagsDropdown', buttonId: 'ctTagsBtn' },
         { dropdownId: 'ctFiltersDropdown', buttonId: 'ctFiltersBtn' },
     ]);
 
-    // ── Preview modal events (attached once — modal DOM persists across provider switches) ──
+    // ── Preview modal events (attached once - modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
 
@@ -1370,7 +1368,7 @@ function updateNsfwToggle() {
 }
 
 // ========================================
-// AUTH — CT COOKIE SESSION VIA CL-HELPER
+// AUTH - CT COOKIE SESSION VIA CL-HELPER
 // ========================================
 
 async function openCtLoginModal() {
@@ -1519,7 +1517,7 @@ async function tryCheckSession() {
         if (savedNsfw) ctNsfwEnabled = true;
         updateNsfwToggle();
     } else {
-        // No active session in cl-helper — try to restore from saved cookie
+        // No active session in cl-helper - try to restore from saved cookie
         const savedCookie = getSetting('ctCookie');
         if (savedCookie) {
             const result = await ctSetCookie(apiRequest, savedCookie);
@@ -1911,7 +1909,7 @@ class ChartavernBrowseView extends BrowseView {
         initCtView();
         const grid = document.getElementById('ctGrid');
         if (grid) this.observeImages(grid);
-        // Check session silently — if logged in, update toggle and reload with NSFW
+        // Check session silently - if logged in, update toggle and reload with NSFW
         tryCheckSession().then(() => loadCharacters(false));
     }
 

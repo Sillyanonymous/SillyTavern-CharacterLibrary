@@ -27,7 +27,7 @@
     cursor: wait;
 }
 
-/* Pygmalion Login — plugin status & auth status */
+/* Pygmalion Login - plugin status & auth status */
 
 .pyg-plugin-status {
     font-size: var(--font-md);

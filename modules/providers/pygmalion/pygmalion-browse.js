@@ -1,4 +1,4 @@
-// Pygmalion Browse View — Online tab UI for pygmalion.chat character browsing
+// Pygmalion Browse View - Online tab UI for pygmalion.chat character browsing
 //
 // Grid-based browse with search, sort, NSFW toggle.
 // Preview modal fetches full character detail via Connect RPC API.
@@ -23,13 +23,14 @@ import {
 } from './pygmalion-api.js';
 
 const {
-    onElement: on, showToast, escapeHtml, debugLog, getSetting, setSetting,
+    onElement: on, showToast, escapeHtml, safePurify, debugLog, getSetting, setSetting,
     fetchCharacters, fetchAndAddCharacter,
     checkCharacterForDuplicatesAsync, showPreImportDuplicateWarning,
     deleteCharacter, getCharacterGalleryId, showImportSummaryModal,
     formatRichText, debounce,
     apiRequest, cleanupCreatorNotesContainer,
     getProviderExcludeTags,
+    renderLoadingState,
 } = CoreAPI;
 
 // ========================================
@@ -277,12 +278,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('pygLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching Pygmalion...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Searching Pygmalion...', 'browse-loading');
     }
 
     if (loadMoreBtn) {
@@ -579,6 +575,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('pygCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.displayName || hit.personality?.name || 'Unknown';
     const owner = hit.owner || {};
@@ -724,7 +721,7 @@ function openPreviewModal(hit) {
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
 
-    // Search results don't include personality — always fetch full detail
+    // Search results don't include personality - always fetch full detail
     if (!hit.personality) {
         const fetchToken = ++pygDetailFetchToken;
         fetchAndPopulateDetails(hit, fetchToken);
@@ -767,7 +764,7 @@ function populateDefinitionSections(name, p, altGreetings) {
             descSection.style.display = 'block';
             if (descEl) descEl.innerHTML = formatRichText(p.persona, name, false);
         } else if (!p.persona && !p.greeting) {
-            // No personality data yet — show loading
+            // No personality data yet - show loading
             descSection.style.display = 'block';
             if (descEl) descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
         } else {
@@ -823,7 +820,7 @@ function populateDefinitionSections(name, p, altGreetings) {
                         if (body && !body.dataset.rendered) {
                             const idx = parseInt(details.dataset.greetingIdx, 10);
                             if (altGreetings[idx] != null) {
-                                body.innerHTML = DOMPurify.sanitize(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
+                                body.innerHTML = safePurify(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
                             }
                             body.dataset.rendered = '1';
                         }
@@ -1184,12 +1181,7 @@ async function switchPygViewMode(mode) {
 
         const grid = document.getElementById('pygGrid');
         if (grid) {
-            grid.innerHTML = `
-                <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                    <p style="margin-top: 12px; color: var(--text-muted);">Loading Pygmalion characters...</p>
-                </div>
-            `;
+            renderLoadingState(grid, 'Loading Pygmalion characters...', 'browse-loading');
         }
 
         pygCharacters = [];
@@ -1233,12 +1225,7 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
     }
 
     if (grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Loading timeline...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Loading timeline...', 'browse-loading');
     }
 
     let shouldRetry = false;
@@ -1748,7 +1735,7 @@ async function attemptTokenRecovery() {
 
 /**
  * Auto-login with stored credentials if plugin available and no valid token.
- * Called on activate() — runs silently, no toasts on failure.
+ * Called on activate() - runs silently, no toasts on failure.
  */
 async function tryAutoLogin() {
     if (pygToken && getTokenTTL(pygToken) > 60) return;
@@ -1798,7 +1785,7 @@ async function tryAutoLogin() {
 // ========================================
 
 let pygIsFollowingCurrentAuthor = false;
-let pygFollowedUserIds = null; // Set<string> — cached followed user IDs
+let pygFollowedUserIds = null; // Set<string> - cached followed user IDs
 
 async function fetchPygFollowedUserIds() {
     if (!pygToken) return new Set();
@@ -2196,7 +2183,7 @@ function initPygView() {
         followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
 
-    // ── Preview modal events (attached once — persist across provider switches)
+    // ── Preview modal events (attached once - persist across provider switches)
     if (!modalEventsAttached) {
         modalEventsAttached = true;
         const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
@@ -2907,6 +2894,9 @@ class PygmalionBrowseView extends BrowseView {
     deactivate() {
         pygDetailFetchToken++;
         delegatesInitialized = false;
+        // Reset following-tab in-flight flag so a stuck flag from a hung fetch
+        // can't block the next view re-entry from kicking off a fresh load.
+        pygFollowingLoading = false;
         super.deactivate();
         this.disconnectImageObserver();
     }

@@ -1,4 +1,4 @@
-// Shared Wyvern API utilities — used by wyvern-provider.js and wyvern-browse.js
+// Shared Wyvern API utilities - used by wyvern-provider.js and wyvern-browse.js
 //
 // Contains constants, auth headers, metadata fetch, the V2 card builder,
 // and the metadata cache. Initialized once via initWyvernApi() which
@@ -182,9 +182,13 @@ export async function fetchWyvernMetadata(charId) {
  */
 export function getAvatarUrl(char) {
     const src = char.avatar_url || char.avatar;
-    if (src && src.startsWith('http')) return src;
-    if (src) return `${WYVERN_IMAGE_BASE}${src}/public`;
-    return '/img/ai4.png';
+    let url;
+    if (src && src.startsWith('http')) url = src;
+    else if (src) url = `${WYVERN_IMAGE_BASE}${src}/public`;
+    else return '/img/ai4.png';
+    const safety = window.isUrlSafeForDownload?.(url);
+    if (safety && !safety.ok) return '/img/ai4.png';
+    return url;
 }
 
 /**
@@ -228,7 +232,7 @@ export function buildCharacterCardFromWyvern(apiData) {
     const creatorName = apiData.creator?.displayName || apiData.creator?.username || '';
     const tags = Array.isArray(apiData.tags) ? apiData.tags : [];
 
-    // shared_info is supplementary character context — append to description
+    // shared_info is supplementary character context - append to description
     let description = apiData.description || '';
     if (apiData.shared_info) {
         description = description
@@ -242,7 +246,7 @@ export function buildCharacterCardFromWyvern(apiData) {
         depthPrompt = { prompt: apiData.character_note, depth: 4, role: 'system' };
     }
 
-    // lorebooks → character_book (V2 format — Wyvern entries are nearly 1:1)
+    // lorebooks → character_book (V2 format - Wyvern entries are nearly 1:1)
     const characterBook = convertWyvernLorebook(apiData.lorebooks);
 
     const wyvernExt = {

@@ -1,4 +1,4 @@
-// Core API — proxy layer between modules and the library monolith
+// Core API - proxy layer between modules and the library monolith
 
 import ProviderRegistry from './providers/provider-registry.js';
 
@@ -184,6 +184,23 @@ export function showToast(message, type = 'info', duration = 3000) {
 }
 
 /**
+ * Show a canonical confirmation dialog. Returns Promise<boolean>.
+ * @param {Object} opts
+ * @param {string} [opts.title]
+ * @param {string} [opts.message] - Plain text message (escaped)
+ * @param {string} [opts.messageHtml] - HTML message (overrides `message`)
+ * @param {string} [opts.icon] - FontAwesome class string for the title icon
+ * @param {string} [opts.iconColor] - CSS color for the title icon
+ * @param {string} [opts.confirmLabel]
+ * @param {string} [opts.cancelLabel]
+ * @param {boolean} [opts.danger] - Style confirm button as danger (red)
+ * @returns {Promise<boolean>}
+ */
+export function showConfirm(opts) {
+    return window.showConfirm?.(opts) ?? Promise.resolve(false);
+}
+
+/**
  * Refresh the character list from server
  * @param {boolean} forceRefresh - Bypass cache
  * @returns {Promise<Array>} Updated characters
@@ -355,6 +372,17 @@ export function getModule(name) {
  */
 export function escapeHtml(text) {
     return window.escapeHtml?.(text) ?? '';
+}
+
+/**
+ * Sanitize HTML safely. Falls back to escapeHtml if DOMPurify is unavailable
+ * and forces rel="noopener noreferrer" on links with target attributes.
+ * @param {string} html - HTML to sanitize
+ * @param {object} [config] - DOMPurify config
+ * @returns {string} Sanitized HTML
+ */
+export function safePurify(html, config) {
+    return window.safePurify?.(html, config) ?? '';
 }
 
 /**
@@ -659,8 +687,8 @@ export function openCharacterCreator() {
     window.openCharacterCreator?.();
 }
 
-export async function autoSnapshotBeforeChange(char, reason) {
-    return window.autoSnapshotBeforeChange?.(char, reason);
+export async function autoSnapshotBeforeChange(char, reason, opts) {
+    return window.autoSnapshotBeforeChange?.(char, reason, opts);
 }
 
 /**
@@ -805,6 +833,15 @@ export function downloadCharacterMedia(character, folderName, options) {
  */
 export function downloadMediaToMemory(url, timeout, signal) {
     return window.downloadMediaToMemory?.(url, timeout, signal) || Promise.resolve(null);
+}
+
+/**
+ * Check if a URL is safe to download from (rejects private IPs, internal hostnames, non-http schemes).
+ * @param {string} url
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export function isUrlSafeForDownload(url) {
+    return window.isUrlSafeForDownload?.(url) || { ok: false, reason: 'safety check unavailable' };
 }
 
 /**
@@ -1043,6 +1080,7 @@ export default {
     getActiveChar,
     setActiveChar,
     showToast,
+    showConfirm,
     refreshCharacters,
     
     // API
@@ -1075,6 +1113,7 @@ export default {
     
     // Utils
     escapeHtml,
+    safePurify,
     sanitizeTaglineHtml,
     isExtensionsRecoveryInProgress,
     debounce,
@@ -1134,6 +1173,7 @@ export default {
     buildDedupState,
     downloadCharacterMedia,
     downloadMediaToMemory,
+    isUrlSafeForDownload,
     calculateHash,
     arrayBufferToBase64,
     getEndpoints,

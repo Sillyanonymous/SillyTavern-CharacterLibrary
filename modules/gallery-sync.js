@@ -405,7 +405,7 @@ export function updateWarningIndicator(audit = null) {
     const container = syncBtn.closest('.gallery-sync-container');
     const uniqueFoldersEnabled = CoreAPI.getSetting('uniqueGalleryFolders') || false;
 
-    // Hide entirely when unique gallery folders are off — nothing to warn about
+    // Hide entirely when unique gallery folders are off - nothing to warn about
     if (!uniqueFoldersEnabled) {
         if (container) container.classList.add('hidden');
         const content = dropdown?.querySelector('.sync-dropdown-content');

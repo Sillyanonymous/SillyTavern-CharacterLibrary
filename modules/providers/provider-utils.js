@@ -1,4 +1,4 @@
-// Provider Utilities — shared helpers used across all providers
+// Provider Utilities - shared helpers used across all providers
 //
 // Contains network helpers, text utilities, image processing,
 // and the import pipeline shared by all provider implementations.
@@ -31,7 +31,7 @@ export async function fetchWithProxy(url, opts = {}) {
         try {
             directResponse = await fetch(url, opts);
         } catch (_) {
-            // fetch() rejects on CORS/network errors — fall through to proxy
+            // fetch() rejects on CORS/network errors - fall through to proxy
             _proxyOrigins.add(origin);
         }
         if (directResponse) {

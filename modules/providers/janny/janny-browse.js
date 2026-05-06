@@ -1,4 +1,4 @@
-// JannyBrowseView — JannyAI browse/search UI for the Online tab
+// JannyBrowseView - JannyAI browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
@@ -33,6 +33,7 @@ const {
     cleanupCreatorNotesContainer,
     debounce,
     getProviderExcludeTags,
+    renderLoadingState,
 } = CoreAPI;
 
 // ========================================
@@ -56,7 +57,7 @@ let jannySortMode = 'newest';
 let jannySelectedChar = null;
 let jannyGridRenderedCount = 0;
 
-// Filter state — mirrors Chub's filter model for parity
+// Filter state - mirrors Chub's filter model for parity
 let jannyShowLowQuality = false;
 let jannyMinTokens = 29;
 let jannyMaxTokens = 100000;
@@ -319,12 +320,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('jannyLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching JannyAI...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Searching JannyAI...', 'browse-loading');
     }
 
     if (loadMoreBtn) {
@@ -460,6 +456,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('jannyCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.name || 'Unknown';
     const creatorNotes = stripHtml(hit.description) || '';
@@ -494,7 +491,7 @@ function openPreviewModal(hit) {
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
     requestAnimationFrame(() => applyTagsClamp(tagsEl));
 
-    // Creator's Notes (website description — may include inline images from ella.janitorai.com)
+    // Creator's Notes (website description - may include inline images from ella.janitorai.com)
     const rawDescription = hit.description || '';
     const creatorNotesSection = document.getElementById('jannyCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('jannyCharCreatorNotes');
@@ -539,7 +536,7 @@ function openPreviewModal(hit) {
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
 
-    // Fetch full details in background — store promise so Import can await it
+    // Fetch full details in background - store promise so Import can await it
     const fetchToken = ++jannyDetailFetchToken;
     jannyDetailFetchPromise = fetchAndPopulateDetails(hit, fetchToken);
 }
@@ -561,7 +558,7 @@ async function fetchAndPopulateDetails(hit, token) {
             console.warn('[JannyBrowse] Detail fetch failed:', e.message);
         }
 
-        // Stale check — user may have opened a different card
+        // Stale check - user may have opened a different card
         if (token !== jannyDetailFetchToken) return;
 
         if (!charData) {
@@ -1085,7 +1082,7 @@ function initJannyView() {
         { dropdownId: 'jannyFiltersDropdown', buttonId: 'jannyFiltersBtn' }
     ]);
 
-    // ── Preview modal events (only attach once — modal DOM persists across provider switches) ──
+    // ── Preview modal events (only attach once - modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
 

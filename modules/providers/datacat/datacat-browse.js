@@ -10,7 +10,7 @@ import CoreAPI from '../../core-api.js';
 import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
 import {
     DATACAT_API_BASE,
-    DATACAT_IMAGE_BASE,
+    resolveDatacatAvatarUrl,
     stripHtml,
     resolveTagNames,
     checkDcPluginAvailable,
@@ -26,7 +26,13 @@ import {
     fetchExtractionStatus,
     searchMeiliJanny,
     fetchHampterCharacters,
+    searchSaucepan,
+    fetchSaucepanCompanion,
+    fetchSaucepanCompanionsOfUser,
     JANNY_TAG_MAP,
+    pickRecoveryVariant,
+    createFlareSolverrSession,
+    destroyFlareSolverrSession,
 } from './datacat-api.js';
 
 const {
@@ -47,6 +53,7 @@ const {
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     getProviderExcludeTags,
+    renderLoadingState,
 } = CoreAPI;
 
 // ========================================
@@ -67,12 +74,23 @@ let datacatBrowseMode = 'recent';
 // Creator browsing state
 let datacatCreatorId = null;
 let datacatCreatorName = '';
+// Source of the active creator filter:
+//   'datacat'  -> uses DataCat's /api/creators/{uuid}/characters
+//   'saucepan' -> uses saucepan.ai /api/v1/companions-of-user?handle=...
+//                 (saucepan creators are not present in DataCat's creator DB)
+let datacatCreatorSource = 'datacat';
+let saucepanCreatorHandle = '';
+// When browsing a saucepan creator, the API returns the entire list in one
+// shot, so we cache it here and paginate client-side via `loadCharacters`.
+let _saucepanCreatorFullList = [];
 let _returnToFollowing = false;
 let datacatSortMode = 'recent';
 let datacatCreatorSortMode = 'chat_count';
 
 let datacatFilterHideOwned = false;
 let datacatFilterHidePossible = false;
+let datacatFilterHideJanitor = false;
+let datacatFilterHideSaucepan = false;
 
 // Fresh endpoint pagination
 let datacatFreshLimit24 = 80;
@@ -116,6 +134,100 @@ let hampterCurrentPage = 1;
 let hampterTotalPages = 0;
 let hampterSearchQuery = '';
 
+// FlareSolverr session reuse state. Sessions keep a hot Chromium instance
+// so subsequent requests skip the Cloudflare challenge.
+let flareSession = { url: '', id: '' };
+let flareSessionPromise = null;
+
+/**
+ * Ensure a FlareSolverr session exists for the given URL. Returns the session
+ * ID, or '' if creation failed (caller should fall back to sessionless).
+ *
+ * Sessions are MUCH faster than sessionless requests on FlareSolverr - even
+ * the very first in-session fetch beats sessionless by ~4-5x because cold
+ * browser spawns dominate sessionless latency. Always prefer sessions.
+ */
+async function ensureFlareSession(flareUrl) {
+    if (!flareUrl) return '';
+    if (flareSession.url === flareUrl && flareSession.id) return flareSession.id;
+    if (flareSession.url && flareSession.url !== flareUrl) {
+        const stale = flareSession;
+        flareSession = { url: '', id: '' };
+        destroyFlareSolverrSession(stale.url, stale.id);
+    }
+    if (flareSessionPromise) return flareSessionPromise;
+    flareSessionPromise = (async () => {
+        try {
+            const id = await createFlareSolverrSession(flareUrl);
+            flareSession = { url: flareUrl, id };
+            return id;
+        } catch (err) {
+            console.warn('[DatacatBrowse] FlareSolverr session create failed, falling back to sessionless:', err.message);
+            return '';
+        } finally {
+            flareSessionPromise = null;
+        }
+    })();
+    return flareSessionPromise;
+}
+
+function clearFlareSession() {
+    if (flareSession.url && flareSession.id) {
+        destroyFlareSolverrSession(flareSession.url, flareSession.id);
+    }
+    flareSession = { url: '', id: '' };
+    flareSessionPromise = null;
+    flareWarmed = false;
+    flareWarmupPromise = null;
+}
+
+// Whether the current FlareSolverr session has already solved the JanitorAI
+// CF challenge once (cookie cached). Once warm, subsequent fetches are fast.
+let flareWarmed = false;
+let flareWarmupPromise = null;
+
+/**
+ * Pre-warm a FlareSolverr session by creating it AND issuing one background
+ * request to JanitorAI's Hampter endpoint to cache the cf_clearance cookie.
+ * Called on tab entry so that by the time the user picks a Hampter sort
+ * (especially after browsing other modes first), the cookie is already
+ * cached and the actual fetch is fast.
+ *
+ * If the user clicks Hampter during the warmup, loadCharacters() awaits this
+ * promise instead of firing a duplicate request.
+ */
+function prewarmFlareSession(flareUrl) {
+    if (!flareUrl || flareWarmed || flareWarmupPromise) return;
+    flareWarmupPromise = (async () => {
+        try {
+            const sessionId = await ensureFlareSession(flareUrl);
+            if (!sessionId) return;
+            // Single warmup fetch - solves CF challenge and caches cookie.
+            await fetchHampterCharacters({
+                sort: 'trending',
+                page: 1,
+                nsfw: true,
+                flareSolverrUrl: flareUrl,
+                flareSessionId: sessionId,
+            });
+            flareWarmed = true;
+        } catch (err) {
+            console.warn('[DatacatBrowse] FlareSolverr prewarm failed:', err.message);
+        } finally {
+            flareWarmupPromise = null;
+        }
+    })();
+}
+
+// Saucepan state
+let saucepanCurrentPage = 1;
+let saucepanTotalPages = 0;
+let saucepanSearchQuery = '';
+let saucepanOpenDefinitionOnly = true;
+let saucepanActiveTags = new Set(); // tag slugs (strings) for include filter
+let saucepanExcludedTags = new Set(); // tag slugs (strings) for exclude filter
+let saucepanDiscoveredTags = new Set(); // slugs harvested from results, merged with curated list
+
 // Extraction state
 let extractionPollTimer = null;
 let extractionTargetUrl = null;
@@ -147,7 +259,13 @@ function getMsgCount(hit) {
 }
 
 function getTotalTokens(hit) {
-    return parseInt(hit?.totalTokens || hit?.total_tokens, 10) || 0;
+    return parseInt(
+        hit?.totalTokens
+            || hit?.total_tokens
+            || hit?.token_counts?.total_tokens
+            || hit?.tokenCounts?.total_tokens,
+        10
+    ) || 0;
 }
 
 function getCreatedDate(hit) {
@@ -179,6 +297,16 @@ function isCharPossibleMatchObj(c) {
     return view.isCharPossibleMatch(c.name || '', getCreatorName(c));
 }
 
+/**
+ * Map a hit's primary_content_source_kind to a normalized source id.
+ * DataCat marks Saucepan items explicitly; everything else (including the
+ * absence of the field on legacy rows) is treated as JanitorAI.
+ * @returns {'janitor'|'saucepan'}
+ */
+function getSourceKind(hit) {
+    return hit?.primary_content_source_kind === 'saucepan' ? 'saucepan' : 'janitor';
+}
+
 // ========================================
 // CARD RENDERING
 // ========================================
@@ -186,8 +314,7 @@ function isCharPossibleMatchObj(c) {
 function createDatacatCard(hit) {
     const name = hit.name || 'Unknown';
     const desc = stripHtml(hit.description) || '';
-    const avatarFile = hit.avatar;
-    const avatarUrl = avatarFile ? `${DATACAT_IMAGE_BASE}${avatarFile}` : '/img/ai4.png';
+    const avatarUrl = resolveDatacatAvatarUrl(hit) || '/img/ai4.png';
     const charId = getCharId(hit);
     const creatorName = getCreatorName(hit);
     const inLibrary = isCharInLocalLibrary(hit);
@@ -202,9 +329,28 @@ function createDatacatCard(hit) {
     } else if (possibleMatch) {
         badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
     }
-    if (isNsfw(hit)) {
-        badges.push('<span class="browse-nsfw-badge">NSFW</span>');
+
+    const sourceBadges = [];
+    const sourceKind = getSourceKind(hit);
+    // Source badges are only meaningful in DataCat-native sort modes where
+    // hits can mix sources (recent / freshest / etc). In single-source sort
+    // modes (janny_*, hampter_*, saucepan_*) every card is the same source
+    // so the J/S badge is just visual noise. The Following timeline always
+    // mixes sources, so badges are always shown there.
+    const isSingleSourceMode = !hit._followedCreatorSource && (
+        isJannySortMode(datacatSortMode)
+        || isHampterSortMode(datacatSortMode)
+        || isSaucepanSortMode(datacatSortMode)
+    );
+    if (!isSingleSourceMode) {
+        if (sourceKind === 'saucepan') {
+            sourceBadges.push('<span class="browse-feature-badge source-saucepan" title="Source: Saucepan">S</span>');
+        } else if (sourceKind === 'janitor') {
+            sourceBadges.push('<span class="browse-feature-badge source-janitor" title="Source: JanitorAI">J</span>');
+        }
     }
+
+    const nsfwBadge = isNsfw(hit) ? '<span class="browse-nsfw-badge">NSFW</span>' : '';
 
     const createdDate = getCreatedDate(hit);
     const dateInfo = createdDate ? `<span class="browse-card-date"><i class="fa-solid fa-clock"></i> ${createdDate}</span>` : '';
@@ -236,7 +382,9 @@ function createDatacatCard(hit) {
         <div class="${cardClass}" data-datacat-id="${escapeHtml(String(charId))}" ${desc ? `title="${escapeHtml(desc)}"` : ''}>
             <div class="browse-card-image">
                 <img data-src="${escapeHtml(avatarUrl)}" src="${IMG_PLACEHOLDER}" alt="${escapeHtml(name)}" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
-                ${badges.length > 0 ? badges.map(b => b.includes('browse-nsfw-badge') ? b : `<div class="browse-feature-badges">${b}</div>`).join('') : ''}
+                ${nsfwBadge}
+                ${sourceBadges.length > 0 ? `<div class="browse-feature-badges browse-feature-badges-tl">${sourceBadges.join('')}</div>` : ''}
+                ${badges.length > 0 ? `<div class="browse-feature-badges">${badges.join('')}</div>` : ''}
             </div>
             <div class="browse-card-body">
                 <div class="browse-card-name">${escapeHtml(name)}</div>
@@ -285,6 +433,12 @@ function renderGrid(characters, append = false) {
     if (datacatFilterHidePossible) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
     }
+    if (datacatFilterHideJanitor) {
+        filtered = filtered.filter(c => getSourceKind(c) !== 'janitor');
+    }
+    if (datacatFilterHideSaucepan) {
+        filtered = filtered.filter(c => getSourceKind(c) !== 'saucepan');
+    }
 
     // Client-side: persistent exclude tags from settings
     const dcPersistentExclude = getProviderExcludeTags('datacat');
@@ -325,14 +479,24 @@ async function loadCharacters(append = false) {
 
     if (!append && grid) {
         const loadingSource = isHampterSortMode(datacatSortMode) ? 'JanitorAI (Hampter)'
-            : isJannySortMode(datacatSortMode) ? 'JanitorAI (MeiliSearch)' : 'DataCat';
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Loading from ${loadingSource}...</p>
-            </div>
-        `;
+            : isJannySortMode(datacatSortMode) ? 'JanitorAI (MeiliSearch)'
+            : isSaucepanSortMode(datacatSortMode) ? 'Saucepan' : 'DataCat';
+        renderLoadingState(grid, `Loading from ${loadingSource}...`, 'browse-loading');
     }
+
+    // Helper to update the loading sub-status line during long-running fetches.
+    const setLoadingSubstatus = (text) => {
+        if (append || !grid) return;
+        const labelEl = grid.querySelector('.cl-loading-label');
+        if (!labelEl) return;
+        let subEl = grid.querySelector('.cl-loading-substatus');
+        if (!subEl) {
+            subEl = document.createElement('div');
+            subEl.className = 'cl-loading-substatus';
+            labelEl.insertAdjacentElement('afterend', subEl);
+        }
+        subEl.textContent = String(text ?? '').replace(/[.\u2026]+\s*$/, '');
+    };
 
     if (loadMoreBtn) {
         loadMoreBtn.disabled = true;
@@ -344,14 +508,39 @@ async function loadCharacters(append = false) {
         let total = 0;
 
         if (datacatBrowseMode === 'creator' && datacatCreatorId) {
-            const data = await fetchDatacatCreatorCharacters(datacatCreatorId, {
-                limit: PAGE_SIZE,
-                offset: datacatCurrentOffset,
-                sortBy: datacatCreatorSortMode
-            });
-            list = data?.list || [];
-            total = data?.total || 0;
-            sortCreatorResults(list, datacatCreatorSortMode);
+            if (datacatCreatorSource === 'saucepan') {
+                // Saucepan endpoint returns the full author list in one shot.
+                // Fetch once on the initial load, then paginate client-side.
+                if (!append) {
+                    let full = _saucepanCreatorFullList;
+                    if (!full || full.length === 0) {
+                        const data = await fetchSaucepanCompanionsOfUser(saucepanCreatorHandle);
+                        full = data?.characters || [];
+                    } else {
+                        // Re-sort the cached list (sortCreatorResults mutates in place)
+                        full = full.slice();
+                    }
+                    sortCreatorResults(full, datacatCreatorSortMode);
+                    _saucepanCreatorFullList = full;
+                    list = full.slice(0, PAGE_SIZE);
+                    total = full.length;
+                } else {
+                    list = (_saucepanCreatorFullList || []).slice(
+                        datacatCharacters.length,
+                        datacatCharacters.length + PAGE_SIZE,
+                    );
+                    total = (_saucepanCreatorFullList || []).length;
+                }
+            } else {
+                const data = await fetchDatacatCreatorCharacters(datacatCreatorId, {
+                    limit: PAGE_SIZE,
+                    offset: datacatCurrentOffset,
+                    sortBy: datacatCreatorSortMode
+                });
+                list = data?.list || [];
+                total = data?.total || 0;
+                sortCreatorResults(list, datacatCreatorSortMode);
+            }
         } else if (isJannySortMode(datacatSortMode)) {
             if (!append) meiliCurrentPage = 1;
             const data = await searchMeiliJanny({
@@ -368,15 +557,86 @@ async function loadCharacters(append = false) {
         } else if (isHampterSortMode(datacatSortMode)) {
             if (!append) hampterCurrentPage = 1;
             const hampterSort = datacatSortMode.replace('hampter_', '');
-            const data = await fetchHampterCharacters({
+            const flareSolverrUrl = (getSetting('datacatFlareSolverrUrl') || '').trim();
+            // Always prefer sessions - even the first in-session fetch is
+            // ~4-5x faster than sessionless because cold browser spawns
+            // dominate sessionless latency on FlareSolverr.
+            let flareSessionId = '';
+            if (flareSolverrUrl) {
+                // If a prewarm is in flight, wait for it instead of firing a
+                // duplicate request that would queue behind it.
+                if (flareWarmupPromise) {
+                    setLoadingSubstatus('Warming FlareSolverr session in the background — waiting for it to finish...');
+                    try { await flareWarmupPromise; } catch { /* prewarm errors are logged elsewhere */ }
+                }
+                const sessionAlreadyExists = !!flareSession.id;
+                if (!sessionAlreadyExists) {
+                    setLoadingSubstatus('Starting FlareSolverr browser session (one-time, ~1-2s)...');
+                }
+                flareSessionId = await ensureFlareSession(flareSolverrUrl);
+            }
+            if (flareSolverrUrl) {
+                if (!flareSessionId) {
+                    setLoadingSubstatus('FlareSolverr session unavailable — falling back to direct fetch...');
+                } else if (flareWarmed && !append) {
+                    setLoadingSubstatus('Reusing cached Cloudflare cookie — this should be quick...');
+                } else if (flareWarmed) {
+                    setLoadingSubstatus('Fetching next page through FlareSolverr session...');
+                } else {
+                    setLoadingSubstatus('Solving Cloudflare challenge via FlareSolverr. The first request can take 30-60s; subsequent ones are much faster...');
+                }
+            }
+            const fetchOpts = {
                 sort: hampterSort,
                 page: hampterCurrentPage,
                 search: hampterSearchQuery,
                 nsfw: datacatNsfwEnabled,
-            });
+                flareSolverrUrl,
+                flareSessionId,
+            };
+            let data;
+            try {
+                data = await fetchHampterCharacters(fetchOpts);
+                if (flareSessionId) flareWarmed = true;
+            } catch (err) {
+                if (err?.sessionInvalid && flareSessionId) {
+                    setLoadingSubstatus('FlareSolverr session expired — refreshing...');
+                    clearFlareSession();
+                    const freshId = await ensureFlareSession(flareSolverrUrl);
+                    setLoadingSubstatus('Retrying request through new session...');
+                    data = await fetchHampterCharacters({ ...fetchOpts, flareSessionId: freshId });
+                    if (freshId) flareWarmed = true;
+                } else {
+                    throw err;
+                }
+            }
             list = data?.characters || [];
             total = data?.total || 0;
             hampterTotalPages = total > 0 ? Math.ceil(total / (data?.pageSize || 34)) : 0;
+        } else if (isSaucepanSortMode(datacatSortMode)) {
+            if (!append) saucepanCurrentPage = 1;
+            const persistentExclude = getProviderExcludeTags('datacat') || [];
+            const mergedExclude = new Set(persistentExclude);
+            for (const t of saucepanExcludedTags) mergedExclude.add(t);
+            const data = await searchSaucepan({
+                search: saucepanSearchQuery,
+                page: saucepanCurrentPage,
+                limit: PAGE_SIZE,
+                sort: datacatSortMode,
+                openDefinitionOnly: saucepanOpenDefinitionOnly,
+                tags: [...saucepanActiveTags],
+                excludedTags: [...mergedExclude],
+            });
+            list = data?.characters || [];
+            total = data?.totalCount || 0;
+            saucepanTotalPages = data?.totalPages || 0;
+            // Harvest tag slugs from results so the picker grows with what users see
+            for (const c of list) {
+                const cTags = Array.isArray(c.tags) ? c.tags : [];
+                for (const t of cTags) {
+                    if (typeof t === 'string' && t) saucepanDiscoveredTags.add(t);
+                }
+            }
         } else {
             const tagIds = [...datacatActiveTagIds];
             const parsed = parseSortMode(datacatSortMode);
@@ -410,6 +670,7 @@ async function loadCharacters(append = false) {
         const isFreshMode = datacatBrowseMode !== 'creator' && freshParsed && datacatActiveTagIds.size === 0;
         const isMeili = isJannySortMode(datacatSortMode);
         const isHampter = isHampterSortMode(datacatSortMode);
+        const isSaucepan = isSaucepanSortMode(datacatSortMode);
 
         if (isMeili) {
             if (append) {
@@ -433,6 +694,17 @@ async function loadCharacters(append = false) {
                 datacatCharacters = list;
             }
             datacatHasMore = hampterCurrentPage < hampterTotalPages;
+        } else if (isSaucepan) {
+            if (append) {
+                const existingIds = new Set(datacatCharacters.map(c => getCharId(c)));
+                datacatCharacters = datacatCharacters.concat(list.filter(c => {
+                    const id = getCharId(c);
+                    return !id || !existingIds.has(id);
+                }));
+            } else {
+                datacatCharacters = list;
+            }
+            datacatHasMore = saucepanCurrentPage < saucepanTotalPages;
         } else if (isFreshMode) {
             datacatCharacters = list;
             const activeLimit = freshParsed.window === '24h' ? datacatFreshLimit24 : datacatFreshLimitWeek;
@@ -468,17 +740,53 @@ async function loadCharacters(append = false) {
     } catch (err) {
         if (thisToken !== datacatLoadToken) return;
         console.error('[DatacatBrowse] Load error:', err);
-        showToast(`DataCat load failed: ${err.message}`, 'error');
+        const isHampterBlocked = err?.code === 'HAMPTER_BLOCKED' && isHampterSortMode(datacatSortMode);
+        const isFlareSolverrError = err?.code === 'FLARESOLVERR_ERROR' && isHampterSortMode(datacatSortMode);
+        const isInlineNotice = isHampterBlocked || isFlareSolverrError;
+        if (!isInlineNotice) {
+            showToast(`DataCat load failed: ${err.message}`, 'error');
+        }
         if (!append && grid) {
-            grid.innerHTML = `
-                <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
-                    <p style="margin-top: 12px;">Load failed: ${escapeHtml(err.message)}</p>
-                    <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
-                        <i class="fa-solid fa-redo"></i> Retry
-                    </button>
-                </div>
-            `;
+            if (isHampterBlocked) {
+                const hasFlareUrl = !!(getSetting('datacatFlareSolverrUrl') || '').trim();
+                const flareHint = hasFlareUrl
+                    ? '<p style="margin-top: 8px;">Your configured FlareSolverr instance also could not satisfy the challenge. Try restarting it, or check its logs.</p>'
+                    : '<p style="margin-top: 8px;">To enable these sort orders, configure a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer" style="color: var(--accent);">FlareSolverr</a> instance under Settings &rarr; Online &rarr; DataCat.</p>';
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted); max-width: 560px; margin: 0 auto;">
+                        <i class="fa-solid fa-shield-halved" style="font-size: 2rem; color: #f5a623;"></i>
+                        <p style="margin-top: 12px; color: var(--text-primary);"><strong>JanitorAI blocked this request</strong></p>
+                        <p style="margin-top: 8px;">JanitorAI's Hampter endpoint sits behind Cloudflare bot protection and rejects server-side requests. Trending and popular sort orders are unavailable through this extension.</p>
+                        <p style="margin-top: 8px;">The other JanitorAI sort orders (MeiliSearch) and Saucepan still work.</p>
+                        ${flareHint}
+                        <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
+                            <i class="fa-solid fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+            } else if (isFlareSolverrError) {
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted); max-width: 560px; margin: 0 auto;">
+                        <i class="fa-solid fa-fire" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <p style="margin-top: 12px; color: var(--text-primary);"><strong>FlareSolverr error</strong></p>
+                        <p style="margin-top: 8px;">${escapeHtml(err.message)}</p>
+                        <p style="margin-top: 8px;">Verify your FlareSolverr URL under Settings &rarr; Online &rarr; DataCat, or check that the service is running.</p>
+                        <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
+                            <i class="fa-solid fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+            } else {
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
+                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <p style="margin-top: 12px;">Load failed: ${escapeHtml(err.message)}</p>
+                        <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
+                            <i class="fa-solid fa-redo"></i> Retry
+                        </button>
+                    </div>
+                `;
+            }
             const retryBtn = document.getElementById('datacatRetryBtn');
             if (retryBtn) retryBtn.addEventListener('click', () => loadCharacters(false));
         }
@@ -505,7 +813,7 @@ async function loadFacetedTags() {
         datacatTagGroups = data.groups || [];
         datacatTags = data.tags || [];
         datacatTagsLoaded = true;
-        renderTagsList();
+        renderTagsList(document.getElementById('datacatTagsSearchInput')?.value || '');
         debugLog('[DatacatBrowse] Faceted tags loaded:', datacatTagGroups.length, 'groups,', datacatTags.length, 'tags');
     } catch (e) {
         console.error('[DatacatBrowse] Failed to load faceted tags:', e);
@@ -517,13 +825,13 @@ async function refreshTagCounts() {
         const data = await fetchFacetedTags({ activeTagIds: [...datacatActiveTagIds] });
         if (!data) return;
         datacatTags = data.tags || [];
-        renderTagsList();
+        renderTagsList(document.getElementById('datacatTagsSearchInput')?.value || '');
     } catch (e) {
         debugLog('[DatacatBrowse] Tag count refresh failed:', e);
     }
 }
 
-function renderTagsList() {
+function renderTagsList(filter = '') {
     const container = document.getElementById('datacatTagsList');
     if (!container) return;
 
@@ -532,14 +840,24 @@ function renderTagsList() {
         return;
     }
 
+    const filterLower = filter.toLowerCase();
+    const matchesFilter = (tag) => {
+        if (!filter) return true;
+        const name = (tag.name || tag.slug || '').toLowerCase();
+        const slug = (tag.slug || '').toLowerCase();
+        return name.includes(filterLower) || slug.includes(filterLower);
+    };
+
     const sortedGroups = [...datacatTagGroups].sort((a, b) => (a.display_order || 0) - (b.display_order || 0));
 
     let html = '';
+    let renderedAny = false;
     for (const group of sortedGroups) {
         const groupTags = datacatTags
-            .filter(t => t.groupId === group.id)
+            .filter(t => t.groupId === group.id && matchesFilter(t))
             .sort((a, b) => (b.count || 0) - (a.count || 0));
         if (groupTags.length === 0) continue;
+        renderedAny = true;
 
         html += `<div class="dropdown-section-title">${escapeHtml(group.name)}</div>`;
         for (const tag of groupTags) {
@@ -556,6 +874,11 @@ function renderTagsList() {
                 </div>
             `;
         }
+    }
+
+    if (!renderedAny) {
+        container.innerHTML = '<div class="browse-tags-empty">No matching tags</div>';
+        return;
     }
 
     container.innerHTML = html;
@@ -600,12 +923,34 @@ function cycleTagState(btn, active) {
     }
 }
 
+function cycleTagStateTri(btn, state) {
+    if (!btn) return;
+    btn.className = 'browse-tag-state-btn';
+    if (state === 'include') {
+        btn.classList.add('state-include');
+        btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+        btn.title = 'Included \u2014 click to exclude';
+    } else if (state === 'exclude') {
+        btn.classList.add('state-exclude');
+        btn.innerHTML = '<i class="fa-solid fa-minus"></i>';
+        btn.title = 'Excluded \u2014 click to clear';
+    } else {
+        btn.classList.add('state-neutral');
+        btn.innerHTML = '';
+        btn.title = 'Neutral \u2014 click to include';
+    }
+}
+
 function updateTagsButton() {
     const btn = document.getElementById('datacatTagsBtn');
     const label = document.getElementById('datacatTagsBtnLabel');
     if (!btn) return;
 
-    const count = isJannyTagMode() ? jannyActiveTagIds.size : datacatActiveTagIds.size;
+    const count = isJannyTagMode()
+        ? jannyActiveTagIds.size
+        : isSaucepanTagMode()
+            ? saucepanActiveTags.size + saucepanExcludedTags.size
+            : datacatActiveTagIds.size;
     if (count > 0) {
         btn.classList.add('has-filters');
         if (label) label.innerHTML = `Tags <span class="tag-count">(${count})</span>`;
@@ -623,15 +968,55 @@ function isJannyTagMode() {
     return isJannySortMode(datacatSortMode);
 }
 
+function isSaucepanTagMode() {
+    return isSaucepanSortMode(datacatSortMode);
+}
+
 function updateTagsVisibility() {
     const btn = document.getElementById('datacatTagsBtn');
     if (!btn) return;
+    // Hampter has no tag-filter API param yet, so we still hide the picker for it.
     const hide = isHampterSortMode(datacatSortMode);
     btn.style.display = hide ? 'none' : '';
     if (hide) {
         const dropdown = document.getElementById('datacatTagsDropdown');
         if (dropdown) dropdown.classList.add('hidden');
     }
+}
+
+function updateOpenDefToggleVisibility() {
+    const btn = document.getElementById('datacatOpenDefToggle');
+    if (!btn) return;
+    btn.style.display = isSaucepanSortMode(datacatSortMode) ? '' : 'none';
+}
+
+function updateSourceFilterVisibility() {
+    const section = document.getElementById('datacatFilterSourceSection');
+    if (!section) return;
+    // Source filters only meaningful in DataCat-native sort modes (mixed sources).
+    // Single-source modes (janny_*, hampter_*, saucepan_*) make these filters useless.
+    // Following view always mixes sources from followed creators, so always show.
+    if (datacatViewMode === 'following') {
+        section.style.display = '';
+        return;
+    }
+    const isSingleSourceMode = isJannySortMode(datacatSortMode)
+        || isHampterSortMode(datacatSortMode)
+        || isSaucepanSortMode(datacatSortMode);
+    section.style.display = isSingleSourceMode ? 'none' : '';
+}
+
+function updateOpenDefToggle() {
+    const btn = document.getElementById('datacatOpenDefToggle');
+    if (!btn) return;
+    btn.classList.toggle('active', saucepanOpenDefinitionOnly);
+    btn.title = saucepanOpenDefinitionOnly
+        ? 'Showing only open-definition characters \u2014 click to include closed'
+        : 'Including closed-definition characters \u2014 click to hide';
+    const label = btn.querySelector('span');
+    if (label) label.textContent = saucepanOpenDefinitionOnly ? 'Open Defs' : 'All Defs';
+    const icon = btn.querySelector('i');
+    if (icon) icon.className = saucepanOpenDefinitionOnly ? 'fa-solid fa-lock-open' : 'fa-solid fa-lock';
 }
 
 const JANNY_ALL_TAGS = Object.entries(JANNY_TAG_MAP)
@@ -684,6 +1069,139 @@ function renderJannyTagsList(filter = '') {
 }
 
 // ========================================
+// SAUCEPAN TAG SYSTEM
+// ========================================
+
+// Curated seed list of Saucepan tag slugs. Saucepan exposes tags as plain
+// slug strings (no listing endpoint), so we ship a known set and merge in
+// any new slugs discovered in search results (`saucepanDiscoveredTags`).
+const SAUCEPAN_KNOWN_TAGS = [
+    'abuse','action','adventure','adventurer','age_gap','age_play','alien','ambitious','angst','anime',
+    'anti_hero','anxious','any_pov','arranged_marriage','artist','assassin','assistant','athlete',
+    'bakadere','bar','bartender','bdsm','bdsm_verse','beach','best_friend','betrayal','bi','biker',
+    'bimbo_himbo','blackmail','blood_play','blue_collar','body_horror','body_worship','bodyguard',
+    'bondage','boss','bottom','brat','brat_taming','breastplay','breath_play','breeding','bully',
+    'business_owner','cannibalism','captive','celebrity','chance_meeting','charismatic','cheating',
+    'chef','childhood_friend','chosen_one','closeted','club','cnc','colleagues_to_lovers','college',
+    'comedy','comfort','comic','coming_of_age','concubine','conspiracy','contemporary','content_creator',
+    'contractual_relationship','cowboy_cowgirl','crush','curse','cyberpunk','dandere','daredevil',
+    'dark_romance','dead_dove','death','deity','demi_human','demi_pov','demisexual','demon','deredere',
+    'detective','dilf','disabled','doctor','dom','drag_crossdress','dragon','drugs_addiction','dystopian',
+    'eldritch','elf','emo','emotionally_unavailable','empath','empathetic','enemies_to_lovers','enhanced',
+    'ensemble_cast','esl','ex','executive','exhibitionism','extroverted','face_sitting','fake_relationship',
+    'fantasy','farm_setting','farmer','fem','fem_pov','female','femboy','feral','filthy','firefighter',
+    'fluff','food_play','forbidden_love','forced_proximity','found_family','freedom','freeuse',
+    'friends_to_lovers','furry','futa','fwb','game','gangster','gender_bend','genderfluid','genki',
+    'gentle_giant','giant','gore','grumpy','gyaru','hair_kink','harem','healer','heat_rut','hedonistic',
+    'hero','hikikomori','himedere','historical','holidays','home','homeless','hookup','horror','hospital',
+    'hostage','housespouse','human','humiliation','hunter','hurt_comfort','hurt_no_comfort','hyper',
+    'identity','impact_play','incel','incest_stepcest','indentured','independent','injured_user',
+    'interactive_rpg','intern','intersex','intersex_pov','introverted','jock','justice','kakkodere',
+    'kamidere','kouhai','kuudere','laboratory','lactation','large_anatomy','lore_heavy','love_triangle',
+    'lover','loyal','m4a','m4w','mafia','mage','magical','maid_butler','male','male_pov','manipulator',
+    'mansion','martial_artist','masc','masochist','mastermind','masturbation','mean_catty','mechanic',
+    'medieval','mentally_ill','milf','military','mind_control','mlm','monster','monster_boy',
+    'monster_girl','monster_pov','movie','multiple','murderer','musician','mutant','mystery',
+    'mythological','needy_clingy','neighbor','nerd','neurodivergent','ninja_samurai','nobility','noir',
+    'non_canonical_au','non_human','non_human_genitalia','non_human_pov','noncon_dubcon','ntr','nurse',
+    'o_l','oc','olfactophilia','omegaverse','online','oral','orgasm_denial','ovipositor','owner',
+    'pansexual','parallel_universe','part_timer','partner','party_member','performer','person_next_door',
+    'perverted','pet_play','pimp','pirate','platonic','playful','plus_sized_bot','plushophilia',
+    'politics','popular','porn_star','portal','post_apocalyptic','power_dynamics','praise_kink',
+    'pregnant','primal_play','prison','pro_dom','promiscuous','psychological','queer','quest','racer',
+    'redemption','rejection','religion','reluctant_hero','revenge','rival','robot','rogue','romance',
+    'roommate','royalty','rpg','sacrifice','sadist','sassy','savior','scenario','sci_fi','scientist',
+    'second_person_pov','self_harm_suicide','selfish','sensitive','sensory_play','servant','sex_toys',
+    'sex_worker','sexual_awakening','sexual_roleplay','size_difference','slice_of_life','slow_burn',
+    'slur_usage','small_town','smut','soft_dom','soldier','somnophilia','soulmate','space',
+    'special_agents','spouse','spy','stalker','step_parent','step_sibling','stoner','stranger',
+    'stripper','student','sub','sugar_parent','supernatural','survival','switch','t4t','t4w',
+    'tavern_inn','teacher_professor','teammate','temperature_play','therapist','third_person_pov',
+    'thriller','time_travel','tomboy','top','trans','transformation','trauma','tsundere','tv_show',
+    'two_faced','undead','unemployed','unestablished_relationship','unreliable','unreliable_narrator',
+    'unrequited_love','urban_fantasy','urban_fiction','user_harm','utility','vampire','vanilla',
+    'villain','villain_pov','villainess','vintage','violence','virgin','voyeurism','vtuber','w4a',
+    'w4m','war','warrior','watersports','wealthy','weapon_play','well_intentioned_extremist',
+    'werewolf','white_collar','widowed','wlw','workplace','writer','y2k','yandere',
+];
+
+function getSaucepanAllTags() {
+    const merged = new Set(SAUCEPAN_KNOWN_TAGS);
+    for (const t of saucepanDiscoveredTags) merged.add(t);
+    return [...merged].sort((a, b) => a.localeCompare(b));
+}
+
+function formatSaucepanTag(slug) {
+    return slug.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderSaucepanTagsList(filter = '') {
+    const container = document.getElementById('datacatTagsList');
+    if (!container) return;
+
+    const all = getSaucepanAllTags();
+    const filterLower = filter.toLowerCase();
+    const filtered = filter ? all.filter(t => t.includes(filterLower)) : all;
+
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="browse-tags-empty">No matching tags</div>';
+        return;
+    }
+
+    // Sort: active filters (include or exclude) first, then alphabetical
+    const sorted = [...filtered].sort((a, b) => {
+        const aActive = saucepanActiveTags.has(a) || saucepanExcludedTags.has(a);
+        const bActive = saucepanActiveTags.has(b) || saucepanExcludedTags.has(b);
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
+        return a.localeCompare(b);
+    });
+
+    container.innerHTML = sorted.map(slug => {
+        const state = saucepanActiveTags.has(slug) ? 'include'
+            : saucepanExcludedTags.has(slug) ? 'exclude'
+            : 'neutral';
+        const stateClass = `state-${state}`;
+        const stateIcon = state === 'include' ? '<i class="fa-solid fa-check"></i>'
+            : state === 'exclude' ? '<i class="fa-solid fa-minus"></i>'
+            : '';
+        const stateTitle = state === 'include' ? 'Included \u2014 click to exclude'
+            : state === 'exclude' ? 'Excluded \u2014 click to clear'
+            : 'Neutral \u2014 click to include';
+        return `
+            <div class="browse-tag-filter-item" data-tag-slug="${escapeHtml(slug)}">
+                <button class="browse-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
+                <span class="tag-label">${escapeHtml(formatSaucepanTag(slug))}</span>
+            </div>
+        `;
+    }).join('');
+
+    container.querySelectorAll('.browse-tag-filter-item').forEach(item => {
+        const slug = item.dataset.tagSlug;
+        const stateBtn = item.querySelector('.browse-tag-state-btn');
+        const cycle = () => {
+            // neutral -> include -> exclude -> neutral
+            if (saucepanActiveTags.has(slug)) {
+                saucepanActiveTags.delete(slug);
+                saucepanExcludedTags.add(slug);
+                cycleTagStateTri(stateBtn, 'exclude');
+            } else if (saucepanExcludedTags.has(slug)) {
+                saucepanExcludedTags.delete(slug);
+                cycleTagStateTri(stateBtn, 'neutral');
+            } else {
+                saucepanActiveTags.add(slug);
+                cycleTagStateTri(stateBtn, 'include');
+            }
+            updateTagsButton();
+            saucepanCurrentPage = 1;
+            datacatCurrentOffset = 0;
+            loadCharacters(false);
+        };
+        item.addEventListener('click', cycle);
+    });
+}
+
+// ========================================
 // SORT OPTIONS
 // ========================================
 
@@ -709,10 +1227,15 @@ function isHampterSortMode(mode) {
     return mode?.startsWith('hampter_');
 }
 
+function isSaucepanSortMode(mode) {
+    return mode?.startsWith('saucepan_');
+}
+
 function parseSortMode(mode) {
     if (mode === 'recent') return null;
     if (isJannySortMode(mode)) return null;
     if (isHampterSortMode(mode)) return null;
+    if (isSaucepanSortMode(mode)) return null;
     if (mode.endsWith('_week')) return { sortBy: mode.slice(0, -5), window: 'week' };
     if (mode.endsWith('_24h')) return { sortBy: mode.slice(0, -4), window: '24h' };
     return { sortBy: mode, window: '24h' };
@@ -729,6 +1252,12 @@ const JANNY_SORT_OPTIONS = [
 const HAMPTER_SORT_OPTIONS = [
     { value: 'hampter_trending', label: '🔥 Trending' },
     { value: 'hampter_popular', label: '👑 Popular' },
+];
+
+const SAUCEPAN_SORT_OPTIONS = [
+    { value: 'saucepan_new', label: '🆕 New' },
+    { value: 'saucepan_trending', label: '🔥 Trending' },
+    { value: 'saucepan_popular', label: '👑 Popular' },
 ];
 
 function buildSortOptionsHtml(selected) {
@@ -751,6 +1280,11 @@ function buildSortOptionsHtml(selected) {
     html += '</optgroup>';
     html += '<optgroup label="JanitorAI (MeiliSearch)">';
     for (const o of JANNY_SORT_OPTIONS) {
+        html += `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`;
+    }
+    html += '</optgroup>';
+    html += '<optgroup label="Saucepan">';
+    for (const o of SAUCEPAN_SORT_OPTIONS) {
         html += `<option value="${o.value}" ${o.value === selected ? 'selected' : ''}>${o.label}</option>`;
     }
     html += '</optgroup>';
@@ -794,10 +1328,14 @@ function sortCreatorResults(list, mode) {
 // CREATOR BROWSING
 // ========================================
 
-async function browseCreator(creatorId) {
+async function browseCreator(creatorId, opts = {}) {
     if (!creatorId) return;
+    const source = opts.source === 'saucepan' ? 'saucepan' : 'datacat';
     datacatBrowseMode = 'creator';
     datacatCreatorId = creatorId;
+    datacatCreatorSource = source;
+    saucepanCreatorHandle = source === 'saucepan' ? (opts.handle || '') : '';
+    _saucepanCreatorFullList = [];
     datacatCurrentOffset = 0;
     datacatCharacters = [];
     datacatHasMore = true;
@@ -806,11 +1344,16 @@ async function browseCreator(creatorId) {
     const banner = document.getElementById('datacatCreatorBanner');
     const bannerName = document.getElementById('datacatCreatorBannerName');
 
-    const creator = await fetchDatacatCreator(creatorId);
-    if (creator) {
-        datacatCreatorName = creator.userName || creatorId;
+    if (source === 'saucepan') {
+        // Saucepan creators aren't on DataCat - skip the creator profile lookup.
+        datacatCreatorName = opts.name || saucepanCreatorHandle || creatorId;
     } else {
-        datacatCreatorName = creatorId;
+        const creator = await fetchDatacatCreator(creatorId);
+        if (creator) {
+            datacatCreatorName = creator.userName || creatorId;
+        } else {
+            datacatCreatorName = creatorId;
+        }
     }
 
     if (banner && bannerName) {
@@ -819,7 +1362,7 @@ async function browseCreator(creatorId) {
         window.pushOverlayGuard?.();
     }
 
-    updateFollowButton(creatorId);
+    updateFollowButton(creatorId, source);
 
     datacatCreatorSortMode = 'chat_count';
     const creatorSortEl = document.getElementById('datacatCreatorSortSelect');
@@ -834,6 +1377,9 @@ function clearCreatorFilter() {
     datacatBrowseMode = 'recent';
     datacatCreatorId = null;
     datacatCreatorName = '';
+    datacatCreatorSource = 'datacat';
+    saucepanCreatorHandle = '';
+    _saucepanCreatorFullList = [];
     datacatCharacters = [];
     datacatCurrentOffset = 0;
     datacatFreshLimit24 = 80;
@@ -897,6 +1443,12 @@ function doSearch() {
             hampterCurrentPage = 1;
             loadCharacters(false);
         }
+        // Clear Saucepan query if in saucepan mode and search is emptied
+        if (isSaucepanSortMode(datacatSortMode) && saucepanSearchQuery) {
+            saucepanSearchQuery = '';
+            saucepanCurrentPage = 1;
+            loadCharacters(false);
+        }
         return;
     }
 
@@ -927,7 +1479,16 @@ function doSearch() {
         if (/^(www\.)?janitorai\.com$/i.test(url.hostname) || /^(www\.)?jannyai\.com$/i.test(url.hostname)) {
             const charMatch = url.pathname.match(/\/characters\/([a-f0-9-]{36})/i);
             if (charMatch) {
-                lookupJanitorCharacter(charMatch[1], val);
+                lookupExternalCharacter(charMatch[1], val, 'janitor');
+                return;
+            }
+        }
+
+        // Saucepan URL -> look up on DataCat, offer extraction if not found
+        if (/^(www\.)?saucepan\.ai$/i.test(url.hostname)) {
+            const charMatch = url.pathname.match(/\/companion\/([a-f0-9-]{36})/i);
+            if (charMatch) {
+                lookupExternalCharacter(charMatch[1], val, 'saucepan');
                 return;
             }
         }
@@ -946,6 +1507,14 @@ function doSearch() {
         meiliSearchQuery = val;
         meiliCurrentPage = 1;
         datacatCurrentOffset = 0;
+        loadCharacters(false);
+        return;
+    }
+
+    // Text search in Saucepan mode
+    if (isSaucepanSortMode(datacatSortMode)) {
+        saucepanSearchQuery = val;
+        saucepanCurrentPage = 1;
         loadCharacters(false);
         return;
     }
@@ -977,6 +1546,20 @@ function performDatacatCreatorSearch() {
 
     const lowerQuery = query.toLowerCase();
 
+    // Helper: route to saucepan creator browse if the matched hit is a
+    // saucepan card (their author IDs are not in DataCat's creator DB).
+    const routeFromHit = (hit) => {
+        const creatorId = getCreatorId(hit);
+        if (!creatorId) return false;
+        if (getSourceKind(hit) === 'saucepan') {
+            const handle = getCreatorName(hit);
+            browseCreator(creatorId, { source: 'saucepan', handle, name: handle });
+        } else {
+            browseCreator(creatorId);
+        }
+        return true;
+    };
+
     // Scan followed creators
     const followMatch = datacatFollowedCreators.find(c => c.name?.toLowerCase() === lowerQuery);
     if (followMatch) {
@@ -986,17 +1569,11 @@ function performDatacatCreatorSearch() {
 
     // Scan currently loaded browse characters
     const browseMatch = datacatCharacters.find(c => getCreatorName(c).toLowerCase() === lowerQuery);
-    if (browseMatch) {
-        browseCreator(getCreatorId(browseMatch));
-        return;
-    }
+    if (browseMatch && routeFromHit(browseMatch)) return;
 
     // Scan following timeline characters
     const followingMatch = datacatFollowingCharacters.find(c => getCreatorName(c).toLowerCase() === lowerQuery);
-    if (followingMatch) {
-        browseCreator(getCreatorId(followingMatch));
-        return;
-    }
+    if (followingMatch && routeFromHit(followingMatch)) return;
 
     // Partial match fallback
     const partialFollow = datacatFollowedCreators.find(c => c.name?.toLowerCase().includes(lowerQuery));
@@ -1006,14 +1583,15 @@ function performDatacatCreatorSearch() {
     }
 
     const partialBrowse = datacatCharacters.find(c => getCreatorName(c).toLowerCase().includes(lowerQuery));
-    if (partialBrowse) {
-        browseCreator(getCreatorId(partialBrowse));
-        return;
-    }
+    if (partialBrowse && routeFromHit(partialBrowse)) return;
 
     const partialFollowing = datacatFollowingCharacters.find(c => getCreatorName(c).toLowerCase().includes(lowerQuery));
-    if (partialFollowing) {
-        browseCreator(getCreatorId(partialFollowing));
+    if (partialFollowing && routeFromHit(partialFollowing)) return;
+
+    // No local match. If we're in a saucepan sort mode, treat the input as a
+    // saucepan handle and try fetching the author's companions directly.
+    if (isSaucepanSortMode(datacatSortMode)) {
+        browseCreator(query, { source: 'saucepan', handle: query, name: query });
         return;
     }
 
@@ -1023,12 +1601,7 @@ function performDatacatCreatorSearch() {
 async function fetchCharacterAndOpenPreview(characterId) {
     const grid = document.getElementById('datacatGrid');
     if (grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Looking up character...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Looking up character...', 'browse-loading');
     }
 
     try {
@@ -1046,18 +1619,28 @@ async function fetchCharacterAndOpenPreview(characterId) {
 }
 
 // ========================================
-// JANITORAI LOOKUP + EXTRACTION
+// EXTERNAL SOURCE LOOKUP + EXTRACTION (JanitorAI, Saucepan)
 // ========================================
 
-async function lookupJanitorCharacter(janitorId, originalUrl) {
+const EXTRACT_SOURCES = {
+    janitor: {
+        label: 'JanitorAI',
+        icon: 'fa-solid fa-cat',
+        urlBase: 'https://janitorai.com/characters/',
+        notFoundCopy: 'JanitorAI character',
+    },
+    saucepan: {
+        label: 'Saucepan',
+        icon: 'fa-solid fa-bowl-food',
+        urlBase: 'https://saucepan.ai/companion/',
+        notFoundCopy: 'Saucepan character',
+    },
+};
+
+async function lookupExternalCharacter(charId, originalUrl, source = 'janitor') {
     const grid = document.getElementById('datacatGrid');
     if (grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Looking up character on DataCat...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Looking up character on DataCat...', 'browse-loading');
     }
 
     // Hide creator banner, load more, etc.
@@ -1067,7 +1650,7 @@ async function lookupJanitorCharacter(janitorId, originalUrl) {
     if (loadMoreEl) loadMoreEl.style.display = 'none';
 
     try {
-        const character = await fetchDatacatCharacter(janitorId);
+        const character = await fetchDatacatCharacter(charId);
         if (character) {
             openPreviewModal(character);
             clearCreatorFilter();
@@ -1075,24 +1658,44 @@ async function lookupJanitorCharacter(janitorId, originalUrl) {
         }
     } catch { /* not found */ }
 
-    showExtractionPanel(janitorId, originalUrl);
+    showExtractionPanel(charId, originalUrl, source);
 }
 
-function showExtractionPanel(janitorId, originalUrl) {
+// Saucepan card click: try DataCat lookup without resetting browse state.
+// If found, open preview. If not, prompt extraction in a modal-like overlay
+// so the user can return to their saucepan grid afterwards.
+async function openSaucepanCardPreview(hit) {
+    // Retained for any callers that still want the lookup-then-extract flow.
+    // The standard grid click now goes through openPreviewModal() directly,
+    // which surfaces the inline extraction CTA when the DataCat lookup fails.
+    const charId = String(getCharId(hit));
+    const url = `https://saucepan.ai/companion/${charId}`;
+    try {
+        const character = await fetchDatacatCharacter(charId);
+        if (character) {
+            openPreviewModal(character);
+            return;
+        }
+    } catch { /* not found on DataCat */ }
+    showExtractionPanel(charId, url, 'saucepan');
+}
+
+function showExtractionPanel(charId, originalUrl, source = 'janitor') {
     const grid = document.getElementById('datacatGrid');
     if (!grid) return;
 
-    const janitorUrl = originalUrl || `https://janitorai.com/characters/${janitorId}`;
-    const shortId = janitorId.substring(0, 8);
+    const cfg = EXTRACT_SOURCES[source] || EXTRACT_SOURCES.janitor;
+    const sourceUrl = originalUrl || `${cfg.urlBase}${charId}`;
+    const shortId = charId.substring(0, 8);
 
     grid.innerHTML = `
         <div class="datacat-extract-panel" style="grid-column: 1 / -1;">
             <div class="datacat-extract-icon">
-                <i class="fa-solid fa-cat"></i>
+                <i class="${cfg.icon}"></i>
             </div>
             <h3>Character Not on DataCat</h3>
             <p class="datacat-extract-desc">
-                This JanitorAI character (<code>${escapeHtml(shortId)}...</code>) hasn't been extracted yet.
+                This ${cfg.notFoundCopy} (<code>${escapeHtml(shortId)}...</code>) hasn't been extracted yet.
                 DataCat can retrieve its definition using a cloud browser instance.
             </p>
             <p class="datacat-extract-note">
@@ -1100,11 +1703,11 @@ function showExtractionPanel(janitorId, originalUrl) {
                 Extraction typically takes 15-60 seconds. A public account is used by default.
             </p>
             <div class="datacat-extract-actions">
-                <button id="datacatExtractBtn" class="action-btn primary" data-url="${escapeHtml(janitorUrl)}" data-id="${escapeHtml(janitorId)}">
+                <button id="datacatExtractBtn" class="action-btn primary" data-url="${escapeHtml(sourceUrl)}" data-id="${escapeHtml(charId)}">
                     <i class="fa-solid fa-cloud-arrow-down"></i> Extract Character
                 </button>
-                <a href="${escapeHtml(janitorUrl)}" target="_blank" class="action-btn secondary">
-                    <i class="fa-solid fa-external-link"></i> View on JanitorAI
+                <a href="${escapeHtml(sourceUrl)}" target="_blank" class="action-btn secondary">
+                    <i class="fa-solid fa-external-link"></i> View on ${cfg.label}
                 </a>
             </div>
             <div id="datacatExtractProgress" class="datacat-extract-progress hidden"></div>
@@ -1352,22 +1955,23 @@ function updateInlineExtractionCTA(state, detail) {
     }
 }
 
-async function startModalExtraction(charId) {
+async function startModalExtraction(charId, source = 'janitor') {
     const importBtn = document.getElementById('datacatImportBtn');
     if (!importBtn) return;
 
-    const janitorUrl = `https://janitorai.com/characters/${charId}`;
+    const cfg = EXTRACT_SOURCES[source] || EXTRACT_SOURCES.janitor;
+    const sourceUrl = `${cfg.urlBase}${charId}`;
 
     importBtn.disabled = true;
     importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Submitting...';
     updateInlineExtractionCTA('submitting');
 
-    extractionTargetUrl = janitorUrl;
+    extractionTargetUrl = sourceUrl;
     extractionTargetId = charId;
     extractionStartTime = Date.now();
 
     try {
-        const result = await submitExtraction(janitorUrl, { publicFeed: getSetting('datacatPublicFeed') === true });
+        const result = await submitExtraction(sourceUrl, { publicFeed: getSetting('datacatPublicFeed') === true });
 
         if (result.queued || result.started) {
             importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Extracting...';
@@ -1488,42 +2092,46 @@ function startModalExtractionPolling(charId) {
 
 function loadFollowedCreators() {
     const saved = getSetting('datacatFollowedCreators');
-    datacatFollowedCreators = Array.isArray(saved) ? saved : [];
+    // Back-compat: pre-source entries default to 'datacat'.
+    datacatFollowedCreators = Array.isArray(saved)
+        ? saved.map(c => ({ ...c, source: c.source || 'datacat' }))
+        : [];
 }
 
 function saveFollowedCreators() {
     setSetting('datacatFollowedCreators', datacatFollowedCreators);
 }
 
-function isCreatorFollowed(creatorId) {
-    return datacatFollowedCreators.some(c => c.id === creatorId);
+function isCreatorFollowed(creatorId, source = 'datacat') {
+    return datacatFollowedCreators.some(c => c.id === creatorId && (c.source || 'datacat') === source);
 }
 
-function followCreator(creatorId, creatorName) {
-    if (isCreatorFollowed(creatorId)) return;
-    datacatFollowedCreators.push({ id: creatorId, name: creatorName || creatorId });
+function followCreator(creatorId, creatorName, source = 'datacat') {
+    if (isCreatorFollowed(creatorId, source)) return;
+    datacatFollowedCreators.push({ id: creatorId, name: creatorName || creatorId, source });
     saveFollowedCreators();
-    updateFollowButton(creatorId);
+    updateFollowButton(creatorId, source);
     showToast(`Followed ${creatorName || 'creator'}`, 'success');
 }
 
-function unfollowCreator(creatorId) {
-    const idx = datacatFollowedCreators.findIndex(c => c.id === creatorId);
+function unfollowCreator(creatorId, source = 'datacat') {
+    const idx = datacatFollowedCreators.findIndex(c => c.id === creatorId && (c.source || 'datacat') === source);
     if (idx === -1) return;
     const name = datacatFollowedCreators[idx].name;
     datacatFollowedCreators.splice(idx, 1);
     saveFollowedCreators();
-    updateFollowButton(creatorId);
+    updateFollowButton(creatorId, source);
     showToast(`Unfollowed ${name || 'creator'}`, 'info');
 }
 
-function updateFollowButton(creatorId) {
+function updateFollowButton(creatorId, source = datacatCreatorSource) {
     const btn = document.getElementById('datacatFollowCreatorBtn');
     if (!btn) return;
 
     if (datacatBrowseMode !== 'creator' || datacatCreatorId !== creatorId) return;
+    if (datacatCreatorSource !== source) return;
 
-    if (isCreatorFollowed(creatorId)) {
+    if (isCreatorFollowed(creatorId, source)) {
         btn.classList.add('active');
         btn.innerHTML = '<i class="fa-solid fa-heart"></i> <span>Following</span>';
         btn.title = 'Unfollow this creator';
@@ -1541,6 +2149,8 @@ async function switchDatacatViewMode(mode) {
     document.querySelectorAll('.datacat-view-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.datacatView === mode);
     });
+
+    updateSourceFilterVisibility();
 
     const browseSection = document.getElementById('datacatBrowseSection');
     const followingSection = document.getElementById('datacatFollowingSection');
@@ -1596,12 +2206,7 @@ async function loadFollowingCharacters(forceRefresh = false) {
     }
 
     if (grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Loading timeline...</p>
-            </div>
-        `;
+        renderLoadingState(grid, 'Loading timeline...', 'browse-loading');
     }
 
     try {
@@ -1613,6 +2218,23 @@ async function loadFollowingCharacters(forceRefresh = false) {
             const promises = batch.map(async (creator) => {
                 try {
                     const allChars = [];
+                    const source = creator.source || 'datacat';
+
+                    if (source === 'saucepan') {
+                        const handle = creator.name; // saucepan handle is stored as name
+                        if (!handle) return [];
+                        const data = await fetchSaucepanCompanionsOfUser(handle);
+                        for (const c of (data?.characters || [])) {
+                            allChars.push({
+                                ...c,
+                                _followedCreatorName: creator.name,
+                                _followedCreatorId: creator.id,
+                                _followedCreatorSource: 'saucepan',
+                            });
+                        }
+                        return allChars;
+                    }
+
                     let offset = 0;
                     const limit = 50;
                     while (true) {
@@ -1627,6 +2249,7 @@ async function loadFollowingCharacters(forceRefresh = false) {
                                 ...c,
                                 _followedCreatorName: creator.name,
                                 _followedCreatorId: creator.id,
+                                _followedCreatorSource: 'datacat',
                             });
                         }
                         if (list.length < limit || allChars.length >= (data?.total || 0)) break;
@@ -1737,7 +2360,14 @@ function _handleFollowingCardClick(e) {
         const creatorId = authorLink.dataset.creatorId;
         if (creatorId) {
             switchDatacatViewMode('browse');
-            browseCreator(creatorId);
+            const card = authorLink.closest('.browse-card');
+            const charId = card?.dataset?.datacatId;
+            const hit = charId ? datacatFollowingCharacters.find(c => String(getCharId(c)) === charId) : null;
+            if (hit && getSourceKind(hit) === 'saucepan') {
+                browseCreator(creatorId, { source: 'saucepan', handle: getCreatorName(hit), name: getCreatorName(hit) });
+            } else {
+                browseCreator(creatorId);
+            }
         }
         return;
     }
@@ -1764,6 +2394,12 @@ function renderFollowing(append = false) {
     }
     if (datacatFilterHidePossible) {
         filtered = filtered.filter(c => !isCharPossibleMatchObj(c));
+    }
+    if (datacatFilterHideJanitor) {
+        filtered = filtered.filter(c => getSourceKind(c) !== 'janitor');
+    }
+    if (datacatFilterHideSaucepan) {
+        filtered = filtered.filter(c => getSourceKind(c) !== 'saucepan');
     }
 
     const dcPersistentExclude = getProviderExcludeTags('datacat');
@@ -1818,13 +2454,19 @@ let datacatLastCreatorNotes = '';
 function openPreviewModal(hit) {
     datacatSelectedChar = hit;
 
+    // Ensure modal DOM exists and event listeners are wired even when called
+    // from outside the Online tab (e.g. "Open on DataCat" from the link modal
+    // before user has visited DataCat browse this session).
+    view.injectModals();
+    ensureModalEventsAttached();
+
     const modal = document.getElementById('datacatCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const charId = getCharId(hit);
     const name = hit.name || 'Unknown';
-    const avatarFile = hit.avatar;
-    const avatarUrl = avatarFile ? `${DATACAT_IMAGE_BASE}${avatarFile}` : '/img/ai4.png';
+    const avatarUrl = resolveDatacatAvatarUrl(hit) || '/img/ai4.png';
     const tags = resolveTagNames(hit.tags || []);
     const creatorName = getCreatorName(hit) || 'Unknown';
     const inLibrary = isCharInLocalLibrary(hit);
@@ -1842,7 +2484,16 @@ function openPreviewModal(hit) {
     BrowseView.adjustPortraitPosition(avatarImg);
     document.getElementById('datacatCharName').textContent = name;
     document.getElementById('datacatCharCreator').textContent = creatorName;
-    document.getElementById('datacatOpenInBrowserBtn').href = `${DATACAT_API_BASE}/characters/${charId}`;
+    const openBtn = document.getElementById('datacatOpenInBrowserBtn');
+    if (openBtn) {
+        if (getSourceKind(hit) === 'saucepan') {
+            openBtn.href = `https://saucepan.ai/companion/${charId}`;
+            openBtn.title = 'Open on Saucepan';
+        } else {
+            openBtn.href = `${DATACAT_API_BASE}/characters/${charId}`;
+            openBtn.title = 'Open on DataCat';
+        }
+    }
 
     // Stats (adapt to available data)
     const chatsEl = document.getElementById('datacatCharChats');
@@ -1859,7 +2510,7 @@ function openPreviewModal(hit) {
     const tagsEl = document.getElementById('datacatCharTags');
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
 
-    // Creator's Notes — show immediately if description is available (all sources include it)
+    // Creator's Notes - show immediately if description is available (all sources include it)
     const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
     const immediateDesc = (hit.description || '').trim();
@@ -1879,9 +2530,11 @@ function openPreviewModal(hit) {
     if (defLoading) defLoading.style.display = 'block';
     const descSection = document.getElementById('datacatCharDescriptionSection');
     const scenarioSection = document.getElementById('datacatCharScenarioSection');
+    const mesExampleSection = document.getElementById('datacatCharMesExampleSection');
     const firstMsgSection = document.getElementById('datacatCharFirstMsgSection');
     descSection.style.display = 'none';
     scenarioSection.style.display = 'none';
+    if (mesExampleSection) mesExampleSection.style.display = 'none';
     firstMsgSection.style.display = 'none';
 
     // Hide alt greetings + greetings stat until download data arrives
@@ -1891,7 +2544,15 @@ function openPreviewModal(hit) {
     if (greetingsStat) greetingsStat.style.display = 'none';
     window.currentBrowseAltGreetings = [];
 
-    // Import button — neutral loading state until definition fetch resolves
+    // Hide gallery until detail fetch reveals saucepan portraits
+    const gallerySection = document.getElementById('datacatCharGallerySection');
+    if (gallerySection) gallerySection.style.display = 'none';
+    const galleryGrid = document.getElementById('datacatCharGalleryGrid');
+    if (galleryGrid) galleryGrid.innerHTML = '';
+    const galleryLabel = document.getElementById('datacatCharGalleryLabel');
+    if (galleryLabel) galleryLabel.textContent = '';
+
+    // Import button - neutral loading state until definition fetch resolves
     const importBtn = document.getElementById('datacatImportBtn');
     delete importBtn.dataset.extractId;
     delete importBtn.dataset.extractPhase;
@@ -1919,25 +2580,48 @@ function openPreviewModal(hit) {
 async function fetchAndPopulateDetails(hit, token) {
     const charId = getCharId(hit);
     const name = hit.name || 'Unknown';
+    const isSaucepanHit = getSourceKind(hit) === 'saucepan';
 
-    function showExtractionCTA(message) {
+    // For Saucepan hits, fetch companion detail in parallel to learn whether
+    // the definition is publicly open. The search/listing endpoint omits
+    // `open_definition`, so this is the only way to surface a lock warning.
+    const saucepanDetailPromise = isSaucepanHit
+        ? fetchSaucepanCompanion(charId).catch(() => null)
+        : Promise.resolve(null);
+
+    function renderLockedDefBanner() {
+        return `
+            <div class="datacat-modal-locked-banner">
+                <i class="fa-solid fa-lock"></i>
+                <div>
+                    <strong>Locked Definition</strong>
+                    <p>This Saucepan companion's definition is not publicly available. Extraction may not retrieve the full character body.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function showExtractionCTA(message, { locked = false } = {}) {
+        const source = isSaucepanHit ? 'saucepan' : 'janitor';
+        const cfg = EXTRACT_SOURCES[source];
         const descSection = document.getElementById('datacatCharDescriptionSection');
         const descEl = document.getElementById('datacatCharDescription');
         if (descSection) descSection.style.display = 'block';
         if (descEl) descEl.innerHTML = `
+            ${locked ? renderLockedDefBanner() : ''}
             <div class="datacat-modal-extract-cta">
                 <div class="datacat-modal-extract-icon-wrap">
                     <i class="fa-solid fa-wand-magic-sparkles datacat-modal-extract-icon"></i>
                 </div>
                 <p class="datacat-modal-extract-message">${escapeHtml(message)}</p>
-                <p class="datacat-modal-extract-hint">Use DataCat's extraction service to retrieve this character's full definition from JanitorAI.</p>
-                <button class="action-btn primary datacat-modal-extract-btn" data-extract-id="${escapeHtml(String(charId))}">
+                <p class="datacat-modal-extract-hint">Use DataCat's extraction service to retrieve this character's full definition from ${cfg.label}.</p>
+                <button class="action-btn primary datacat-modal-extract-btn" data-extract-id="${escapeHtml(String(charId))}" data-extract-source="${source}">
                     <i class="fa-solid fa-cloud-arrow-down"></i> Extract Character
                 </button>
             </div>
         `;
         const inlineBtn = descEl?.querySelector('.datacat-modal-extract-btn');
-        if (inlineBtn) inlineBtn.addEventListener('click', () => startModalExtraction(charId));
+        if (inlineBtn) inlineBtn.addEventListener('click', () => startModalExtraction(charId, source));
         const importBtn = document.getElementById('datacatImportBtn');
         if (importBtn) {
             importBtn.disabled = false;
@@ -1945,6 +2629,7 @@ async function fetchAndPopulateDetails(hit, token) {
             importBtn.classList.remove('primary', 'secondary', 'warning');
             importBtn.classList.add('primary');
             importBtn.dataset.extractId = charId;
+            importBtn.dataset.extractSource = source;
         }
     }
 
@@ -1961,7 +2646,12 @@ async function fetchAndPopulateDetails(hit, token) {
         if (defLoading) defLoading.style.display = 'none';
 
         if (!character) {
-            showExtractionCTA('Character definition is hidden or unavailable.');
+            const saucepanDetail = await saucepanDetailPromise;
+            const lockedDef = isSaucepanHit && saucepanDetail && saucepanDetail.open_definition === false;
+            showExtractionCTA(isSaucepanHit
+                ? 'This Saucepan character has not been extracted to DataCat yet.'
+                : 'Character definition is hidden or unavailable.',
+                { locked: lockedDef });
             return;
         }
 
@@ -1980,16 +2670,42 @@ async function fetchAndPopulateDetails(hit, token) {
             }
         }
 
-        const personality = character.personality || '';
-        const scenario = character.scenario || '';
-        const firstMessage = character.first_message || '';
+        // Saucepan characters with hidden definitions surface their repaired
+        // body via `content_variants[primary].content` on the character row.
+        // When present, those fields are authoritative. For open-definition
+        // Saucepan rows, DataCat populates `character.description` with the
+        // body and exposes a correctly-mapped V2 in `chara_card_v2_json.data`.
+        // JanitorAI rows keep the body in `character.personality`.
+        const recoveredVariant = pickRecoveryVariant(character);
+        const charIsSaucepan = getSourceKind(character) === 'saucepan' || getSourceKind(hit) === 'saucepan';
+        const v2Data = character?.chara_card_v2_json?.data || null;
+        const saucepanBody = charIsSaucepan
+            ? (recoveredVariant?.description || v2Data?.description || character.description || '')
+            : '';
+        const personality = charIsSaucepan
+            ? saucepanBody
+            : (recoveredVariant?.description || recoveredVariant?.personality || character.personality || '');
+        const scenario = recoveredVariant?.scenario || character.scenario || v2Data?.scenario || '';
+        const firstMessage = recoveredVariant?.first_message || character.first_message || v2Data?.first_mes || '';
+        const canPaintBody = !!recoveredVariant || !charIsSaucepan || !!saucepanBody;
+
+        // Resolve Saucepan lock state if we have detail data. When the
+        // character is on DataCat but the definition is locked AND we have
+        // no recovered variant, the body sections are empty: surface a
+        // banner so the user understands why.
+        const saucepanDetail = await saucepanDetailPromise;
+        const saucepanLocked = isSaucepanHit && saucepanDetail && saucepanDetail.open_definition === false;
+        const showLockedBanner = saucepanLocked && !recoveredVariant;
 
         const descSection = document.getElementById('datacatCharDescriptionSection');
         if (descSection) {
             const descEl = document.getElementById('datacatCharDescription');
-            if (personality) {
+            if (personality && canPaintBody) {
                 descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = formatRichText(personality, name, false);
+                if (descEl) descEl.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${formatRichText(personality, name, false)}`;
+            } else if (showLockedBanner) {
+                descSection.style.display = 'block';
+                if (descEl) descEl.innerHTML = renderLockedDefBanner();
             } else {
                 descSection.style.display = 'none';
                 if (descEl) descEl.innerHTML = '';
@@ -1998,14 +2714,14 @@ async function fetchAndPopulateDetails(hit, token) {
 
         const scenarioSection = document.getElementById('datacatCharScenarioSection');
         const scenarioEl = document.getElementById('datacatCharScenario');
-        if (scenarioSection && scenario) {
+        if (scenarioSection && scenario && canPaintBody) {
             scenarioSection.style.display = 'block';
             if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
         }
 
         const firstMsgSection = document.getElementById('datacatCharFirstMsgSection');
         const firstMsgEl = document.getElementById('datacatCharFirstMsg');
-        if (firstMsgSection && firstMessage) {
+        if (firstMsgSection && firstMessage && canPaintBody) {
             firstMsgSection.style.display = 'block';
             if (firstMsgEl) {
                 firstMsgEl.innerHTML = formatRichText(firstMessage, name, false);
@@ -2016,13 +2732,25 @@ async function fetchAndPopulateDetails(hit, token) {
         // Silently update stats values if full character has better data
         const chatsEl = document.getElementById('datacatCharChats');
         const msgsEl = document.getElementById('datacatCharMessages');
+        const tokensEl = document.getElementById('datacatCharTokens');
         const fullChatCount = getChatCount(character);
         const fullMsgCount = getMsgCount(character);
+        const fullTokens = getTotalTokens(character);
         if (chatsEl && fullChatCount) chatsEl.textContent = formatNumber(fullChatCount);
         if (msgsEl && fullMsgCount) msgsEl.textContent = formatNumber(fullMsgCount);
+        if (tokensEl && fullTokens) tokensEl.textContent = formatNumber(fullTokens);
 
-        // Refresh creator notes only if content changed (avoids iframe rebuild flash)
-        const fullCreatorNotes = (character.description || '').trim();
+        // Refresh creator notes only if content changed (avoids iframe rebuild flash).
+        // Source field differs by row kind: JanitorAI puts the blurb in
+        // `character.description`; Saucepan puts the body there and exposes
+        // the actual blurb via `companion_snapshot.full_description` (with
+        // formatting markers) or the V2 mapping in `chara_card_v2_json.data`.
+        const fullCreatorNotes = (charIsSaucepan
+            ? (character?.companion_snapshot?.full_description
+                || character?.intercepted_chat_data?.companion_snapshot?.full_description
+                || v2Data?.creator_notes
+                || '')
+            : (character.description || '')).trim();
         const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
         const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
         if (fullCreatorNotes && fullCreatorNotes !== datacatLastCreatorNotes) {
@@ -2041,6 +2769,24 @@ async function fetchAndPopulateDetails(hit, token) {
                 const fullTags = resolveTagNames(character.tags);
                 const newHtml = fullTags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
                 if (tagsEl.innerHTML !== newHtml) tagsEl.innerHTML = newHtml;
+            }
+        }
+
+        // Saucepan portraits gallery
+        const portraits = character?.companion_snapshot?.portraits;
+        if (Array.isArray(portraits) && portraits.length > 0) {
+            const gallerySection = document.getElementById('datacatCharGallerySection');
+            const galleryGrid = document.getElementById('datacatCharGalleryGrid');
+            const galleryLabel = document.getElementById('datacatCharGalleryLabel');
+            if (gallerySection && galleryGrid) {
+                gallerySection.style.display = 'block';
+                if (galleryLabel) galleryLabel.textContent = `(${portraits.length})`;
+                galleryGrid.innerHTML = portraits.map(p => {
+                    const url = p?.image?.highres_url;
+                    if (!url) return '';
+                    const title = p?.description || p?.name || 'Gallery image';
+                    return `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(title)}" title="${escapeHtml(title)}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`;
+                }).join('');
             }
         }
 
@@ -2068,11 +2814,63 @@ async function fetchAndPopulateDetails(hit, token) {
             importBtn.disabled = false;
         }
 
-        // Fetch download data for alternate greetings (started in parallel above)
+        // Fetch download data for alternate greetings and example messages
         downloadPromise.then(downloadData => {
             if (token !== datacatDetailFetchToken) return;
-            const altGreetings = downloadData?.data?.alternate_greetings;
-            renderAltGreetings(altGreetings, name);
+            const d = downloadData?.data;
+
+            // /download is authoritative for the body fields when available.
+            // The character endpoint sometimes carries a short synopsis that
+            // DataCat scraped from JanitorAI's listing page in the
+            // `personality` slot - using that as the Description gives the
+            // preview content that doesn't match what gets imported. Import
+            // already prefers /download via buildV2FromDownload, so this
+            // mirrors that behavior.
+            //
+            // Exception: Saucepan with a recovery variant. The recovered
+            // variant is the only authoritative source for repaired cards;
+            // /download returns empty fields in that case.
+            const useRecoveryAsAuthority = charIsSaucepan && !!recoveredVariant;
+            const needSaucepanFallback = charIsSaucepan && !recoveredVariant;
+            if (d) {
+                const dlDesc = d.personality || d.description || '';
+                const shouldOverwriteDesc = !useRecoveryAsAuthority
+                    && dlDesc
+                    && (needSaucepanFallback || !personality || dlDesc !== personality);
+                if (shouldOverwriteDesc) {
+                    const ds = document.getElementById('datacatCharDescriptionSection');
+                    const de = document.getElementById('datacatCharDescription');
+                    if (ds) ds.style.display = 'block';
+                    if (de) de.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${formatRichText(dlDesc, name, false)}`;
+                }
+                if (d.scenario && !useRecoveryAsAuthority && (needSaucepanFallback || !scenario || d.scenario !== scenario)) {
+                    const ss = document.getElementById('datacatCharScenarioSection');
+                    const se = document.getElementById('datacatCharScenario');
+                    if (ss) ss.style.display = 'block';
+                    if (se) se.innerHTML = formatRichText(d.scenario, name, false);
+                }
+                if (d.first_mes && !useRecoveryAsAuthority && (needSaucepanFallback || !firstMessage || d.first_mes !== firstMessage)) {
+                    const fs = document.getElementById('datacatCharFirstMsgSection');
+                    const fe = document.getElementById('datacatCharFirstMsg');
+                    if (fs) fs.style.display = 'block';
+                    if (fe) {
+                        fe.innerHTML = formatRichText(d.first_mes, name, false);
+                        fe.dataset.fullContent = d.first_mes;
+                    }
+                }
+            }
+
+            // Example messages - only present in the download payload
+            const mesExample = d?.mes_example || '';
+            const mesSection = document.getElementById('datacatCharMesExampleSection');
+            const mesEl = document.getElementById('datacatCharMesExample');
+            if (mesExample && mesSection && mesEl) {
+                mesSection.style.display = 'block';
+                mesEl.innerHTML = formatRichText(mesExample, name, false);
+                mesEl.dataset.fullContent = mesExample;
+            }
+
+            renderAltGreetings(d?.alternate_greetings, name);
         });
     } catch (err) {
         debugLog('[DatacatBrowse] Detail fetch error:', err);
@@ -2155,6 +2953,7 @@ function cleanupDatacatCharModal() {
         'datacatCharFirstMsg',
         'datacatCharAltGreetings',
         'datacatCharTags',
+        'datacatCharGalleryGrid',
     ];
     for (const id of sectionIds) {
         const el = document.getElementById(id);
@@ -2222,9 +3021,7 @@ async function importCharacter(charData) {
         if (duplicateMatches && duplicateMatches.length > 0) {
             if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-exclamation-triangle"></i> Duplicate found...';
 
-            const avatarUrl = (character.avatar || charData.avatar)
-                ? `${DATACAT_IMAGE_BASE}${character.avatar || charData.avatar}`
-                : '/img/ai4.png';
+            const avatarUrl = resolveDatacatAvatarUrl(character) || resolveDatacatAvatarUrl(charData) || '/img/ai4.png';
             const result = await showPreImportDuplicateWarning({
                 name: charName,
                 creator: charCreator,
@@ -2302,12 +3099,14 @@ function markCardAsImported(charId) {
         if (!card) continue;
         card.classList.add('in-library');
         card.classList.remove('possible-library');
-        let badgesEl = card.querySelector('.browse-feature-badges');
+        // Use :not(-tl) so we don't grab the top-left source badge container,
+        // which shares the .browse-feature-badges base class.
+        let badgesEl = card.querySelector('.browse-feature-badges:not(.browse-feature-badges-tl)');
         if (!badgesEl) {
             const imgWrap = card.querySelector('.browse-card-image');
             if (imgWrap) {
                 imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                badgesEl = imgWrap.querySelector('.browse-feature-badges:not(.browse-feature-badges-tl)');
             }
         }
         if (badgesEl) {
@@ -2341,7 +3140,7 @@ function updateNsfwToggle() {
 function updateDatacatFiltersButtonState() {
     const btn = document.getElementById('datacatFiltersBtn');
     if (!btn) return;
-    const count = [datacatFilterHideOwned, datacatFilterHidePossible].filter(Boolean).length;
+    const count = [datacatFilterHideOwned, datacatFilterHidePossible, datacatFilterHideJanitor, datacatFilterHideSaucepan].filter(Boolean).length;
     btn.classList.toggle('has-filters', count > 0);
     btn.innerHTML = count > 0
         ? `<i class="fa-solid fa-sliders"></i> Features (${count})`
@@ -2379,7 +3178,16 @@ function initDatacatView() {
             if (authorLink) {
                 e.stopPropagation();
                 const creatorId = authorLink.dataset.creatorId;
-                if (creatorId) browseCreator(creatorId);
+                if (creatorId) {
+                    const card = authorLink.closest('.browse-card');
+                    const charId = card?.dataset?.datacatId;
+                    const hit = charId ? datacatCharacters.find(c => String(getCharId(c)) === charId) : null;
+                    if (hit && getSourceKind(hit) === 'saucepan') {
+                        browseCreator(creatorId, { source: 'saucepan', handle: getCreatorName(hit), name: getCreatorName(hit) });
+                    } else {
+                        browseCreator(creatorId);
+                    }
+                }
                 return;
             }
 
@@ -2388,7 +3196,11 @@ function initDatacatView() {
             const charId = card.dataset.datacatId;
             if (!charId) return;
             const hit = datacatCharacters.find(c => String(getCharId(c)) === charId);
-            if (hit) openPreviewModal(hit);
+            if (!hit) return;
+            // Saucepan and DataCat hits both go through the preview modal.
+            // For saucepan items not yet on DataCat, fetchAndPopulateDetails
+            // will surface the inline extraction CTA when the lookup fails.
+            openPreviewModal(hit);
         });
     }
 
@@ -2428,6 +3240,11 @@ function initDatacatView() {
             datacatCurrentOffset = 0;
             loadCharacters(false);
         }
+        if (isSaucepanSortMode(datacatSortMode) && saucepanSearchQuery) {
+            saucepanSearchQuery = '';
+            saucepanCurrentPage = 1;
+            loadCharacters(false);
+        }
     });
 
     // Load More
@@ -2438,6 +3255,8 @@ function initDatacatView() {
             hampterCurrentPage++;
         } else if (isJannySortMode(datacatSortMode)) {
             meiliCurrentPage++;
+        } else if (isSaucepanSortMode(datacatSortMode)) {
+            saucepanCurrentPage++;
         } else {
             const loadParsed = parseSortMode(datacatSortMode);
             if (loadParsed) {
@@ -2467,6 +3286,19 @@ function initDatacatView() {
     });
     updateNsfwToggle();
 
+    // Open-Definition toggle (Saucepan)
+    on('datacatOpenDefToggle', 'click', () => {
+        saucepanOpenDefinitionOnly = !saucepanOpenDefinitionOnly;
+        updateOpenDefToggle();
+        if (isSaucepanSortMode(datacatSortMode)) {
+            saucepanCurrentPage = 1;
+            loadCharacters(false);
+        }
+    });
+    updateOpenDefToggle();
+    updateOpenDefToggleVisibility();
+    updateSourceFilterVisibility();
+
     // Filters dropdown toggle
     on('datacatFiltersBtn', 'click', (e) => {
         e.stopPropagation();
@@ -2479,6 +3311,8 @@ function initDatacatView() {
     const dcFilterCheckboxes = [
         { id: 'datacatFilterHideOwned', setter: (v) => datacatFilterHideOwned = v, getter: () => datacatFilterHideOwned },
         { id: 'datacatFilterHidePossible', setter: (v) => datacatFilterHidePossible = v, getter: () => datacatFilterHidePossible },
+        { id: 'datacatFilterHideJanitor', setter: (v) => datacatFilterHideJanitor = v, getter: () => datacatFilterHideJanitor },
+        { id: 'datacatFilterHideSaucepan', setter: (v) => datacatFilterHideSaucepan = v, getter: () => datacatFilterHideSaucepan },
     ];
     dcFilterCheckboxes.forEach(({ id, getter }) => {
         const cb = document.getElementById(id);
@@ -2513,10 +3347,22 @@ function initDatacatView() {
             meiliCurrentPage = 1;
             hampterCurrentPage = 1;
             hampterSearchQuery = '';
+            saucepanCurrentPage = 1;
+            saucepanSearchQuery = '';
         }
         datacatCurrentOffset = 0;
         updateSearchPlaceholder();
         updateTagsVisibility();
+        updateTagsButton();
+        // Refresh open tag dropdown so it shows the right tag set for the new mode
+        const tagDropdown = document.getElementById('datacatTagsDropdown');
+        if (tagDropdown && !tagDropdown.classList.contains('hidden')) {
+            if (isJannyTagMode()) renderJannyTagsList();
+            else if (isSaucepanTagMode()) renderSaucepanTagsList();
+            else loadFacetedTags();
+        }
+        updateOpenDefToggleVisibility();
+        updateSourceFilterVisibility();
         loadCharacters(false);
     });
 
@@ -2555,17 +3401,30 @@ function initDatacatView() {
         if (!dropdown) return;
         dropdown.classList.toggle('hidden');
         if (!dropdown.classList.contains('hidden')) {
+            const searchInput = document.getElementById('datacatTagsSearchInput');
+            if (searchInput) searchInput.value = '';
             if (isJannyTagMode()) {
                 renderJannyTagsList();
+            } else if (isSaucepanTagMode()) {
+                renderSaucepanTagsList();
             } else {
                 loadFacetedTags();
             }
+            // Focus search after a tick (avoid immediately blurring on open)
+            setTimeout(() => searchInput?.focus(), 50);
         }
     });
     on('datacatTagsClearBtn', 'click', () => {
+        const searchInput = document.getElementById('datacatTagsSearchInput');
+        if (searchInput) searchInput.value = '';
         if (isJannyTagMode()) {
             jannyActiveTagIds.clear();
             renderJannyTagsList();
+        } else if (isSaucepanTagMode()) {
+            saucepanActiveTags.clear();
+            saucepanExcludedTags.clear();
+            renderSaucepanTagsList();
+            saucepanCurrentPage = 1;
         } else {
             datacatActiveTagIds.clear();
             renderTagsList();
@@ -2574,6 +3433,19 @@ function initDatacatView() {
         updateTagsButton();
         datacatCurrentOffset = 0;
         loadCharacters(false);
+    });
+
+    // Tags search input — filter the current rendered list
+    on('datacatTagsSearchInput', 'input', () => {
+        const searchInput = document.getElementById('datacatTagsSearchInput');
+        const filter = searchInput?.value || '';
+        if (isJannyTagMode()) {
+            renderJannyTagsList(filter);
+        } else if (isSaucepanTagMode()) {
+            renderSaucepanTagsList(filter);
+        } else {
+            renderTagsList(filter);
+        }
     });
 
     // Dropdown dismiss (click outside)
@@ -2596,10 +3468,11 @@ function initDatacatView() {
     // Follow button in creator banner
     on('datacatFollowCreatorBtn', 'click', () => {
         if (!datacatCreatorId) return;
-        if (isCreatorFollowed(datacatCreatorId)) {
-            unfollowCreator(datacatCreatorId);
+        const src = datacatCreatorSource;
+        if (isCreatorFollowed(datacatCreatorId, src)) {
+            unfollowCreator(datacatCreatorId, src);
         } else {
-            followCreator(datacatCreatorId, datacatCreatorName);
+            followCreator(datacatCreatorId, datacatCreatorName, src);
         }
     });
 
@@ -2620,57 +3493,79 @@ function initDatacatView() {
 
 
     // ---- Preview modal events (only attach once) ----
-    if (!modalEventsAttached) {
-        modalEventsAttached = true;
+    ensureModalEventsAttached();
+}
 
-        if (!window.matchMedia('(max-width: 768px)').matches) {
-            const datacatOverlay = document.getElementById('datacatCharModal');
-            BrowseView.wireTitleScroll(document.getElementById('datacatCharName'), datacatOverlay, datacatOverlay?.querySelector('.browse-char-modal'));
-        }
+function ensureModalEventsAttached() {
+    if (modalEventsAttached) return;
+    if (!document.getElementById('datacatCharModal')) return;
+    modalEventsAttached = true;
 
-        on('datacatCharClose', 'click', () => closePreviewModal());
+    if (!window.matchMedia('(max-width: 768px)').matches) {
+        const datacatOverlay = document.getElementById('datacatCharModal');
+        BrowseView.wireTitleScroll(document.getElementById('datacatCharName'), datacatOverlay, datacatOverlay?.querySelector('.browse-char-modal'));
+    }
 
-        const creatorLink = document.getElementById('datacatCharCreator');
-        if (creatorLink) {
-            creatorLink.addEventListener('click', (e) => {
-                e.preventDefault();
-                const creatorId = getCreatorId(datacatSelectedChar);
-                if (creatorId) {
-                    closePreviewModal();
-                    browseCreator(creatorId);
-                }
-            });
-        }
+    on('datacatCharClose', 'click', () => closePreviewModal());
 
-        const avatar = document.getElementById('datacatCharAvatar');
-        if (avatar && !window.matchMedia('(max-width: 768px)').matches) {
-            avatar.addEventListener('click', (e) => {
-                e.stopPropagation();
-                if (!avatar.src || avatar.src.endsWith('/img/ai4.png')) return;
-                BrowseView.openAvatarViewer(avatar.src);
-            });
-        }
-
-        on('datacatImportBtn', 'click', () => {
-            const importBtn = document.getElementById('datacatImportBtn');
-            const extractId = importBtn?.dataset.extractId;
-            if (extractId) {
-                startModalExtraction(extractId);
-            } else if (datacatSelectedChar) {
-                importCharacter(datacatSelectedChar);
+    const datacatGalleryGrid = document.getElementById('datacatCharGalleryGrid');
+    if (datacatGalleryGrid) {
+        datacatGalleryGrid.addEventListener('click', (e) => {
+            if (e.target.classList.contains('browse-gallery-thumb')) {
+                const thumbs = [...datacatGalleryGrid.querySelectorAll('.browse-gallery-thumb')];
+                const urls = thumbs.map(t => t.src);
+                const idx = thumbs.indexOf(e.target);
+                BrowseView.openAvatarViewer(e.target.src, null, urls, idx);
             }
         });
-
-        const modalOverlay = document.getElementById('datacatCharModal');
-        if (modalOverlay) {
-            modalOverlay.addEventListener('click', (e) => {
-                if (e.target === modalOverlay) closePreviewModal();
-            });
-        }
-
-        window.registerOverlay?.({ id: 'datacatCharModal', tier: 7, close: () => closePreviewModal() });
-        window.registerOverlay?.({ id: 'datacatCreatorBanner', tier: 9, close: () => clearCreatorFilter() });
     }
+
+    const creatorLink = document.getElementById('datacatCharCreator');
+    if (creatorLink) {
+        creatorLink.addEventListener('click', (e) => {
+            e.preventDefault();
+            const creatorId = getCreatorId(datacatSelectedChar);
+            if (creatorId) {
+                closePreviewModal();
+                if (datacatSelectedChar && getSourceKind(datacatSelectedChar) === 'saucepan') {
+                    const handle = getCreatorName(datacatSelectedChar);
+                    browseCreator(creatorId, { source: 'saucepan', handle, name: handle });
+                } else {
+                    browseCreator(creatorId);
+                }
+            }
+        });
+    }
+
+    const avatar = document.getElementById('datacatCharAvatar');
+    if (avatar && !window.matchMedia('(max-width: 768px)').matches) {
+        avatar.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!avatar.src || avatar.src.endsWith('/img/ai4.png')) return;
+            BrowseView.openAvatarViewer(avatar.src);
+        });
+    }
+
+    on('datacatImportBtn', 'click', () => {
+        const importBtn = document.getElementById('datacatImportBtn');
+        const extractId = importBtn?.dataset.extractId;
+        if (extractId) {
+            const extractSource = importBtn?.dataset.extractSource || 'janitor';
+            startModalExtraction(extractId, extractSource);
+        } else if (datacatSelectedChar) {
+            importCharacter(datacatSelectedChar);
+        }
+    });
+
+    const modalOverlay = document.getElementById('datacatCharModal');
+    if (modalOverlay) {
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closePreviewModal();
+        });
+    }
+
+    window.registerOverlay?.({ id: 'datacatCharModal', tier: 7, close: () => closePreviewModal() });
+    window.registerOverlay?.({ id: 'datacatCreatorBanner', tier: 9, close: () => clearCreatorFilter() });
 }
 
 // ========================================
@@ -2684,6 +3579,17 @@ window.openDatacatCharPreview = function(char) {
 // ========================================
 // BROWSE VIEW CLASS
 // ========================================
+
+// Destroy any active FlareSolverr session on tab close so we don't leak a
+// Chromium instance on the user's FlareSolverr server.
+if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', () => {
+        if (flareSession.url && flareSession.id) {
+            // Use sendBeacon-friendly synchronous path is unavailable; best-effort.
+            destroyFlareSolverrSession(flareSession.url, flareSession.id);
+        }
+    });
+}
 
 const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
 
@@ -2705,20 +3611,72 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         return datacatFollowedCreators.map((c, i) => ({
             id: c.id,
             name: c.name,
+            source: c.source || 'datacat',
+            handle: (c.source === 'saucepan') ? c.name : undefined,
             followedAt: i,
         }));
     }
 
+    _renderManagerCreatorCard(creator, index) {
+        const html = super._renderManagerCreatorCard(creator, index);
+        const source = creator.source || 'datacat';
+        // DataCat-tracked creators are JanitorAI creators (DataCat indexes JanitorAI),
+        // so display them with the Janitor badge for consistency with the timeline.
+        const badge = source === 'saucepan'
+            ? '<span class="browse-feature-badge source-saucepan" title="Source: Saucepan">S</span>'
+            : '<span class="browse-feature-badge source-janitor" title="Source: JanitorAI">J</span>';
+        // Inject the source badge inside the meta line, before the existing meta children.
+        return html.replace(
+            '<div class="follow-mgr-card-meta">',
+            `<div class="follow-mgr-card-meta"><span class="follow-mgr-source-badge">${badge}</span>`
+        );
+    }
+
     async followCreator(query) {
         if (!query) return null;
-        let creatorId = query.trim();
+        const raw = query.trim();
+
+        // Saucepan URL or @handle pattern
+        const saucepanUrlMatch = raw.match(/saucepan\.ai\/@?([A-Za-z0-9_.-]+)/i);
+        const atHandleMatch = raw.match(/^@([A-Za-z0-9_.-]+)$/);
+        if (saucepanUrlMatch || atHandleMatch) {
+            const handle = (saucepanUrlMatch?.[1] || atHandleMatch?.[1] || '').trim();
+            if (!handle) return null;
+            // Saucepan stores handle as both display name and lookup key; id = author_id
+            // Try fetching to resolve author_id
+            try {
+                const data = await fetchSaucepanCompanionsOfUser(handle);
+                const list = data?.characters || [];
+                if (list.length === 0) {
+                    showToast(`Saucepan creator "${handle}" not found or has no characters`, 'warning');
+                    return null;
+                }
+                const authorId = list[0]?.creator_id;
+                if (!authorId) {
+                    showToast('Could not resolve Saucepan creator id', 'warning');
+                    return null;
+                }
+                if (isCreatorFollowed(authorId, 'saucepan')) {
+                    showToast('Already following this creator', 'info');
+                    return null;
+                }
+                followCreator(authorId, handle, 'saucepan');
+                return { id: authorId, name: handle };
+            } catch (e) {
+                debugLog('[DatacatFollowing] Saucepan follow lookup failed:', e.message);
+                showToast('Failed to look up Saucepan creator', 'error');
+                return null;
+            }
+        }
+
+        let creatorId = raw;
 
         // Extract UUID from DataCat creator URL
         const urlMatch = creatorId.match(/creators?\/([0-9a-f-]{36})/i);
         if (urlMatch) creatorId = urlMatch[1];
 
-        // Check if already followed
-        if (isCreatorFollowed(creatorId)) {
+        // Check if already followed (datacat)
+        if (isCreatorFollowed(creatorId, 'datacat')) {
             showToast('Already following this creator', 'info');
             return null;
         }
@@ -2728,39 +3686,45 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             const creator = await fetchDatacatCreator(creatorId);
             if (creator) {
                 const name = creator.userName || creatorId;
-                followCreator(creatorId, name);
+                followCreator(creatorId, name, 'datacat');
                 return { id: creatorId, name };
             }
         }
 
         // Client-side name search across known data
-        const lowerQ = query.toLowerCase().trim();
+        const lowerQ = raw.toLowerCase();
         const sources = [
-            ...datacatFollowedCreators.map(c => ({ id: c.id, name: c.name })),
-            ...datacatCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c) })),
-            ...datacatFollowingCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c) })),
+            ...datacatFollowedCreators.map(c => ({ id: c.id, name: c.name, source: c.source || 'datacat' })),
+            ...datacatCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c), source: getSourceKind(c) === 'saucepan' ? 'saucepan' : 'datacat' })),
+            ...datacatFollowingCharacters.map(c => ({ id: getCreatorId(c), name: getCreatorName(c), source: getSourceKind(c) === 'saucepan' ? 'saucepan' : 'datacat' })),
         ];
         const exact = sources.find(c => c.name?.toLowerCase() === lowerQ);
         const match = exact || sources.find(c => c.name?.toLowerCase().includes(lowerQ));
 
-        if (match && match.id && !isCreatorFollowed(match.id)) {
-            followCreator(match.id, match.name);
+        if (match && match.id && !isCreatorFollowed(match.id, match.source)) {
+            followCreator(match.id, match.name, match.source);
             return { id: match.id, name: match.name };
         }
 
-        showToast('Creator not found. Try pasting a DataCat creator URL.', 'warning');
+        showToast('Creator not found. Try pasting a DataCat or Saucepan creator URL.', 'warning');
         return null;
     }
 
     async unfollowCreator(id) {
-        unfollowCreator(id);
+        const entry = datacatFollowedCreators.find(c => c.id === id);
+        unfollowCreator(id, entry?.source || 'datacat');
         return true;
     }
 
     browseCreatorFromManager(creator) {
         switchDatacatViewMode('browse');
         _returnToFollowing = true;
-        browseCreator(creator.id);
+        const source = creator.source || 'datacat';
+        if (source === 'saucepan') {
+            browseCreator(creator.id, { source: 'saucepan', handle: creator.handle || creator.name, name: creator.name });
+        } else {
+            browseCreator(creator.id);
+        }
     }
 
     getFollowingManagerSortOptions() {
@@ -2856,7 +3820,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                 </button>
                 <div id="datacatTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <span style="font-size: var(--btn-font-sm); color: var(--text-secondary);">Filter by tags</span>
+                        <input type="search" id="datacatTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
                         <button id="datacatTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
@@ -2874,12 +3838,22 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <div class="dropdown-section-title">Library:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideOwned"> <i class="fa-solid fa-check"></i> Hide Owned Characters</label>
                     <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHidePossible"> <i class="fa-solid fa-check" style="color: #f0a500;"></i> Hide Possible Matches</label>
+                    <div id="datacatFilterSourceSection">
+                        <div class="dropdown-section-title">Source:</div>
+                        <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideJanitor"> <i class="fa-solid fa-cat"></i> Hide JanitorAI</label>
+                        <label class="filter-checkbox"><input type="checkbox" id="datacatFilterHideSaucepan"> <i class="fa-solid fa-bowl-food"></i> Hide Saucepan</label>
+                    </div>
                 </div>
             </div>
 
             <!-- NSFW toggle -->
             <button id="datacatNsfwToggle" class="glass-btn nsfw-toggle" title="Toggle NSFW content">
                 <i class="fa-solid fa-shield-halved"></i> <span>SFW Only</span>
+            </button>
+
+            <!-- Open-Definition toggle (Saucepan only) -->
+            <button id="datacatOpenDefToggle" class="glass-btn active" title="Showing only open-definition characters" style="display: none;">
+                <i class="fa-solid fa-lock-open"></i> <span>Open Defs</span>
             </button>
 
             <!-- Refresh -->
@@ -3054,6 +4028,15 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <div id="datacatCharScenario" class="scrolling-text"></div>
                 </div>
 
+                <!-- Example Messages -->
+                <div class="browse-char-section browse-section-collapsed" id="datacatCharMesExampleSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="datacatCharMesExample" data-label="Example Messages" data-icon="fa-solid fa-comments" title="Click to expand">
+                        <i class="fa-solid fa-comments"></i> Example Messages
+                        <span class="browse-section-inline-toggle" title="Toggle inline"><i class="fa-solid fa-chevron-down"></i></span>
+                    </h3>
+                    <div id="datacatCharMesExample" class="scrolling-text"></div>
+                </div>
+
                 <!-- First Message -->
                 <div class="browse-char-section" id="datacatCharFirstMsgSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="datacatCharFirstMsg" data-label="First Message" data-icon="fa-solid fa-message" title="Click to expand">
@@ -3068,6 +4051,14 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         <i class="fa-solid fa-comments"></i> Alternate Greetings <span class="browse-section-count" id="datacatCharAltGreetingsCount"></span>
                     </h3>
                     <div id="datacatCharAltGreetings" class="browse-alt-greetings-list"></div>
+                </div>
+
+                <!-- Gallery (Saucepan portraits) -->
+                <div class="browse-char-section" id="datacatCharGallerySection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="datacatCharGalleryGrid" data-label="Gallery" data-icon="fa-solid fa-images" title="Click to expand">
+                        <i class="fa-solid fa-images"></i> Gallery <span class="browse-section-count" id="datacatCharGalleryLabel"></span>
+                    </h3>
+                    <div id="datacatCharGalleryGrid" class="browse-gallery-grid"></div>
                 </div>
             </div>
         </div>
@@ -3097,6 +4088,8 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             hampterCurrentPage++;
         } else if (isJannySortMode(datacatSortMode)) {
             meiliCurrentPage++;
+        } else if (isSaucepanSortMode(datacatSortMode)) {
+            saucepanCurrentPage++;
         } else {
             const parsed = parseSortMode(datacatSortMode);
             if (parsed) {
@@ -3115,7 +4108,12 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         this.buildLocalLibraryLookup();
         initDatacatView();
         const grid = document.getElementById('datacatGrid');
-        if (grid) this.observeImages(grid);
+        if (grid) {
+            this.observeImages(grid);
+            // Show spinner immediately so the user doesn't see a blank grid
+            // while the async cl-helper / session checks below are in flight.
+            renderLoadingState(grid, 'Loading from DataCat...', 'browse-loading');
+        }
 
         // Check cl-helper, auto-init session (with persistence), then load
         checkDcPluginAvailable().then(async ok => {
@@ -3197,6 +4195,12 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
             updateSearchPlaceholder();
             updateTagsVisibility();
         }
+
+        // Pre-warm FlareSolverr in the background so by the time the user
+        // picks a Hampter sort the session has already solved CF and cached
+        // the cookie. Best-effort; no UI feedback if it fails silently.
+        const flareUrl = (getSetting('datacatFlareSolverrUrl') || '').trim();
+        if (flareUrl) prewarmFlareSession(flareUrl);
     }
 
     // -- Library Lookup (BrowseView contract) --
@@ -3214,6 +4218,10 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         datacatDetailFetchToken++;
         delegatesInitialized = false;
         clearExtractionState();
+        // Intentionally NOT clearing the FlareSolverr session here - keeping
+        // it alive across tab switches means re-entering DataCat reuses the
+        // already-warm session instead of paying the CF challenge cost again.
+        // The session is destroyed on page unload via the beforeunload hook.
         super.deactivate();
         this.disconnectImageObserver();
     }

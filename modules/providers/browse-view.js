@@ -1,4 +1,4 @@
-// BrowseView — base class for provider browse views in the Online tab
+// BrowseView - base class for provider browse views in the Online tab
 
 import CoreAPI from '../core-api.js';
 import { normalizeBrowseName } from './provider-utils.js';
@@ -74,9 +74,9 @@ export class BrowseView {
     /**
      * Called every time the Online tab shows this provider's view.
      * First call should trigger init() if not yet done.
-     * @param {HTMLElement} container — #onlineView element
+     * @param {HTMLElement} container - #onlineView element
      * @param {Object} [options]
-     * @param {boolean} [options.domRecreated] — true when the DOM was
+     * @param {boolean} [options.domRecreated] - true when the DOM was
      *   destroyed and rebuilt by the registry (provider switch).
      */
     activate(container, options = {}) {
@@ -109,7 +109,7 @@ export class BrowseView {
      * @param {Object} defaults - { view?: string, sort?: string }
      */
     applyDefaults(defaults) {
-        // Base implementation — no-op. Subclasses override.
+        // Base implementation - no-op. Subclasses override.
     }
 
     /**
@@ -362,7 +362,7 @@ export class BrowseView {
 
     /**
      * Create the shared IntersectionObserver (once). Subclasses normally
-     * don't need to call this directly — observeImages() auto-initializes.
+     * don't need to call this directly - observeImages() auto-initializes.
      */
     _initImageObserver() {
         if (this._imageObserver) return;
@@ -928,7 +928,8 @@ export class BrowseView {
     }
 
     _renderManagerCreatorCard(creator, index) {
-        const avatarUrl = this.getCreatorAvatarUrl(creator);
+        const rawAvatarUrl = this.getCreatorAvatarUrl(creator);
+        const avatarUrl = rawAvatarUrl ? CoreAPI.escapeHtml?.(rawAvatarUrl) ?? rawAvatarUrl : '';
         const name = CoreAPI.escapeHtml?.(creator.name) || creator.name;
         const username = creator.username ? CoreAPI.escapeHtml?.(creator.username) || creator.username : '';
         const charCount = creator.characterCount != null ? creator.characterCount : -1;
@@ -1066,7 +1067,7 @@ export class BrowseView {
     }
 
     /**
-     * Full teardown — page unload.
+     * Full teardown - page unload.
      */
     destroy() {
         this.deactivate();

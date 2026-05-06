@@ -829,11 +829,17 @@ body.char-modal-above .gv-modal.visible {
     border: 1px solid rgba(74, 158, 255, 0.2);
     border-radius: 10px;
     margin-bottom: 14px;
+    font-size: var(--font-md);
+    line-height: 1.4;
 }
 
 .batch-summary-header i {
     color: var(--cl-accent, #4a9eff);
-    font-size: var(--font-lg);
+    font-size: var(--font-md);
+}
+
+.batch-summary-header strong {
+    font-weight: 600;
 }
 
 .batch-summary-fields {
@@ -841,6 +847,7 @@ body.char-modal-above .gv-modal.visible {
     flex-wrap: wrap;
     gap: var(--space-xs-sm);
     margin-bottom: 16px;
+    font-size: var(--font-sm);
 }
 
 .batch-summary-field-group {
@@ -854,7 +861,6 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .batch-summary-field-count {
-    font-size: var(--font-sm);
     color: var(--cl-text-secondary, #999);
 }
 

@@ -1,4 +1,4 @@
-// DataCat Provider — implementation for datacat.run character source
+// DataCat Provider - implementation for datacat.run character source
 //
 // DataCat aggregates JanitorAI characters with its own REST API layer
 // and AI-powered character scoring. Uses ella.janitorai.com CDN for images.
@@ -10,7 +10,7 @@ import { assignGalleryId, importFromPng, fetchWithProxy } from '../provider-util
 import datacatBrowseView from './datacat-browse.js';
 import {
     DATACAT_API_BASE,
-    DATACAT_IMAGE_BASE,
+    resolveDatacatAvatarUrl,
     setApiRequest,
     slugify,
     stripHtml,
@@ -28,6 +28,23 @@ import {
 } from './datacat-api.js';
 
 let api = null;
+
+// Saucepan-source DataCat characters expose extra portraits in
+// `character.companion_snapshot.portraits[]`. Each entry has
+// `image.highres_url` pointing at the saucepan CDN. Avatar lives at
+// `companion_snapshot.image.highres_url` and is downloaded separately
+// during import, so it's excluded here.
+function extractSaucepanGalleryImages(character) {
+    const portraits = character?.companion_snapshot?.portraits;
+    if (!Array.isArray(portraits) || portraits.length === 0) return [];
+    const out = [];
+    for (const p of portraits) {
+        const url = p?.image?.highres_url;
+        if (!url) continue;
+        out.push({ url, id: p.image.id || null });
+    }
+    return out;
+}
 
 // ========================================
 // PROVIDER CLASS
@@ -267,6 +284,26 @@ class DatacatProvider extends ProviderBase {
 
     get supportsVersionHistory() { return false; }
 
+    // ── Gallery ──────────────────────────────────────────────
+    //
+    // Saucepan-source characters carry extra portraits in
+    // `character.companion_snapshot.portraits[]`, each with an `image.highres_url`
+    // pointing at the saucepan CDN. JanitorAI-source characters have no
+    // gallery field on DataCat, so this returns [] for them.
+
+    get supportsGallery() { return true; }
+
+    async fetchGalleryImages(linkInfo) {
+        if (!linkInfo?.id) return [];
+        try {
+            const character = await fetchDatacatCharacter(linkInfo.id);
+            return extractSaucepanGalleryImages(character);
+        } catch (e) {
+            console.error('[DatacatProvider] fetchGalleryImages failed:', linkInfo.id, e);
+            return [];
+        }
+    }
+
     // ── Character URL / Link UI ─────────────────────────────
 
     getCharacterUrl(linkInfo) {
@@ -343,7 +380,7 @@ class DatacatProvider extends ProviderBase {
             };
         }
 
-        // No datacat extensions — cannot auto-enrich without a search API
+        // No datacat extensions - cannot auto-enrich without a search API
         return null;
     }
 
@@ -419,7 +456,7 @@ class DatacatProvider extends ProviderBase {
             assignGalleryId(characterCard, options, api);
 
             // Download avatar
-            const avatarUrl = character.avatar ? `${DATACAT_IMAGE_BASE}${character.avatar}` : null;
+            const avatarUrl = resolveDatacatAvatarUrl(character);
             let imageBuffer = null;
 
             if (avatarUrl) {
@@ -434,7 +471,8 @@ class DatacatProvider extends ProviderBase {
             return await importFromPng({
                 characterCard, imageBuffer,
                 fileName: `datacat_${slugify(characterName)}.png`,
-                characterName, hasGallery: false,
+                characterName,
+                hasGallery: extractSaucepanGalleryImages(character).length > 0,
                 providerCharId: charId,
                 fullPath: charId,
                 avatarUrl: avatarUrl || null,
@@ -454,7 +492,7 @@ class DatacatProvider extends ProviderBase {
 
     // ── Bulk Linking ────────────────────────────────────────
 
-    // TODO: No search API discovered yet — bulk link disabled until we find one
+    // TODO: No search API discovered yet - bulk link disabled until we find one
     get supportsBulkLink() { return false; }
 }
 

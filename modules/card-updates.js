@@ -10,7 +10,7 @@ let batchCheckedCount = 0;
 let batchSelectedAvatars = new Set(); // Characters checked for inclusion in Apply All
 let batchStatusFilter = 'all'; // Active filter: 'all' | 'has-updates' | 'up-to-date' | 'errors' | 'unavailable' | 'applied'
 
-// Base fields to compare (key -> display label) — provider fields merged at init
+// Base fields to compare (key -> display label) - provider fields merged at init
 const BASE_COMPARABLE_FIELDS = {
     // Core character fields
     'name': 'Name',
@@ -60,12 +60,12 @@ const BASE_FIELD_ICONS = {
     'listing_name': 'fa-solid fa-store',
 };
 
-// Effective fields — rebuilt after providers register
+// Effective fields - rebuilt after providers register
 let COMPARABLE_FIELDS = { ...BASE_COMPARABLE_FIELDS };
 let FIELD_ICONS = { ...BASE_FIELD_ICONS };
 
 // Maps provider-specific field paths to their provider ID
-// Base fields are NOT in this map — only provider-contributed fields.
+// Base fields are NOT in this map - only provider-contributed fields.
 let fieldProviderMap = {};
 
 // Groups of provider fields that share a single filter checkbox.
@@ -495,7 +495,7 @@ function compareCards(localData, remoteCard, allowedFields = null) {
             const remoteEntries = remoteValue?.entries || [];
             const localEntries = localValue?.entries || [];
 
-            // Remote has no lorebook but local does — lorebook was removed upstream
+            // Remote has no lorebook but local does - lorebook was removed upstream
             if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) {
                 if (localEntries.length > 0) {
                     diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
@@ -830,7 +830,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Help & tips — collapsible explainer
+    // Help & tips - collapsible explainer
     entriesHtml += `<div class="lorebook-diff-info-box">
         <i class="fa-solid fa-circle-info"></i>
         <div>
@@ -872,7 +872,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Entries that exist on remote but not locally — will be added
+    // Entries that exist on remote but not locally - will be added
     for (const entry of added) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
@@ -884,7 +884,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Entries in embedded lorebook but not on remote — will be lost from embedded on apply
+    // Entries in embedded lorebook but not on remote - will be lost from embedded on apply
     for (const entry of localOnly) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
@@ -1139,7 +1139,7 @@ function lorebookEntryMatchScore(a, b) {
         if (aName.includes(bName) || bName.includes(aName)) return 0.8;
     }
 
-    // Content similarity fallback — first 200 chars
+    // Content similarity fallback - first 200 chars
     const aCont = (a.content || '').slice(0, 200).toLowerCase().trim();
     const bCont = (b.content || '').slice(0, 200).toLowerCase().trim();
     if (aCont.length > 20 && bCont.length > 20 && aCont === bCont) return 0.7;
@@ -1184,7 +1184,7 @@ const LOREBOOK_META_FIELDS = {
     recursive_scanning: 'Recursive Scanning',
 };
 
-// V2-spec entry fields — everything else (uid, display_index, vectorized, etc.) is ST-internal
+// V2-spec entry fields - everything else (uid, display_index, vectorized, etc.) is ST-internal
 const LOREBOOK_ENTRY_FIELDS = [
     'keys', 'secondary_keys', 'content', 'enabled', 'selective',
     'constant', 'position', 'insertion_order', 'priority', 'case_sensitive',
@@ -1207,10 +1207,10 @@ function normalizeLorebookEntry(entry) {
 //
 // How SillyTavern's lorebook storage works:
 //
-//   character_book (in card PNG)  — Snapshot created at import time. ST does NOT
+//   character_book (in card PNG)  - Snapshot created at import time. ST does NOT
 //                                   re-embed /worlds data on normal saves.
 //
-//   /worlds/{name}.json           — The live working copy. All edits in ST's
+//   /worlds/{name}.json           - The live working copy. All edits in ST's
 //                                   World Info editor go here. Linked via
 //                                   char.data.extensions.world.
 //
@@ -1341,7 +1341,7 @@ function showBatchCheckModal(characters) {
         if (linkInfo?.providerId) representedProviders.add(linkInfo.providerId);
     }
 
-    // Build relevant fields — base fields always included, provider fields only if that provider is represented
+    // Build relevant fields - base fields always included, provider fields only if that provider is represented
     batchRelevantFields = new Set();
     for (const field of Object.keys(COMPARABLE_FIELDS)) {
         const ownerProvider = fieldProviderMap[field];
@@ -1376,7 +1376,7 @@ function showBatchCheckModal(characters) {
             `);
         }
 
-        // Grouped fields — one checkbox per group (only if any path in the group is relevant)
+        // Grouped fields - one checkbox per group (only if any path in the group is relevant)
         for (const [groupName, group] of Object.entries(fieldGroups)) {
             const relevantPaths = group.paths.filter(p => batchRelevantFields.has(p));
             if (relevantPaths.length === 0) continue;
@@ -1598,7 +1598,7 @@ async function applySingleUpdates() {
         const field = cb.dataset.field;
         if (field === 'listing_name') { hasListingName = true; return; }
         const remoteValue = getFieldValue(remoteData, field);
-        // null means "clear this field" — undefined would be silently dropped by JSON
+        // null means "clear this field" - undefined would be silently dropped by JSON
         updatedFields[field] = remoteValue ?? null;
     });
     
@@ -1905,7 +1905,7 @@ function updateSourceBadge(modal, char) {
         }
     }
 
-    // Batch / no character — hide badge (mixed providers)
+    // Batch / no character - hide badge (mixed providers)
     badge.style.display = 'none';
 }
 
@@ -2028,7 +2028,7 @@ function updateBatchFieldCount() {
 }
 
 function handleBatchFieldSelectionChange(e) {
-    // Group checkbox — toggles all paths in the group
+    // Group checkbox - toggles all paths in the group
     const groupCheckbox = e.target.closest('input[type="checkbox"][data-group]');
     if (groupCheckbox) {
         const group = fieldGroups[groupCheckbox.dataset.group];

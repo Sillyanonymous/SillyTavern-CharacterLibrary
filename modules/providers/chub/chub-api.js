@@ -1,4 +1,4 @@
-// Shared ChubAI API utilities — used by chub-provider.js and chub-browse.js
+// Shared ChubAI API utilities - used by chub-provider.js and chub-browse.js
 //
 // Contains constants, auth headers, metadata/lorebook/gallery fetch,
 // the V2 card builder, and the metadata cache. Initialized once via

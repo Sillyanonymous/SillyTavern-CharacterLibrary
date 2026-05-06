@@ -19,10 +19,10 @@
     --modal-scale: 1;
 
     /* Button sizing tiers:
-       xl  — oversized/hero actions
-       lg  — primary modal action buttons
-       md  — general chrome (glass-btn, cl-btn, settings-action-btn)
-       sm  — inline subordinate actions (action-btn.small) */
+       xl  - oversized/hero actions
+       lg  - primary modal action buttons
+       md  - general chrome (glass-btn, cl-btn, settings-action-btn)
+       sm  - inline subordinate actions (action-btn.small) */
     --btn-pad-v-xl: 10px;
     --btn-pad-h-xl: 24px;
     --btn-font-xl: 0.9rem;
@@ -37,14 +37,14 @@
     --btn-font-sm: 0.85rem;
 
     /* Typography scale:
-       2xs — tiny badges, counters, stat numbers
-       xs  — tags, captions, timestamps
-       sm  — secondary text, hints, metadata
-       md  — default body text, card content
-       base — inputs, emphasis, standard prose
-       lg  — section headers, modal titles
-       xl  — subheadings, view titles
-       2xl — major headings, hero text */
+       2xs - tiny badges, counters, stat numbers
+       xs  - tags, captions, timestamps
+       sm  - secondary text, hints, metadata
+       md  - default body text, card content
+       base - inputs, emphasis, standard prose
+       lg  - section headers, modal titles
+       xl  - subheadings, view titles
+       2xl - major headings, hero text */
     --font-4xs: 0.55rem;
     --font-3xs: 0.65rem;
     --font-2xs: 0.7rem;
@@ -167,42 +167,42 @@ body.modal-size-large .creator-saveas-diff-content { max-width: 800px; }
  * ========================================================================
  *
  * BUTTONS
- *   .glass-btn              — Translucent glass button (topbar, filters)
- *   .glass-btn.icon-only    — Icon-only variant (tighter padding)
- *   .action-btn             — Action button, solid base + glass override (.primary / .secondary / .danger)
- *   .cl-btn                 — Module dialog button (.primary / .danger / .small)
- *   .settings-action-btn    — Settings panel action button (.primary / .danger)
+ *   .glass-btn              - Translucent glass button (topbar, filters)
+ *   .glass-btn.icon-only    - Icon-only variant (tighter padding)
+ *   .action-btn             - Action button, solid base + glass override (.primary / .secondary / .danger)
+ *   .cl-btn                 - Module dialog button (.primary / .danger / .small)
+ *   .settings-action-btn    - Settings panel action button (.primary / .danger)
  *
  * INPUTS
- *   .glass-input            — Standard text/textarea input
- *   .glass-input-small      — Compact input (inside dropdowns/panels)
- *   .cl-input               — Module dialog input
+ *   .glass-input            - Standard text/textarea input
+ *   .glass-input-small      - Compact input (inside dropdowns/panels)
+ *   .cl-input               - Module dialog input
  *
  * SELECTS / DROPDOWNS
- *   .custom-select-*        — Styled <select> replacement via initCustomSelect()
- *   .dropdown-menu          — Dropdown panel (menus, popovers)
- *   .dropdown-item          — Clickable row inside .dropdown-menu
- *   .dropdown-section-title — Section header inside .dropdown-menu
+ *   .custom-select-*        - Styled <select> replacement via initCustomSelect()
+ *   .dropdown-menu          - Dropdown panel (menus, popovers)
+ *   .dropdown-item          - Clickable row inside .dropdown-menu
+ *   .dropdown-section-title - Section header inside .dropdown-menu
  *
  * MODALS
- *   .modal-glass            — Full-screen detail/viewer panel
- *   .cl-modal               — Lightweight dialog overlay (confirm, edit)
- *   .cl-modal-content       — Dialog box inside .cl-modal
+ *   .modal-glass            - Full-screen detail/viewer panel
+ *   .cl-modal               - Lightweight dialog overlay (confirm, edit)
+ *   .cl-modal-content       - Dialog box inside .cl-modal
  *
  * TAGS
- *   .cl-tag                 — Pill-style tag (.removable variant adds ×)
- *   .provider-exclude-tag-pill — Red pill in settings exclude tags input
+ *   .cl-tag                 - Pill-style tag (.removable variant adds ×)
+ *   .provider-exclude-tag-pill - Red pill in settings exclude tags input
  *
  * UTILITIES
- *   .cl-hidden              — display: none !important
- *   .hidden                 — display: none (general hide class)
+ *   .cl-hidden              - display: none !important
+ *   .hidden                 - display: none (general hide class)
  *
  * CSS VARIABLES
- *   --accent, --text-primary, --glass-border, etc. — see :root above
- *   --font-4xs/3xs/2xs/xs/sm/md/base/lg/xl/2xl — typography scale (font sizes)
- *   --btn-pad-v-xl/lg/md/sm, --btn-pad-h-xl/lg/md/sm, --btn-font-xl/lg/md/sm — button sizing tiers
- *   --space-xs/sm/md/lg/xl/2xl — spacing scale
- *   --cl-accent, --cl-glass-bg, --cl-border, etc. — module vars (bottom of file)
+ *   --accent, --text-primary, --glass-border, etc. - see :root above
+ *   --font-4xs/3xs/2xs/xs/sm/md/base/lg/xl/2xl - typography scale (font sizes)
+ *   --btn-pad-v-xl/lg/md/sm, --btn-pad-h-xl/lg/md/sm, --btn-font-xl/lg/md/sm - button sizing tiers
+ *   --space-xs/sm/md/lg/xl/2xl - spacing scale
+ *   --cl-accent, --cl-glass-bg, --cl-border, etc. - module vars (bottom of file)
  * ======================================================================== */
 
 /* @canonical select-dropdown */
@@ -239,14 +239,14 @@ body.modal-size-large .creator-saveas-diff-content { max-width: 800px; }
     transform: rotate(180deg);
 }
 
-/* Small variant — matches glass-select-small sizing */
+/* Small variant - matches glass-select-small sizing */
 .custom-select-trigger.small {
     padding: 5px 8px;
     font-size: var(--font-sm);
     border-radius: 4px;
 }
 
-/* Menu — position: fixed, appended to <body> to escape overflow clipping */
+/* Menu - position: fixed, appended to <body> to escape overflow clipping */
 .dropdown-menu.custom-select-menu {
     position: fixed;
     z-index: 10005;
@@ -820,7 +820,7 @@ body {
     white-space: nowrap;
 }
 
-/* @deprecated — use initCustomSelect() */
+/* @deprecated - use initCustomSelect() */
 .glass-select option {
     background: var(--bg-secondary);
 }
@@ -861,8 +861,154 @@ body {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    font-size: var(--font-2xl);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
     color: var(--text-secondary);
+    pointer-events: none;
+    user-select: none;
+    text-align: center;
+    padding: var(--space-2xl);
+    min-width: 280px;
+}
+
+.loading-spinner .loading-icon {
+    position: relative;
+    width: 64px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: var(--space-xs);
+}
+
+.loading-spinner .loading-icon i {
+    font-size: 2.25rem;
+    color: var(--accent);
+    filter: drop-shadow(0 0 14px color-mix(in srgb, var(--accent) 45%, transparent));
+    animation: cl-loader-pulse 2s ease-in-out infinite;
+}
+
+.loading-spinner .loading-title {
+    font-size: var(--font-xl);
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.5px;
+    line-height: 1;
+}
+
+.loading-spinner .loading-title span {
+    color: var(--accent);
+    font-weight: 400;
+}
+
+.loading-spinner .loading-subtitle {
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+    opacity: 0.85;
+}
+
+.loading-spinner .loading-progress {
+    width: 200px;
+    height: 2px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: var(--space-2xs);
+}
+
+.loading-spinner .loading-progress span {
+    display: block;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        var(--accent) 50%,
+        transparent 100%);
+    border-radius: 2px;
+    animation: cl-loader-bar 1.6s ease-in-out infinite;
+}
+
+@keyframes cl-loader-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.08); opacity: 0.85; }
+}
+
+@keyframes cl-loader-bar {
+    0% { transform: translateX(-150%); }
+    100% { transform: translateX(400%); }
+}
+
+/* @canonical cl-loading */
+/* Inline loading state for grids/lists. Used by renderLoadingState() helper. */
+.cl-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    color: var(--text-secondary);
+    text-align: center;
+    user-select: none;
+    width: 100%;
+    padding: var(--space-2xl) var(--space-md);
+    grid-column: 1 / -1;
+}
+
+.cl-loading .cl-loading-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.cl-loading .cl-loading-icon i {
+    font-size: 1.6rem;
+    color: var(--accent);
+    opacity: 1;
+    margin: 0;
+    filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 40%, transparent));
+    animation: cl-loader-pulse 2s ease-in-out infinite;
+}
+
+.cl-loading .cl-loading-label {
+    font-size: var(--font-md);
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+
+.cl-loading .cl-loading-substatus {
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    max-width: 380px;
+    text-align: center;
+    line-height: 1.4;
+    margin-top: calc(var(--space-2xs) * -1);
+}
+
+.cl-loading .cl-loading-bar {
+    width: 160px;
+    height: 2px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: var(--space-2xs);
+}
+
+.cl-loading .cl-loading-bar span {
+    display: block;
+    width: 40%;
+    height: 100%;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        var(--accent) 50%,
+        transparent 100%);
+    border-radius: 2px;
+    animation: cl-loader-bar 1.6s ease-in-out infinite;
 }
 
 /* Empty state message */
@@ -4387,6 +4533,95 @@ input[type="search"]::-webkit-search-results-decoration {
     font-size: var(--font-lg);
 }
 
+/* Card Image edit overlay (in-place hero swap when edit lock is unlocked) */
+.portrait-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: var(--font-md);
+    font-weight: 500;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 2;
+}
+
+.portrait-edit-overlay i {
+    font-size: var(--font-3xl);
+}
+
+.char-portrait-container.editing-unlocked .portrait-edit-overlay {
+    opacity: 0;
+}
+
+.char-portrait-container.editing-unlocked .portrait-edit-overlay:hover {
+    opacity: 1;
+}
+
+.portrait-pending-badge {
+    position: absolute;
+    top: var(--space-sm);
+    right: var(--space-sm);
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    background: rgba(255, 200, 50, 0.95);
+    color: #1a1a1a;
+    font-size: var(--font-2xs);
+    font-weight: 600;
+    padding: var(--space-2xs) var(--space-xs);
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    z-index: 3;
+}
+
+.portrait-pending-badge button {
+    background: transparent;
+    border: none;
+    color: #1a1a1a;
+    cursor: pointer;
+    padding: 0 var(--space-2xs);
+    font-size: var(--font-sm);
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+}
+
+.portrait-pending-badge button:hover {
+    color: #d32f2f;
+}
+
+@media (max-width: 768px) {
+    /* On mobile the desktop hero portrait is hidden; the visible avatar is the
+       small thumbnail injected into the modal header by library-mobile.js.
+       When edit lock is unlocked, give it an accent-color pulsing glow so the
+       user sees there is something to interact with. */
+    #charModal.editing-unlocked .mobile-header-avatar {
+        box-shadow: 0 0 0 2px var(--accent), 0 0 14px 3px rgba(74, 158, 255, 0.55);
+        animation: portrait-edit-pulse 1.8s ease-in-out infinite;
+        cursor: pointer;
+    }
+
+    /* Desktop portrait gets the same glow if visible (defensive — sidebar is
+       hidden on mobile but kept in case the layout ever changes). */
+    .char-portrait-container.editing-unlocked .portrait-edit-overlay {
+        opacity: 1;
+        background: rgba(0, 0, 0, 0.45);
+    }
+
+    @keyframes portrait-edit-pulse {
+        0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 12px 2px rgba(74, 158, 255, 0.45); }
+        50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 20px 5px rgba(74, 158, 255, 0.75); }
+    }
+}
+
 /* Locked input state */
 .glass-input.locked {
     background: rgba(0, 0, 0, 0.3);
@@ -6567,7 +6802,7 @@ input[type="search"]::-webkit-search-results-decoration {
     overflow-y: auto;
 }
 
-/* Responsive — desktop only (mobile has its own overrides in library-mobile.css) */
+/* Responsive - desktop only (mobile has its own overrides in library-mobile.css) */
 @media (min-width: 769px) and (max-width: 1250px) {
     .char-duplicates-modal-content {
         min-width: unset;
@@ -6783,6 +7018,84 @@ input[type="search"]::-webkit-search-results-decoration {
     gap: var(--space-sm-md);
     padding: 15px 20px;
     border-top: 1px solid var(--glass-border);
+}
+
+/* @canonical cl-confirm-overlay
+   Standard confirmation dialog overlay. Use via window.showConfirm({...}).
+   Sleek floating popup on desktop, slide-up bottom sheet on mobile.
+   Internal dividers and the header gradient are stripped so the dialog
+   reads as one unified surface. */
+.cl-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10003;
+    background: rgba(0, 0, 0, 0.65);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: clConfirmFadeIn 0.18s ease;
+    padding: var(--space-lg);
+}
+
+.cl-confirm-overlay.hidden {
+    display: none;
+}
+
+.cl-confirm-overlay .confirm-modal-content {
+    max-width: calc(420px * var(--modal-scale, 1));
+    width: 100%;
+    border-radius: 16px;
+    background: var(--bg-secondary);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--glass-border);
+    border: none;
+    animation: clConfirmPop 0.22s cubic-bezier(0.34, 1.3, 0.5, 1);
+}
+
+.cl-confirm-overlay .confirm-modal-header {
+    border-bottom: none;
+    background: transparent;
+    padding: var(--space-lg) var(--space-lg) var(--space-2xs);
+    border-radius: 16px 16px 0 0;
+}
+
+.cl-confirm-overlay .confirm-modal-header h3 {
+    font-size: var(--font-lg);
+    font-weight: 600;
+    letter-spacing: 0.1px;
+}
+
+.cl-confirm-overlay .confirm-modal-body {
+    padding: var(--space-xs) var(--space-lg) var(--space-md) !important;
+}
+
+.cl-confirm-overlay .confirm-modal-body p {
+    margin: 0;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    font-size: var(--font-md);
+}
+
+.cl-confirm-overlay .confirm-modal-footer {
+    border-top: none;
+    padding: var(--space-2xs) var(--space-md) var(--space-md);
+    gap: var(--space-sm);
+}
+
+.cl-confirm-overlay .confirm-modal-footer .action-btn {
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+@keyframes clConfirmFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes clConfirmPop {
+    from { opacity: 0; transform: scale(0.94) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* Disable Gallery Folders Modal - higher z-index to appear above settings */
@@ -10293,7 +10606,7 @@ details.settings-provider-section > .settings-provider-body {
 }
 
 /* ==============================================
-   RESPONSIVE TOPBAR — progressive collapse
+   RESPONSIVE TOPBAR - progressive collapse
    ============================================== */
 
 /* Stage 0: Reduce whitespace at wide-but-tight viewports */
@@ -10364,7 +10677,7 @@ details.settings-provider-section > .settings-provider-body {
         max-width: 400px;
     }
 
-    /* Online filter bar — collapse text labels to icon-only */
+    /* Online filter bar - collapse text labels to icon-only */
     .chub-view-btn span,
     .pyg-view-btn span,
     .wyvern-view-btn span {
@@ -10385,7 +10698,7 @@ details.settings-provider-section > .settings-provider-body {
     }
 }
 
-/* Overflow items in ⋮ menu — hidden at wide widths, shown when topbar buttons are hidden */
+/* Overflow items in ⋮ menu - hidden at wide widths, shown when topbar buttons are hidden */
 .topbar-overflow-item {
     display: none;
 }
@@ -10656,7 +10969,7 @@ details.settings-provider-section > .settings-provider-body {
     display: none !important;
 }
 
-/* Stage 3: Hide sort, favorites, tags — only search + view toggle + ⋮ remain */
+/* Stage 3: Hide sort, favorites, tags - only search + view toggle + ⋮ remain */
 @media (max-width: 900px) {
     [data-select-id="sortSelect"] {
         display: none;

@@ -1,4 +1,4 @@
-// JannyAI Provider — implementation for JanitorAI/JannyAI character source
+// JannyAI Provider - implementation for JanitorAI/JannyAI character source
 //
 // Uses MeiliSearch API for character search and HTML scraping for full details.
 // No version history (no Git-like API). No gallery support.
@@ -35,16 +35,16 @@ let api = null;
  * TLS fingerprinting and JS challenges. Strategy order is based on
  * observed reliability:
  *
- * 1. corsproxy.io — most reliable in practice
- * 2. Puter.js WISP relay — needs COOP/COEP headers (SharedArrayBuffer);
+ * 1. corsproxy.io - most reliable in practice
+ * 2. Puter.js WISP relay - needs COOP/COEP headers (SharedArrayBuffer);
  *    SillyTavern doesn't set these, so rustls.wasm fails on most setups
- * 3. SillyTavern /proxy/ — node-fetch with Node.js TLS fingerprint,
+ * 3. SillyTavern /proxy/ - node-fetch with Node.js TLS fingerprint,
  *    Cloudflare usually blocks it with 403
  */
 async function fetchHtmlPage(url) {
     const errors = [];
 
-    // Strategy 1: corsproxy.io — most reliable based on real-world testing
+    // Strategy 1: corsproxy.io - most reliable based on real-world testing
     try {
         const html = await corsproxyFetchHtml(url);
         if (html) {
@@ -143,7 +143,7 @@ async function puterFetchHtml(url) {
             throw e;
         }
 
-        // Follow redirects manually — puter.net.fetch uses raw HTTP/1.1
+        // Follow redirects manually - puter.net.fetch uses raw HTTP/1.1
         if ([301, 302, 303, 307, 308].includes(r.status)) {
             const location = r.headers?.get?.('location') || r.headers?.get?.('Location');
             if (!location) break;
@@ -648,7 +648,7 @@ class JannyProvider extends ProviderBase {
             const match = results.find(r => (r.name || '').toLowerCase().trim() === normalizedName);
             if (!match) return null;
 
-            // Fetch full details for proper V2 field mapping
+            // Fetch full details for verification + tagline/listing-name enrichment
             const parts = match.fullPath.split('_');
             const charId = parts[0];
             const slug = parts.slice(1).join('_') || 'character';
@@ -658,49 +658,36 @@ class JannyProvider extends ProviderBase {
 
             const char = data.character;
 
-            // Verify creator matches when both sides have one — prevents
-            // false-claiming cards that belong to a different provider
-            if (creator && char.creatorUsername) {
-                if (creator.toLowerCase() !== char.creatorUsername.toLowerCase()) {
-                    return null;
-                }
-            }
+            // Strict creator verification: require both sides to have a creator
+            // and require an exact (case-insensitive) match. Names alone are far too
+            // ambiguous ("Akari" exists on Janny dozens of times). Local cards may
+            // store creator as a URL, in which case auto-linking is unsafe — skip.
+            const localCreator = creator.trim();
+            const remoteCreator = (char.creatorUsername || '').trim();
+            if (!localCreator || !remoteCreator) return null;
+            if (localCreator.toLowerCase() !== remoteCreator.toLowerCase()) return null;
 
-            // Backfill tags/creatorId from MeiliSearch
-            if (!char.tagIds?.length || !char.creatorId) {
-                try {
-                    const searchData = await searchJanny({ search: name, page: 1, limit: 20 });
-                    const hits = searchData?.results?.[0]?.hits || [];
-                    const hitMatch = hits.find(h => h.id === charId);
-                    if (hitMatch) {
-                        if (!char.tagIds?.length && hitMatch.tagIds) char.tagIds = hitMatch.tagIds;
-                        if (!char.creatorId && hitMatch.creatorId) char.creatorId = hitMatch.creatorId;
-                    }
-                } catch (_) { /* best-effort */ }
-            }
-
-            // Build properly-mapped V2 card (personality → description, etc.)
+            // Build the metadata block but do NOT touch any descriptive field.
+            // The user's local PNG is the source of truth for description, scenario,
+            // first_mes, alternate_greetings, etc. Replacing those would silently
+            // overwrite the user's card with a same-named character's data.
             const enrichedCard = buildV2FromDetails(data);
+            const tagline = stripHtml(enrichedCard?.data?.creator_notes || '') || '';
 
-            if (!enrichedCard.data.extensions) enrichedCard.data.extensions = {};
-            enrichedCard.data.extensions.jannyai = {
-                ...(enrichedCard.data.extensions.jannyai || {}),
+            if (!cardData.data.extensions) cardData.data.extensions = {};
+            cardData.data.extensions.jannyai = {
+                ...(cardData.data.extensions.jannyai || {}),
                 id: charId,
                 creatorId: char.creatorId || null,
                 creatorUsername: char.creatorUsername || null,
                 slug,
                 linkedAt: new Date().toISOString(),
-                tagline: stripHtml(enrichedCard.data.creator_notes) || '',
+                tagline,
                 pageName: this.getListingName(char),
             };
 
-            // Preserve gallery_id from original card
-            if (cardData.data?.extensions?.gallery_id) {
-                enrichedCard.data.extensions.gallery_id = cardData.data.extensions.gallery_id;
-            }
-
             return {
-                cardData: enrichedCard,
+                cardData,
                 providerInfo: {
                     providerId: 'jannyai',
                     charId,
@@ -766,7 +753,7 @@ class JannyProvider extends ProviderBase {
             let data;
 
             // If hitData already has definition fields (e.g., from preview modal fetch),
-            // use it directly — no need to scrape the page a second time
+            // use it directly - no need to scrape the page a second time
             const hasDefinitionFields = hitData && (hitData.personality || hitData.firstMessage);
             if (hasDefinitionFields) {
                 console.info('[JannyProvider] Using pre-fetched character data for import');
@@ -791,7 +778,7 @@ class JannyProvider extends ProviderBase {
             const char = data.character;
             const characterName = char.name || 'Unnamed';
 
-            // Page scrape often lacks tagIds/creatorId — backfill from MeiliSearch
+            // Page scrape often lacks tagIds/creatorId - backfill from MeiliSearch
             if (!char.tagIds?.length || !char.creatorId) {
                 try {
                     const searchData = await searchJanny({ search: char.name || '', page: 1, limit: 20 });
@@ -875,7 +862,7 @@ class JannyProvider extends ProviderBase {
      */
     async searchForBulkLink(name, creator) {
         try {
-            // JannyAI has no creator filter — search by name only
+            // JannyAI has no creator filter - search by name only
             const searchTerm = name;
             const data = await searchJanny({ search: searchTerm, page: 1, limit: 15 });
             const hits = data?.results?.[0]?.hits || [];
