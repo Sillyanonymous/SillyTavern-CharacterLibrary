@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
     <link rel="stylesheet" href="library.css?v=56">
     <link rel="stylesheet" href="library-mobile.css?v=4" media="screen and (max-width: 768px)">
@@ -15,6 +16,32 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" integrity="sha384-cwS6YdhLI7XS60eoDiC+egV0qHp8zI+Cms46R0nbn8JrmoAzV9uFL60etMZhAnSu" crossorigin="anonymous"></script>
 </head>
 <body>
+    <script>
+        // Apply UI scale and modal size synchronously from the localStorage cache
+        // before any rendering happens. The authoritative settings load via
+        // /api/settings/get is async (network) and would otherwise leave the
+        // first 1–2s of the page visibly unscaled. Mirrors applyUiScale /
+        // applyModalSize in library.js — keep maps in sync if those change.
+        (function () {
+            try {
+                if (window.matchMedia('(max-width: 768px)').matches) return;
+                var raw = localStorage.getItem('SillyTavernCharacterGallery');
+                if (!raw) return;
+                var s = JSON.parse(raw);
+                var uiMap = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2 };
+                var modalMap = { 1: 0.8, 2: 1, 3: 1.25 };
+                var ui = uiMap[s.uiScale] || 1;
+                if (ui !== 1) {
+                    document.body.style.zoom = ui;
+                    document.body.style.height = 'calc(100vh / ' + ui + ')';
+                }
+                var ms = modalMap[s.modalSize] || 1;
+                document.body.style.setProperty('--modal-scale', ms);
+                if (s.modalSize === 1) document.body.classList.add('modal-size-small');
+                else if (s.modalSize === 3) document.body.classList.add('modal-size-large');
+            } catch (e) { /* ignore — async path will recover */ }
+        })();
+    </script>
     <div class="app-container">
         <!-- Top Toolbar -->
         <header class="topbar">
@@ -95,6 +122,7 @@
                     <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
                     <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
                     <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
+                    <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
                 </select>
 
                 <div class="filter-group" style="position: relative;">
@@ -227,7 +255,7 @@
                     </button>
                 </div>
 
-                <!-- Online view — provider selector + filters -->
+                <!-- Online view - provider selector + filters -->
                 <div class="filter-area online-filters" id="onlineFilterArea">
                     <div id="providerSelectorArea"></div>
                     <div id="onlineFilterContent"></div>
@@ -238,7 +266,12 @@
         <!-- Main Grid Area -->
         <main class="gallery-content">
             <div id="loading" class="loading-spinner">
-                <i class="fa-solid fa-circle-notch fa-spin"></i> Loading Library...
+                <div class="loading-icon">
+                    <i class="fa-solid fa-layer-group"></i>
+                </div>
+                <div class="loading-title">Character<span>Library</span></div>
+                <div class="loading-progress" aria-hidden="true"><span></span></div>
+                <div class="loading-subtitle">Loading your collection</div>
             </div>
             
             <div id="characterGrid" class="character-grid">
@@ -255,7 +288,7 @@
                 </div>
             </div>
 
-            <!-- Online View — populated by active provider -->
+            <!-- Online View - populated by active provider -->
             <div id="browseRecoveryBanner" class="browse-recovery-banner hidden">
                 <i class="fa-solid fa-sync fa-spin"></i>
                 <span>Loading library data<span class="recovery-progress"></span> &mdash; some <em>In Library</em> badges may be incomplete</span>
@@ -318,6 +351,15 @@
                 <div class="modal-sidebar">
                     <div class="char-portrait-container">
                         <img id="modalImage" src="" alt="Character Portrait">
+                        <div id="portraitEditOverlay" class="portrait-edit-overlay hidden" title="Click to change card image">
+                            <i class="fa-solid fa-camera"></i>
+                            <span>Change Image</span>
+                        </div>
+                        <div id="portraitPendingBadge" class="portrait-pending-badge hidden">
+                            <span>Pending</span>
+                            <button type="button" id="portraitPendingRevertBtn" title="Revert image change"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <input type="file" id="editAvatarFileInput" accept="image/png,image/jpeg,image/jpg,image/webp" class="hidden">
                         <!-- Sprite/Avatar Navigation - Disabled (SillyTavern standard characters are single-image)
                         <div class="gallery-nav">
                             <button id="prevSprite" class="nav-btn"><i class="fa-solid fa-chevron-left"></i></button>
@@ -1290,6 +1332,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Type a name in the input and click <strong>Save</strong> to capture the current filter state (tags, sort, search, advanced filters, NSFW toggle, etc.)</li>
                                 <li>Click any saved preset to load it. Use the input as a search box to filter the preset list when you have many</li>
                                 <li>Hover a preset to rename or delete it</li>
+                                <li>Set a <strong>Default Filter Preset</strong> in Settings (under Default Sort) to auto-load one preset every time the library opens</li>
                                 <li>Presets are also available in the <strong>Chats</strong> tab for filtering chat history with the same UI</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Useful for switching between focused workflows: a "sfw fantasy" preset, a "my tagged characters" preset, a "recently created" preset, etc.</p>
@@ -1339,6 +1382,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>Infinite scroll</strong> automatically loads more results as you scroll down (toggleable per provider in Settings)</li>
                                 <li>Cards already in your library are marked with an <strong>"In Library"</strong> badge</li>
                                 <li>Click a card to preview the full character details and gallery images, then import with one click</li>
+                                <li>Set <strong>Collapse all browse preview sections by default</strong> in Settings → Character Details to start each preview with all sections collapsed except creator's notes (cleaner view for large cards)</li>
                                 <li>Some providers support login for additional features (favorites, following lists)</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Configure provider order and NSFW defaults in Settings → Online.</p>
@@ -1372,6 +1416,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Tag filtering is not available in this mode</li>
                                 <li>Creator names are always available</li>
                             </ul>
+                            <p><strong>Cloudflare protection on Hampter:</strong> JanitorAI gates its trending/popular feed behind Cloudflare bot protection, so these sort orders only work when a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance is configured in Settings &rarr; Online &rarr; DataCat (proxied through the cl-helper plugin). Without it, Hampter sorts will show a friendly notice explaining what to do; the other DataCat and JanitorAI sort orders are unaffected. Once configured, sessions are kept warm across tab switches so subsequent fetches skip the multi-second challenge.</p>
                             <p><strong>Across all modes:</strong> Pasting a <strong>JanitorAI character URL</strong> into the search bar will look up the character on DataCat. If it's found, the preview opens directly. If not, an extraction panel appears letting you request the character from DataCat's cloud service.</p>
                             <p><strong>Extraction:</strong> When a character only exists on JanitorAI and hasn't been indexed by DataCat yet, the Import button changes to <strong>Extract</strong>. This sends a request to DataCat's cloud service, which visits the JanitorAI page and retrieves the full character definition. You can also paste a JanitorAI URL directly into the search bar to look up and extract specific characters.</p>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
@@ -1405,6 +1450,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li>All fields are locked by default to prevent accidental changes</li>
                                 <li>Editable fields: name, description, personality, scenario, first message, alternate greetings, example messages, system prompt, post-history instructions, creator, creator notes, character version, tags, and the embedded lorebook</li>
                                 <li>Use the <strong>expand</strong> buttons for full-screen editing of long text fields</li>
+                                <li><strong>Replace card image</strong>: with editing unlocked, click the large card image (or tap the avatar in the mobile header) to pick a new PNG. The pending image previews live; an X badge reverts before save. The auto-snapshot embeds the previous image, so version history can still show the old image after overwrite</li>
                                 <li>A snapshot is auto-saved before each edit so you can always undo</li>
                             </ul>
                         </div>
@@ -1501,7 +1547,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>Civitai</strong>: posts and image collections (public out-of-the-box; private/hidden posts require an API key)</li>
                                 <li><strong>Imgchest</strong>: public and password-protected posts (passwords are auto-detected from the card's creator notes / description via regex; password-protected posts require cl-helper)</li>
                                 <li><strong>Mega.nz</strong>: public folder shares with multi-pass folder traversal</li>
-                                <li><strong>Imgur, PostImg, ImgBB</strong>: albums and individual images</li>
+                                <li><strong>Imgur, PostImg, ImgBB, Imgbox</strong>: albums and individual images</li>
                                 <li><strong>Catbox</strong>: direct file URLs</li>
                                 <li><strong>Google Drive</strong>: shared folders and individual files</li>
                             </ul>
@@ -1524,6 +1570,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Filter the sample pool by favorites, chat history, date range, and tags</li>
                                 <li>Click any result card to expand its reasoning, or tap it to open the character</li>
                                 <li>Add individual characters to a playlist from the result card, or use <strong>Add all to playlist</strong> to save every recommendation at once</li>
+                                <li><strong>Reroll</strong> to re-run with the same prompt and settings; previously picked characters are excluded so you get fresh suggestions</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> The recommender only sends character names, tags, creator, and taglines, not conversation history or full card text.</p>
                         </div>
@@ -1822,8 +1869,19 @@ https://jannyai.com/characters/uuid_slug
                                     <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
                                     <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
                                     <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
+                                    <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
                                 </select>
                             </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-filter"></i> Default Filter Preset</div>
+                            <div class="settings-row">
+                                <select id="settingsDefaultFilterPreset" class="glass-select">
+                                    <option value="" data-icon="fa-solid fa-ban">(None)</option>
+                                </select>
+                            </div>
+                            <span class="settings-hint">Loads a saved Advanced Filter preset on page load.</span>
                         </div>
                         
                         <div class="settings-group">
@@ -1916,6 +1974,12 @@ https://jannyai.com/characters/uuid_slug
                                     <input type="checkbox" id="settingsBrowseSnapSections" checked> Snap-scroll in browse previews <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
                                 </label>
                                 <span class="settings-hint">Gently snap to content sections (creator's notes, description, etc.) when scrolling character previews</span>
+                            </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsCollapseAllBrowseSections"> Collapse all browse preview sections by default
+                                </label>
+                                <span class="settings-hint">In online browse previews, start every section collapsed except creator's notes. Click a section title to toggle it open.</span>
                             </div>
 
                             <div class="settings-row">
@@ -2303,6 +2367,24 @@ https://jannyai.com/characters/uuid_slug
                                         <span class="settings-hint">Force DataCat to re-extract character data from JanitorAI before checking for updates. Slower, but ensures comparisons use fresh data instead of a stale cache.</span>
                                     </div>
                                 </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-fire"></i> FlareSolverr (Hampter sort orders)</div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">JanitorAI's <strong>Trending</strong> and <strong>Popular</strong> sort orders are behind Cloudflare bot protection. Run a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance and paste its endpoint here to enable them. Other JanitorAI sort orders work without this.</span>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="url" id="settingsDatacatFlareSolverrUrl" class="glass-input" placeholder="http://localhost:8191/v1" autocomplete="off">
+                                            <button id="testDatacatFlareSolverrBtn" class="settings-verify-btn" title="Test FlareSolverr connection">
+                                                <i class="fa-solid fa-plug-circle-check"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span id="datacatFlareSolverrStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not configured</span>
+                                    </div>
+                                </div>
                                 <div class="settings-group" style="opacity: 0.45; pointer-events: none;">
                                     <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
                                     <div class="settings-row">
@@ -2401,7 +2483,7 @@ https://jannyai.com/characters/uuid_slug
                                 <label>
                                     <input type="checkbox" id="settingsIncludeExternalGalleries" checked> Include External Galleries
                                 </label>
-                                <span class="settings-hint">Detect and download images from external gallery pages (Imgchest, ImgBB) linked in character card text.</span>
+                                <span class="settings-hint">Detect and download images from external gallery pages (Imgchest, ImgBB, Imgbox) linked in character card text.</span>
                             </div>
                             <div class="settings-row">
                                 <label>
@@ -2634,7 +2716,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.1.1</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.2.0</span>
                             </div>
                         </div>
                     </div>
@@ -2647,7 +2729,7 @@ https://jannyai.com/characters/uuid_slug
         </div>
     </div>
 
-    <!-- Toast container — placed last to guarantee it renders above all modals -->
+    <!-- Toast container - placed last to guarantee it renders above all modals -->
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->

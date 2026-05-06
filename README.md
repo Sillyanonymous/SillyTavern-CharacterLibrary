@@ -64,7 +64,7 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 - **Right-click context menu** on any character card for quick actions
 - **Version history & snapshots** with save/restore, remote version browsing, and full diff preview
 - **Playlists** for organizing characters into named, ordered virtual folders with icons and colors
-- **Filter presets** to save and restore your current filter configuration (tags, sort, search, advanced filters). Open the **Presets** dropdown in the Advanced Filters panel to load, save, rename, or delete presets. Type a name in the input to save the current filter state; click an existing preset to load it. Presets are also available in the **Chats** tab for filtering chat history.
+- **Filter presets** to save and restore your current filter configuration (tags, sort, search, advanced filters). Open the **Presets** dropdown in the Advanced Filters panel to load, save, rename, or delete presets. Type a name in the input to save the current filter state; click an existing preset to load it. Set a **Default Filter Preset** in Settings to auto-apply one on page load. Presets are also available in the **Chats** tab for filtering chat history.
 - **Character Creator** with built-in AI Studio for assisted card authoring, brainstorming, and iterative refinement
 - **Animated card info** on hover with configurable visibility options
 
@@ -120,7 +120,7 @@ These options apply when Embedded Panel mode is selected:
 
 - **Gallery tab** for all character images, video, and audio in one place
 - **Embedded media downloads** for images linked in creator notes, descriptions, and greetings
-- **External image-host extractors** for content embedded as gallery/album links (not direct image URLs). Supports Civitai, Imgchest, Mega, Imgur, PostImg, ImgBB, Catbox, and Google Drive. The library walks each link, resolves the actual image URLs, and downloads them into the gallery folder
+- **External image-host extractors** for content embedded as gallery/album links (not direct image URLs). Supports Civitai, Imgchest, Mega, Imgur, PostImg, Imgbox, ImgBB, Catbox, and Google Drive. The library walks each link, resolves the actual image URLs, and downloads them into the gallery folder
 - **Provider gallery downloads** from linked characters on ChubAI, Wyvern, or Pygmalion
 - **Audio & video support** including MP3, WAV, OGG, M4A with built-in player; video thumbnails with inline playback
 - **Full-screen viewer** with keyboard navigation (← → 0 Esc) and scroll-wheel zoom up to 5× with drag-to-pan
@@ -297,6 +297,7 @@ An AI-powered recommendation engine that uses your connected LLM to discover cha
 3. The model evaluates each character against your prompt and returns a **ranked list with reasons.**
 4. Results appear as clickable cards with **expandable reasoning**.
 5. Use **Add all to playlist** to save the entire result set to a playlist in one click.
+6. **Reroll** to re-run the same prompt with the same settings. Previously picked characters are excluded so each reroll surfaces fresh suggestions from the remaining pool.
 
 #### Batch Mode
 
@@ -571,6 +572,7 @@ DataCat aggregates JanitorAI characters with its own REST API and AI-powered cha
 
 - Browse recent and popular characters
 - Sort by newest, trending, popular, and Hampter algorithm modes
+- Hampter sort orders (Trending, Popular) now require an optional [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) endpoint configured in Settings > Online > DataCat (proxied through the [cl-helper plugin](#cl-helper-plugin-not-detected)), since JanitorAI's trending/popular feed is now behind Cloudflare bot protection (other sort orders work without it)
 - Filter by tags and NSFW toggle
 - In-app character preview with card details
 - Character linking and card updates

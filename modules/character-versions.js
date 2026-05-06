@@ -1,4 +1,4 @@
-// Character version history — local snapshots + remote provider versions
+// Character version history - local snapshots + remote provider versions
 
 import * as CoreAPI from './core-api.js';
 
@@ -44,7 +44,7 @@ const CARD_FIELDS = [
     'name', 'description', 'personality', 'scenario',
     'first_mes', 'mes_example', 'system_prompt',
     'post_history_instructions', 'creator_notes', 'creator',
-    // 'character_version', // Always "main" on ChubAI — excluded from diffs
+    // 'character_version', // Always "main" on ChubAI - excluded from diffs
     'tags', 'alternate_greetings', 'character_book'
 ];
 
@@ -250,7 +250,7 @@ async function storageDeleteSnapshot(versionUid, snapshotId) {
     charFile.snapshots = charFile.snapshots.filter(s => s.id !== snapshotId);
 
     if (charFile.snapshots.length === 0 && !charFile.backup) {
-        // No data left — remove the file entirely
+        // No data left - remove the file entirely
         charDataCache.delete(versionUid);
         await fileDelete(charFileName(versionUid));
         await removeFromIndex(versionUid);
@@ -341,13 +341,32 @@ async function ensureVersionUid(char) {
 // CARD DATA EXTRACTION
 // ========================================
 
-async function extractCardData(char) {
+async function extractCardData(char, opts = {}) {
     if (char._slim) await CoreAPI.hydrateCharacter(char);
     const src = char.data || char;
     const out = JSON.parse(JSON.stringify(src));
     // Preserve avatar URL for snapshot comparisons
     if (char.avatar) {
         out._avatarUrl = `/characters/${encodeURIComponent(char.avatar)}`;
+    }
+    // Optionally embed the live avatar PNG as a base64 data URL so the snapshot
+    // remains visually accurate even after the character's PNG is overwritten.
+    if (opts.embedAvatar && char.avatar) {
+        try {
+            const resp = await fetch(`/characters/${encodeURIComponent(char.avatar)}`);
+            if (resp.ok) {
+                const blob = await resp.blob();
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = () => reject(reader.error);
+                    reader.readAsDataURL(blob);
+                });
+                out._avatarImageData = dataUrl;
+            }
+        } catch (e) {
+            CoreAPI.debugLog('[CharVersions] Failed to embed avatar image:', e);
+        }
     }
     return out;
 }
@@ -428,13 +447,13 @@ export async function saveCurrentSnapshot(char, label = '') {
     CoreAPI.showToast(`Snapshot saved: "${finalLabel}"`, 'success');
 }
 
-export async function autoSnapshotBeforeChange(char, source = 'edit') {
+export async function autoSnapshotBeforeChange(char, source = 'edit', opts = {}) {
     if (!char) return;
     const enabled = CoreAPI.getSetting('autoSnapshotOnEdit');
     if (!enabled) return;
     try {
         const uid = await ensureVersionUid(char);
-        const data = await extractCardData(char);
+        const data = await extractCardData(char, opts);
         const charName = char.data?.name || char.name || 'Unknown';
         const timestamp = new Date().toLocaleString();
         const label = `${source.charAt(0).toUpperCase() + source.slice(1)} - ${timestamp}`;
@@ -649,7 +668,7 @@ function renderRemoteList(versions) {
     const list = el('.vt-list');
     status.innerHTML = `<i class="fa-solid fa-clock-rotate-left"></i> ${versions.length} version${versions.length !== 1 ? 's' : ''} found`;
 
-    // Provider "page" entry — shows what the provider's metadata API returns,
+    // Provider "page" entry - shows what the provider's metadata API returns,
     // which can differ from the Git-exported card.json that versions are based on.
     const showPageEntry = currentProvider?.supportsRemotePageVersion;
     const pageInfo = showPageEntry ? currentProvider.getRemotePageInfo() : null;
@@ -825,7 +844,7 @@ async function selectVersion(shortId, fullId) {
 
 /**
  * Handle selection of the provider page pseudo-version entry.
- * Shows a diff against the provider's metadata API response — what the
+ * Shows a diff against the provider's metadata API response - what the
  * provider website displays, which may differ from the Git-exported card.json.
  */
 async function selectProviderPageVersion() {
@@ -937,7 +956,7 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
     ];
 
     // Append provider-specific fields (e.g. tagline)
-    // These are optional — only shown when the compare source carries them
+    // These are optional - only shown when the compare source carries them
     // (e.g. Provider Page has tagline, but Git card.json does not)
     if (currentProvider?.getComparableFields) {
         for (const f of currentProvider.getComparableFields()) {
@@ -949,8 +968,10 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
     let diffCount = 0;
     let html = '';
 
-    // Avatar image — show the selected version/snapshot's avatar
-    const snapshotAvatar = compareData._avatarUrl;
+    // Avatar image - show the selected version/snapshot's avatar.
+    // Prefer the embedded image data (captured at snapshot time) over the live URL,
+    // so snapshots remain accurate after the character's PNG is overwritten.
+    const snapshotAvatar = compareData._avatarImageData || compareData._avatarUrl;
     const remoteAvatar = rawRemoteData?.data?.avatar;
     const avatarUrl = remoteAvatar || snapshotAvatar;
     if (avatarUrl) {
@@ -1218,7 +1239,7 @@ async function restoreVersion() {
                     updates[f] = cardData[f];
                     if (activeTab === 'remote') lorebookRestored = true;
                 } else if (hasLocal && !hasRemote) {
-                    // Remote has no lorebook — clear embedded copy
+                    // Remote has no lorebook - clear embedded copy
                     updates[f] = null;
                 }
                 continue;
@@ -1764,7 +1785,7 @@ const LB_META_FIELDS = {
     recursive_scanning: 'Recursive Scanning',
 };
 
-// V2-spec entry fields — everything else (uid, display_index, vectorized, etc.) is ST-internal
+// V2-spec entry fields - everything else (uid, display_index, vectorized, etc.) is ST-internal
 const LB_ENTRY_FIELDS = [
     'keys', 'secondary_keys', 'content', 'enabled', 'selective',
     'constant', 'position', 'insertion_order', 'priority', 'case_sensitive',

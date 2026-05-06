@@ -1,4 +1,4 @@
-// Shared CharacterTavern API utilities — used by both chartavern-provider.js and chartavern-browse.js
+// Shared CharacterTavern API utilities - used by both chartavern-provider.js and chartavern-browse.js
 //
 // Contains constants, fetch helpers, and text utilities for the
 // character-tavern.com API.
@@ -31,7 +31,7 @@ import { fetchWithProxy } from '../provider-utils.js';
 export { fetchWithProxy };
 
 // ========================================
-// AUTH — cl-helper cookie session
+// AUTH - cl-helper cookie session
 // ========================================
 
 let ctSessionActive = false;
@@ -186,7 +186,7 @@ export async function searchCards(opts = {}, apiRequest) {
     if (hasLorebook != null) params.set('hasLorebook', String(hasLorebook));
     if (isOC != null) params.set('isOC', String(isOC));
 
-    // CT API has no explicit NSFW toggle — exclude_tags is used instead
+    // CT API has no explicit NSFW toggle - exclude_tags is used instead
     if (!nsfw) {
         const existing = excludeTags ? excludeTags.split(',').map(t => t.trim()) : [];
         if (!existing.includes('nsfw')) existing.push('nsfw');

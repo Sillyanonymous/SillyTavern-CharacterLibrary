@@ -356,44 +356,12 @@ function isDirty() {
 }
 
 function showUnsavedConfirm() {
-    return new Promise(resolve => {
-        let overlay = document.getElementById('creatorDiscardConfirmOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'creatorDiscardConfirmOverlay';
-            overlay.className = 'creator-saveas-diff-overlay';
-            overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
-                <div class="confirm-modal-header">
-                    <h3>Discard unsaved character?</h3>
-                </div>
-                <div class="confirm-modal-body" style="padding:12px 16px">
-                    <p style="margin:0;color:var(--text-secondary)">Your character draft has unsaved changes. Discard them and close?</p>
-                </div>
-                <div class="confirm-modal-footer">
-                    <button type="button" class="action-btn secondary" id="creatorDiscardKeepBtn">Keep Editing</button>
-                    <button type="button" class="action-btn danger" id="creatorDiscardConfirmBtn">Discard</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            document.getElementById('creatorDiscardKeepBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(false);
-            });
-            document.getElementById('creatorDiscardConfirmBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(true);
-            });
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) {
-                    overlay.classList.add('hidden');
-                    overlay._resolve?.(false);
-                }
-            });
-        }
-        overlay._resolve = resolve;
-        overlay.classList.remove('hidden');
-        document.getElementById('creatorDiscardKeepBtn')?.focus();
+    return CoreAPI.showConfirm({
+        title: 'Discard unsaved character?',
+        message: 'Your character draft has unsaved changes. Discard them and close?',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
     });
 }
 
@@ -1017,6 +985,12 @@ function updateProfileStatus() {
 // LLM API CALLS
 // ========================================
 
+function isAuthError(message) {
+    const m = String(message || '').toLowerCase();
+    return m.includes('unauthorized') || m.includes('401')
+        || m.includes('invalid api key') || m.includes('authentication');
+}
+
 async function callLLM(messages, signal) {
     const profile = getSelectedProfile();
     const source = profile?.api || activeSource;
@@ -1039,16 +1013,26 @@ async function callLLM(messages, signal) {
     if (model) body.model = model;
 
     if (profile) {
+        if (profile['secret-id']) body.secret_id = profile['secret-id'];
         if (profile['api-url']) {
             body.custom_url = profile['api-url'];
             body.vertexai_region = profile['api-url'];
             body.zai_endpoint = profile['api-url'];
+            body.siliconflow_endpoint = profile['api-url'];
+            body.minimax_endpoint = profile['api-url'];
         }
+        if (profile['prompt-post-processing']) body.custom_prompt_post_processing = profile['prompt-post-processing'];
     } else if (activePreset) {
         if (activePreset.custom_url) body.custom_url = activePreset.custom_url;
         if (activePreset.reverse_proxy) body.reverse_proxy = activePreset.reverse_proxy;
         if (activePreset.proxy_password) body.proxy_password = activePreset.proxy_password;
     }
+
+    CoreAPI.debugLog('[CharCreator] Sending request:', {
+        source: body.chat_completion_source, model: body.model,
+        customUrl: body.custom_url || null,
+        hasSecretId: !!body.secret_id, profileName: profile?.name,
+    });
 
     for (const endpoint of GENERATE_ENDPOINTS) {
         let response;
@@ -1058,21 +1042,30 @@ async function callLLM(messages, signal) {
             if (err.name === 'AbortError') throw new Error('Generation cancelled.');
             continue;
         }
-
         if (response.status === 404) continue;
-
         if (!response.ok) {
             const errText = await response.text().catch(() => '');
             throw new Error(`API returned ${response.status}: ${errText.slice(0, 300)}`);
         }
 
         const responseText = await response.text();
+        let data;
         try {
-            const data = JSON.parse(responseText);
-            return extractContent(data);
+            data = JSON.parse(responseText);
         } catch {
             return responseText;
         }
+
+        if (isAuthError(data?.error?.message)) {
+            throw new Error(
+                'Authentication failed. Open SillyTavern → Connection Manager and click the "Update" ' +
+                'button on the selected connection profile to refresh its credentials, then retry.'
+            );
+        }
+        if (data?.error) {
+            console.warn('[CharCreator] ST returned error envelope:', data);
+        }
+        return extractContent(data);
     }
     throw new Error(
         'Could not reach SillyTavern\'s Chat Completion API. ' +
@@ -1681,7 +1674,7 @@ function openNotesPreview() {
 
     const iframe = container.querySelector('iframe');
     if (iframe) {
-        // Kill the auto-resize machinery — this container has a fixed flex height.
+        // Kill the auto-resize machinery - this container has a fixed flex height.
         // setupCreatorNotesResize sets iframe.onload which would re-impose a pixel
         // height, overriding height:100% and causing the iframe to visually cut off.
         iframe._resizeObserver?.disconnect();
@@ -2168,44 +2161,12 @@ function studioHasUnsavedWork() {
 }
 
 function showStudioDiscardConfirm() {
-    return new Promise(resolve => {
-        let overlay = document.getElementById('studioDiscardConfirmOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'studioDiscardConfirmOverlay';
-            overlay.className = 'creator-saveas-diff-overlay';
-            overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
-                <div class="confirm-modal-header">
-                    <h3>Discard AI Studio progress?</h3>
-                </div>
-                <div class="confirm-modal-body" style="padding:12px 16px">
-                    <p style="margin:0;color:var(--text-secondary)">You have unsaved work in the AI Studio. Discard and close?</p>
-                </div>
-                <div class="confirm-modal-footer">
-                    <button type="button" class="action-btn secondary" id="studioDiscardKeepBtn">Keep Editing</button>
-                    <button type="button" class="action-btn danger" id="studioDiscardConfirmBtn">Discard</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            document.getElementById('studioDiscardKeepBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(false);
-            });
-            document.getElementById('studioDiscardConfirmBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(true);
-            });
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) {
-                    overlay.classList.add('hidden');
-                    overlay._resolve?.(false);
-                }
-            });
-        }
-        overlay._resolve = resolve;
-        overlay.classList.remove('hidden');
-        document.getElementById('studioDiscardKeepBtn')?.focus();
+    return CoreAPI.showConfirm({
+        title: 'Discard AI Studio progress?',
+        message: 'You have unsaved work in the AI Studio. Discard and close?',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
     });
 }
 
@@ -3253,15 +3214,13 @@ function buildCharacterCard() {
 function init() {
     // Register all creator overlays with the overlay registry.
     // The global Escape handler (library.js) and mobile back-button stack
-    // (library-mobile.js) both read from this registry — no per-overlay
+    // (library-mobile.js) both read from this registry - no per-overlay
     // Escape listeners or manual mobile stack entries needed.
     const reg = window.registerOverlay?.bind(window);
     if (!reg) return;
 
-    reg({ id: 'studioDiscardConfirmOverlay', tier: 0, close: (el) => { el.classList.add('hidden'); document.getElementById('studioDiscardKeepBtn')?.click(); } });
     reg({ id: 'aiStudioOverlay',             tier: 1, close: () => window.closeAiStudio?.() });
     reg({ id: 'creatorNotesPreview',          tier: 2, close: () => window.closeNotesPreview?.() });
-    reg({ id: 'creatorDiscardConfirmOverlay', tier: 3, close: (el) => { el.classList.add('hidden'); document.getElementById('creatorDiscardKeepBtn')?.click(); } });
     reg({ id: 'creatorSaveAsDiff',            tier: 4, close: (el) => el.classList.add('hidden') });
     reg({ id: 'creatorImportPicker',          tier: 5, close: () => closeImportPicker?.() });
     reg({ id: 'creatorNamePromptOverlay',     tier: 6, close: () => document.getElementById('creatorNamePromptCancel')?.click() });

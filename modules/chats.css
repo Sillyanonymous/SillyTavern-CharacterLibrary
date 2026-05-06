@@ -940,6 +940,13 @@
     font-size: var(--font-lg);
 }
 
+/* When chats-loading uses cl-loading helper, restore vertical layout */
+.chats-view .chats-loading.cl-loading {
+    flex-direction: column;
+    gap: var(--space-sm);
+    font-size: var(--font-md);
+}
+
 /* Chat message action buttons (edit/delete) */
 .chat-message {
     position: relative;

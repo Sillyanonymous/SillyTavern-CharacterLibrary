@@ -3,6 +3,51 @@
    Extracted from library.css
    ============================================ */
 
+/* Source badges (JanitorAI / Saucepan) on browse cards.
+   Letter glyphs (J / S) instead of icons for instant recognition.
+   Positioned top-left so they don't compete with the In Library /
+   possible-match badge in the bottom-left group. */
+.browse-feature-badges.browse-feature-badges-tl {
+    top: 8px;
+    left: 8px;
+    bottom: auto;
+}
+.browse-feature-badge.source-janitor,
+.browse-feature-badge.source-saucepan {
+    font-family: var(--cl-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-weight: 800;
+    font-size: var(--font-sm);
+    line-height: 1;
+    letter-spacing: 0;
+}
+.browse-feature-badge.source-janitor {
+    color: #ff6f61;
+}
+.browse-feature-badge.source-janitor:hover {
+    color: #ff8a7a;
+}
+.browse-feature-badge.source-saucepan {
+    color: #f4b860;
+}
+.browse-feature-badge.source-saucepan:hover {
+    color: #f7c97f;
+}
+
+/* Source badge inside the Following Manager creator card meta line.
+   Shrinks the shared browse-feature-badge so it fits the dense meta row. */
+.follow-mgr-source-badge {
+    display: inline-flex;
+    align-items: center;
+}
+.follow-mgr-source-badge .browse-feature-badge {
+    position: static;
+    width: 18px;
+    height: 18px;
+    font-size: var(--font-2xs);
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 4px;
+}
+
 
 #datacatFollowCreatorBtn {
     background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
@@ -145,6 +190,40 @@
 /* ============================================
    In-Modal Extraction CTA
    ============================================ */
+
+.datacat-modal-locked-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    margin: 0 auto var(--space-md);
+    max-width: 480px;
+    border-radius: 8px;
+    background: rgba(255, 180, 60, 0.08);
+    border: 1px solid rgba(255, 180, 60, 0.25);
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.datacat-modal-locked-banner > i {
+    color: rgb(255, 180, 60);
+    font-size: var(--font-lg);
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.datacat-modal-locked-banner strong {
+    display: block;
+    font-size: var(--font-md);
+    margin-bottom: var(--space-2xs);
+}
+
+.datacat-modal-locked-banner p {
+    margin: 0;
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
 
 .datacat-modal-extract-cta {
     display: flex;

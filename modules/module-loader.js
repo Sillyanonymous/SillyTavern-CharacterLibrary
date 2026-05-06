@@ -2,8 +2,8 @@
  * Module Loader for SillyTavern Character Library
  *
  * Two-tier initialization:
- *   Tier 1 — Loaded immediately (critical for Characters grid / detail modal)
- *   Tier 2 — Lazily loaded on first use via proxy stubs
+ *   Tier 1 - Loaded immediately (critical for Characters grid / detail modal)
+ *   Tier 2 - Lazily loaded on first use via proxy stubs
  */
 
 import ProviderRegistry from './providers/provider-registry.js';
@@ -59,8 +59,8 @@ function createLazyBridgeGroup(importFn, setupFn) {
 
     /**
      * Returns a stub that, on call, triggers the shared import then resolves
-     * getTarget() — which by that point has been replaced with the real
-     * function by setupFn — and forwards the original arguments.
+     * getTarget() - which by that point has been replaced with the real
+     * function by setupFn - and forwards the original arguments.
      */
     function createStub(getTarget) {
         return function (...args) {
@@ -174,7 +174,7 @@ async function initModuleSystem() {
     const dependencies = {};
 
     // ============================
-    // TIER 1 — Immediate modules
+    // TIER 1 - Immediate modules
     // ============================
 
     try {
@@ -295,7 +295,7 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load playlists module:', err);
     }
 
-    // Gallery Extractors — lazy-loaded on first use to save memory
+    // Gallery Extractors - lazy-loaded on first use to save memory
     // All call sites guard with typeof window.extractGalleryImages === 'function'
     let _extractorsLoaded = false;
     async function ensureExtractorsLoaded() {
@@ -310,6 +310,7 @@ async function initModuleSystem() {
                 import('./gallery-extractors/catbox.js'),
                 import('./gallery-extractors/mega.js'),
                 import('./gallery-extractors/postimg.js'),
+                import('./gallery-extractors/imgbox.js'),
                 import('./gallery-extractors/civitai.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
@@ -324,7 +325,7 @@ async function initModuleSystem() {
     }
     window.ensureExtractorsLoaded = ensureExtractorsLoaded;
 
-    // Providers — must be Tier 1 because ProviderRegistry is queried
+    // Providers - must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');
     loadModuleCSS('./providers/chub/chub-browse.css');
@@ -360,7 +361,7 @@ async function initModuleSystem() {
     }
 
     // ============================
-    // TIER 2 — Lazy modules
+    // TIER 2 - Lazy modules
     // ============================
 
     setupLazyBatchTagging();

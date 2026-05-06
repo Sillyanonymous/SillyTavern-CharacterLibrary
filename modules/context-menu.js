@@ -281,14 +281,14 @@ function buildSingleMenuItems(char, cardElement) {
             }
         });
     } else if (CoreAPI.isExtensionsRecoveryInProgress()) {
-        // Extensions not yet recovered — provider link status unknown
+        // Extensions not yet recovered - provider link status unknown
         items.push({
             icon: 'fa-solid fa-spinner fa-spin',
             label: 'Loading provider data…',
             disabled: true
         });
     } else {
-        // Unlinked — single entry that opens the global link modal (searches all providers)
+        // Unlinked - single entry that opens the global link modal (searches all providers)
         items.push({
             icon: 'fa-solid fa-link',
             label: 'Link to Provider',
@@ -296,7 +296,7 @@ function buildSingleMenuItems(char, cardElement) {
         });
     }
     
-    // Version history (available for ALL characters — local snapshots + remote if provider-linked)
+    // Version history (available for ALL characters - local snapshots + remote if provider-linked)
     items.push({
         icon: 'fa-solid fa-clock-rotate-left',
         label: 'Version History',

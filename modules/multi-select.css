@@ -210,15 +210,22 @@ body.multi-select-mode .char-card:hover::before {
     .multi-select-actions {
         display: flex;
         flex-wrap: nowrap;
-        gap: var(--space-2xs);
-        justify-content: flex-start;
+        gap: var(--space-xs);
+        justify-content: center;
         min-width: 0;
     }
     .ms-btn {
-        padding: var(--space-xs) var(--space-xs-sm);
-        font-size: var(--font-xs);
-        gap: var(--space-2xs);
+        padding: 0;
+        gap: 0;
+        min-width: 32px;
         min-height: 32px;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        justify-content: center;
+    }
+    .ms-btn i {
+        font-size: var(--font-base);
     }
     .ms-btn span {
         display: none;
@@ -227,9 +234,9 @@ body.multi-select-mode .char-card:hover::before {
         display: none;
     }
     .multi-select-right {
-        gap: var(--space-2xs);
+        gap: var(--space-xs);
     }
     .ms-btn-exit {
-        padding: var(--space-xs) var(--space-xs-sm);
+        padding: 0;
     }
 }

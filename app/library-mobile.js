@@ -12,8 +12,8 @@
      2. toLocaleDateString safety net (prevents "Invalid Date" text)
      3. DOM-level date fixer reads raw last_mes from localStorage
         chat cache and patches "Unknown" text in chat cards using
-        a fully manual regex-based parser — ZERO reliance on Date().
-   NO Response/fetch/JSON.parse patching — those break imports.
+        a fully manual regex-based parser - ZERO reliance on Date().
+   NO Response/fetch/JSON.parse patching - those break imports.
    ======================================== */
 (function datePatch() {
     var OrigDate = Date;
@@ -132,7 +132,7 @@
             return isNaN(d.getTime()) ? null : d;
         }
 
-        // Manual parser — guaranteed to work on all browsers
+        // Manual parser - guaranteed to work on all browsers
         var manual = manualParse(String(v));
         if (manual) return manual;
 
@@ -195,7 +195,7 @@
         try { Object.defineProperty(SmartDate, 'length', { value: 7 }); } catch (e) {}
         try { Object.defineProperty(SmartDate, 'name', { value: 'Date' }); } catch (e) {}
 
-        // Multiple assignment strategies — at least one must stick
+        // Multiple assignment strategies - at least one must stick
         try { window.Date = SmartDate; } catch (e) {}
         try { Date = SmartDate; } catch (e) {}
         try {
@@ -230,15 +230,15 @@
    library-mobile.js or wiring their own Escape listeners.
 
    Config shape:
-     id        {string}   — DOM element ID
-     tier      {number}   — z-order priority (lower number = closes first = higher z-index)
-     close     {function} — called with the element to close it
-     static    {boolean}  — protect from catch-all el.remove() (default: true)
-     escape    {boolean}  — respond to Escape key (default: true)
-     visible   {function} — optional override: (el) => bool. Default: !el.classList.contains('hidden')
+     id        {string}   - DOM element ID
+     tier      {number}   - z-order priority (lower number = closes first = higher z-index)
+     close     {function} - called with the element to close it
+     static    {boolean}  - protect from catch-all el.remove() (default: true)
+     escape    {boolean}  - respond to Escape key (default: true)
+     visible   {function} - optional override: (el) => bool. Default: !el.classList.contains('hidden')
    ======================================== */
-window._overlayRegistry = [];
-window.registerOverlay = function(cfg) {
+window._overlayRegistry = window._overlayRegistry || [];
+window.registerOverlay = window.registerOverlay || function(cfg) {
     window._overlayRegistry.push(cfg);
 };
 
@@ -312,7 +312,7 @@ window.registerOverlay = function(cfg) {
        ANDROID BACK BUTTON
        ======================================== */
     function setupBackButton() {
-        // Built lazily — ProviderRegistry may not exist yet at setup time
+        // Built lazily - ProviderRegistry may not exist yet at setup time
         // (ES modules load async, this runs 200ms after DOMContentLoaded)
         const BASE_STATIC_HARDCODED = ['charModal', 'chatPreviewModal', 'chubLoginModal', 'creatorModal'];
         let _staticOverlays = null;
@@ -330,23 +330,15 @@ window.registerOverlay = function(cfg) {
                 ...(window._overlayRegistry || []).filter(r => r.static !== false).map(r => r.id)]);
         }
 
-        const multiSelectHandler = () => {
-            if (window.MultiSelect?.enabled) {
-                window.MultiSelect.disable();
-                return true;
-            }
-            return false;
-        };
-
         const stack = [
-            // Tier 0 — avatar/gallery quick-view (highest z-index)
+            // Tier 0 - avatar/gallery quick-view (highest z-index)
             ['#browseAvatarViewer', el => {
                 if (el._onKey) document.removeEventListener('keydown', el._onKey);
                 el.remove();
             }],
             ['.mobile-avatar-viewer', () => closeAvatarViewer()],
 
-            // Tier 1 — top z-index overlays
+            // Tier 1 - top z-index overlays
             ['#galleryViewerModal.visible',    () => window.closeGalleryViewer?.()],
             ['.mobile-ctx-sheet.visible',      () => { document.querySelector('.mobile-ctx-sheet')?.classList.remove('visible'); document.querySelector('.mobile-ctx-scrim')?.classList.remove('visible'); }],
             ['#clContextMenu.visible',         el => el.classList.remove('visible')],
@@ -364,7 +356,7 @@ window.registerOverlay = function(cfg) {
                 return false;
             },
 
-            // Tier 1.5 — catch-all for dynamic modal-overlays
+            // Tier 1.5 - catch-all for dynamic modal-overlays
             () => {
                 for (const el of document.querySelectorAll('.modal-overlay:not(.hidden)')) {
                     if (!getStaticOverlays().has(el.id)) {
@@ -375,7 +367,7 @@ window.registerOverlay = function(cfg) {
                 return false;
             },
 
-            // Tier 2 — confirm/dialog modals (z-2000+)
+            // Tier 2 - confirm/dialog modals (z-2000+)
             ['#disableGalleryFoldersModal',          el => el.remove()],
             ['#confirmSaveModal:not(.hidden)',        el => el.classList.add('hidden')],
             ['#preImportDuplicateModal:not(.hidden)', el => el.classList.add('hidden')],
@@ -387,15 +379,13 @@ window.registerOverlay = function(cfg) {
             ['#bulkLocalizeModal:not(.hidden)',       el => el.classList.add('hidden')],
             ['#bulkLocalizeSummaryModal:not(.hidden)', el => el.classList.add('hidden')],
             ['#charDuplicatesModal:not(.hidden)',     el => el.classList.add('hidden')],
-            ['#importSummaryModal:not(.hidden)',      el => el.classList.add('hidden')],
-            ['#recommenderModal:not(.hidden)',        el => el.classList.add('hidden')],
             ['#importModal:not(.hidden)',             el => el.classList.add('hidden')],
             ['#deleteConfirmModal',                   el => el.remove()],
             ['#deleteDuplicateModal',                 el => el.remove()],
             ['#legacyFolderModal',                    el => el.remove()],
             ['#folderMappingModal',                   el => el.remove()],
             ['#orphanedFoldersModal',                 el => el.remove()],
-            // Tier 2.5 — mobile sheets & overlays
+            // Tier 2.5 - mobile sheets & overlays
             ['.mobile-search-overlay:not(.hidden)', () => {
                 const overlay = document.querySelector('.mobile-search-overlay');
                 if (overlay) overlay.classList.add('hidden');
@@ -410,10 +400,10 @@ window.registerOverlay = function(cfg) {
             ['#tagFilterPopup:not(.hidden)', el => el.classList.add('hidden')],
             ['#playlistFilterPopup:not(.hidden)', el => el.classList.add('hidden')],
 
-            // Tier 3 — tag editor sheet
+            // Tier 3 - tag editor sheet
             ['.tag-editor-sheet:not(.hidden)', el => { el.classList.add('hidden'); document.getElementById('tagEditorSheetAutocomplete')?.classList.add('hidden'); }],
 
-            // Tier 3.5 — registered overlays (populated via window.registerOverlay)
+            // Tier 3.5 - registered overlays (populated via window.registerOverlay)
             () => {
                 const regs = [...(window._overlayRegistry || [])]
                     .sort((a, b) => a.tier - b.tier);
@@ -426,7 +416,7 @@ window.registerOverlay = function(cfg) {
                 return false;
             },
 
-            // Tier 3 — full-screen modals
+            // Tier 3 - full-screen modals
             ['#chatPreviewModal:not(.hidden)',  el => el.classList.add('hidden')],
             ['#chubLoginModal:not(.hidden)',    el => el.classList.add('hidden')],
             () => {
@@ -442,17 +432,14 @@ window.registerOverlay = function(cfg) {
                 return false;
             },
 
-            // Tier 4 — in-modal sub-views
+            // Tier 4 - in-modal sub-views
             ['.vt-container.vt-detail-open', el => el.classList.remove('vt-detail-open')],
 
-            // Tier 5 — main modals (lowest priority full-screen)
+            // Tier 5 - main modals (lowest priority full-screen)
             ['#charModal:not(.hidden)',    () => window.closeModal?.()],
             ['#creatorModal:not(.hidden)', () => window.closeCharacterCreator?.()],
 
-            // Tier 5.5 — multi-select mode
-            multiSelectHandler,
-
-            // Tier 6 — dropdowns (browse filter dropdowns are relocated to body on mobile)
+            // Tier 6 - dropdowns (browse filter dropdowns are relocated to body on mobile)
             ['#moreOptionsMenu:not(.hidden)',     el => el.classList.add('hidden')],
             ['#settingsMenu:not(.hidden)',        el => el.classList.add('hidden')],
             () => {
@@ -463,7 +450,7 @@ window.registerOverlay = function(cfg) {
                 return false;
             },
 
-            // Tier 7 — active text search on characters view
+            // Tier 7 - active text search on characters view
             () => {
                 if (window.getCurrentView?.() !== 'characters') return false;
                 const input = document.getElementById('searchInput');
@@ -512,12 +499,7 @@ window.registerOverlay = function(cfg) {
         function hasOpenModals() {
             for (let i = 0; i < stack.length; i++) {
                 const entry = stack[i];
-                if (typeof entry === 'function') {
-                    if (entry === multiSelectHandler) {
-                        if (window.MultiSelect?.enabled) return true;
-                    }
-                    continue;
-                }
+                if (typeof entry === 'function') continue;
                 const [selector] = entry;
                 if (document.querySelector(selector)) return true;
             }
@@ -584,7 +566,7 @@ window.registerOverlay = function(cfg) {
                         node.classList.contains('creator-import-overlay') ||
                         node.classList.contains('creator-saveas-diff-overlay')) {
                         classObserver.observe(node, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
-                        // Inject + show often happen in the same sync block — by the time
+                        // Inject + show often happen in the same sync block - by the time
                         // childObserver fires, 'hidden' is already gone. Push now if visible.
                         if (!node.classList.contains('hidden')) pushGuard();
                     }
@@ -603,7 +585,7 @@ window.registerOverlay = function(cfg) {
             processedHash = h;
             if (closeTopLayer() && !location.hash && hasOpenModals()) {
                 // Browser skipped intermediate guards and landed at the base URL
-                // while modals are still open — replenish so the next press closes
+                // while modals are still open - replenish so the next press closes
                 // the remaining layer instead of letting the tab navigate away.
                 pushGuard();
             }
@@ -819,8 +801,6 @@ window.registerOverlay = function(cfg) {
         modeToggleSection.dataset.view = 'online';
         body.appendChild(modeToggleSection);
 
-        let _lastModeToggleProviderId = null;
-
         // Mode toggle (Browse / Following)
         const modeSection = createSection('Mode');
         const modeRow = document.createElement('div');
@@ -867,7 +847,7 @@ window.registerOverlay = function(cfg) {
         modeSection.appendChild(modeRow);
         modeToggleSection.appendChild(modeSection);
 
-        // Sort — two selects: Browse sort + Following sort, toggled by mode
+        // Sort - two selects: Browse sort + Following sort, toggled by mode
         const mtSortSection = createSection('Sort By');
 
         const mtBrowseSortSelect = document.createElement('select');
@@ -956,7 +936,7 @@ window.registerOverlay = function(cfg) {
         mtActionsSection.appendChild(mtActionsRow);
         modeToggleSection.appendChild(mtActionsSection);
 
-        // ===== GENERIC PROVIDER SECTION (no mode toggle — Janny, CT, future providers) =====
+        // ===== GENERIC PROVIDER SECTION (no mode toggle - Janny, CT, future providers) =====
         const genericSection = document.createElement('div');
         genericSection.className = 'mobile-settings-view-section';
         genericSection.dataset.view = 'online';
@@ -1146,27 +1126,23 @@ window.registerOverlay = function(cfg) {
                 if (hasModeToggle) {
                     const realBrowseSort = ids?.sort ? document.getElementById(ids.sort) : null;
                     if (realBrowseSort) {
-                        const curProviderId = reg?.getActiveProvider?.()?.id;
-                        if (curProviderId !== _lastModeToggleProviderId) {
-                            mtBrowseSortSelect.innerHTML = realBrowseSort.innerHTML;
-                            _lastModeToggleProviderId = curProviderId;
-                        }
+                        // Always re-copy options - some providers (e.g. DataCat) rebuild
+                        // their sort options dynamically based on sort mode (creator browse,
+                        // saucepan/janny/hampter modes), so we cannot cache.
+                        mtBrowseSortSelect.innerHTML = realBrowseSort.innerHTML;
                         mtBrowseSortSelect.value = realBrowseSort.value;
                     }
 
                     const realTimelineSort = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
                     if (realTimelineSort) {
-                        const curProviderId = reg?.getActiveProvider?.()?.id;
-                        if (mtFollowSortSelect.options.length === 0 || mtFollowSortSelect.dataset.providerId !== curProviderId) {
-                            mtFollowSortSelect.innerHTML = '';
-                            Array.from(realTimelineSort.options).forEach(opt => {
-                                const o = document.createElement('option');
-                                o.value = opt.value;
-                                o.textContent = opt.textContent;
-                                mtFollowSortSelect.appendChild(o);
-                            });
-                            mtFollowSortSelect.dataset.providerId = curProviderId;
-                        }
+                        // Always re-copy timeline sort options too, for symmetry.
+                        mtFollowSortSelect.innerHTML = '';
+                        Array.from(realTimelineSort.options).forEach(opt => {
+                            const o = document.createElement('option');
+                            o.value = opt.value;
+                            o.textContent = opt.textContent;
+                            mtFollowSortSelect.appendChild(o);
+                        });
                         mtFollowSortSelect.value = realTimelineSort.value;
                     }
 
@@ -1224,7 +1200,7 @@ window.registerOverlay = function(cfg) {
         if (moreOptionsMenu) {
             const items = moreOptionsMenu.querySelectorAll('.dropdown-item');
             items.forEach(item => {
-                // Skip desktop-only responsive overflow items — they belong to the
+                // Skip desktop-only responsive overflow items - they belong to the
                 // progressive topbar collapse and have their own mobile equivalents
                 if (item.classList.contains('topbar-overflow-item') ||
                     item.classList.contains('topbar-overflow-item-narrow')) return;
@@ -1251,7 +1227,7 @@ window.registerOverlay = function(cfg) {
             });
         }
 
-        // Gallery sync status — directly toggle dropdown (the real button is in a hidden container)
+        // Gallery sync status - directly toggle dropdown (the real button is in a hidden container)
         const syncDropdown = document.getElementById('gallerySyncDropdown');
         if (syncDropdown) {
             const syncItem = document.createElement('button');
@@ -1513,6 +1489,8 @@ window.registerOverlay = function(cfg) {
             let attached = false;
             let scrollBody = null;
             let collapsedAt = 0;
+            // Suppresses scroll-driven header toggles while layout settles.
+            let toggleCooldownUntil = 0;
 
             function handleScroll() {
                 if (!scrollBody) return;
@@ -1525,21 +1503,38 @@ window.registerOverlay = function(cfg) {
                     else if (y <= 50 && hasSnap) scrollBody.classList.remove('snap-active');
                 }
 
+                if (Date.now() < toggleCooldownUntil) {
+                    lastScrollY = y;
+                    return;
+                }
+
+                // No scroll runway: keep the header revealed.
+                const maxScroll = scrollBody.scrollHeight - scrollBody.clientHeight;
+                if (maxScroll < 80) {
+                    if (glass.classList.contains('header-collapsed')) {
+                        glass.classList.remove('header-collapsed');
+                        toggleCooldownUntil = Date.now() + 250;
+                    }
+                    lastScrollY = y;
+                    return;
+                }
+
                 const isCollapsed = glass.classList.contains('header-collapsed');
                 const topZone = isCollapsed
                     ? (isBrowse ? 12 : 2)
                     : (isBrowse ? 20 : 10);
                 const upDelta = isBrowse ? -3 : -4;
 
+                let changed = false;
                 if (y <= topZone) {
-                    glass.classList.remove('header-collapsed');
+                    if (isCollapsed) { glass.classList.remove('header-collapsed'); changed = true; }
                 } else if (y > lastScrollY + 2) {
-                    if (!isCollapsed) collapsedAt = Date.now();
-                    glass.classList.add('header-collapsed');
+                    if (!isCollapsed) { collapsedAt = Date.now(); glass.classList.add('header-collapsed'); changed = true; }
                 } else if (y < lastScrollY + upDelta && Date.now() - collapsedAt > 300) {
-                    glass.classList.remove('header-collapsed');
+                    if (isCollapsed) { glass.classList.remove('header-collapsed'); changed = true; }
                 }
                 lastScrollY = y;
+                if (changed) toggleCooldownUntil = Date.now() + 250;
             }
 
             function attach() {
@@ -1574,6 +1569,20 @@ window.registerOverlay = function(cfg) {
                     }
                 });
             }
+
+            overlay.addEventListener('click', (e) => {
+                if (e.target.closest('.browse-section-inline-toggle, .browse-section-title, .expandable-section-title')) {
+                    toggleCooldownUntil = Date.now() + 400;
+                    setTimeout(() => {
+                        if (!scrollBody) return;
+                        const maxScroll = scrollBody.scrollHeight - scrollBody.clientHeight;
+                        if (maxScroll < 80) {
+                            glass.classList.remove('header-collapsed');
+                            lastScrollY = scrollBody.scrollTop;
+                        }
+                    }, 420);
+                }
+            }, true);
 
             new MutationObserver(() => {
                 const isOpen = !overlay.classList.contains('hidden');
@@ -1628,6 +1637,15 @@ window.registerOverlay = function(cfg) {
             avatar.alt = 'Avatar';
             avatar.addEventListener('click', (e) => {
                 e.stopPropagation();
+                // When edit lock is unlocked, tapping the avatar opens the
+                // file picker (matches the desktop hover-overlay behavior).
+                if (modal.classList.contains('editing-unlocked')) {
+                    const fileInput = document.getElementById('editAvatarFileInput');
+                    if (fileInput) {
+                        fileInput.click();
+                        return;
+                    }
+                }
                 openAvatarViewer(avatar.src);
             });
             // Insert before the title h2
@@ -1984,7 +2002,7 @@ window.registerOverlay = function(cfg) {
 
         // Block desktop click-to-navigate on the image (left/right half tap).
         // The desktop gallery-viewer.js adds a click handler on #galleryViewerImage
-        // that navigates prev/next — we must suppress it so pinch/double-tap work.
+        // that navigates prev/next - we must suppress it so pinch/double-tap work.
         const viewerImg = document.getElementById('galleryViewerImage');
         if (viewerImg) {
             viewerImg.addEventListener('click', (e) => {
@@ -2050,7 +2068,7 @@ window.registerOverlay = function(cfg) {
 
             if (e.touches.length !== 1) return;
 
-            gestureOccurred = false; // reset — will be set true if finger moves
+            gestureOccurred = false; // reset - will be set true if finger moves
 
             const tapX = e.touches[0].clientX;
             const tapY = e.touches[0].clientY;
@@ -2136,7 +2154,7 @@ window.registerOverlay = function(cfg) {
         container.addEventListener('touchend', (e) => {
             const img = getImageEl();
 
-            // Pan end — single tap while zoomed resets to 1x
+            // Pan end - single tap while zoomed resets to 1x
             if (isPanning) {
                 isPanning = false;
                 if (!gestureOccurred && img && getZoom() > 1.05) {
@@ -2181,7 +2199,7 @@ window.registerOverlay = function(cfg) {
                     }
                 }, 150);
             } else {
-                // Below threshold — snap back
+                // Below threshold - snap back
                 if (imageContainer) {
                     imageContainer.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
                     imageContainer.style.transform = 'translateX(0)';
@@ -2483,7 +2501,7 @@ window.registerOverlay = function(cfg) {
 
     /* ========================================
        RELOCATE PLAYLIST POPUP
-       Same pattern as tag popup — move to body,
+       Same pattern as tag popup - move to body,
        add scrim + handle
        ======================================== */
     function relocatePlaylistPopup() {
@@ -2523,7 +2541,7 @@ window.registerOverlay = function(cfg) {
 
     /* ========================================
        RELOCATE ADVANCED FILTER PANEL
-       Same pattern as tag/playlist popup — move to body,
+       Same pattern as tag/playlist popup - move to body,
        add scrim + handle
        ======================================== */
     function relocateAdvFilterPanel() {
@@ -3040,7 +3058,7 @@ window.registerOverlay = function(cfg) {
             try {
                 if (typeof window.auditGalleryIntegrity === 'function') {
                     const audit = await window.auditGalleryIntegrity();
-                    // updateGallerySyncWarning is updateWarningIndicator — updates dropdown content
+                    // updateGallerySyncWarning is updateWarningIndicator - updates dropdown content
                     if (typeof window.updateGallerySyncWarning === 'function') {
                         window.updateGallerySyncWarning(audit);
                     }

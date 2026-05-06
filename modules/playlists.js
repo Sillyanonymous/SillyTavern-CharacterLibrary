@@ -798,9 +798,12 @@ async function handleManageCreate() {
 // ========================================
 
 function init() {
-    loadPlaylists().then(() => {
-        CoreAPI.refreshPlaylistBadges();
-    });
+    loadPlaylists()
+        .then(() => CoreAPI.refreshPlaylistBadges())
+        .catch(err => {
+            console.error('[Playlists] init load failed:', err);
+            CoreAPI.showToast?.('Could not load playlists. Existing playlists may not appear until the issue is fixed.', 'error', 6000);
+        });
 }
 
 // ========================================

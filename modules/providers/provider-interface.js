@@ -1,47 +1,47 @@
-// Provider Interface — contract for external character sources
+// Provider Interface - contract for external character sources
 
 import { saveGalleryImage } from './provider-utils.js';
 
 /**
  * @typedef {Object} ProviderLinkInfo
- * @property {string} providerId   — which provider owns this link (e.g. 'chub')
- * @property {string|number} id    — provider-internal numeric/string ID
- * @property {string} fullPath     — canonical path on the provider (e.g. 'creator/slug')
- * @property {string} [linkedAt]   — ISO timestamp of when the link was created
+ * @property {string} providerId   - which provider owns this link (e.g. 'chub')
+ * @property {string|number} id    - provider-internal numeric/string ID
+ * @property {string} fullPath     - canonical path on the provider (e.g. 'creator/slug')
+ * @property {string} [linkedAt]   - ISO timestamp of when the link was created
  */
 
 /**
  * @typedef {Object} ProviderSettingDescriptor
- * @property {string} key          — setting key stored in library settings
- * @property {string} label        — human-readable label
+ * @property {string} key          - setting key stored in library settings
+ * @property {string} label        - human-readable label
  * @property {'text'|'password'|'checkbox'|'number'} type
- * @property {*} defaultValue      — value when unset
- * @property {string} [hint]       — helper text shown below the control
- * @property {string} [section]    — grouping label inside the settings panel
+ * @property {*} defaultValue      - value when unset
+ * @property {string} [hint]       - helper text shown below the control
+ * @property {string} [section]    - grouping label inside the settings panel
  */
 
 /**
  * @typedef {Object} ProviderUpdateResult
- * @property {string} avatar       — character avatar filename
- * @property {boolean} hasUpdate   — whether an update is available
- * @property {Object} [remoteCard] — full remote card data if fetched
- * @property {string} [error]      — error message if check failed
+ * @property {string} avatar       - character avatar filename
+ * @property {boolean} hasUpdate   - whether an update is available
+ * @property {Object} [remoteCard] - full remote card data if fetched
+ * @property {string} [error]      - error message if check failed
  */
 
 /**
  * @typedef {Object} ProviderVersionEntry
- * @property {string} ref          — version identifier (commit hash, revision ID, etc.)
- * @property {string} date         — ISO timestamp
- * @property {string} [message]    — commit message or version label
- * @property {string} [author]     — author name if available
+ * @property {string} ref          - version identifier (commit hash, revision ID, etc.)
+ * @property {string} date         - ISO timestamp
+ * @property {string} [message]    - commit message or version label
+ * @property {string} [author]     - author name if available
  */
 
 /**
  * @typedef {Object} ProviderComparableField
- * @property {string} path         — dot-notation field path (e.g. 'extensions.chub.tagline')
- * @property {string} label        — human-readable column label
- * @property {string} [icon]       — Font Awesome icon class
- * @property {boolean} [optional]  — if true, excluded from diff by default
+ * @property {string} path         - dot-notation field path (e.g. 'extensions.chub.tagline')
+ * @property {string} label        - human-readable column label
+ * @property {string} [icon]       - Font Awesome icon class
+ * @property {boolean} [optional]  - if true, excluded from diff by default
  */
 
 /**
@@ -91,9 +91,9 @@ export class ProviderBase {
     /**
      * Called when the Online tab switches TO this provider.
      * The provider should render/refresh its UI inside `container`.
-     * @param {HTMLElement} container — the provider's content div
+     * @param {HTMLElement} container - the provider's content div
      * @param {Object} [options]
-     * @param {boolean} [options.domRecreated] — true when the registry has
+     * @param {boolean} [options.domRecreated] - true when the registry has
      *   destroyed and rebuilt the view HTML (provider switch). Signals that
      *   event listeners must be re-attached.
      */
@@ -140,7 +140,7 @@ export class ProviderBase {
      * provider recognises the card. This is how the library decides which
      * provider "owns" a character for updates, version history, etc.
      *
-     * @param {Object} char — character object (has .data.extensions)
+     * @param {Object} char - character object (has .data.extensions)
      * @returns {ProviderLinkInfo|null}
      */
     getLinkInfo(char) { return null; }
@@ -149,8 +149,8 @@ export class ProviderBase {
      * Write provider link metadata onto a character object. The caller is
      * responsible for persisting the change to the server afterward.
      *
-     * @param {Object} char — character object
-     * @param {ProviderLinkInfo|null} linkInfo — null to unlink
+     * @param {Object} char - character object
+     * @param {ProviderLinkInfo|null} linkInfo - null to unlink
      */
     setLinkInfo(char, linkInfo) { /* optional, some providers are read-only */ }
 
@@ -158,7 +158,7 @@ export class ProviderBase {
      * Extract the listing/page name from provider hit or metadata.
      * This is the name shown on the provider's website, which may differ
      * from the card's internal data.name.
-     * @param {Object} hitData — provider metadata or search hit object
+     * @param {Object} hitData - provider metadata or search hit object
      * @returns {string|null}
      */
     getListingName(hitData) { return hitData?.name || null; }
@@ -191,15 +191,15 @@ export class ProviderBase {
     /**
      * Build a preview character object from a local character's metadata.
      * Called by viewOnLinkedProvider() when supportsInAppPreview is true.
-     * @param {Object} char — local character object
-     * @param {ProviderLinkInfo} linkInfo — link info for this character
+     * @param {Object} char - local character object
+     * @param {ProviderLinkInfo} linkInfo - link info for this character
      * @returns {Promise<Object|null>} provider-specific char object for openPreview()
      */
     async buildPreviewObject(char, linkInfo) { return null; }
 
     /**
      * Open the provider's browse preview modal for a character.
-     * @param {Object} previewChar — object returned by buildPreviewObject()
+     * @param {Object} previewChar - object returned by buildPreviewObject()
      */
     openPreview(previewChar) { /* optional */ }
 
@@ -207,7 +207,7 @@ export class ProviderBase {
      * Open the link/unlink UI for a single character. Context menus and
      * detail panels call this to let the user manage a character's link
      * to this provider.
-     * @param {Object} char — character object
+     * @param {Object} char - character object
      */
     openLinkUI(char) { /* optional */ }
 
@@ -220,22 +220,22 @@ export class ProviderBase {
      * returns fresh data.
      * @param {ProviderLinkInfo} linkInfo
      * @param {Object} [options]
-     * @param {AbortSignal} [options.signal] — abort signal to cancel long-running operations
-     * @param {function(string):void} [options.onStatus] — progress callback for UI updates
+     * @param {AbortSignal} [options.signal] - abort signal to cancel long-running operations
+     * @param {function(string):void} [options.onStatus] - progress callback for UI updates
      * @returns {Promise<void>}
      */
     async refreshRemoteData(linkInfo, options = {}) { return; }
 
     /**
      * Fetch full remote metadata for a linked character.
-     * @param {string} fullPath — provider-specific canonical path
+     * @param {string} fullPath - provider-specific canonical path
      * @returns {Promise<Object|null>} provider-specific metadata blob
      */
     async fetchMetadata(fullPath) { return null; }
 
     /**
      * Fetch the remote V2 card JSON for a character (for update comparison).
-     * The returned object should already be normalized to V2 spec — providers
+     * The returned object should already be normalized to V2 spec - providers
      * are responsible for mapping their own field names.
      * @param {ProviderLinkInfo} linkInfo
      * @returns {Promise<Object|null>} V2-spec card data or null
@@ -246,7 +246,7 @@ export class ProviderBase {
      * Normalize raw remote data into V2 card spec. Called internally by
      * fetchRemoteCard() implementations. Override to map provider-specific
      * field names (e.g. Chub's 'personality' → V2 'description').
-     * @param {Object} rawData — raw API response
+     * @param {Object} rawData - raw API response
      * @returns {Object} V2-spec card data
      */
     normalizeRemoteCard(rawData) { return rawData; }
@@ -293,7 +293,7 @@ export class ProviderBase {
 
     /**
      * Check one character for available updates.
-     * @param {Object} char — local character object
+     * @param {Object} char - local character object
      * @param {ProviderLinkInfo} linkInfo
      * @returns {Promise<ProviderUpdateResult>}
      */
@@ -305,7 +305,7 @@ export class ProviderBase {
      * Batch-check multiple characters. Default calls checkForUpdate() in
      * parallel with concurrency control. Override for provider-native batch APIs.
      * @param {Array<{char: Object, linkInfo: ProviderLinkInfo}>} items
-     * @param {function} [onProgress] — called with (completed, total)
+     * @param {function} [onProgress] - called with (completed, total)
      * @returns {Promise<ProviderUpdateResult[]>}
      */
     async checkForUpdates(items, onProgress) {
@@ -355,7 +355,7 @@ export class ProviderBase {
     /**
      * Fetch the V2 card JSON for a specific historical version.
      * @param {ProviderLinkInfo} linkInfo
-     * @param {string} ref — version identifier from fetchVersionList()
+     * @param {string} ref - version identifier from fetchVersionList()
      * @returns {Promise<Object|null>} V2-spec card data or null
      */
     async fetchVersionData(linkInfo, ref) { return null; }
@@ -405,7 +405,7 @@ export class ProviderBase {
 
     /**
      * Return auth headers for API requests. The core never hard-codes
-     * bearer tokens — it calls this on the relevant provider.
+     * bearer tokens - it calls this on the relevant provider.
      * @returns {Object} headers object (e.g. { Authorization: 'Bearer ...' })
      */
     getAuthHeaders() { return {}; }
@@ -431,7 +431,7 @@ export class ProviderBase {
 
     /**
      * Return an array of setting descriptors for the settings panel.
-     * The core renders these automatically — the provider doesn't build DOM.
+     * The core renders these automatically - the provider doesn't build DOM.
      * @returns {ProviderSettingDescriptor[]}
      */
     getSettings() { return []; }
@@ -456,8 +456,8 @@ export class ProviderBase {
      * Returned objects must have at minimum:
      *   { id, fullPath, name, avatarUrl, rating, starCount, description, tagline }
      *
-     * @param {string} name    — local character name
-     * @param {string} creator — local character creator (may be empty)
+     * @param {string} name    - local character name
+     * @param {string} creator - local character creator (may be empty)
      * @returns {Promise<Array<Object>>} search results
      */
     async searchForBulkLink(name, creator) { return []; }
@@ -466,7 +466,7 @@ export class ProviderBase {
      * Get an avatar URL for a search result returned by searchForBulkLink().
      * Default just returns result.avatarUrl. Override if the provider needs
      * to construct the URL from result fields (e.g. CDN path + fullPath).
-     * @param {Object} result — a search result object
+     * @param {Object} result - a search result object
      * @returns {string}
      */
     getResultAvatarUrl(result) { return result.avatarUrl || ''; }
@@ -493,7 +493,7 @@ export class ProviderBase {
      *   api.getCSRFToken()
      *   api.findCharacterMediaUrls(cardData)
      *
-     * @param {string} identifier — provider-specific ID from parseUrl()
+     * @param {string} identifier - provider-specific ID from parseUrl()
      * @returns {Promise<ProviderImportResult>}
      */
     async importCharacter(identifier) {
@@ -503,15 +503,15 @@ export class ProviderBase {
     /**
      * @typedef {Object} ProviderImportResult
      * @property {boolean} success
-     * @property {string} [error]          — error message if !success
-     * @property {string} [fileName]       — avatar filename on ST server
-     * @property {string} [characterName]  — display name
-     * @property {boolean} [hasGallery]    — whether gallery images are available
-     * @property {string|number} [providerCharId] — provider-side numeric/string ID (for gallery fetch)
-     * @property {string} [fullPath]       — canonical path on provider
-     * @property {string} [avatarUrl]      — remote avatar URL for display
-     * @property {string[]} [embeddedMediaUrls] — media found in card fields
-     * @property {string} [galleryId]      — unique gallery folder ID if assigned
+     * @property {string} [error]          - error message if !success
+     * @property {string} [fileName]       - avatar filename on ST server
+     * @property {string} [characterName]  - display name
+     * @property {boolean} [hasGallery]    - whether gallery images are available
+     * @property {string|number} [providerCharId] - provider-side numeric/string ID (for gallery fetch)
+     * @property {string} [fullPath]       - canonical path on provider
+     * @property {string} [avatarUrl]      - remote avatar URL for display
+     * @property {string[]} [embeddedMediaUrls] - media found in card fields
+     * @property {string} [galleryId]      - unique gallery folder ID if assigned
      */
 
     // ── Gallery Download ────────────────────────────────────
@@ -537,12 +537,12 @@ export class ProviderBase {
      * for custom naming conventions or CDN-specific handling.
      *
      * @param {ProviderLinkInfo} linkInfo
-     * @param {string} folderName — gallery folder name (already resolved)
+     * @param {string} folderName - gallery folder name (already resolved)
      * @param {Object} [options]
-     * @param {function} [options.onProgress] — (current, total)
-     * @param {function} [options.onLog]      — (message, status) → entry
-     * @param {function} [options.onLogUpdate] — (entry, message, status)
-     * @param {function} [options.shouldAbort] — () → boolean
+     * @param {function} [options.onProgress] - (current, total)
+     * @param {function} [options.onLog]      - (message, status) → entry
+     * @param {function} [options.onLogUpdate] - (entry, message, status)
+     * @param {function} [options.shouldAbort] - () → boolean
      * @param {AbortSignal} [options.abortSignal]
      * @returns {Promise<{success: number, skipped: number, errors: number, aborted: boolean}>}
      */
@@ -683,9 +683,9 @@ export class ProviderBase {
      * Used during the import pipeline to auto-discover remote matches (e.g., for
      * gallery ID, duplicate detection). More thorough than searchForBulkLink().
      *
-     * @param {string} name    — character name
-     * @param {string} creator — creator name
-     * @param {Object} [localChar] — full local character for content comparison
+     * @param {string} name    - character name
+     * @param {string} creator - creator name
+     * @param {Object} [localChar] - full local character for content comparison
      * @returns {Promise<{id: string|number, fullPath: string, hasGallery: boolean}|null>}
      */
     async searchForImportMatch(name, creator, localChar) { return null; }

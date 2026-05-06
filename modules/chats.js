@@ -84,7 +84,7 @@ function clearChatCache() {
 }
 
 // ========================================
-// CHARACTER MODAL — CHATS TAB
+// CHARACTER MODAL - CHATS TAB
 // ========================================
 
 async function fetchCharacterChats(char) {

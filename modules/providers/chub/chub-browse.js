@@ -1,4 +1,4 @@
-// ChubBrowseView — ChubAI browse/search UI for the Online tab
+// ChubBrowseView - ChubAI browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
@@ -24,6 +24,7 @@ const {
     debugLog,
     showToast,
     escapeHtml,
+    safePurify,
     formatRichText,
     sanitizeTaglineHtml,
     renderLoadingState,
@@ -127,7 +128,7 @@ let chubModalEventsAttached = false;
 let chubDetailFetchController = null; // AbortController for in-flight detail fetches
 
 const chubDetailCache = new Map();
-const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (stripped entries only)
+const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap - keep small for mobile memory (stripped entries only)
 
 // Append-only rendering: track how many cards are already in DOM to avoid full re-render on Load More
 let chubGridRenderedCount = 0;
@@ -864,7 +865,7 @@ class ChubBrowseView extends BrowseView {
         super.activate(container, options);
         chubDelegatesInitialized = true;
 
-        // Ensure grid is populated — covers fresh init, provider switch, and tab re-entry
+        // Ensure grid is populated - covers fresh init, provider switch, and tab re-entry
         this.buildLocalLibraryLookup();
         const browseGrid = document.getElementById('chubGrid');
         const timelineGrid = document.getElementById('chubTimelineGrid');
@@ -900,6 +901,9 @@ class ChubBrowseView extends BrowseView {
         chubDelegatesInitialized = false;
         // Increment render token to cancel in-flight chunked renders
         chubTimelineRenderToken++;
+        // Reset in-flight flag so a stuck flag from a hung fetch can't block the
+        // next view re-entry from kicking off a fresh load.
+        chubTimelineLoadInFlight = false;
         this.disconnectImageObserver();
         // Abort any in-flight detail fetch
         if (chubDetailFetchController) {
@@ -1156,7 +1160,7 @@ function initChubView() {
         }
     });
     
-    // Load more button (guard against rapid clicks — don't increment page while loading)
+    // Load more button (guard against rapid clicks - don't increment page while loading)
     on('chubLoadMoreBtn', 'click', () => {
         if (chubIsLoading) return;
         chubCurrentPage++;
@@ -1178,7 +1182,7 @@ function initChubView() {
         loadChubCharacters(); // Reload with new sort (server-side sorting)
     });
     
-    // Modal and document-level listeners — only attach once since these elements
+    // Modal and document-level listeners - only attach once since these elements
     // persist in document.body across provider switches (DOM recreation)
     if (!chubModalEventsAttached) {
         chubModalEventsAttached = true;
@@ -1596,7 +1600,7 @@ function initChubTagsDropdown() {
         // Populate tags when opening
         if (wasHidden) {
             renderChubTagsDropdownList();
-            // Skip auto-focus on mobile — it spawns the virtual keyboard
+            // Skip auto-focus on mobile - it spawns the virtual keyboard
             if (!window.matchMedia('(max-width: 768px)').matches) {
                 searchInput?.focus();
             }
@@ -1900,7 +1904,7 @@ async function switchChubViewMode(mode) {
         const tsTarget = timelineSortHeader?._customSelect?.container || timelineSortHeader;
         if (dpTarget) dpTarget.classList.add('browse-filter-hidden');
         if (tsTarget) tsTarget.classList.remove('browse-filter-hidden');
-        // Hide advanced options (sort direction, token limits) — not applicable to timeline
+        // Hide advanced options (sort direction, token limits) - not applicable to timeline
         const advancedOpts = document.getElementById('chubAdvancedOptions');
         const advancedDivider = document.getElementById('chubAdvancedDivider');
         if (advancedOpts) advancedOpts.style.display = 'none';
@@ -1930,11 +1934,17 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         renderTimelineEmpty('login');
         return;
     }
-    
+
+    // Prevent concurrent top-level loads from stacking loading bars / racing renders.
+    // Auto-pagination recursion is allowed through.
+    if (!_isAutoPage && chubTimelineLoadInFlight) return;
+
     const grid = document.getElementById('chubTimelineGrid');
     const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
     const isInitialLoad = !_isAutoPage;
-    
+
+    if (!_isAutoPage) chubTimelineLoadInFlight = true;
+
     if (forceRefresh || (!chubTimelineCursor && chubTimelineCharacters.length === 0)) {
         renderLoadingState(grid, 'Loading timeline...', 'browse-loading');
         if (forceRefresh) {
@@ -1945,7 +1955,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
             chubTimelineAuthorHasMore = false;
         }
     }
-    
+
     try {
         // Use the dedicated timeline endpoint which returns updates from followed authors
         // This API uses cursor-based pagination, not page-based
@@ -2113,16 +2123,20 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         
     } catch (e) {
         console.error('[ChubTimeline] Load error:', e);
-        grid.innerHTML = `
-            <div class="chub-timeline-empty">
-                <i class="fa-solid fa-exclamation-triangle"></i>
-                <h3>Failed to Load Timeline</h3>
-                <p>${escapeHtml(e.message)}</p>
-                <button class="action-btn primary browse-retry-btn">
-                    <i class="fa-solid fa-refresh"></i> Retry
-                </button>
-            </div>
-        `;
+        if (grid) {
+            grid.innerHTML = `
+                <div class="chub-timeline-empty">
+                    <i class="fa-solid fa-exclamation-triangle"></i>
+                    <h3>Failed to Load Timeline</h3>
+                    <p>${escapeHtml(e.message)}</p>
+                    <button class="action-btn primary browse-retry-btn">
+                        <i class="fa-solid fa-refresh"></i> Retry
+                    </button>
+                </div>
+            `;
+        }
+    } finally {
+        if (!_isAutoPage) chubTimelineLoadInFlight = false;
     }
 }
 
@@ -2370,7 +2384,7 @@ function renderChubTimeline(appendOnly = false) {
             if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
             if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             if (chubFilterFavorites && chubUserFavoriteIds.size > 0 && !chubUserFavoriteIds.has(c.id || c.project_id)) return false;
-            // Tag filters (client-side — timeline data already has topics)
+            // Tag filters (client-side - timeline data already has topics)
             if (includeTags.length > 0 || excludeTags.length > 0) {
                 const charTopics = (c.topics || []).map(t => t.toLowerCase());
                 if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
@@ -2465,7 +2479,7 @@ function performChubCreatorSearch() {
 }
 
 function filterByAuthor(authorName) {
-    // Set filter state BEFORE mode switch — switchChubViewMode('browse')
+    // Set filter state BEFORE mode switch - switchChubViewMode('browse')
     // triggers loadChubCharacters() internally, which must see the author filter
     chubAuthorFilter = authorName;
     chubCurrentSearch = '';
@@ -3401,6 +3415,7 @@ async function openChubCharPreview(char) {
     chubSelectedChar = char;
     
     const modal = document.getElementById('chubCharModal');
+    window.resetBrowseSectionCollapseState?.(modal);
     const avatarImg = document.getElementById('chubCharAvatar');
     const nameEl = document.getElementById('chubCharName');
     const creatorLink = document.getElementById('chubCharCreator');
@@ -3517,10 +3532,10 @@ async function openChubCharPreview(char) {
         lorebookStat.style.display = 'none';
     }
 
-    // Gallery stat — hidden until detail data loads with actual count
+    // Gallery stat - hidden until detail data loads with actual count
     if (galleryStat) galleryStat.style.display = 'none';
     
-    // Reset definition sections — show loading indicator until detail fetch completes
+    // Reset definition sections - show loading indicator until detail fetch completes
     const defLoading = document.getElementById('chubCharDefinitionLoading');
     descSection.style.display = 'none';
     personalitySection.style.display = 'none';
@@ -3533,7 +3548,7 @@ async function openChubCharPreview(char) {
     if (galleryGrid) galleryGrid.innerHTML = '';
     if (defLoading) defLoading.style.display = 'block';
     
-    // Import button state — show "In Library" if already imported
+    // Import button state - show "In Library" if already imported
     const downloadBtn = document.getElementById('chubDownloadBtn');
     if (downloadBtn) {
         if (inLibrary) {
@@ -3571,7 +3586,7 @@ async function openChubCharPreview(char) {
             return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
         };
         altGreetingsSection.style.display = 'block';
-        // Build HTML with empty bodies — content is rendered lazily on toggle to save memory
+        // Build HTML with empty bodies - content is rendered lazily on toggle to save memory
         altGreetingsEl.innerHTML = greetings.map((greeting, idx) => {
             const label = `#${idx + 1}`;
             const preview = escapeHtml(buildPreview(greeting));
@@ -3594,7 +3609,7 @@ async function openChubCharPreview(char) {
                 if (body && !body.dataset.rendered) {
                     const idx = parseInt(details.dataset.greetingIdx, 10);
                     if (greetings[idx] != null) {
-                        body.innerHTML = DOMPurify.sanitize(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
+                        body.innerHTML = safePurify(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
                     }
                     body.dataset.rendered = '1';
                 }
@@ -3624,21 +3639,21 @@ async function openChubCharPreview(char) {
         // This is confusingly named in ChubAI's API - "personality" is actually the main character definition
         if (def.personality) {
             descSection.style.display = 'block';
-            descEl.innerHTML = DOMPurify.sanitize(formatRichText(def.personality, char.name, true), BROWSE_PURIFY_CONFIG);
+            descEl.innerHTML = safePurify(formatRichText(def.personality, char.name, true), BROWSE_PURIFY_CONFIG);
             descEl.dataset.fullContent = def.personality;
         }
 
         // Scenario
         if (def.scenario) {
             scenarioSection.style.display = 'block';
-            scenarioEl.innerHTML = DOMPurify.sanitize(formatRichText(def.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
+            scenarioEl.innerHTML = safePurify(formatRichText(def.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
             scenarioEl.dataset.fullContent = def.scenario;
         }
 
         // Example Dialogs
         if (def.mes_example) {
             examplesSection.style.display = 'block';
-            examplesEl.innerHTML = DOMPurify.sanitize(formatRichText(def.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
+            examplesEl.innerHTML = safePurify(formatRichText(def.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
             examplesEl.dataset.fullContent = def.mes_example;
         }
 
@@ -3646,7 +3661,7 @@ async function openChubCharPreview(char) {
         const firstMsg = def.first_message || def.first_mes;
         if (firstMsg) {
             firstMsgSection.style.display = 'block';
-            firstMsgEl.innerHTML = DOMPurify.sanitize(formatRichText(firstMsg, char.name, true), BROWSE_PURIFY_CONFIG);
+            firstMsgEl.innerHTML = safePurify(formatRichText(firstMsg, char.name, true), BROWSE_PURIFY_CONFIG);
             firstMsgEl.dataset.fullContent = firstMsg;
         }
 
@@ -3737,7 +3752,7 @@ async function openChubCharPreview(char) {
                     debugLog('[ChubAI] Detail fetch completed but modal moved on — discarding');
                 } else {
                     const node = detailData.node || detailData;
-                    // Strip heavy data we never display — character_book (lorebook) can be
+                    // Strip heavy data we never display - character_book (lorebook) can be
                     // 100KB-1MB by itself, mes_example and extensions add more.
                     // Only keep fields actually used in applyDetailData.
                     const stripped = {
@@ -3754,7 +3769,7 @@ async function openChubCharPreview(char) {
                         galleryAuthRequired: !!(galleryImages?._authRequired && !galleryImages.length),
                         hasGallery: char.hasGallery || node.hasGallery || false,
                     };
-                    // Enforce LRU cap — evict oldest entries
+                    // Enforce LRU cap - evict oldest entries
                     while (chubDetailCache.size >= CHUB_DETAIL_CACHE_MAX) {
                         const oldestKey = chubDetailCache.keys().next().value;
                         chubDetailCache.delete(oldestKey);
@@ -3987,7 +4002,7 @@ function cleanupChubCharModal() {
             if (el) el.innerHTML = '';
         }
         
-        // Clear creator notes iframe — disconnect ResizeObserver and release its document
+        // Clear creator notes iframe - disconnect ResizeObserver and release its document
         const creatorNotesEl = document.getElementById('chubCreatorNotes');
         cleanupCreatorNotesContainer(creatorNotesEl);
     }

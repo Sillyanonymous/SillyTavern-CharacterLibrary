@@ -1,4 +1,4 @@
-// CharacterTavern Provider — implementation for character-tavern.com character source
+// CharacterTavern Provider - implementation for character-tavern.com character source
 //
 // Uses the CT REST API for search and character details. Cards are served as
 // PNG files with embedded V2 data via their CDN. No version history or gallery support.
@@ -253,26 +253,32 @@ class ChartavernProvider extends ProviderBase {
             };
         }
 
-        // No CT extensions — try to find on CharacterTavern
+        // No CT extensions - try to find on CharacterTavern
         const name = cardData.data?.name;
         if (!name) return null;
 
         try {
             const creator = cardData.data?.creator || '';
-            const results = await this.searchForBulkLink(name, creator);
+            // Strict: require a non-empty creator on the local card. Names alone
+            // are too ambiguous to safely auto-link.
+            const localCreator = creator.trim();
+            if (!localCreator) return null;
+
+            const results = await this.searchForBulkLink(name, localCreator);
             if (results.length === 0) return null;
 
             const normalizedName = name.toLowerCase().trim();
             const nameMatches = results.filter(r => (r.name || '').toLowerCase().trim() === normalizedName);
             if (nameMatches.length === 0) return null;
 
-            // Prefer match by same creator when multiple cards share the same name
-            let match = nameMatches[0];
-            if (creator && nameMatches.length > 1) {
-                const creatorLower = creator.toLowerCase();
-                const creatorMatch = nameMatches.find(r => r.fullPath?.toLowerCase().startsWith(creatorLower + '/'));
-                if (creatorMatch) match = creatorMatch;
-            }
+            // CT fullPath is `creator/slug`. Require exact creator-segment match
+            // (case-insensitive) against the local card's creator.
+            const creatorLower = localCreator.toLowerCase();
+            const match = nameMatches.find(r => {
+                const seg = (r.fullPath || '').split('/')[0]?.toLowerCase();
+                return seg && seg === creatorLower;
+            });
+            if (!match) return null;
 
             // Fetch details for tag/tagline enrichment
             const parts = match.fullPath.split('/');

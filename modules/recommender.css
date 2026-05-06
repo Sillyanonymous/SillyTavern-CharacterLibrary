@@ -705,7 +705,7 @@
     border-radius: 10px;
     font-size: var(--font-xs);
     line-height: 1.5;
-    margin-bottom: 6px;
+    margin-top: var(--space-sm);
 }
 
 .recommender-status-info {
@@ -817,6 +817,40 @@
 .recommender-playlist-all-btn:hover {
     opacity: 1;
     color: var(--accent);
+}
+
+.recommender-reroll-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: var(--font-3xs);
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 100px;
+    transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.recommender-reroll-btn:hover:not(:disabled) {
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+.recommender-reroll-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.recommender-reroll-btn.generating i {
+    animation: recommender-reroll-spin 0.8s linear infinite;
+}
+
+@keyframes recommender-reroll-spin {
+    to { transform: rotate(360deg); }
 }
 
 .recommender-results-grid {
@@ -1138,10 +1172,11 @@
     .recommender-profile-status {
         min-width: 0;
         overflow: hidden;
+        flex-shrink: 0;
     }
 
     .recommender-connection-text {
-        font-size: var(--font-3xs);
+        display: none;
     }
 
     .recommender-toolbar-btn {

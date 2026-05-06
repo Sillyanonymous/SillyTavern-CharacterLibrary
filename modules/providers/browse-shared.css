@@ -14,7 +14,7 @@
 }
 
 /* ========================================
-   ONLINE VIEW — PROVIDER SELECTOR
+   ONLINE VIEW - PROVIDER SELECTOR
    ======================================== */
 
 /* Provider selector uses initCustomSelect()-generated dropdown */
@@ -689,6 +689,13 @@
     opacity: 0.3;
 }
 
+/* Loading state uses cl-loading helper; reset legacy icon sizing inside it */
+.browse-loading.cl-loading i {
+    font-size: 1.6rem;
+    margin-bottom: 0;
+    opacity: 1;
+}
+
 .browse-error i {
     color: #e74c3c;
     opacity: 0.7;
@@ -727,7 +734,7 @@
     border-color: var(--accent);
 }
 
-/* Pygmalion Login — plugin status & auth status */
+/* Pygmalion Login - plugin status & auth status */
 
 /* ChubAI Character Preview Modal */
 .browse-char-modal {
@@ -1153,6 +1160,56 @@ h2.browse-title-scroll-end {
 }
 
 .browse-char-section.browse-section-collapsed > h3 .browse-section-inline-toggle {
+    transform: rotate(0deg);
+}
+
+/* ---- Collapse-all mode ----
+   When body.collapse-all-browse-sections is active, every browse-char-section
+   except Creator's Notes and Alt Greetings starts collapsed. Clicking the
+   title toggles `.browse-section-uncollapsed` to reveal content (handled in
+   library.js). A chevron pseudo-indicator is added to titles that don't
+   already carry an inline-toggle span (Examples already has its own). */
+body.collapse-all-browse-sections
+    .browse-char-section:has(> .browse-section-title[data-section]:not([data-section$="CreatorNotes"]):not([data-section="browseAltGreetings"])):not(.browse-section-uncollapsed)
+    > *:not(h3) {
+    display: none !important;
+}
+body.collapse-all-browse-sections
+    .browse-char-section:has(> .browse-section-title[data-section]:not([data-section$="CreatorNotes"]):not([data-section="browseAltGreetings"])):not(.browse-section-uncollapsed)
+    > h3 {
+    margin-bottom: 0;
+}
+
+/* Pseudo-element chevron for titles that don't already have an inline-toggle */
+body.collapse-all-browse-sections
+    .browse-section-title[data-section]:not([data-section$="CreatorNotes"]):not([data-section="browseAltGreetings"]):not(:has(.browse-section-inline-toggle))::after {
+    content: '\f078';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    font-size: var(--font-sm);
+    margin-left: auto;
+    opacity: 0.6;
+    transition: transform 0.2s, opacity 0.2s;
+}
+body.collapse-all-browse-sections
+    .browse-section-title[data-section]:not([data-section$="CreatorNotes"]):not([data-section="browseAltGreetings"]):not(:has(.browse-section-inline-toggle)):hover::after {
+    opacity: 1;
+}
+body.collapse-all-browse-sections
+    .browse-char-section.browse-section-uncollapsed
+    > .browse-section-title:not(:has(.browse-section-inline-toggle))::after {
+    transform: rotate(180deg);
+}
+
+/* Real inline-toggle chevron rotation under collapse-all (Examples & co.) */
+body.collapse-all-browse-sections
+    .browse-char-section.browse-section-uncollapsed
+    > h3 .browse-section-inline-toggle {
+    transform: rotate(180deg);
+}
+body.collapse-all-browse-sections
+    .browse-char-section:not(.browse-section-uncollapsed)
+    > h3 .browse-section-inline-toggle {
     transform: rotate(0deg);
 }
 
@@ -2078,10 +2135,26 @@ h2.browse-title-scroll-end {
     .browse-char-section .scrolling-text { font-size: var(--font-sm); padding: 8px 10px; border-radius: 8px; }
     .browse-section-title {
         font-size: var(--font-sm);
-        padding: 4px 0;
+        padding: 6px 10px;
         min-height: 32px;
         display: flex;
         align-items: center;
+        background: linear-gradient(180deg,
+            color-mix(in srgb, var(--accent) 4%, transparent) 0%,
+            color-mix(in srgb, var(--accent) 1.5%, transparent) 100%);
+        border: 1px solid color-mix(in srgb, var(--glass-border) 60%, transparent);
+        border-radius: 6px;
+    }
+    /* Match inline-toggle chevron sizing to the pseudo-element ::after one. */
+    .browse-section-title .browse-section-inline-toggle {
+        padding: 0;
+        margin-left: auto;
+        font-size: var(--font-sm);
+        line-height: 1;
+    }
+    body.collapse-all-browse-sections
+        .browse-section-title[data-section]:not([data-section$="CreatorNotes"]):not([data-section="browseAltGreetings"]):not(:has(.browse-section-inline-toggle))::after {
+        margin-right: 0;
     }
     .browse-section-count { font-size: var(--font-xs); }
     .scrolling-text {
@@ -2279,7 +2352,7 @@ h2.browse-title-scroll-end {
     }
     .browse-card { contain-intrinsic-size: 120px 190px; }
 
-    /* Provider selector — icon only on phones */
+    /* Provider selector - icon only on phones */
     .provider-tab-btn {
         font-size: 0;
         gap: 0;

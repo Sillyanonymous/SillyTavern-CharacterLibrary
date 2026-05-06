@@ -313,16 +313,6 @@ function setupKeyboardShortcuts() {
                 MultiSelect.enable();
             }
         }
-
-        // Escape to exit multi-select mode
-        if (e.key === 'Escape' && MultiSelect.enabled) {
-            // Only if no modal is open
-            const anyModalOpen = document.querySelector('.modal-overlay:not(.hidden), .cl-modal.visible');
-            if (!anyModalOpen) {
-                MultiSelect.disable();
-                e.preventDefault();
-            }
-        }
     });
 }
 
@@ -335,6 +325,14 @@ function init() {
     injectMultiSelectToolbar();
     injectMultiSelectToggle();
     setupKeyboardShortcuts();
+
+    // Tier 10 - mode toggle, closes after all modals/dropdowns
+    window.registerOverlay?.({
+        id: 'multiSelectToolbar',
+        tier: 10,
+        close: () => MultiSelect.disable(),
+        visible: () => MultiSelect.enabled,
+    });
 
     window.MultiSelect = MultiSelect;
     window.handleCardClickForMultiSelect = function(char, cardElement) {
