@@ -126,6 +126,58 @@ test('BotBooru NSFW toggle mirrors provider label states', async () => {
     });
 });
 
+test('BotBooru provider accepts BotBooru direct download URLs', async () => {
+    globalThis.window = globalThis.window || {};
+    const { default: provider } = await import(`../modules/providers/botbooru/botbooru-provider.js?case=download-url-${Date.now()}`);
+
+    for (const url of [
+        'https://botbooru.com/download/png/5477',
+        'https://botbooru.com/download/json/5477',
+        'botbooru.com/download/png/5477',
+    ]) {
+        assert.equal(provider.canHandleUrl(url), true, url);
+        assert.equal(provider.parseUrl(url), '5477', url);
+    }
+});
+
+test('BotBooru import prefers card data embedded in the direct PNG download', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).buffer;
+
+    try {
+        const { default: provider } = await import(`../modules/providers/botbooru/botbooru-provider.js?case=direct-png-import-${Date.now()}`);
+        provider.init({
+            apiRequest: async (path) => {
+                calls.push(path);
+                if (path.includes('/download/json/')) {
+                    throw new Error('JSON endpoint should not be needed when PNG card data is present');
+                }
+                return new Response(pngBytes, { status: 200 });
+            },
+            embedCharacterDataInPng: (pngBuffer) => pngBuffer,
+            extractCharacterDataFromPng: () => ({
+                spec: 'chara_card_v2',
+                spec_version: '2.0',
+                data: { name: 'Direct PNG Bot', extensions: {} },
+            }),
+            findCharacterMediaUrls: () => [],
+            getCSRFToken: () => 'csrf',
+            getSetting: () => false,
+        });
+        globalThis.fetch = async () => new Response(JSON.stringify({ file_name: 'direct_png_bot.png' }), { status: 200 });
+
+        const result = await provider.importCharacter(5477, { id: 5477, character_name: 'Listing Name' });
+
+        assert.equal(result.success, true);
+        assert.equal(result.characterName, 'Direct PNG Bot');
+        assert.deepEqual(calls, ['/plugins/cl-helper/bb-proxy/download/png/5477']);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test('BotBooru preview exposes downloaded card sections', async () => {
     globalThis.window = globalThis.window || {};
     const { getBotbooruPreviewSections } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-sections-${Date.now()}`);

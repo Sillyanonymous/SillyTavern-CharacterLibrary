@@ -624,6 +624,8 @@ BotBooru is available in the Online tab as a public-first provider. Browsing, pr
 
 - `https://botbooru.com/character/1234`
 - `https://botbooru.com/post/1234`
+- `https://botbooru.com/download/png/1234`
+- `https://botbooru.com/download/json/1234`
 
 </details>
 

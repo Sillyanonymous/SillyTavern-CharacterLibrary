@@ -168,6 +168,8 @@ class BotbooruProvider extends ProviderBase {
 
     normalizeRemoteCard(rawData) {
         if (rawData?.spec === 'chara_card_v2' && rawData?.data) return rawData;
+        if (rawData?.data) return { spec: 'chara_card_v2', spec_version: '2.0', data: rawData.data };
+        if (rawData?.name) return { spec: 'chara_card_v2', spec_version: '2.0', data: rawData };
         return null;
     }
 
@@ -225,15 +227,18 @@ class BotbooruProvider extends ProviderBase {
             const post = hitData ? normalizeBotbooruPost(hitData) : await this.fetchMetadata(postId);
             if (!post) throw new Error('Could not fetch BotBooru post metadata');
 
-            const characterCard = await fetchBotbooruCardJson(postId);
-            if (!characterCard?.data) throw new Error('Could not fetch BotBooru V2 card JSON');
-
             let imageBuffer = null;
             try {
                 imageBuffer = await fetchBotbooruCardPng(postId);
             } catch (e) {
                 console.warn('[BotbooruProvider] PNG download failed, importing with placeholder:', e.message);
             }
+            let characterCard = this.normalizeRemoteCard(api?.extractCharacterDataFromPng?.(imageBuffer));
+
+            if (!characterCard?.data) {
+                characterCard = await fetchBotbooruCardJson(postId);
+            }
+            if (!characterCard?.data) throw new Error('Could not fetch BotBooru V2 card JSON');
 
             ensureBotbooruExtension(characterCard, postId, post);
             assignGalleryId(characterCard, options, api);

@@ -4,7 +4,7 @@ export { slugify, stripHtml };
 
 export const BOTBOORU_SITE_BASE = 'https://botbooru.com';
 export const BOTBOORU_PROVIDER_ID = 'botbooru';
-export const BOTBOORU_PAGE_RE = /^\/(?:character|post)\/(\d+)/i;
+export const BOTBOORU_PAGE_RE = /^\/(?:(?:character|post)|download\/(?:png|json))\/(\d+)/i;
 export const BB_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/bb-proxy`;
 export const BB_PROXY_ASSET_BASE = `/api${BB_PROXY_BASE}`;
 
