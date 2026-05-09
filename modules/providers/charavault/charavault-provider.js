@@ -6,6 +6,7 @@ import { assignGalleryId, importFromPng, slugify } from '../provider-utils.js';
 import charavaultBrowseView, { markCvCardImported } from './charavault-browse.js';
 import {
     initCvApi,
+    getCvCdnBase,
     getCvHeaders,
     cvThumbUrl,
     cvDownloadUrl,
@@ -28,6 +29,7 @@ class CharaVaultProvider extends ProviderBase {
     get id() { return 'charavault'; }
     get name() { return 'CharaVault'; }
     get icon() { return 'fa-solid fa-vault'; }
+    get iconUrl() { return `${getCvCdnBase()}/favicon.ico`; }
     get browseView() { return charavaultBrowseView; }
 
     // ── Lifecycle ───────────────────────────────────────────

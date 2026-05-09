@@ -38,7 +38,9 @@ export async function fetchWithProxy(url, opts = {}) {
             if (directResponse.ok) return directResponse;
             // Some upstreams reject the browser Origin even when CORS passes.
             // Remember and retry through ST /proxy/ which strips Origin/Referer.
-            if (directResponse.status === 403 || directResponse.status === 401 || directResponse.status === 451) {
+            // 401 is genuine auth-fail and should propagate; only origin-shaped
+            // rejections (403 forbidden, 451 region block) get retried.
+            if (directResponse.status === 403 || directResponse.status === 451) {
                 _proxyOrigins.add(origin);
             } else {
                 throw new Error(`HTTP ${directResponse.status}`);

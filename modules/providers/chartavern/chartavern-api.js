@@ -80,6 +80,20 @@ export const CT_SORT_OPTIONS = {
 import { fetchWithProxy } from '../provider-utils.js';
 export { fetchWithProxy };
 
+/**
+ * Build outgoing headers for a CharacterTavern request. When the user
+ * configures a gateway URL + key, the key is sent as Authorization so
+ * the gateway can authenticate the call. Direct (default) requests to
+ * character-tavern.com need no auth header.
+ * @returns {Object}
+ */
+export function getCtHeaders() {
+    const headers = { 'Accept': 'application/json' };
+    const gwKey = _getSetting?.('chartavernGatewayKey');
+    if (gwKey) headers['Authorization'] = `Bearer ${gwKey}`;
+    return headers;
+}
+
 // ========================================
 // AUTH - cl-helper cookie session
 // ========================================
@@ -196,7 +210,7 @@ async function ctFetch(url, apiRequest) {
         const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-proxy${path}`);
         return resp;
     }
-    return fetchWithProxy(url);
+    return fetchWithProxy(url, { headers: getCtHeaders() });
 }
 
 // ========================================
@@ -273,7 +287,7 @@ export async function fetchCharacterDetail(author, slug, apiRequest) {
  */
 export async function fetchTopTags() {
     const url = `${getCtApiBase()}/catalog/top-tags`;
-    const resp = await fetchWithProxy(url);
+    const resp = await fetchWithProxy(url, { headers: getCtHeaders() });
     if (!resp.ok) throw new Error(`Top tags fetch failed (${resp.status})`);
     return resp.json();
 }
