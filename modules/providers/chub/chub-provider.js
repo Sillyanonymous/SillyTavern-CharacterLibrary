@@ -193,7 +193,7 @@ class ChubProvider extends ProviderBase {
             name: metadata.name || metadata.definition?.name,
             description: metadata.description,
             tagline: metadata.tagline,
-            avatar_url: `https://avatars.charhub.io/avatars/${linkInfo.fullPath}/avatar.webp`,
+            avatar_url: `${CHUB_AVATAR_BASE}${linkInfo.fullPath}/avatar.webp`,
             rating: metadata.rating,
             ratingCount: metadata.ratingCount || metadata.rating_count,
             starCount: metadata.starCount || metadata.star_count,
@@ -619,7 +619,7 @@ class ChubProvider extends ProviderBase {
                     username: creatorLower
                 });
                 try {
-                    const authorResp = await fetch(`${CHUB_API_BASE}/search?${authorParams}`, { method: 'GET', headers });
+                    const authorResp = await fetchWithProxy(`${CHUB_API_BASE}/search?${authorParams}`, { method: 'GET', headers });
                     if (authorResp.ok) {
                         const authorData = await authorResp.json();
                         const authorNodes = this._extractNodes(authorData);
@@ -650,7 +650,7 @@ class ChubProvider extends ProviderBase {
                 search: searchTerm, first: '10', sort: 'download_count',
                 nsfw: 'true', nsfl: 'true', include_forks: 'true', min_tokens: '50'
             });
-            const resp = await fetch(`${CHUB_API_BASE}/search?${params}`, { method: 'GET', headers });
+            const resp = await fetchWithProxy(`${CHUB_API_BASE}/search?${params}`, { method: 'GET', headers });
             if (resp.ok) {
                 const data = await resp.json();
                 for (const node of this._extractNodes(data)) {
@@ -666,7 +666,7 @@ class ChubProvider extends ProviderBase {
                     search: name, first: '15', sort: 'download_count',
                     nsfw: 'true', nsfl: 'true', include_forks: 'true', min_tokens: '50'
                 });
-                const nameResp = await fetch(`${CHUB_API_BASE}/search?${nameParams}`, { method: 'GET', headers });
+                const nameResp = await fetchWithProxy(`${CHUB_API_BASE}/search?${nameParams}`, { method: 'GET', headers });
                 if (nameResp.ok) {
                     const nameData = await nameResp.json();
                     allResults = this._extractNodes(nameData).map(n => this._normalizeSearchResult(n, CHUB_AVATAR_BASE));
