@@ -457,6 +457,9 @@ const DEFAULT_SETTINGS = {
     datacatReextractOnUpdate: false,
     datacatFlareSolverrUrl: '',
     ctCookie: null,
+    charavaultAppPassword: null,
+    charavaultGatewayUrl: null,
+    charavaultGatewayKey: null,
     civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
@@ -983,6 +986,11 @@ function setupSettingsModal() {
     const ctCookieInput = document.getElementById('settingsCtCookie');
     const ctPluginBanner = document.getElementById('ctPluginBanner');
     const ctSettingsFields = document.getElementById('ctSettingsFields');
+    const charavaultAppPasswordInput = document.getElementById('settingsCharavaultAppPassword');
+    const toggleCharavaultAppPasswordVisibility = document.getElementById('toggleCharavaultAppPasswordVisibility');
+    const charavaultGatewayUrlInput = document.getElementById('settingsCharavaultGatewayUrl');
+    const charavaultGatewayKeyInput = document.getElementById('settingsCharavaultGatewayKey');
+    const toggleCharavaultGatewayKeyVisibility = document.getElementById('toggleCharavaultGatewayKeyVisibility');
     const wyvernEmailInput = document.getElementById('settingsWyvernEmail');
     const wyvernPasswordInput = document.getElementById('settingsWyvernPassword');
     const wyvernRememberCredsCheckbox = document.getElementById('settingsWyvernRememberCredentials');
@@ -1467,6 +1475,7 @@ function setupSettingsModal() {
         { id: 'chartavern', inputId: 'ctExcludeTagsInput', pillsId: 'ctExcludeTagsPills' },
         { id: 'wyvern', inputId: 'wyvernExcludeTagsInput', pillsId: 'wyvernExcludeTagsPills' },
         { id: 'datacat', inputId: 'datacatExcludeTagsInput', pillsId: 'datacatExcludeTagsPills' },
+        { id: 'charavault', inputId: 'charavaultExcludeTagsInput', pillsId: 'charavaultExcludeTagsPills' },
     ];
 
     function renderExcludeTagPills(providerId, pillsId) {
@@ -1528,6 +1537,9 @@ function setupSettingsModal() {
         if (pygmalionPasswordInput) pygmalionPasswordInput.value = getSetting('pygmalionPassword') || '';
         if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = getSetting('pygmalionRememberCredentials') || false;
         if (ctCookieInput) ctCookieInput.value = getSetting('ctCookie') || '';
+        if (charavaultAppPasswordInput) charavaultAppPasswordInput.value = getSetting('charavaultAppPassword') || '';
+        if (charavaultGatewayUrlInput) charavaultGatewayUrlInput.value = getSetting('charavaultGatewayUrl') || '';
+        if (charavaultGatewayKeyInput) charavaultGatewayKeyInput.value = getSetting('charavaultGatewayKey') || '';
         if (wyvernEmailInput) wyvernEmailInput.value = getSetting('wyvernEmail') || '';
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
@@ -1907,6 +1919,21 @@ function setupSettingsModal() {
             toggleDatacatTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
         };
     }
+
+    if (toggleCharavaultAppPasswordVisibility && charavaultAppPasswordInput) {
+        toggleCharavaultAppPasswordVisibility.onclick = () => {
+            const isPassword = charavaultAppPasswordInput.type === 'password';
+            charavaultAppPasswordInput.type = isPassword ? 'text' : 'password';
+            toggleCharavaultAppPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+    if (toggleCharavaultGatewayKeyVisibility && charavaultGatewayKeyInput) {
+        toggleCharavaultGatewayKeyVisibility.onclick = () => {
+            const isPassword = charavaultGatewayKeyInput.type === 'password';
+            charavaultGatewayKeyInput.type = isPassword ? 'text' : 'password';
+            toggleCharavaultGatewayKeyVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
     
     // Slider value display
     const formatMinScore = (val) => parseInt(val) >= 120 ? 'Exact' : val;
@@ -2004,6 +2031,9 @@ function setupSettingsModal() {
             pygmalionPassword: pygmalionPasswordInput ? (pygmalionPasswordInput.value || null) : null,
             pygmalionRememberCredentials: pygmalionRememberCredsCheckbox ? pygmalionRememberCredsCheckbox.checked : false,
             ctCookie: ctCookieInput ? (ctCookieInput.value?.trim() || null) : null,
+            charavaultAppPassword: charavaultAppPasswordInput ? (charavaultAppPasswordInput.value?.trim() || null) : null,
+            charavaultGatewayUrl: charavaultGatewayUrlInput ? (charavaultGatewayUrlInput.value?.trim() || null) : null,
+            charavaultGatewayKey: charavaultGatewayKeyInput ? (charavaultGatewayKeyInput.value?.trim() || null) : null,
             wyvernEmail: wyvernEmailInput ? (wyvernEmailInput.value || null) : null,
             wyvernPassword: wyvernPasswordInput ? (wyvernPasswordInput.value || null) : null,
             wyvernRememberCredentials: wyvernRememberCredsCheckbox ? wyvernRememberCredsCheckbox.checked : false,
@@ -2168,6 +2198,9 @@ function setupSettingsModal() {
         if (pygmalionPasswordInput) pygmalionPasswordInput.value = '';
         if (pygmalionRememberCredsCheckbox) pygmalionRememberCredsCheckbox.checked = false;
         if (ctCookieInput) ctCookieInput.value = '';
+        if (charavaultAppPasswordInput) charavaultAppPasswordInput.value = '';
+        if (charavaultGatewayUrlInput) charavaultGatewayUrlInput.value = '';
+        if (charavaultGatewayKeyInput) charavaultGatewayKeyInput.value = '';
         if (wyvernEmailInput) wyvernEmailInput.value = '';
         if (wyvernPasswordInput) wyvernPasswordInput.value = '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = false;
@@ -2256,6 +2289,9 @@ function setupSettingsModal() {
             wyvernUid: preserveWyv ? getSetting('wyvernUid') : null,
             datacatToken: getSetting('datacatToken') || null,
             ctCookie: getSetting('ctCookie') || null,
+            charavaultAppPassword: getSetting('charavaultAppPassword') || null,
+            charavaultGatewayUrl: getSetting('charavaultGatewayUrl') || null,
+            charavaultGatewayKey: getSetting('charavaultGatewayKey') || null,
         });
         
         const searchName = document.getElementById('searchName');

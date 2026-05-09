@@ -2138,6 +2138,62 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </details>
 
+                        <!-- CharaVault provider settings -->
+                        <details class="settings-provider-section" id="settingsCharavaultSection">
+                            <summary>
+                                <i class="fa-solid fa-vault provider-icon"></i> CharaVault
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultGatewayUrl">Gateway URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsCharavaultGatewayUrl" placeholder="Leave empty for direct charavault.net access">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultGatewayKey">Gateway Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsCharavaultGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleCharavaultGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Only fill these if you proxy CharaVault through a self-hosted gateway. Leave both empty for direct access.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultAppPassword">App Password:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsCharavaultAppPassword" placeholder="cv_..." autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleCharavaultAppPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. CharaVault app password (cv_...) for higher rate limits and downloads. Generate one at <a href="https://charavault.net/account/app-passwords" target="_blank" rel="noopener">charavault.net</a>.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="charavaultExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="charavaultExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from CharaVault browse results.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
                         <!-- Pygmalion provider settings -->
                         <details class="settings-provider-section" id="settingsPygmalionSection">
                             <summary>
