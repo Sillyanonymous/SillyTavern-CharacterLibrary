@@ -606,34 +606,57 @@ function buildCvCard(char) {
     const name = escapeHtml(char.name || 'Unknown');
     const creator = escapeHtml(char.creator || '');
     const tokens = char.token_count ? formatNumber(char.token_count) : '';
-    const rating = char.avg_rating ? char.avg_rating.toFixed(1) : '';
-    const hasLore = char.has_lorebook;
+    const rating = (typeof char.avg_rating === 'number' && char.avg_rating > 0) ? char.avg_rating.toFixed(1) : '';
+    const ratingCount = char.rating_count || 0;
+    const downloads = char.download_count ? formatNumber(char.download_count) : '';
+    const hasLore = !!char.has_lorebook;
+    const isNsfw = !!char.nsfw;
+    const tagline = char.description_preview ? char.description_preview.slice(0, 200) : '';
+    const taglineTooltip = tagline ? escapeHtml(tagline) : '';
+
+    // Up to 3 tags, mirrors the chub layout.
+    const tags = Array.isArray(char.tags) ? char.tags.slice(0, 3) : [];
+
+    // Indexed_at is the closest analogue to chub's createdAt - it's when CV's
+    // crawler picked the card up, which is the only date the API exposes.
+    const indexedDate = char.indexed_at ? new Date(char.indexed_at).toLocaleDateString() : '';
+    const dateInfo = indexedDate
+        ? `<span class="browse-card-date" title="Indexed"><i class="fa-solid fa-clock"></i> ${indexedDate}</span>`
+        : '';
 
     const badges = [];
-    if (inLib) badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
-    else if (possible) badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
-    if (hasLore) badges.push('<span class="browse-feature-badge cv-badge-lorebook" title="Has Lorebook"><i class="fa-solid fa-book"></i></span>');
+    if (inLib) {
+        badges.push('<span class="browse-feature-badge in-library" title="In Your Library"><i class="fa-solid fa-check"></i></span>');
+    } else if (possible) {
+        badges.push('<span class="browse-feature-badge possible-library" title="Possible Match in Library"><i class="fa-solid fa-check"></i></span>');
+    }
+    if (hasLore) {
+        badges.push('<span class="browse-feature-badge" title="Has Lorebook"><i class="fa-solid fa-book"></i></span>');
+    }
 
     const card = document.createElement('div');
     card.className = `browse-card${inLib ? ' in-library' : ''}${possible ? ' possible-library' : ''}`;
     card.dataset.fullPath = char.fullPath;
     card.dataset.charIdx = String(cvCharacters.indexOf(char));
+    if (taglineTooltip) card.title = taglineTooltip;
     card.innerHTML = `
         <div class="browse-card-image">
-            <img data-src="${escapeHtml(thumbUrl)}" src="${IMG_PLACEHOLDER}" alt="${name}" loading="lazy">
+            <img data-src="${escapeHtml(thumbUrl)}" src="${IMG_PLACEHOLDER}" alt="${name}" loading="lazy" decoding="async" fetchpriority="low">
+            ${isNsfw ? '<span class="browse-nsfw-badge">NSFW</span>' : ''}
             ${badges.length ? `<div class="browse-feature-badges">${badges.join('')}</div>` : ''}
         </div>
-        <div class="browse-card-info">
+        <div class="browse-card-body">
             <div class="browse-card-name">${name}</div>
-            <div class="browse-card-creator">
-                <a class="browse-card-creator-link" href="#" data-author="${creator}" data-creator-name="${creator}" title="Filter by ${creator}">
-                    ${creator}
-                </a>
+            ${creator ? `<span class="browse-card-creator-link" data-author="${creator}" data-creator-name="${creator}" title="Click to see all characters by ${creator}">${creator}</span>` : ''}
+            <div class="browse-card-tags">
+                ${tags.map(t => `<span class="browse-card-tag" title="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}
             </div>
-            <div class="browse-card-meta">
-                ${tokens ? `<span title="Tokens"><i class="fa-solid fa-message"></i> ${tokens}</span>` : ''}
-                ${rating ? `<span title="Rating"><i class="fa-solid fa-star"></i> ${rating}</span>` : ''}
-            </div>
+        </div>
+        <div class="browse-card-footer">
+            ${rating ? `<span class="browse-card-stat" title="${ratingCount} rating${ratingCount !== 1 ? 's' : ''}"><i class="fa-solid fa-star"></i> ${rating}</span>` : ''}
+            ${tokens ? `<span class="browse-card-stat" title="Tokens"><i class="fa-solid fa-message"></i> ${tokens}</span>` : ''}
+            ${downloads ? `<span class="browse-card-stat" title="Downloads"><i class="fa-solid fa-download"></i> ${downloads}</span>` : ''}
+            ${dateInfo}
         </div>
     `;
     return card;
