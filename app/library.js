@@ -460,6 +460,16 @@ const DEFAULT_SETTINGS = {
     charavaultAppPassword: null,
     charavaultGatewayUrl: null,
     charavaultGatewayKey: null,
+    chubGatewayBaseUrl: null,
+    chubGatewayApiUrl: null,
+    chubGatewayGatewayUrl: null,
+    chubGatewayAvatarUrl: null,
+    chubGatewayKey: null,
+    chartavernGatewayBaseUrl: null,
+    chartavernGatewayApiUrl: null,
+    chartavernGatewaySiteUrl: null,
+    chartavernGatewayCdnUrl: null,
+    chartavernGatewayKey: null,
     civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
@@ -991,6 +1001,18 @@ function setupSettingsModal() {
     const charavaultGatewayUrlInput = document.getElementById('settingsCharavaultGatewayUrl');
     const charavaultGatewayKeyInput = document.getElementById('settingsCharavaultGatewayKey');
     const toggleCharavaultGatewayKeyVisibility = document.getElementById('toggleCharavaultGatewayKeyVisibility');
+    const chubGatewayBaseUrlInput = document.getElementById('settingsChubGatewayBaseUrl');
+    const chubGatewayApiUrlInput = document.getElementById('settingsChubGatewayApiUrl');
+    const chubGatewayGatewayUrlInput = document.getElementById('settingsChubGatewayGatewayUrl');
+    const chubGatewayAvatarUrlInput = document.getElementById('settingsChubGatewayAvatarUrl');
+    const chubGatewayKeyInput = document.getElementById('settingsChubGatewayKey');
+    const toggleChubGatewayKeyVisibility = document.getElementById('toggleChubGatewayKeyVisibility');
+    const chartavernGatewayBaseUrlInput = document.getElementById('settingsChartavernGatewayBaseUrl');
+    const chartavernGatewayApiUrlInput = document.getElementById('settingsChartavernGatewayApiUrl');
+    const chartavernGatewaySiteUrlInput = document.getElementById('settingsChartavernGatewaySiteUrl');
+    const chartavernGatewayCdnUrlInput = document.getElementById('settingsChartavernGatewayCdnUrl');
+    const chartavernGatewayKeyInput = document.getElementById('settingsChartavernGatewayKey');
+    const toggleChartavernGatewayKeyVisibility = document.getElementById('toggleChartavernGatewayKeyVisibility');
     const wyvernEmailInput = document.getElementById('settingsWyvernEmail');
     const wyvernPasswordInput = document.getElementById('settingsWyvernPassword');
     const wyvernRememberCredsCheckbox = document.getElementById('settingsWyvernRememberCredentials');
@@ -1540,6 +1562,16 @@ function setupSettingsModal() {
         if (charavaultAppPasswordInput) charavaultAppPasswordInput.value = getSetting('charavaultAppPassword') || '';
         if (charavaultGatewayUrlInput) charavaultGatewayUrlInput.value = getSetting('charavaultGatewayUrl') || '';
         if (charavaultGatewayKeyInput) charavaultGatewayKeyInput.value = getSetting('charavaultGatewayKey') || '';
+        if (chubGatewayBaseUrlInput) chubGatewayBaseUrlInput.value = getSetting('chubGatewayBaseUrl') || '';
+        if (chubGatewayApiUrlInput) chubGatewayApiUrlInput.value = getSetting('chubGatewayApiUrl') || '';
+        if (chubGatewayGatewayUrlInput) chubGatewayGatewayUrlInput.value = getSetting('chubGatewayGatewayUrl') || '';
+        if (chubGatewayAvatarUrlInput) chubGatewayAvatarUrlInput.value = getSetting('chubGatewayAvatarUrl') || '';
+        if (chubGatewayKeyInput) chubGatewayKeyInput.value = getSetting('chubGatewayKey') || '';
+        if (chartavernGatewayBaseUrlInput) chartavernGatewayBaseUrlInput.value = getSetting('chartavernGatewayBaseUrl') || '';
+        if (chartavernGatewayApiUrlInput) chartavernGatewayApiUrlInput.value = getSetting('chartavernGatewayApiUrl') || '';
+        if (chartavernGatewaySiteUrlInput) chartavernGatewaySiteUrlInput.value = getSetting('chartavernGatewaySiteUrl') || '';
+        if (chartavernGatewayCdnUrlInput) chartavernGatewayCdnUrlInput.value = getSetting('chartavernGatewayCdnUrl') || '';
+        if (chartavernGatewayKeyInput) chartavernGatewayKeyInput.value = getSetting('chartavernGatewayKey') || '';
         if (wyvernEmailInput) wyvernEmailInput.value = getSetting('wyvernEmail') || '';
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
@@ -1934,6 +1966,20 @@ function setupSettingsModal() {
             toggleCharavaultGatewayKeyVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
         };
     }
+    if (toggleChubGatewayKeyVisibility && chubGatewayKeyInput) {
+        toggleChubGatewayKeyVisibility.onclick = () => {
+            const isPassword = chubGatewayKeyInput.type === 'password';
+            chubGatewayKeyInput.type = isPassword ? 'text' : 'password';
+            toggleChubGatewayKeyVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+    if (toggleChartavernGatewayKeyVisibility && chartavernGatewayKeyInput) {
+        toggleChartavernGatewayKeyVisibility.onclick = () => {
+            const isPassword = chartavernGatewayKeyInput.type === 'password';
+            chartavernGatewayKeyInput.type = isPassword ? 'text' : 'password';
+            toggleChartavernGatewayKeyVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
     
     // Slider value display
     const formatMinScore = (val) => parseInt(val) >= 120 ? 'Exact' : val;
@@ -2034,6 +2080,16 @@ function setupSettingsModal() {
             charavaultAppPassword: charavaultAppPasswordInput ? (charavaultAppPasswordInput.value?.trim() || null) : null,
             charavaultGatewayUrl: charavaultGatewayUrlInput ? (charavaultGatewayUrlInput.value?.trim() || null) : null,
             charavaultGatewayKey: charavaultGatewayKeyInput ? (charavaultGatewayKeyInput.value?.trim() || null) : null,
+            chubGatewayBaseUrl: chubGatewayBaseUrlInput ? (chubGatewayBaseUrlInput.value?.trim() || null) : null,
+            chubGatewayApiUrl: chubGatewayApiUrlInput ? (chubGatewayApiUrlInput.value?.trim() || null) : null,
+            chubGatewayGatewayUrl: chubGatewayGatewayUrlInput ? (chubGatewayGatewayUrlInput.value?.trim() || null) : null,
+            chubGatewayAvatarUrl: chubGatewayAvatarUrlInput ? (chubGatewayAvatarUrlInput.value?.trim() || null) : null,
+            chubGatewayKey: chubGatewayKeyInput ? (chubGatewayKeyInput.value?.trim() || null) : null,
+            chartavernGatewayBaseUrl: chartavernGatewayBaseUrlInput ? (chartavernGatewayBaseUrlInput.value?.trim() || null) : null,
+            chartavernGatewayApiUrl: chartavernGatewayApiUrlInput ? (chartavernGatewayApiUrlInput.value?.trim() || null) : null,
+            chartavernGatewaySiteUrl: chartavernGatewaySiteUrlInput ? (chartavernGatewaySiteUrlInput.value?.trim() || null) : null,
+            chartavernGatewayCdnUrl: chartavernGatewayCdnUrlInput ? (chartavernGatewayCdnUrlInput.value?.trim() || null) : null,
+            chartavernGatewayKey: chartavernGatewayKeyInput ? (chartavernGatewayKeyInput.value?.trim() || null) : null,
             wyvernEmail: wyvernEmailInput ? (wyvernEmailInput.value || null) : null,
             wyvernPassword: wyvernPasswordInput ? (wyvernPasswordInput.value || null) : null,
             wyvernRememberCredentials: wyvernRememberCredsCheckbox ? wyvernRememberCredsCheckbox.checked : false,
@@ -2201,6 +2257,16 @@ function setupSettingsModal() {
         if (charavaultAppPasswordInput) charavaultAppPasswordInput.value = '';
         if (charavaultGatewayUrlInput) charavaultGatewayUrlInput.value = '';
         if (charavaultGatewayKeyInput) charavaultGatewayKeyInput.value = '';
+        if (chubGatewayBaseUrlInput) chubGatewayBaseUrlInput.value = '';
+        if (chubGatewayApiUrlInput) chubGatewayApiUrlInput.value = '';
+        if (chubGatewayGatewayUrlInput) chubGatewayGatewayUrlInput.value = '';
+        if (chubGatewayAvatarUrlInput) chubGatewayAvatarUrlInput.value = '';
+        if (chubGatewayKeyInput) chubGatewayKeyInput.value = '';
+        if (chartavernGatewayBaseUrlInput) chartavernGatewayBaseUrlInput.value = '';
+        if (chartavernGatewayApiUrlInput) chartavernGatewayApiUrlInput.value = '';
+        if (chartavernGatewaySiteUrlInput) chartavernGatewaySiteUrlInput.value = '';
+        if (chartavernGatewayCdnUrlInput) chartavernGatewayCdnUrlInput.value = '';
+        if (chartavernGatewayKeyInput) chartavernGatewayKeyInput.value = '';
         if (wyvernEmailInput) wyvernEmailInput.value = '';
         if (wyvernPasswordInput) wyvernPasswordInput.value = '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = false;
@@ -2292,6 +2358,16 @@ function setupSettingsModal() {
             charavaultAppPassword: getSetting('charavaultAppPassword') || null,
             charavaultGatewayUrl: getSetting('charavaultGatewayUrl') || null,
             charavaultGatewayKey: getSetting('charavaultGatewayKey') || null,
+            chubGatewayBaseUrl: getSetting('chubGatewayBaseUrl') || null,
+            chubGatewayApiUrl: getSetting('chubGatewayApiUrl') || null,
+            chubGatewayGatewayUrl: getSetting('chubGatewayGatewayUrl') || null,
+            chubGatewayAvatarUrl: getSetting('chubGatewayAvatarUrl') || null,
+            chubGatewayKey: getSetting('chubGatewayKey') || null,
+            chartavernGatewayBaseUrl: getSetting('chartavernGatewayBaseUrl') || null,
+            chartavernGatewayApiUrl: getSetting('chartavernGatewayApiUrl') || null,
+            chartavernGatewaySiteUrl: getSetting('chartavernGatewaySiteUrl') || null,
+            chartavernGatewayCdnUrl: getSetting('chartavernGatewayCdnUrl') || null,
+            chartavernGatewayKey: getSetting('chartavernGatewayKey') || null,
         });
         
         const searchName = document.getElementById('searchName');

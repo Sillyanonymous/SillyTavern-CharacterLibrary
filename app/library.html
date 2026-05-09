@@ -2099,6 +2099,51 @@ https://jannyai.com/characters/uuid_slug
                             </summary>
                             <div class="settings-provider-body">
                                 <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsChubGatewayBaseUrl">Base URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsChubGatewayBaseUrl" placeholder="https://your-proxy.example.com">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsChubGatewayKey">Bearer Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsChubGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleChubGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Leave Base URL empty for direct chub.ai access. When set, the proxy is expected to expose <code>/v1/chub</code>, <code>/v1/chub-gw</code>, and <code>/v1/chub-av/avatars/</code>.</span>
+                                    </div>
+                                    <details class="settings-advanced">
+                                        <summary>Advanced: per-host overrides</summary>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayApiUrl">API:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayApiUrl" placeholder="overrides Base URL + /v1/chub">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayGatewayUrl">Gateway:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayGatewayUrl" placeholder="overrides Base URL + /v1/chub-gw">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayAvatarUrl">Avatar Base:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayAvatarUrl" placeholder="overrides Base URL + /v1/chub-av/avatars/">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <span class="settings-hint">Each field, when set, replaces the corresponding host directly. Avatar base must end with a slash.</span>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
                                     <div class="settings-row">
                                         <label for="settingsChubToken">URQL Token:</label>
@@ -2283,6 +2328,51 @@ https://jannyai.com/characters/uuid_slug
                                     </div>
                                 </div>
                                 <div class="settings-group" id="ctSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsChartavernGatewayBaseUrl">Base URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsChartavernGatewayBaseUrl" placeholder="https://your-proxy.example.com">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsChartavernGatewayKey">Bearer Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsChartavernGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleChartavernGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Leave Base URL empty for direct character-tavern.com access. When set, the proxy is expected to expose <code>/v1/ct</code>, <code>/v1/ct-site</code>, and <code>/v1/ct-cdn</code>.</span>
+                                    </div>
+                                    <details class="settings-advanced">
+                                        <summary>Advanced: per-host overrides</summary>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewayApiUrl">API:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewayApiUrl" placeholder="overrides Base URL + /v1/ct">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewaySiteUrl">Site:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewaySiteUrl" placeholder="overrides Base URL + /v1/ct-site">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewayCdnUrl">Cards CDN:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewayCdnUrl" placeholder="overrides Base URL + /v1/ct-cdn">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <span class="settings-hint">Each field, when set, replaces the corresponding host directly.</span>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-cookie-bite"></i> Session Cookies</div>
                                     <div class="settings-row">
                                         <label for="settingsCtCookie">Cookie String:</label>
