@@ -8,7 +8,6 @@ import CoreAPI from '../../core-api.js';
 import { assignGalleryId, importFromPng } from '../provider-utils.js';
 import chartavernBrowseView from './chartavern-browse.js';
 import {
-    CT_SITE_BASE,
     fetchWithProxy,
     searchCards,
     fetchCharacterDetail,
@@ -23,6 +22,8 @@ import {
     isCtSessionActive,
     ctSetCookie,
     ctValidateSession,
+    initChartavernApi,
+    getCtSiteBase,
 } from './chartavern-api.js';
 
 let api = null;
@@ -117,7 +118,7 @@ class ChartavernProvider extends ProviderBase {
     get id() { return 'chartavern'; }
     get name() { return 'CharacterTavern'; }
     get icon() { return 'fa-solid fa-beer-mug-empty'; }
-    get iconUrl() { return `${CT_SITE_BASE}/favicon.ico`; }
+    get iconUrl() { return `${getCtSiteBase()}/favicon.ico`; }
     get browseView() { return chartavernBrowseView; }
 
     get linkStatFields() {
@@ -132,6 +133,7 @@ class ChartavernProvider extends ProviderBase {
 
     async init(coreAPI) {
         super.init(coreAPI);
+        initChartavernApi({ getSetting: coreAPI.getSetting });
         api = coreAPI;
     }
 

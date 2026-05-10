@@ -2099,6 +2099,51 @@ https://jannyai.com/characters/uuid_slug
                             </summary>
                             <div class="settings-provider-body">
                                 <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsChubGatewayBaseUrl">Base URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsChubGatewayBaseUrl" placeholder="https://your-proxy.example.com">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsChubGatewayKey">Bearer Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsChubGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleChubGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Leave Base URL empty for direct chub.ai access. When set, the proxy is expected to expose <code>/v1/chub</code>, <code>/v1/chub-gw</code>, and <code>/v1/chub-av/avatars/</code>. A reference implementation is available at <a href="https://github.com/AdamsGH/charlib-proxy" target="_blank" rel="noopener">AdamsGH/charlib-proxy</a>.</span>
+                                    </div>
+                                    <details class="settings-advanced">
+                                        <summary>Advanced: per-host overrides</summary>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayApiUrl">API:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayApiUrl" placeholder="overrides Base URL + /v1/chub">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayGatewayUrl">Gateway:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayGatewayUrl" placeholder="overrides Base URL + /v1/chub-gw">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChubGatewayAvatarUrl">Avatar Base:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChubGatewayAvatarUrl" placeholder="overrides Base URL + /v1/chub-av/avatars/">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <span class="settings-hint">Each field, when set, replaces the corresponding host directly. Avatar base must end with a slash.</span>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
                                     <div class="settings-row">
                                         <label for="settingsChubToken">URQL Token:</label>
@@ -2133,6 +2178,62 @@ https://jannyai.com/characters/uuid_slug
                                             <input type="text" class="glass-input provider-exclude-tags-input" id="chubExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
                                         </div>
                                         <span class="settings-hint">Tags entered here are always excluded from ChubAI browse results.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- CharaVault provider settings -->
+                        <details class="settings-provider-section" id="settingsCharavaultSection">
+                            <summary>
+                                <i class="fa-solid fa-vault provider-icon"></i> CharaVault
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultGatewayUrl">Gateway URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsCharavaultGatewayUrl" placeholder="Leave empty for direct charavault.net access">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultGatewayKey">Gateway Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsCharavaultGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleCharavaultGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Only fill these if you proxy CharaVault through a self-hosted gateway. Leave both empty for direct access. A reference implementation is available at <a href="https://github.com/AdamsGH/charlib-proxy" target="_blank" rel="noopener">AdamsGH/charlib-proxy</a>.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-key"></i> Authentication</div>
+                                    <div class="settings-row">
+                                        <label for="settingsCharavaultAppPassword">App Password:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsCharavaultAppPassword" placeholder="cv_..." autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleCharavaultAppPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. CharaVault app password (cv_...) for higher rate limits and downloads. Generate one at <a href="https://charavault.net/account/app-passwords" target="_blank" rel="noopener">charavault.net</a>.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="charavaultExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="charavaultExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from CharaVault browse results.</span>
                                     </div>
                                 </div>
                             </div>
@@ -2227,6 +2328,51 @@ https://jannyai.com/characters/uuid_slug
                                     </div>
                                 </div>
                                 <div class="settings-group" id="ctSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-network-wired"></i> Gateway (optional)</div>
+                                    <div class="settings-row">
+                                        <label for="settingsChartavernGatewayBaseUrl">Base URL:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsChartavernGatewayBaseUrl" placeholder="https://your-proxy.example.com">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsChartavernGatewayKey">Bearer Key:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsChartavernGatewayKey" placeholder="Bearer token" autocomplete="new-password" data-sensitive="true">
+                                            <button id="toggleChartavernGatewayKeyVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. Leave Base URL empty for direct character-tavern.com access. When set, the proxy is expected to expose <code>/v1/ct</code>, <code>/v1/ct-site</code>, and <code>/v1/ct-cdn</code>. A reference implementation is available at <a href="https://github.com/AdamsGH/charlib-proxy" target="_blank" rel="noopener">AdamsGH/charlib-proxy</a>.</span>
+                                    </div>
+                                    <details class="settings-advanced">
+                                        <summary>Advanced: per-host overrides</summary>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewayApiUrl">API:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewayApiUrl" placeholder="overrides Base URL + /v1/ct">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewaySiteUrl">Site:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewaySiteUrl" placeholder="overrides Base URL + /v1/ct-site">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <label for="settingsChartavernGatewayCdnUrl">Cards CDN:</label>
+                                            <div class="settings-input-group">
+                                                <input type="text" id="settingsChartavernGatewayCdnUrl" placeholder="overrides Base URL + /v1/ct-cdn">
+                                            </div>
+                                        </div>
+                                        <div class="settings-row">
+                                            <span class="settings-hint">Each field, when set, replaces the corresponding host directly.</span>
+                                        </div>
+                                    </details>
+                                </div>
+                                <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-cookie-bite"></i> Session Cookies</div>
                                     <div class="settings-row">
                                         <label for="settingsCtCookie">Cookie String:</label>

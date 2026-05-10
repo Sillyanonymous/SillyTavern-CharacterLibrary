@@ -328,6 +328,7 @@ async function initModuleSystem() {
     // Providers - must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');
+    loadModuleCSS('./providers/charavault/charavault-browse.css');
     loadModuleCSS('./providers/chub/chub-browse.css');
     loadModuleCSS('./providers/chartavern/chartavern-browse.css');
     loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
@@ -341,6 +342,7 @@ async function initModuleSystem() {
             { name: 'pygmalion', load: () => import('./providers/pygmalion/pygmalion-provider.js') },
             { name: 'wyvern', load: () => import('./providers/wyvern/wyvern-provider.js') },
             { name: 'datacat', load: () => import('./providers/datacat/datacat-provider.js') },
+            { name: 'charavault', load: () => import('./providers/charavault/charavault-provider.js') },
         ];
         const results = await Promise.allSettled(providerImports.map(p => p.load()));
         for (let i = 0; i < results.length; i++) {

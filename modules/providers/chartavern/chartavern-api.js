@@ -10,9 +10,59 @@
 import { CL_HELPER_PLUGIN_BASE as CL_HELPER_CT_BASE } from '../provider-utils.js';
 export { CL_HELPER_CT_BASE };
 
-export const CT_API_BASE = 'https://character-tavern.com/api';
-export const CT_SITE_BASE = 'https://character-tavern.com';
-export const CT_CARDS_CDN = 'https://cards.character-tavern.com';
+let _getSetting = null;
+
+/**
+ * Must be called once before any other export is used.
+ * @param {{ getSetting: Function }} deps
+ */
+export function initChartavernApi(deps) {
+    _getSetting = deps.getSetting;
+}
+
+// Default upstream hosts. CharacterTavern has three: the REST API, the
+// public site (favicons, og:images), and the cards CDN.
+const CT_DEFAULT_API   = 'https://character-tavern.com/api';
+const CT_DEFAULT_SITE  = 'https://character-tavern.com';
+const CT_DEFAULT_CDN   = 'https://cards.character-tavern.com';
+
+// When proxying through a self-hosted gateway, the convention below
+// mirrors the gateway used by this extension upstream. A reverse proxy
+// that exposes these paths gets the simple single-field setup; per-host
+// overrides remain available for non-standard topologies.
+const CT_GATEWAY_PATHS = {
+    api:  '/v1/ct',
+    site: '/v1/ct-site',
+    cdn:  '/v1/ct-cdn',
+};
+
+function _trimSlash(s) {
+    return s.replace(/\/+$/, '');
+}
+
+function _resolveCtBase(overrideKey, defaultBase, gatewayPath) {
+    const override = _trimSlash((_getSetting?.(overrideKey) || '').trim());
+    if (override) return override;
+    const base = _trimSlash((_getSetting?.('chartavernGatewayBaseUrl') || '').trim());
+    if (base) return base + gatewayPath;
+    return defaultBase;
+}
+
+export function getCtApiBase() {
+    return _resolveCtBase('chartavernGatewayApiUrl', CT_DEFAULT_API, CT_GATEWAY_PATHS.api);
+}
+
+export function getCtSiteBase() {
+    return _resolveCtBase('chartavernGatewaySiteUrl', CT_DEFAULT_SITE, CT_GATEWAY_PATHS.site);
+}
+
+export function getCtCardsCdn() {
+    return _resolveCtBase('chartavernGatewayCdnUrl', CT_DEFAULT_CDN, CT_GATEWAY_PATHS.cdn);
+}
+
+export function getCtGatewayKey() {
+    return _getSetting?.('chartavernGatewayKey') || '';
+}
 
 // Sort options accepted by /api/search/cards
 export const CT_SORT_OPTIONS = {
@@ -29,6 +79,20 @@ export const CT_SORT_OPTIONS = {
 
 import { fetchWithProxy } from '../provider-utils.js';
 export { fetchWithProxy };
+
+/**
+ * Build outgoing headers for a CharacterTavern request. When the user
+ * configures a gateway URL + key, the key is sent as Authorization so
+ * the gateway can authenticate the call. Direct (default) requests to
+ * character-tavern.com need no auth header.
+ * @returns {Object}
+ */
+export function getCtHeaders() {
+    const headers = { 'Accept': 'application/json' };
+    const gwKey = _getSetting?.('chartavernGatewayKey');
+    if (gwKey) headers['Authorization'] = `Bearer ${gwKey}`;
+    return headers;
+}
 
 // ========================================
 // AUTH - cl-helper cookie session
@@ -142,11 +206,11 @@ export function isCtSessionActive() {
 async function ctFetch(url, apiRequest) {
     if (ctSessionActive && apiRequest) {
         // Route through cl-helper proxy: strip the CT origin, prepend proxy path
-        const path = url.replace(CT_SITE_BASE, '');
+        const path = url.replace(getCtSiteBase(), '');
         const resp = await apiRequest(`${CL_HELPER_CT_BASE}/ct-proxy${path}`);
         return resp;
     }
-    return fetchWithProxy(url);
+    return fetchWithProxy(url, { headers: getCtHeaders() });
 }
 
 // ========================================
@@ -193,7 +257,7 @@ export async function searchCards(opts = {}, apiRequest) {
         params.set('exclude_tags', existing.join(','));
     }
 
-    const url = `${CT_API_BASE}/search/cards?${params}`;
+    const url = `${getCtApiBase()}/search/cards?${params}`;
     const resp = await ctFetch(url, apiRequest);
     if (!resp.ok) {
         throw new Error(`CT search returned HTTP ${resp.status}`);
@@ -209,7 +273,7 @@ export async function searchCards(opts = {}, apiRequest) {
  * @returns {Promise<Object>} { card: {...}, ownerCTId: ... }
  */
 export async function fetchCharacterDetail(author, slug, apiRequest) {
-    const url = `${CT_API_BASE}/character/${encodeURIComponent(author)}/${encodeURIComponent(slug)}`;
+    const url = `${getCtApiBase()}/character/${encodeURIComponent(author)}/${encodeURIComponent(slug)}`;
     const resp = await ctFetch(url, apiRequest);
     if (!resp.ok) {
         throw new Error(`CT detail returned HTTP ${resp.status}`);
@@ -222,8 +286,8 @@ export async function fetchCharacterDetail(author, slug, apiRequest) {
  * @returns {Promise<Array<{tag: string, count: number}>>}
  */
 export async function fetchTopTags() {
-    const url = `${CT_API_BASE}/catalog/top-tags`;
-    const resp = await fetchWithProxy(url);
+    const url = `${getCtApiBase()}/catalog/top-tags`;
+    const resp = await fetchWithProxy(url, { headers: getCtHeaders() });
     if (!resp.ok) throw new Error(`Top tags fetch failed (${resp.status})`);
     return resp.json();
 }
@@ -239,7 +303,7 @@ export async function fetchTopTags() {
  * @returns {string}
  */
 export function getAvatarUrl(path, width = 320) {
-    return `${CT_CARDS_CDN}/cdn-cgi/image/format=auto,width=${width},quality=85/${path}.png`;
+    return `${getCtCardsCdn()}/cdn-cgi/image/format=auto,width=${width},quality=85/${path}.png`;
 }
 
 /**
@@ -248,7 +312,7 @@ export function getAvatarUrl(path, width = 320) {
  * @returns {string}
  */
 export function getCardPngUrl(path) {
-    return `${CT_CARDS_CDN}/${path}.png`;
+    return `${getCtCardsCdn()}/${path}.png`;
 }
 
 /**
@@ -257,7 +321,7 @@ export function getCardPngUrl(path) {
  * @returns {string}
  */
 export function getCharacterPageUrl(path) {
-    return `${CT_SITE_BASE}/character/${path}`;
+    return `${getCtSiteBase()}/character/${path}`;
 }
 
 /**

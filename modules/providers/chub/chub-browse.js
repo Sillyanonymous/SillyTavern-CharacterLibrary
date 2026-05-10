@@ -2,11 +2,11 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy } from '../provider-utils.js';
 import {
-    CHUB_API_BASE,
-    CHUB_GATEWAY_BASE,
-    CHUB_AVATAR_BASE,
+    getChubApiBase,
+    getChubGatewayBase,
+    getChubAvatarBase,
     getChubHeaders,
     extractNodes,
 } from './chub-api.js';
@@ -247,7 +247,7 @@ class ChubBrowseView extends BrowseView {
         if (creator.avatar) return creator.avatar;
         const fp = chubTimelineCharacters.find(c =>
             (c.fullPath || c.full_path || '').toLowerCase().startsWith(creator.id + '/'));
-        return fp ? `${CHUB_AVATAR_BASE}${fp.fullPath || fp.full_path}/avatar.webp` : '';
+        return fp ? `${getChubAvatarBase()}${fp.fullPath || fp.full_path}/avatar.webp` : '';
     }
 
     async followCreator(query) {
@@ -264,7 +264,7 @@ class ChubBrowseView extends BrowseView {
         }
 
         try {
-            const response = await fetch(`${CHUB_API_BASE}/api/follow/${username}`, {
+            const response = await fetchWithProxy(`${getChubApiBase()}/api/follow/${username}`, {
                 method: 'POST',
                 headers: { ...getChubHeaders(true), 'Content-Type': 'application/json' },
             });
@@ -282,7 +282,7 @@ class ChubBrowseView extends BrowseView {
     async unfollowCreator(id) {
         if (!chubToken) return false;
         try {
-            const response = await fetch(`${CHUB_API_BASE}/api/follow/${id}`, {
+            const response = await fetchWithProxy(`${getChubApiBase()}/api/follow/${id}`, {
                 method: 'DELETE',
                 headers: getChubHeaders(true),
             });
@@ -1426,7 +1426,7 @@ async function fetchChubPopularTags() {
                         min_tokens: '50'
                     });
                     
-                    const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                    const response = await fetchWithProxy(`${getChubApiBase()}/search?${params.toString()}`, {
                         method: 'GET',
                         headers
                     });
@@ -1976,7 +1976,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         
         debugLog('[ChubTimeline] Loading timeline, nsfw:', chubNsfwEnabled);
         
-        const response = await fetch(`${CHUB_API_BASE}/api/timeline/v1?${params.toString()}`, {
+        const response = await fetchWithProxy(`${getChubApiBase()}/api/timeline/v1?${params.toString()}`, {
             method: 'GET',
             headers
         });
@@ -2180,7 +2180,7 @@ async function supplementTimelineWithAuthorFetches(page = 1) {
                     params.set('nsfl', chubNsfwEnabled.toString());
                     params.set('include_forks', 'true');
                     
-                    const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                    const response = await fetchWithProxy(`${getChubApiBase()}/search?${params.toString()}`, {
                         headers: getChubHeaders(true)
                     });
                     
@@ -2526,7 +2526,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
     
     try {
         // First get our own username from account
-        const accountResp = await fetch(`${CHUB_API_BASE}/api/account`, {
+        const accountResp = await fetchWithProxy(`${getChubApiBase()}/api/account`, {
             headers: getChubHeaders(true)
         });
         
@@ -2547,7 +2547,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         }
         
         // Now get who we follow
-        const followsResp = await fetch(`${CHUB_API_BASE}/api/follows/${myUsername}?page=1`, {
+        const followsResp = await fetchWithProxy(`${getChubApiBase()}/api/follows/${myUsername}?page=1`, {
             headers: getChubHeaders(true)
         });
         
@@ -2575,7 +2575,7 @@ async function fetchMyFollowsList(forceRefresh = false) {
         const totalCount = followsData.count || 0;
         let page = 2;
         while (followedUsernames.size < totalCount && page <= 20) {
-            const moreResp = await fetch(`${CHUB_API_BASE}/api/follows/${myUsername}?page=${page}`, {
+            const moreResp = await fetchWithProxy(`${getChubApiBase()}/api/follows/${myUsername}?page=${page}`, {
                 headers: getChubHeaders(true)
             });
             
@@ -2665,7 +2665,7 @@ async function toggleFollowAuthor() {
         const headers = getChubHeaders(true);
         headers['Content-Type'] = 'application/json';
         
-        const response = await fetch(`${CHUB_API_BASE}/api/follow/${chubAuthorFilter}`, {
+        const response = await fetchWithProxy(`${getChubApiBase()}/api/follow/${chubAuthorFilter}`, {
             method: method,
             headers
         });
@@ -2879,7 +2879,7 @@ async function loadChubCharacters(forceRefresh = false) {
         
         const headers = getChubHeaders(true);
         
-        const response = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+        const response = await fetchWithProxy(`${getChubApiBase()}/search?${params.toString()}`, {
             method: 'GET',
             headers
         });
@@ -2948,7 +2948,7 @@ async function loadChubCharacters(forceRefresh = false) {
                 chubCurrentPage++;
                 params.set('page', chubCurrentPage.toString());
                 
-                const moreRes = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, {
+                const moreRes = await fetchWithProxy(`${getChubApiBase()}/search?${params.toString()}`, {
                     method: 'GET',
                     headers
                 });
@@ -3022,7 +3022,7 @@ async function fetchChubUserFavoriteIds() {
     }
     
     try {
-        const url = `${CHUB_GATEWAY_BASE}/api/favorites?first=500`;
+        const url = `${getChubGatewayBase()}/api/favorites?first=500`;
         const response = await fetch(url, {
             method: 'GET',
             headers: {
@@ -3066,7 +3066,7 @@ async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
             params.set('page', chubCurrentPage.toString());
         }
         
-        const url = `${CHUB_GATEWAY_BASE}/api/favorites?${params.toString()}`;
+        const url = `${getChubGatewayBase()}/api/favorites?${params.toString()}`;
         debugLog('[ChubAI] Loading favorites from:', url);
         
         const response = await fetch(url, {
@@ -3275,7 +3275,7 @@ function createChubCard(char, isTimeline = false) {
     // ChubAI's weird naming: starCount is actually downloads, n_favorites is the heart/favorite count
     const downloads = formatNumber(char.starCount || 0);
     const favorites = formatNumber(char.n_favorites || char.nFavorites || 0);
-    const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
+    const avatarUrl = char.avatar_url || (fullPath ? `${getChubAvatarBase()}${fullPath}/avatar.webp` : '/img/ai4.png');
     
     // Check if this character is in local library
     const inLibrary = isCharInLocalLibrary(char);
@@ -3456,7 +3456,7 @@ async function openChubCharPreview(char) {
     const galleryLabel = document.getElementById('chubCharGalleryLabel');
     
     const fullPath = getChubFullPath(char);
-    const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
+    const avatarUrl = char.avatar_url || (fullPath ? `${getChubAvatarBase()}${fullPath}/avatar.webp` : '/img/ai4.png');
     const creatorName = fullPath.split('/')[0] || 'Unknown';
     const inLibrary = isCharInLocalLibrary(char);
     const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
@@ -3724,7 +3724,7 @@ async function openChubCharPreview(char) {
             }
             const charProjectId = char.id || char.project_id;
             const galleryPromise = char.hasGallery && charProjectId
-                ? fetch(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`, {
+                ? fetch(`${getChubGatewayBase()}/api/gallery/project/${charProjectId}?limit=100&count=false`, {
                     headers: galleryHeaders, signal: fetchSignal
                 }).then(r => {
                     if (r.ok) return r.json();
@@ -3833,7 +3833,7 @@ async function updateChubFavoriteButton(char) {
         
         // Try to get user's favorites list and check if this char is in it
         // The gateway endpoint might not support GET for single item, so we check differently
-        const url = `${CHUB_GATEWAY_BASE}/api/favorites?first=500`;
+        const url = `${getChubGatewayBase()}/api/favorites?first=500`;
         debugLog('[ChubAI] Checking favorites list for:', charId);
         
         const response = await fetch(url, {
@@ -3910,7 +3910,7 @@ async function toggleChubCharFavorite() {
     favoriteBtn.classList.add('loading');
     
     try {
-        const url = `${CHUB_GATEWAY_BASE}/api/favorites/${charId}`;
+        const url = `${getChubGatewayBase()}/api/favorites/${charId}`;
         debugLog('[ChubAI] Toggle favorite:', isCurrentlyFavorited ? 'DELETE' : 'POST', url);
         
         const response = await fetch(url, {
@@ -4048,7 +4048,7 @@ async function downloadChubCharacter() {
                 name: characterName,
                 creator: characterCreator,
                 fullPath: fullPath,
-                avatarUrl: chubSelectedChar.avatar_url || `${CHUB_AVATAR_BASE}${fullPath}/avatar.webp`
+                avatarUrl: chubSelectedChar.avatar_url || `${getChubAvatarBase()}${fullPath}/avatar.webp`
             }, duplicateMatches);
             
             if (result.choice === 'skip') {
