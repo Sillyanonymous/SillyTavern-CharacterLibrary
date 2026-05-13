@@ -267,6 +267,93 @@ test('BotBooru avatar viewer opens the full image with preview fallback', async 
     }
 });
 
+test('BotBooru grid render plan appends only newly visible browse cards', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruGridRenderPlan } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=grid-plan-${Date.now()}`);
+    const characters = [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Bravo' },
+        { id: 3, name: 'Charlie' },
+    ];
+
+    assert.deepEqual(
+        getBotbooruGridRenderPlan(characters, 1, true),
+        {
+            mode: 'append',
+            characters: [{ id: 2, name: 'Bravo' }, { id: 3, name: 'Charlie' }],
+        },
+    );
+    assert.deepEqual(
+        getBotbooruGridRenderPlan(characters, 0, true),
+        {
+            mode: 'replace',
+            characters,
+        },
+    );
+});
+
+test('BotBooru preview cleanup clears transient modal content', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalDocument = globalThis.document;
+    const { BrowseView } = await import('../modules/providers/browse-view.js');
+    const { cleanupBotbooruCharModal } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-cleanup-${Date.now()}`);
+    const originalCloseAvatarViewer = BrowseView.closeAvatarViewer;
+    let viewerClosed = false;
+
+    const tracked = [{ dataset: { fullContent: 'hello' } }, { dataset: { fullContent: 'world' } }];
+    const sections = {
+        botbooruCharAltGreetings: { innerHTML: 'greetings' },
+        botbooruCharCreatorNotes: { innerHTML: 'notes' },
+        botbooruCharDescription: { innerHTML: 'description' },
+        botbooruCharPersonality: { innerHTML: 'personality' },
+        botbooruCharScenario: { innerHTML: 'scenario' },
+        botbooruCharExamples: { innerHTML: 'examples' },
+        botbooruCharFirstMsg: { innerHTML: 'first message' },
+    };
+
+    try {
+        BrowseView.closeAvatarViewer = () => { viewerClosed = true; };
+        globalThis.window.currentBrowseAltGreetings = ['one', 'two'];
+        globalThis.document = {
+            getElementById(id) {
+                if (id === 'botbooruCharModal') {
+                    return {
+                        querySelectorAll(selector) {
+                            return selector === '[data-full-content]' ? tracked : [];
+                        },
+                    };
+                }
+                return sections[id] || null;
+            },
+        };
+
+        cleanupBotbooruCharModal();
+
+        assert.equal(viewerClosed, true);
+        assert.equal(globalThis.window.currentBrowseAltGreetings, null);
+        assert.deepEqual(tracked.map(entry => 'fullContent' in entry.dataset), [false, false]);
+        assert.deepEqual(Object.values(sections).map(section => section.innerHTML), ['', '', '', '', '', '', '']);
+    } finally {
+        BrowseView.closeAvatarViewer = originalCloseAvatarViewer;
+        globalThis.document = originalDocument;
+    }
+});
+
+test('BotBooru cards render creator as static text until author search is supported', async () => {
+    globalThis.window = globalThis.window || {};
+    const { renderBotbooruCardMarkup } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=static-creator-${Date.now()}`);
+
+    const html = renderBotbooruCardMarkup({
+        id: 1,
+        name: 'Daphne',
+        creator: 'spaghettiman',
+        tags: [],
+    });
+
+    assert.match(html, /botbooru-card-creator/);
+    assert.doesNotMatch(html, /browse-card-creator-link/);
+});
+
 test('BotBooru personalized modes apply selected sort locally', async () => {
     globalThis.window = globalThis.window || {};
     const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);

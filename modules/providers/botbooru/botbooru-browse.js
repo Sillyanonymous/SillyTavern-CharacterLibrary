@@ -98,11 +98,22 @@ const PREVIEW_SECTIONS = [
     },
 ];
 
+const BOTBOORU_PREVIEW_CLEANUP_IDS = [
+    'botbooruCharAltGreetings',
+    'botbooruCharCreatorNotes',
+    'botbooruCharDescription',
+    'botbooruCharPersonality',
+    'botbooruCharScenario',
+    'botbooruCharExamples',
+    'botbooruCharFirstMsg',
+];
+
 let botbooruCharacters = [];
 let botbooruOffset = 0;
 let botbooruTotal = 0;
 let botbooruHasMore = true;
 let botbooruLoading = false;
+let botbooruGridRenderedCount = 0;
 let botbooruFilterHideOwned = false;
 let botbooruFilterHidePossible = false;
 let botbooruLoadToken = 0;
@@ -311,6 +322,8 @@ function updateLoadMore() {
 function setLoadingGrid(message = 'Loading BotBooru...') {
     const grid = getGrid();
     if (!grid) return;
+    botbooruGridRenderedCount = 0;
+    botbooruBrowseView.disconnectImageObserver();
     grid.innerHTML = `
         <div class="browse-loading-overlay botbooru-state" style="grid-column: 1 / -1;">
             <i class="fa-solid fa-spinner fa-spin"></i>
@@ -324,6 +337,8 @@ function setLoadingGrid(message = 'Loading BotBooru...') {
 function renderEmptyState(message, icon = 'fa-solid fa-magnifying-glass', actionHtml = '') {
     const grid = getGrid();
     if (!grid) return;
+    botbooruGridRenderedCount = 0;
+    botbooruBrowseView.disconnectImageObserver();
     grid.innerHTML = `
         <div class="botbooru-empty-state" style="grid-column: 1 / -1;">
             <i class="${safe(icon)}"></i>
@@ -390,7 +405,7 @@ function renderBotbooruCard(char) {
             </div>
             <div class="browse-card-body">
                 <div class="browse-card-name">${safe(name)}</div>
-                <span class="browse-card-creator-link" data-author="${safe(creator)}">${safe(creator)}</span>
+                <span class="botbooru-card-creator">${safe(creator)}</span>
                 <div class="browse-card-tags">
                     ${tags.map(tag => `<span class="browse-card-tag" title="${safe(tag)}">${safe(tag)}</span>`).join('')}
                 </div>
@@ -404,11 +419,17 @@ function renderBotbooruCard(char) {
     `;
 }
 
-function renderBotbooruGrid() {
+export function renderBotbooruCardMarkup(char) {
+    return renderBotbooruCard(char);
+}
+
+function renderBotbooruGrid(appendOnly = false) {
     const grid = getGrid();
     if (!grid) return;
 
     if (botbooruCharacters.length === 0) {
+        botbooruGridRenderedCount = 0;
+        botbooruBrowseView.disconnectImageObserver();
         const message = botbooruViewMode === 'favorites'
             ? 'No BotBooru favorites found.'
             : botbooruViewMode === 'curated'
@@ -423,15 +444,49 @@ function renderBotbooruGrid() {
     if (botbooruFilterHidePossible) filtered = filtered.filter(c => !isCharPossibleMatch(c));
 
     if (filtered.length === 0) {
+        botbooruGridRenderedCount = 0;
+        botbooruBrowseView.disconnectImageObserver();
         renderEmptyState('All characters hidden by filters.', 'fa-solid fa-filter');
         return;
     }
 
-    grid.innerHTML = filtered.map(renderBotbooruCard).join('');
+    const plan = getBotbooruGridRenderPlan(filtered, botbooruGridRenderedCount, appendOnly);
+    if (plan.mode === 'append') {
+        if (plan.characters.length > 0) {
+            grid.insertAdjacentHTML('beforeend', plan.characters.map(renderBotbooruCard).join(''));
+        }
+    } else {
+        botbooruBrowseView.disconnectImageObserver();
+        grid.innerHTML = filtered.map(renderBotbooruCard).join('');
+    }
+
+    botbooruGridRenderedCount = filtered.length;
     botbooruBrowseView.observeImages(grid);
     botbooruBrowseView.refreshInLibraryBadges();
     updateResultCount();
     updateLoadMore();
+}
+
+export function cleanupBotbooruCharModal() {
+    BrowseView.closeAvatarViewer();
+    window.currentBrowseAltGreetings = null;
+
+    const modal = document.getElementById('botbooruCharModal');
+    if (modal) {
+        modal.querySelectorAll('[data-full-content]').forEach(el => {
+            delete el.dataset.fullContent;
+        });
+    }
+
+    for (const id of BOTBOORU_PREVIEW_CLEANUP_IDS) {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = '';
+    }
+
+    const altGreetingsCount = document.getElementById('botbooruCharAltGreetingsCount');
+    if (altGreetingsCount) altGreetingsCount.textContent = '';
+
+    botbooruSelectedChar = null;
 }
 
 function syncFilterCheckboxState() {
@@ -492,6 +547,20 @@ export function getBotbooruPreviewSections(char) {
             content: getCardPreviewText(char, section.keys),
         }))
         .filter(section => section.content);
+}
+
+export function getBotbooruGridRenderPlan(characters, renderedCount, appendOnly = false) {
+    if (appendOnly && renderedCount > 0 && renderedCount < characters.length) {
+        return {
+            mode: 'append',
+            characters: characters.slice(renderedCount),
+        };
+    }
+
+    return {
+        mode: 'replace',
+        characters,
+    };
 }
 
 function getBotbooruAltGreetings(char) {
@@ -692,7 +761,7 @@ async function openBotbooruCharPreview(char) {
 
 function closePreviewModal() {
     document.getElementById('botbooruCharModal')?.classList.add('hidden');
-    botbooruSelectedChar = null;
+    cleanupBotbooruCharModal();
 }
 
 async function getDuplicateMatches(char) {
@@ -935,6 +1004,7 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
         botbooruHasMore = true;
         botbooruTotal = 0;
         botbooruCharacters = [];
+        botbooruGridRenderedCount = 0;
     }
 
     if (botbooruViewMode === 'favorites' && !botbooruToken) {
@@ -990,7 +1060,7 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
         botbooruTotal = data.total || botbooruCharacters.length;
         botbooruOffset += rawPosts.length;
         botbooruHasMore = botbooruOffset < botbooruTotal && rawPosts.length > 0;
-        renderBotbooruGrid();
+        renderBotbooruGrid(!reset && botbooruViewMode === 'browse');
     } catch (err) {
         if (token !== botbooruLoadToken) return;
         console.error('[BotBooru] Load failed:', err);
@@ -1377,6 +1447,7 @@ class BotbooruBrowseView extends BrowseView {
             botbooruTotal = 0;
             botbooruHasMore = true;
             botbooruLoading = false;
+            botbooruGridRenderedCount = 0;
             botbooruSelectedChar = null;
         }
 

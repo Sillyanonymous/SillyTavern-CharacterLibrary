@@ -16,6 +16,19 @@
     object-position: center 20%;
 }
 
+.botbooru-card-creator {
+    align-items: center;
+    color: var(--text-secondary);
+    display: inline-flex;
+    font-size: var(--font-md);
+    gap: var(--space-xs);
+    margin-bottom: 8px;
+}
+
+.botbooru-card-creator::before {
+    content: 'by ';
+}
+
 .botbooru-result-count {
     color: var(--text-secondary);
     font-size: 0.9rem;
