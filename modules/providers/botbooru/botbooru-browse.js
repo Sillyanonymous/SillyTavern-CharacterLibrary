@@ -25,6 +25,8 @@ const {
     getSetting,
     setSetting,
     escapeHtml,
+    safePurify,
+    formatRichText,
     showPreImportDuplicateWarning,
     showImportSummaryModal,
     getCharacterGalleryId,
@@ -42,6 +44,20 @@ const SORT_OPTIONS = [
     { value: 'curated', label: '⭐ Curated', hidden: true },
     { value: 'random', label: '🎲 Random' },
 ];
+
+const BROWSE_PURIFY_CONFIG = {
+    ALLOWED_TAGS: [
+        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
+    ],
+    ALLOWED_ATTR: [
+        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
+        'width', 'height', 'loading', 'color', 'size', 'align'
+    ],
+    ALLOW_DATA_ATTR: false,
+};
 
 const PREVIEW_SECTIONS = [
     {
@@ -449,6 +465,24 @@ function getCardPreviewText(char, keys) {
     return '';
 }
 
+export function getBotbooruPreviewSectionHtml(content, charName = '') {
+    const raw = String(content ?? '').trim();
+    if (!raw) return '';
+
+    const formatted = typeof formatRichText === 'function'
+        ? formatRichText(raw, charName, true)
+        : raw;
+    const sanitized = typeof safePurify === 'function'
+        ? safePurify(formatted, BROWSE_PURIFY_CONFIG)
+        : '';
+
+    if (sanitized) return sanitized;
+
+    return safe(raw)
+        .replace(/\n\n+/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+}
+
 export function getBotbooruPreviewSections(char) {
     return PREVIEW_SECTIONS
         .map(section => ({
@@ -507,7 +541,7 @@ function renderBotbooruAltGreetings(char) {
             const body = details.querySelector('.browse-alt-greeting-body');
             if (!body || body.dataset.rendered) return;
             const index = Number.parseInt(details.dataset.greetingIdx, 10);
-            body.textContent = greetings[index] || '';
+            body.innerHTML = getBotbooruPreviewSectionHtml(greetings[index] || '', char?.name || 'Character');
             body.dataset.rendered = '1';
         }, { once: true });
     });
@@ -518,6 +552,7 @@ function renderBotbooruAltGreetings(char) {
 
 function renderPreviewSections(char) {
     const sectionsById = new Map(getBotbooruPreviewSections(char).map(section => [section.id, section]));
+    const charName = char?.name || document.getElementById('botbooruCharName')?.textContent || 'Character';
 
     for (const sectionConfig of PREVIEW_SECTIONS) {
         const wrapper = document.getElementById(`${sectionConfig.id}Section`);
@@ -526,15 +561,25 @@ function renderPreviewSections(char) {
         if (!wrapper || !contentEl) continue;
 
         wrapper.style.display = section ? '' : 'none';
-        contentEl.textContent = section?.content || '';
         if (section?.content) {
+            contentEl.innerHTML = getBotbooruPreviewSectionHtml(section.content, charName);
             contentEl.dataset.fullContent = section.content;
         } else {
+            contentEl.innerHTML = '';
             delete contentEl.dataset.fullContent;
         }
     }
 
     renderBotbooruAltGreetings(char);
+}
+
+export function openBotbooruAvatarViewer(char, fallbackSrc = null) {
+    const fullSrc = char?.image_url || char?.avatar_url || fallbackSrc || '';
+    const previewSrc = fallbackSrc || char?.avatar_url || char?.image_url || '';
+    if (!fullSrc) return false;
+
+    BrowseView.openAvatarViewer(fullSrc, previewSrc || undefined);
+    return true;
 }
 
 function applyCardPreviewData(char, card) {
@@ -578,6 +623,7 @@ async function openBotbooruCharPreview(char) {
 
     const modal = document.getElementById('botbooruCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
     modal.classList.remove('hidden');
 
     const id = char.id || char.fullPath;
@@ -589,7 +635,12 @@ async function openBotbooruCharPreview(char) {
 
     if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
     if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
-    if (avatarEl) avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
+    if (avatarEl) {
+        avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
+        avatarEl.onerror = () => { avatarEl.src = '/img/ai4.png'; };
+        avatarEl.title = (char.image_url || char.avatar_url) ? 'Click to view full image' : '';
+        BrowseView.adjustPortraitPosition(avatarEl);
+    }
     if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
     if (tagsEl) {
         tagsEl.innerHTML = (char.tags || [])
@@ -611,7 +662,11 @@ async function openBotbooruCharPreview(char) {
             Object.assign(char, detail, { _detailLoaded: true });
             if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
             if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
-            if (avatarEl) avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
+            if (avatarEl) {
+                avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
+                avatarEl.title = (char.image_url || char.avatar_url) ? 'Click to view full image' : '';
+                BrowseView.adjustPortraitPosition(avatarEl);
+            }
             if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
             if (viewsEl) viewsEl.textContent = formatNumber(char.views || 0);
             if (downloadsEl) downloadsEl.textContent = formatNumber(char.downloads || 0);
@@ -1431,6 +1486,14 @@ class BotbooruBrowseView extends BrowseView {
         on('botbooruLoadMoreBtn', 'click', () => loadBotbooruCharacters({ reset: false }), listenerOptions);
         on('botbooruImportBtn', 'click', importSelectedBotbooruCharacter, listenerOptions);
         on('botbooruFavoriteBtn', 'click', toggleSelectedFavorite, listenerOptions);
+        const isDesktop = typeof window.matchMedia !== 'function' || !window.matchMedia('(max-width: 768px)').matches;
+        const avatarEl = document.getElementById('botbooruCharAvatar');
+        if (avatarEl && isDesktop) {
+            avatarEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openBotbooruAvatarViewer(botbooruSelectedChar, avatarEl.currentSrc || avatarEl.src || null);
+            }, listenerOptions);
+        }
         on('botbooruCharClose', 'click', closePreviewModal, listenerOptions);
         on('botbooruCharModal', 'click', (e) => {
             if (e.target.id === 'botbooruCharModal') closePreviewModal();

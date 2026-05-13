@@ -217,6 +217,56 @@ test('BotBooru preview section headings are expandable', async () => {
     assert.match(html, /data-section="botbooruCharFirstMsg"/);
 });
 
+test('BotBooru preview sections use rich text rendering for entities and spacing', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalFormatRichText = globalThis.window.formatRichText;
+    const originalSafePurify = globalThis.window.safePurify;
+
+    try {
+        globalThis.window.formatRichText = (text) => String(text)
+            .replace(/&quot;/g, '"')
+            .replace(/\n\n/g, '<br><br>');
+        globalThis.window.safePurify = html => `safe:${html}`;
+
+        const { getBotbooruPreviewSectionHtml } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-html-${Date.now()}`);
+
+        assert.equal(
+            getBotbooruPreviewSectionHtml('pics in &quot;Gallery&quot;\n\nLine 2', 'Daphne'),
+            'safe:pics in "Gallery"<br><br>Line 2',
+        );
+    } finally {
+        globalThis.window.formatRichText = originalFormatRichText;
+        globalThis.window.safePurify = originalSafePurify;
+    }
+});
+
+test('BotBooru avatar viewer opens the full image with preview fallback', async () => {
+    globalThis.window = globalThis.window || {};
+    const { BrowseView } = await import('../modules/providers/browse-view.js');
+    const { openBotbooruAvatarViewer } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=avatar-viewer-${Date.now()}`);
+    const originalOpenAvatarViewer = BrowseView.openAvatarViewer;
+    const calls = [];
+
+    try {
+        BrowseView.openAvatarViewer = (...args) => calls.push(args);
+
+        openBotbooruAvatarViewer({
+            image_url: 'https://botbooru.test/images/full.png',
+            avatar_url: 'https://botbooru.test/images/preview.png',
+        });
+        openBotbooruAvatarViewer({
+            avatar_url: 'https://botbooru.test/images/preview-only.png',
+        });
+
+        assert.deepEqual(calls, [
+            ['https://botbooru.test/images/full.png', 'https://botbooru.test/images/preview.png'],
+            ['https://botbooru.test/images/preview-only.png', 'https://botbooru.test/images/preview-only.png'],
+        ]);
+    } finally {
+        BrowseView.openAvatarViewer = originalOpenAvatarViewer;
+    }
+});
+
 test('BotBooru personalized modes apply selected sort locally', async () => {
     globalThis.window = globalThis.window || {};
     const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);
