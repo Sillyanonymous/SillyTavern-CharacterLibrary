@@ -80,6 +80,17 @@ export function getBotbooruImageUrl(filename) {
     return buildProxyAssetUrl(`/images/${encodeURIComponent(String(filename))}`);
 }
 
+function getWriterTagName(tags) {
+    const entries = Array.isArray(tags) ? tags : [];
+    for (const entry of entries) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (String(entry.category || '').toLowerCase() !== 'writer') continue;
+        const name = String(entry.name || '').trim();
+        if (name) return name;
+    }
+    return '';
+}
+
 export function getTagNames(tags) {
     return (Array.isArray(tags) ? tags : [])
         .map(tag => typeof tag === 'string' ? tag : tag?.name)
@@ -154,13 +165,24 @@ export function normalizeBotbooruPost(post) {
     const parsedId = Number.parseInt(post.id, 10);
     const id = Number.isFinite(parsedId) ? parsedId : post.id;
     const filename = getPostFilename(post);
+    const creatorId = toInt(post.uploader_id ?? post.user_id ?? post.creator_id, 0) || null;
+    const creator = String(
+        post.uploader_name ||
+        post.user?.username ||
+        post.username ||
+        post.creator ||
+        post.data?.creator ||
+        getWriterTagName(post.tags) ||
+        'Unknown'
+    ).trim() || 'Unknown';
 
     return {
         ...post,
         id,
         fullPath: String(id),
         name: post.character_name || post.name || post.data?.name || `BotBooru ${id}`,
-        creator: post.uploader_name || post.creator || post.data?.creator || 'Unknown',
+        creator,
+        creator_id: creatorId,
         tags,
         rating: getRating(tags),
         avatar_url: getBotbooruPreviewUrl(filename),
@@ -203,6 +225,71 @@ export async function fetchBotbooruPost(id) {
     const resp = await bbProxyFetch(`/post/${postId}`);
     const data = await resp.json();
     return normalizeBotbooruPost(data?.post || data);
+}
+
+function normalizeBotbooruUser(user) {
+    if (!user) return null;
+    const id = Number.parseInt(user.id, 10);
+    if (!Number.isFinite(id)) return null;
+    const username = String(user.username || user.name || '').trim();
+    return {
+        ...user,
+        id,
+        name: username || `User ${id}`,
+        username: username || `User ${id}`,
+        avatar_url: user.avatar_url || '',
+        banner_url: user.banner_url || '',
+        characterCount: toInt(user.uploads_list_total ?? user.upload_count),
+        followers: toInt(user.followers),
+        following: toInt(user.following),
+        is_following: user.is_following === true,
+        is_followed_by: user.is_followed_by === true,
+    };
+}
+
+export async function fetchBotbooruUserProfile(id, {
+    uploadLimit = null,
+    uploadOffset = 0,
+    uploadSort = 'latest',
+} = {}) {
+    const userId = Number.parseInt(id, 10);
+    if (!userId) return null;
+
+    const params = new URLSearchParams();
+    if (Number.isFinite(uploadLimit)) params.set('upload_limit', String(Math.max(0, uploadLimit)));
+    if (Number.isFinite(uploadOffset)) params.set('upload_offset', String(Math.max(0, uploadOffset)));
+    if (uploadSort) params.set('upload_sort', String(uploadSort));
+
+    const resp = await bbProxyFetch(`/api/users/${userId}`, params);
+    return normalizeBotbooruUser(await resp.json());
+}
+
+export async function fetchBotbooruUserUploads(id, {
+    limit = 48,
+    offset = 0,
+    sort = 'latest',
+} = {}) {
+    const userId = Number.parseInt(id, 10);
+    if (!userId) return { total: 0, user: null, posts: [] };
+
+    const user = await fetchBotbooruUserProfile(userId, {
+        uploadLimit: limit,
+        uploadOffset: offset,
+        uploadSort: sort,
+    });
+    const rawUploads = Array.isArray(user?.uploads) ? user.uploads : [];
+
+    return {
+        total: toInt(user?.uploads_list_total ?? user?.upload_count, rawUploads.length),
+        user,
+        posts: rawUploads
+            .map(upload => normalizeBotbooruPost({
+                ...upload,
+                uploader_id: userId,
+                uploader_name: user?.name || user?.username || upload?.uploader_name,
+            }))
+            .filter(Boolean),
+    };
 }
 
 export async function fetchBotbooruCardJson(id) {

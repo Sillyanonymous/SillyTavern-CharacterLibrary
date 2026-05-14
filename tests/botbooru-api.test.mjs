@@ -4,7 +4,9 @@ import test from 'node:test';
 import {
     fetchBotbooruFavorites,
     fetchBotbooruFollowedTags,
+    fetchBotbooruUserUploads,
     followBotbooruTag,
+    normalizeBotbooruPost,
     parseBotbooruTagInput,
     setApiRequest,
     unfollowBotbooruTag,
@@ -43,6 +45,25 @@ test('fetchBotbooruFavorites accepts BotBooru profile favorites arrays', async (
     assert.equal(result.posts[0].favorites, 148);
     assert.equal(result.posts[0].rating, 'nsfw');
     assert.equal(result.posts[1].name, 'Elise');
+});
+
+test('normalizeBotbooruPost falls back to Writer tags when browse listings omit uploader_name', () => {
+    const post = normalizeBotbooruPost({
+        id: 5827,
+        filename: 'daphne.png',
+        character_name: 'Daphne',
+        uploader_id: 91,
+        favorite_count: 4,
+        tags: [
+            { id: 1, name: 'female', category: 'General' },
+            { id: 2, name: 'spaghettiman', category: 'Writer' },
+        ],
+    });
+
+    assert.equal(post.creator, 'spaghettiman');
+    assert.equal(post.creator_id, 91);
+    assert.equal(post.favorites, 4);
+    assert.equal(post.avatar_url, '/api/plugins/cl-helper/bb-proxy/images/preview/480/daphne.png');
 });
 
 test('parseBotbooruTagInput normalizes namespaced followed-tag input', () => {
@@ -85,6 +106,36 @@ test('followed tag helpers use the BotBooru helper routes', async () => {
         ['/plugins/cl-helper/bb-followed-tags', 'POST'],
         ['/plugins/cl-helper/bb-followed-tags/12', 'DELETE'],
     ]);
+});
+
+test('fetchBotbooruUserUploads uses the public user profile query for creator browsing', async () => {
+    setApiRequest(async (path) => {
+        assert.equal(path, '/plugins/cl-helper/bb-proxy/api/users/5386?upload_limit=2&upload_offset=0&upload_sort=latest');
+        return new Response(JSON.stringify({
+            id: 5386,
+            username: 'PokeTrainerIce',
+            avatar_url: '/avatars/a1c141607f044d94972625594e2bb52d.jpg',
+            uploads_list_total: 129,
+            uploads: [
+                {
+                    id: 8211,
+                    filename: 'b76b98b122194eaf97d417a296e45821.png',
+                    character_name: 'Etie',
+                    favorite_count: 0,
+                    tags: ['female', 'human', 'poketrainerice'],
+                },
+            ],
+        }), { status: 200 });
+    });
+
+    const result = await fetchBotbooruUserUploads(5386, { limit: 2, offset: 0, sort: 'latest' });
+
+    assert.equal(result.total, 129);
+    assert.equal(result.user.id, 5386);
+    assert.equal(result.user.name, 'PokeTrainerIce');
+    assert.equal(result.posts.length, 1);
+    assert.equal(result.posts[0].creator, 'PokeTrainerIce');
+    assert.equal(result.posts[0].creator_id, 5386);
 });
 
 test('BotBooru syncs saved token for personalized loads without gating Curated', async () => {
@@ -381,7 +432,7 @@ test('BotBooru preview cleanup clears transient modal content', async () => {
     }
 });
 
-test('BotBooru cards render creator as static text until author search is supported', async () => {
+test('BotBooru cards render creator browse links when uploader ids are known', async () => {
     globalThis.window = globalThis.window || {};
     const { renderBotbooruCardMarkup } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=static-creator-${Date.now()}`);
 
@@ -389,11 +440,15 @@ test('BotBooru cards render creator as static text until author search is suppor
         id: 1,
         name: 'Daphne',
         creator: 'spaghettiman',
+        creator_id: 99,
+        avatar_url: 'https://botbooru.test/images/preview.png',
         tags: [],
     });
 
-    assert.match(html, /botbooru-card-creator/);
-    assert.doesNotMatch(html, /browse-card-creator-link/);
+    assert.match(html, /browse-card-creator-link/);
+    assert.match(html, /data-creator-id="99"/);
+    assert.match(html, /data-creator-name="spaghettiman"/);
+    assert.match(html, /src="https:\/\/botbooru\.test\/images\/preview\.png"/);
 });
 
 test('BotBooru personalized modes apply selected sort locally', async () => {

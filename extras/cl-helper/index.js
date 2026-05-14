@@ -816,6 +816,8 @@ const BB_ALLOWED_PATHS = [
     /^\/images\/.+$/,
     /^\/tags\/?$/,
     /^\/random\/?$/,
+    /^\/api\/users\/\d+$/,
+    /^\/api\/users\/\d+\/(?:followers|following)$/,
     /^\/interactions\/\d+\/favorites$/,
 ];
 

@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { formatNumber } from '../provider-utils.js';
 import {
     checkBotbooruPluginAvailable,
     clearBotbooruToken,
@@ -12,6 +12,7 @@ import {
     fetchBotbooruFollowedTags,
     fetchBotbooruPost,
     fetchBotbooruPosts,
+    fetchBotbooruUserUploads,
     followBotbooruTag,
     getBotbooruPostUrl,
     setBotbooruToken,
@@ -123,6 +124,7 @@ let botbooruSort = DEFAULT_SORT;
 let botbooruLastBrowseSort = DEFAULT_SORT;
 let botbooruSearch = '';
 let botbooruNsfw = true;
+let botbooruCreatorFilter = null;
 let botbooruPluginOk = false;
 let botbooruToken = null;
 let botbooruTokenSynced = false;
@@ -179,6 +181,10 @@ function buildSortOptionsHtml(selected = getBotbooruSortSelectValue()) {
 
 function getActiveBotbooruSort() {
     return botbooruViewMode === 'curated' ? CURATED_SORT : botbooruSort;
+}
+
+function getBotbooruCreatorApiSort(sort = botbooruSort) {
+    return ['latest', 'favorites', 'downloads'].includes(sort) ? sort : DEFAULT_SORT;
 }
 
 export function shouldSyncBotbooruTokenForLoad(mode, sort) {
@@ -319,6 +325,43 @@ function updateLoadMore() {
     botbooruBrowseView.updateLoadMoreVisibility('botbooruLoadMore', botbooruHasMore, botbooruCharacters.length > 0);
 }
 
+function updateBotbooruCreatorBanner() {
+    const banner = document.getElementById('botbooruCreatorBanner');
+    const nameEl = document.getElementById('botbooruCreatorName');
+    if (!banner || !nameEl) return;
+
+    if (botbooruCreatorFilter?.id) {
+        nameEl.textContent = botbooruCreatorFilter.name || `User ${botbooruCreatorFilter.id}`;
+        banner.classList.remove('hidden');
+    } else {
+        nameEl.textContent = '';
+        banner.classList.add('hidden');
+    }
+}
+
+function setBotbooruCreatorFilter(creatorId, creatorName = '') {
+    const id = Number.parseInt(creatorId, 10);
+    if (!id) return;
+
+    const favCb = document.getElementById('botbooruFilterFavorites');
+    if (favCb) favCb.checked = false;
+    botbooruCreatorFilter = {
+        id,
+        name: creatorName || `User ${id}`,
+    };
+    botbooruSearch = '';
+    const searchInput = document.getElementById('botbooruSearchInput');
+    if (searchInput) searchInput.value = '';
+    setBotbooruViewMode('browse');
+    updateBotbooruCreatorBanner();
+}
+
+function clearBotbooruCreatorFilter() {
+    if (!botbooruCreatorFilter) return;
+    botbooruCreatorFilter = null;
+    updateBotbooruCreatorBanner();
+}
+
 function setLoadingGrid(message = 'Loading BotBooru...') {
     const grid = getGrid();
     if (!grid) return;
@@ -371,6 +414,7 @@ function renderBotbooruCard(char) {
     const id = String(char.id || char.fullPath || '');
     const name = char.name || `BotBooru ${id}`;
     const creator = char.creator || 'Unknown';
+    const creatorId = Number.parseInt(char.creator_id ?? char.uploader_id, 10) || '';
     const tags = (char.tags || []).slice(0, 4);
     const imageUrl = char.avatar_url || char.image_url || '/img/ai4.png';
     const rating = String(char.rating || '').toLowerCase();
@@ -395,17 +439,20 @@ function renderBotbooruCard(char) {
         : possibleMatch
             ? 'browse-card botbooru-card possible-library'
             : 'browse-card botbooru-card';
+    const creatorMarkup = creatorId
+        ? `<span class="browse-card-creator-link botbooru-card-creator" data-creator-id="${safe(creatorId)}" data-creator-name="${safe(creator)}" title="Click to see all characters by ${safe(creator)}">${safe(creator)}</span>`
+        : `<span class="botbooru-card-creator">${safe(creator)}</span>`;
 
     return `
         <div class="${cardClass}" data-botbooru-id="${safe(id)}" title="${safe(name)}">
             <div class="browse-card-image">
-                <img data-src="${safe(imageUrl)}" src="${IMG_PLACEHOLDER}" alt="${safe(name)}" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
+                <img data-src="${safe(imageUrl)}" src="${safe(imageUrl)}" alt="${safe(name)}" loading="lazy" decoding="async" fetchpriority="low" onerror="this.dataset.failed='1';this.src='/img/ai4.png'">
                 ${featureBadges.length ? `<div class="browse-feature-badges">${featureBadges.join('')}</div>` : ''}
                 ${ratingBadge}
             </div>
             <div class="browse-card-body">
                 <div class="browse-card-name">${safe(name)}</div>
-                <span class="botbooru-card-creator">${safe(creator)}</span>
+                ${creatorMarkup}
                 <div class="browse-card-tags">
                     ${tags.map(tag => `<span class="browse-card-tag" title="${safe(tag)}">${safe(tag)}</span>`).join('')}
                 </div>
@@ -430,7 +477,9 @@ function renderBotbooruGrid(appendOnly = false) {
     if (botbooruCharacters.length === 0) {
         botbooruGridRenderedCount = 0;
         botbooruBrowseView.disconnectImageObserver();
-        const message = botbooruViewMode === 'favorites'
+        const message = botbooruCreatorFilter?.id
+            ? `No BotBooru characters found for ${botbooruCreatorFilter.name || `user ${botbooruCreatorFilter.id}`}.`
+            : botbooruViewMode === 'favorites'
             ? 'No BotBooru favorites found.'
             : botbooruViewMode === 'curated'
                 ? 'No BotBooru curated characters found.'
@@ -1043,7 +1092,9 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
     const token = ++botbooruLoadToken;
     botbooruLoading = true;
     if (reset) {
-        const message = botbooruViewMode === 'favorites'
+        const message = botbooruCreatorFilter?.id
+            ? `Loading ${botbooruCreatorFilter.name || `user ${botbooruCreatorFilter.id}`}...`
+            : botbooruViewMode === 'favorites'
             ? 'Loading BotBooru favorites...'
             : botbooruViewMode === 'curated'
                 ? 'Loading BotBooru curated...'
@@ -1073,16 +1124,32 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
             q: botbooruSearch,
             sfwOnly: !botbooruNsfw,
         };
-        const data = botbooruViewMode === 'favorites'
-            ? await fetchBotbooruFavorites(params)
-            : await fetchBotbooruPosts({ ...params, sort: getActiveBotbooruSort() });
+        let data;
+        if (botbooruCreatorFilter?.id) {
+            data = await fetchBotbooruUserUploads(botbooruCreatorFilter.id, {
+                limit: PAGE_SIZE,
+                offset: botbooruOffset,
+                sort: getBotbooruCreatorApiSort(getActiveBotbooruSort()),
+            });
+        } else if (botbooruViewMode === 'favorites') {
+            data = await fetchBotbooruFavorites(params);
+        } else {
+            data = await fetchBotbooruPosts({ ...params, sort: getActiveBotbooruSort() });
+        }
 
         if (token !== botbooruLoadToken) return;
 
         const rawPosts = data.posts || [];
-        const posts = applyPersistentExcludeTags(rawPosts);
+        let posts = applyPersistentExcludeTags(rawPosts);
+        if (botbooruCreatorFilter?.id && !botbooruNsfw) {
+            posts = posts.filter(post => !['nsfw', 'nsfl'].includes(String(post.rating || '').toLowerCase()));
+        }
         const nextCharacters = reset ? posts : botbooruCharacters.concat(posts);
-        botbooruCharacters = sortBotbooruCharactersForView(nextCharacters, botbooruViewMode, botbooruSort);
+        botbooruCharacters = sortBotbooruCharactersForView(
+            nextCharacters,
+            botbooruCreatorFilter?.id ? 'curated' : botbooruViewMode,
+            botbooruSort
+        );
         botbooruTotal = data.total || botbooruCharacters.length;
         botbooruOffset += rawPosts.length;
         botbooruHasMore = botbooruOffset < botbooruTotal && rawPosts.length > 0;
@@ -1149,7 +1216,7 @@ async function loadBotbooruFollowedTags() {
         await syncSavedTokenToHelper();
         const tags = await fetchBotbooruFollowedTags();
         renderFollowedTagsList(tags);
-        renderFollowedTagsStatus(tags.length ? '' : 'Curated uses the tags you follow on BotBooru.');
+        renderFollowedTagsStatus(tags.length ? '' : 'Curated uses the tags and creators you follow on BotBooru.');
     } catch (err) {
         renderFollowedTagsList([]);
         renderFollowedTagsStatus(err.message || 'Failed to load followed tags.', 'error');
@@ -1263,7 +1330,7 @@ class BotbooruBrowseView extends BrowseView {
                 <button class="botbooru-view-btn active" data-botbooru-view="browse" type="button" title="Browse all BotBooru characters">
                     <i class="fa-solid fa-compass"></i> <span>Browse</span>
                 </button>
-                <button class="botbooru-view-btn" data-botbooru-view="curated" type="button" title="Characters from your followed BotBooru tags">
+                <button class="botbooru-view-btn" data-botbooru-view="curated" type="button" title="Characters from your followed BotBooru tags and creators">
                     <i class="fa-solid fa-star"></i> <span>Curated</span>
                 </button>
             </div>
@@ -1317,6 +1384,15 @@ class BotbooruBrowseView extends BrowseView {
                         </button>
                     </div>
                     <div id="botbooruResultCount" class="botbooru-result-count">No results</div>
+                </div>
+                <div id="botbooruCreatorBanner" class="botbooru-creator-banner hidden">
+                    <div class="botbooru-creator-banner-copy">
+                        <i class="fa-solid fa-user"></i>
+                        <span>Showing characters by <strong id="botbooruCreatorName"></strong></span>
+                    </div>
+                    <button id="botbooruClearCreatorBtn" class="glass-btn icon-only" type="button" title="Clear creator filter">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
                 </div>
                 <div id="botbooruGrid" class="browse-grid"></div>
                 <div class="browse-load-more" id="botbooruLoadMore" style="display: none;">
@@ -1434,7 +1510,7 @@ class BotbooruBrowseView extends BrowseView {
                 <button class="close-btn" id="botbooruFollowedTagsClose" type="button">&times;</button>
             </div>
             <div class="botbooru-tags-body">
-                <p class="botbooru-tags-copy">Followed tags feed BotBooru's Curated sort.</p>
+                <p class="botbooru-tags-copy">Curated currently blends the tags and creators you follow on BotBooru. This panel manages tags; creator follows are managed from creator profiles on BotBooru.</p>
                 <div class="botbooru-followed-tags-add">
                     <input type="search" id="botbooruFollowedTagsInput" class="glass-input" placeholder='artist:cinnabus or character:name' autocomplete="off">
                     <button id="botbooruFollowedTagsAddBtn" class="action-btn primary" type="button">
@@ -1483,6 +1559,7 @@ class BotbooruBrowseView extends BrowseView {
         updateBotbooruNsfwToggle();
         syncBotbooruSortSelect();
         syncFilterCheckboxState();
+        updateBotbooruCreatorBanner();
 
         if (!wasInitialized || options.domRecreated || botbooruCharacters.length === 0) {
             this.buildLocalLibraryLookup();
@@ -1521,12 +1598,17 @@ class BotbooruBrowseView extends BrowseView {
                     const favCb = document.getElementById('botbooruFilterFavorites');
                     if (favCb) favCb.checked = false;
                 }
+                if (nextMode !== 'browse') clearBotbooruCreatorFilter();
                 setBotbooruViewMode(nextMode);
                 loadBotbooruCharacters({ reset: true });
             }, listenerOptions);
         });
 
         on('botbooruTagsBtn', 'click', openFollowedTagsModal, listenerOptions);
+        on('botbooruClearCreatorBtn', 'click', () => {
+            clearBotbooruCreatorFilter();
+            loadBotbooruCharacters({ reset: true });
+        }, listenerOptions);
 
         on('botbooruFilterFavorites', 'change', (e) => {
             if (e.target.checked && !botbooruToken) {
@@ -1534,6 +1616,7 @@ class BotbooruBrowseView extends BrowseView {
                 openBotbooruTokenModal();
                 return;
             }
+            if (e.target.checked) clearBotbooruCreatorFilter();
             setBotbooruViewMode(e.target.checked ? 'favorites' : 'browse');
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);
@@ -1551,6 +1634,7 @@ class BotbooruBrowseView extends BrowseView {
         on('botbooruSortSelect', 'change', e => {
             const selectedSort = e.target.value || DEFAULT_SORT;
             if (selectedSort === CURATED_SORT) {
+                clearBotbooruCreatorFilter();
                 botbooruSort = botbooruLastBrowseSort || DEFAULT_SORT;
                 setBotbooruViewMode('curated');
             } else {
@@ -1622,6 +1706,17 @@ class BotbooruBrowseView extends BrowseView {
         getGrid()?.addEventListener('click', e => {
             if (e.target.closest('.botbooru-open-token-btn')) {
                 openBotbooruTokenModal();
+                return;
+            }
+            const creatorLink = e.target.closest('.browse-card-creator-link');
+            if (creatorLink) {
+                e.stopPropagation();
+                const creatorId = creatorLink.dataset.creatorId;
+                const creatorName = creatorLink.dataset.creatorName || creatorLink.textContent?.trim() || '';
+                if (creatorId) {
+                    setBotbooruCreatorFilter(creatorId, creatorName);
+                    loadBotbooruCharacters({ reset: true });
+                }
                 return;
             }
             const card = e.target.closest('.botbooru-card');
