@@ -707,6 +707,10 @@ export function openBotbooruAvatarViewer(char, fallbackSrc = null) {
     return true;
 }
 
+export function getBotbooruPreviewAvatarDisplaySrc(char, fallbackSrc = null) {
+    return char?.avatar_url || char?.image_url || fallbackSrc || '';
+}
+
 export function getBotbooruAvatarViewerSources(char, fallbackSrc = null) {
     const fullSrc = char?.image_url || char?.avatar_url || fallbackSrc || '';
     const previewSrc = fallbackSrc || char?.avatar_url || char?.image_url || '';
@@ -716,6 +720,24 @@ export function getBotbooruAvatarViewerSources(char, fallbackSrc = null) {
         fullSrc,
         previewSrc: previewSrc || fullSrc,
     };
+}
+
+function applyBotbooruPreviewAvatar(avatarEl, char) {
+    if (!avatarEl) return;
+
+    const viewerSources = getBotbooruAvatarViewerSources(char);
+    const displaySrc = getBotbooruPreviewAvatarDisplaySrc(char);
+    avatarEl.src = displaySrc || '/img/ai4.png';
+    avatarEl.onerror = () => { avatarEl.src = '/img/ai4.png'; };
+    if (viewerSources) {
+        avatarEl.dataset.fullSrc = viewerSources.fullSrc;
+        avatarEl.dataset.previewSrc = viewerSources.previewSrc;
+    } else {
+        delete avatarEl.dataset.fullSrc;
+        delete avatarEl.dataset.previewSrc;
+    }
+    avatarEl.title = viewerSources ? 'Click to view full image' : '';
+    BrowseView.adjustPortraitPosition(avatarEl);
 }
 
 function applyCardPreviewData(char, card) {
@@ -753,6 +775,12 @@ async function refreshSelectedFavoriteState() {
     }
 }
 
+function performBotbooruSearch() {
+    botbooruSearch = document.getElementById('botbooruSearchInput')?.value?.trim() || '';
+    if (botbooruCreatorFilter) clearBotbooruCreatorFilter();
+    loadBotbooruCharacters({ reset: true });
+}
+
 async function openBotbooruCharPreview(char) {
     if (!char) return;
     botbooruSelectedChar = char;
@@ -771,20 +799,7 @@ async function openBotbooruCharPreview(char) {
 
     if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
     if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
-    if (avatarEl) {
-        const viewerSources = getBotbooruAvatarViewerSources(char);
-        avatarEl.src = viewerSources?.fullSrc || '/img/ai4.png';
-        avatarEl.onerror = () => { avatarEl.src = '/img/ai4.png'; };
-        if (viewerSources) {
-            avatarEl.dataset.fullSrc = viewerSources.fullSrc;
-            avatarEl.dataset.previewSrc = viewerSources.previewSrc;
-        } else {
-            delete avatarEl.dataset.fullSrc;
-            delete avatarEl.dataset.previewSrc;
-        }
-        avatarEl.title = viewerSources ? 'Click to view full image' : '';
-        BrowseView.adjustPortraitPosition(avatarEl);
-    }
+    applyBotbooruPreviewAvatar(avatarEl, char);
     if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
     if (tagsEl) {
         tagsEl.innerHTML = (char.tags || [])
@@ -806,11 +821,7 @@ async function openBotbooruCharPreview(char) {
             Object.assign(char, detail, { _detailLoaded: true });
             if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
             if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
-            if (avatarEl) {
-                avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
-                avatarEl.title = (char.image_url || char.avatar_url) ? 'Click to view full image' : '';
-                BrowseView.adjustPortraitPosition(avatarEl);
-            }
+            applyBotbooruPreviewAvatar(avatarEl, char);
             if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
             if (viewsEl) viewsEl.textContent = formatNumber(char.views || 0);
             if (downloadsEl) downloadsEl.textContent = formatNumber(char.downloads || 0);
@@ -1385,14 +1396,16 @@ class BotbooruBrowseView extends BrowseView {
                     </div>
                     <div id="botbooruResultCount" class="botbooru-result-count">No results</div>
                 </div>
-                <div id="botbooruCreatorBanner" class="botbooru-creator-banner hidden">
-                    <div class="botbooru-creator-banner-copy">
+                <div id="botbooruCreatorBanner" class="chub-author-banner hidden">
+                    <div class="chub-author-banner-content">
                         <i class="fa-solid fa-user"></i>
                         <span>Showing characters by <strong id="botbooruCreatorName"></strong></span>
                     </div>
-                    <button id="botbooruClearCreatorBtn" class="glass-btn icon-only" type="button" title="Clear creator filter">
-                        <i class="fa-solid fa-times"></i>
-                    </button>
+                    <div class="chub-author-banner-actions">
+                        <button id="botbooruClearCreatorBtn" class="glass-btn icon-only" type="button" title="Clear creator filter">
+                            <i class="fa-solid fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="botbooruGrid" class="browse-grid"></div>
                 <div class="browse-load-more" id="botbooruLoadMore" style="display: none;">
@@ -1651,10 +1664,7 @@ class BotbooruBrowseView extends BrowseView {
             loadBotbooruCharacters({ reset: true });
         }, listenerOptions);
         on('botbooruRefreshBtn', 'click', () => loadBotbooruCharacters({ reset: true }), listenerOptions);
-        on('botbooruSearchBtn', 'click', () => {
-            botbooruSearch = document.getElementById('botbooruSearchInput')?.value?.trim() || '';
-            loadBotbooruCharacters({ reset: true });
-        }, listenerOptions);
+        on('botbooruSearchBtn', 'click', performBotbooruSearch, listenerOptions);
         on('botbooruSearchInput', 'keydown', e => {
             if (e.key === 'Enter') document.getElementById('botbooruSearchBtn')?.click();
         }, listenerOptions);
@@ -1729,6 +1739,10 @@ class BotbooruBrowseView extends BrowseView {
         window.registerOverlay?.({ id: 'botbooruCharModal', tier: 7, close: () => closePreviewModal() });
         window.registerOverlay?.({ id: 'botbooruTokenModal', tier: 6, close: () => closeTokenModal() });
         window.registerOverlay?.({ id: 'botbooruFollowedTagsModal', tier: 6, close: () => closeFollowedTagsModal() });
+        window.registerOverlay?.({ id: 'botbooruCreatorBanner', tier: 9, close: () => {
+            clearBotbooruCreatorFilter();
+            loadBotbooruCharacters({ reset: true });
+        } });
     }
 
     closePreview() {

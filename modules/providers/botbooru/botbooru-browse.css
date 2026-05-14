@@ -35,29 +35,6 @@
     white-space: nowrap;
 }
 
-.botbooru-creator-banner {
-    align-items: center;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-lg);
-    display: flex;
-    gap: 10px;
-    justify-content: space-between;
-    margin-bottom: 14px;
-    padding: 10px 12px;
-}
-
-.botbooru-creator-banner-copy {
-    align-items: center;
-    color: var(--text-secondary);
-    display: inline-flex;
-    gap: 8px;
-}
-
-.botbooru-creator-banner strong {
-    color: var(--text-primary);
-}
-
 .botbooru-empty-state,
 .botbooru-state {
     align-items: center;

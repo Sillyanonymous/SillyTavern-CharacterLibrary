@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -432,6 +433,25 @@ test('BotBooru preview cleanup clears transient modal content', async () => {
     }
 });
 
+test('BotBooru preview avatar display prefers preview-sized art before full image loads', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruPreviewAvatarDisplaySrc } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-avatar-src-${Date.now()}`);
+
+    assert.equal(
+        getBotbooruPreviewAvatarDisplaySrc({
+            image_url: 'https://botbooru.test/images/full.png',
+            avatar_url: 'https://botbooru.test/images/preview.png',
+        }),
+        'https://botbooru.test/images/preview.png',
+    );
+    assert.equal(
+        getBotbooruPreviewAvatarDisplaySrc({
+            image_url: 'https://botbooru.test/images/full-only.png',
+        }),
+        'https://botbooru.test/images/full-only.png',
+    );
+});
+
 test('BotBooru cards render creator browse links when uploader ids are known', async () => {
     globalThis.window = globalThis.window || {};
     const { renderBotbooruCardMarkup } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=static-creator-${Date.now()}`);
@@ -480,4 +500,10 @@ test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => 
     assert.match(html, />\s*Browse\s*</);
     assert.match(html, />\s*Curated\s*</);
     assert.match(html, /<option value="curated"[^>]*hidden/);
+});
+
+test('BotBooru creator banner reuses the maintainer banner classes and stays hideable', () => {
+    const css = readFileSync(new URL('../modules/providers/botbooru/botbooru-browse.css', import.meta.url), 'utf8');
+
+    assert.doesNotMatch(css, /\.botbooru-creator-banner\s*\{/);
 });
