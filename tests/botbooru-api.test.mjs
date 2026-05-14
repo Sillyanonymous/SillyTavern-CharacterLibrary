@@ -4,9 +4,13 @@ import test from 'node:test';
 
 import {
     fetchBotbooruFavorites,
+    fetchBotbooruPosts,
+    fetchBotbooruFollowState,
     fetchBotbooruFollowedTags,
+    fetchBotbooruUserProfile,
     fetchBotbooruUserUploads,
     followBotbooruTag,
+    setBotbooruFollowState,
     normalizeBotbooruPost,
     parseBotbooruTagInput,
     setApiRequest,
@@ -46,6 +50,30 @@ test('fetchBotbooruFavorites accepts BotBooru profile favorites arrays', async (
     assert.equal(result.posts[0].favorites, 148);
     assert.equal(result.posts[0].rating, 'nsfw');
     assert.equal(result.posts[1].name, 'Elise');
+});
+
+test('fetchBotbooruPosts can route Curated loads through the helper when auth is needed', async () => {
+    setApiRequest(async (path) => {
+        assert.equal(path, '/plugins/cl-helper/bb-posts?sort=curated&limit=48&offset=0&sfw_only=false');
+        return new Response(JSON.stringify({
+            total: 1,
+            posts: [
+                {
+                    id: 8211,
+                    character_name: 'Etie',
+                    uploader_name: 'PokeTrainerIce',
+                    filename: 'etie.png',
+                    favorite_count: 7,
+                },
+            ],
+        }), { status: 200 });
+    });
+
+    const result = await fetchBotbooruPosts({ sort: 'curated', auth: true });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.posts[0].creator, 'PokeTrainerIce');
+    assert.equal(result.posts[0].favorites, 7);
 });
 
 test('normalizeBotbooruPost falls back to Writer tags when browse listings omit uploader_name', () => {
@@ -139,6 +167,47 @@ test('fetchBotbooruUserUploads uses the public user profile query for creator br
     assert.equal(result.posts[0].creator_id, 5386);
 });
 
+test('BotBooru creator follow helpers use dedicated helper routes', async () => {
+    const calls = [];
+    setApiRequest(async (path, method = 'GET') => {
+        calls.push({ path, method });
+        if (method === 'DELETE') {
+            return new Response(JSON.stringify({
+                id: 5386,
+                username: 'PokeTrainerIce',
+                followers: 120,
+                following: 45,
+                is_following: false,
+            }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+            id: 5386,
+            username: 'PokeTrainerIce',
+            followers: method === 'POST' ? 121 : 120,
+            following: 45,
+            is_following: method !== 'GET' || true,
+        }), { status: 200 });
+    });
+
+    const profile = await fetchBotbooruUserProfile(5386, { auth: true });
+    const followState = await fetchBotbooruFollowState(5386);
+    const followed = await setBotbooruFollowState(5386, true);
+    const unfollowed = await setBotbooruFollowState(5386, false);
+
+    assert.equal(profile.id, 5386);
+    assert.equal(profile.username, 'PokeTrainerIce');
+    assert.equal(followState.is_following, true);
+    assert.equal(followed.is_following, true);
+    assert.equal(followed.followers, 121);
+    assert.equal(unfollowed.is_following, false);
+    assert.deepEqual(calls.map(call => [call.path, call.method]), [
+        ['/plugins/cl-helper/bb-users/5386', 'GET'],
+        ['/plugins/cl-helper/bb-users/5386', 'GET'],
+        ['/plugins/cl-helper/bb-users/5386/follow', 'POST'],
+        ['/plugins/cl-helper/bb-users/5386/follow', 'DELETE'],
+    ]);
+});
+
 test('BotBooru syncs saved token for personalized loads without gating Curated', async () => {
     globalThis.window = globalThis.window || {};
     const { shouldSyncBotbooruTokenForLoad } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sync-token-${Date.now()}`);
@@ -150,13 +219,13 @@ test('BotBooru syncs saved token for personalized loads without gating Curated',
     assert.equal(shouldSyncBotbooruTokenForLoad('favorites', 'latest'), true);
 });
 
-test('BotBooru Curated mode keeps Sort By on normal order values', async () => {
+test('BotBooru Curated mode keeps Curated visible in Sort By', async () => {
     globalThis.window = globalThis.window || {};
     const { getBotbooruSortSelectValue } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sort-select-${Date.now()}`);
 
     assert.equal(getBotbooruSortSelectValue('latest'), 'latest');
     assert.equal(getBotbooruSortSelectValue('favorites'), 'favorites');
-    assert.equal(getBotbooruSortSelectValue('curated'), 'latest');
+    assert.equal(getBotbooruSortSelectValue('curated'), 'curated');
     assert.equal(getBotbooruSortSelectValue(''), 'latest');
 });
 
@@ -276,6 +345,8 @@ test('BotBooru preview modal exposes a clickable creator link', async () => {
 
     const html = browseView.renderModals();
     assert.match(html, /id="botbooruCharCreator" href="#"/);
+    assert.match(html, /id="botbooruFavoriteBtn"/);
+    assert.match(html, /id="botbooruCharFavoriteCount"/);
 
     const creatorEl = {
         textContent: '',
@@ -534,7 +605,7 @@ test('BotBooru personalized modes apply selected sort locally', async () => {
     assert.equal(sortBotbooruCharactersForView(posts, 'browse', 'favorites'), posts);
 });
 
-test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => {
+test('BotBooru filter bar exposes Browse, Curated, and a visible Curated sort option', async () => {
     globalThis.window = globalThis.window || {};
     globalThis.window.escapeHtml = value => String(value ?? '');
     const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=${Date.now()}`);
@@ -545,7 +616,20 @@ test('BotBooru filter bar exposes Browse and Curated mode buttons', async () => 
     assert.match(html, /data-botbooru-view="curated"/);
     assert.match(html, />\s*Browse\s*</);
     assert.match(html, />\s*Curated\s*</);
-    assert.match(html, /<option value="curated"[^>]*hidden/);
+    assert.match(html, /<option value="curated"/);
+    assert.doesNotMatch(html, /<option value="curated"[^>]*hidden/);
+});
+
+test('BotBooru creator banner exposes a Chub-style follow action', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=banner-follow-${Date.now()}`);
+
+    const html = browseView.renderView();
+
+    assert.match(html, /id="botbooruCreatorBanner"/);
+    assert.match(html, /id="botbooruFollowCreatorBtn"/);
+    assert.match(html, />\s*Follow\s*</);
 });
 
 test('BotBooru creator banner reuses the maintainer banner classes and stays hideable', () => {

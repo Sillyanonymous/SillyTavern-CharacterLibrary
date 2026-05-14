@@ -7,6 +7,7 @@ import {
     checkBotbooruPluginAvailable,
     clearBotbooruToken,
     fetchBotbooruCardJson,
+    fetchBotbooruFollowState,
     fetchBotbooruFavoriteState,
     fetchBotbooruFavorites,
     fetchBotbooruFollowedTags,
@@ -15,6 +16,7 @@ import {
     fetchBotbooruUserUploads,
     followBotbooruTag,
     getBotbooruPostUrl,
+    setBotbooruFollowState,
     setBotbooruToken,
     toggleBotbooruFavorite,
     unfollowBotbooruTag,
@@ -42,7 +44,7 @@ const SORT_OPTIONS = [
     { value: 'favorites', label: '❤️ Most Favorited' },
     { value: 'views', label: '👁️ Most Viewed' },
     { value: 'downloads', label: '📥 Most Downloaded' },
-    { value: 'curated', label: '⭐ Curated', hidden: true },
+    { value: 'curated', label: '⭐ Curated' },
     { value: 'random', label: '🎲 Random' },
 ];
 
@@ -125,6 +127,8 @@ let botbooruLastBrowseSort = DEFAULT_SORT;
 let botbooruSearch = '';
 let botbooruNsfw = true;
 let botbooruCreatorFilter = null;
+let botbooruCreatorProfile = null;
+let botbooruCreatorFollowLoading = false;
 let botbooruPluginOk = false;
 let botbooruToken = null;
 let botbooruTokenSynced = false;
@@ -169,8 +173,7 @@ function getGrid() {
 }
 
 export function getBotbooruSortSelectValue(sort = botbooruSort) {
-    const value = sort || DEFAULT_SORT;
-    return value === CURATED_SORT ? (botbooruLastBrowseSort || DEFAULT_SORT) : value;
+    return sort || DEFAULT_SORT;
 }
 
 function buildSortOptionsHtml(selected = getBotbooruSortSelectValue()) {
@@ -180,7 +183,7 @@ function buildSortOptionsHtml(selected = getBotbooruSortSelectValue()) {
 }
 
 function getActiveBotbooruSort() {
-    return botbooruViewMode === 'curated' ? CURATED_SORT : botbooruSort;
+    return botbooruSort || DEFAULT_SORT;
 }
 
 function getBotbooruCreatorApiSort(sort = botbooruSort) {
@@ -247,6 +250,7 @@ export function sortBotbooruCharactersForView(characters, mode, sort) {
     if (!Array.isArray(characters) || !['curated', 'favorites'].includes(mode)) return characters;
 
     const selectedSort = getBotbooruSortSelectValue(sort);
+    if (selectedSort === CURATED_SORT) return characters;
     if (selectedSort === 'random') return shuffleCharacters(characters);
     if (!['latest', 'favorites', 'views', 'downloads'].includes(selectedSort)) return characters;
 
@@ -282,9 +286,10 @@ function setBotbooruViewMode(mode) {
     if (mode === 'curated') {
         if (botbooruSort && botbooruSort !== CURATED_SORT) botbooruLastBrowseSort = botbooruSort;
         botbooruViewMode = 'curated';
+        botbooruSort = CURATED_SORT;
     } else {
         botbooruViewMode = mode === 'favorites' ? 'favorites' : 'browse';
-        if (botbooruViewMode === 'browse' && botbooruSort === CURATED_SORT) {
+        if (botbooruSort === CURATED_SORT) {
             botbooruSort = botbooruLastBrowseSort || DEFAULT_SORT;
         }
     }
@@ -325,6 +330,38 @@ function updateLoadMore() {
     botbooruBrowseView.updateLoadMoreVisibility('botbooruLoadMore', botbooruHasMore, botbooruCharacters.length > 0);
 }
 
+function renderBotbooruCreatorFollowButton() {
+    if (botbooruCreatorFollowLoading) {
+        return '<i class="fa-solid fa-spinner fa-spin"></i>';
+    }
+    if (botbooruCreatorProfile?.is_following) {
+        return '<i class="fa-solid fa-heart"></i> <span>Following</span>';
+    }
+    return '<i class="fa-solid fa-heart"></i> <span>Follow</span>';
+}
+
+function updateBotbooruCreatorFollowButton() {
+    const followBtn = document.getElementById('botbooruFollowCreatorBtn');
+    if (!followBtn) return;
+
+    const visible = !!(botbooruCreatorFilter?.id && botbooruToken);
+    followBtn.style.display = visible ? '' : 'none';
+    followBtn.disabled = !!botbooruCreatorFollowLoading;
+    followBtn.classList.toggle('following', !!botbooruCreatorProfile?.is_following);
+    followBtn.innerHTML = renderBotbooruCreatorFollowButton();
+    followBtn.title = botbooruCreatorProfile?.is_following
+        ? `Unfollow ${botbooruCreatorFilter?.name || 'this creator'} on BotBooru`
+        : `Follow ${botbooruCreatorFilter?.name || 'this creator'} on BotBooru`;
+}
+
+function setBotbooruCreatorProfile(profile = null) {
+    botbooruCreatorProfile = profile || null;
+    if (botbooruCreatorFilter?.id && botbooruCreatorProfile?.name) {
+        botbooruCreatorFilter.name = botbooruCreatorProfile.name;
+    }
+    updateBotbooruCreatorBanner();
+}
+
 function updateBotbooruCreatorBanner() {
     const banner = document.getElementById('botbooruCreatorBanner');
     const nameEl = document.getElementById('botbooruCreatorName');
@@ -337,6 +374,7 @@ function updateBotbooruCreatorBanner() {
         nameEl.textContent = '';
         banner.classList.add('hidden');
     }
+    updateBotbooruCreatorFollowButton();
 }
 
 function setBotbooruCreatorFilter(creatorId, creatorName = '') {
@@ -349,6 +387,8 @@ function setBotbooruCreatorFilter(creatorId, creatorName = '') {
         id,
         name: creatorName || `User ${id}`,
     };
+    botbooruCreatorProfile = null;
+    botbooruCreatorFollowLoading = false;
     botbooruSearch = '';
     const searchInput = document.getElementById('botbooruSearchInput');
     if (searchInput) searchInput.value = '';
@@ -359,6 +399,8 @@ function setBotbooruCreatorFilter(creatorId, creatorName = '') {
 function clearBotbooruCreatorFilter() {
     if (!botbooruCreatorFilter) return;
     botbooruCreatorFilter = null;
+    botbooruCreatorProfile = null;
+    botbooruCreatorFollowLoading = false;
     updateBotbooruCreatorBanner();
 }
 
@@ -568,7 +610,9 @@ function syncFilterCheckboxState() {
 function setFavoriteButtonState(favorited, count) {
     const favoriteBtn = document.getElementById('botbooruFavoriteBtn');
     const favoriteCountEl = document.getElementById('botbooruCharFavorites');
+    const inlineCountEl = document.getElementById('botbooruCharFavoriteCount');
     if (favoriteCountEl && count != null) favoriteCountEl.textContent = formatNumber(count);
+    if (inlineCountEl && count != null) inlineCountEl.textContent = formatNumber(count);
     if (!favoriteBtn) return;
 
     favoriteBtn.classList.toggle('favorited', !!favorited);
@@ -1025,12 +1069,68 @@ async function toggleSelectedFavorite() {
     }
 }
 
+async function refreshBotbooruCreatorFollowState() {
+    if (!botbooruCreatorFilter?.id || !botbooruToken) {
+        botbooruCreatorFollowLoading = false;
+        updateBotbooruCreatorFollowButton();
+        return;
+    }
+
+    botbooruCreatorFollowLoading = true;
+    updateBotbooruCreatorFollowButton();
+
+    try {
+        await syncSavedTokenToHelper();
+        const profile = await fetchBotbooruFollowState(botbooruCreatorFilter.id);
+        setBotbooruCreatorProfile(profile);
+    } catch (err) {
+        CoreAPI.debugLog?.('[BotBooru] Creator follow state unavailable:', err.message);
+        updateBotbooruCreatorBanner();
+    } finally {
+        botbooruCreatorFollowLoading = false;
+        updateBotbooruCreatorFollowButton();
+    }
+}
+
+async function toggleBotbooruCreatorFollow() {
+    if (!botbooruCreatorFilter?.id) return;
+    if (!botbooruToken) {
+        openBotbooruTokenModal();
+        return;
+    }
+
+    const shouldFollow = !botbooruCreatorProfile?.is_following;
+    botbooruCreatorFollowLoading = true;
+    updateBotbooruCreatorFollowButton();
+
+    try {
+        await syncSavedTokenToHelper();
+        const profile = await setBotbooruFollowState(botbooruCreatorFilter.id, shouldFollow);
+        setBotbooruCreatorProfile(profile);
+        showToast?.(
+            profile?.is_following
+                ? `Now following ${botbooruCreatorFilter.name || 'this creator'} on BotBooru`
+                : `Unfollowed ${botbooruCreatorFilter.name || 'this creator'} on BotBooru`,
+            profile?.is_following ? 'success' : 'info',
+        );
+        if (botbooruSort === CURATED_SORT || botbooruViewMode === 'curated') {
+            loadBotbooruCharacters({ reset: true });
+        }
+    } catch (err) {
+        showToast?.(`Creator follow update failed: ${err.message}`, 'error');
+        if (/token|invalid|expired|401/i.test(err.message)) openBotbooruTokenModal();
+    } finally {
+        botbooruCreatorFollowLoading = false;
+        updateBotbooruCreatorFollowButton();
+    }
+}
+
 function openBotbooruTokenModal() {
     const modal = document.getElementById('botbooruTokenModal');
     const input = document.getElementById('botbooruTokenInput');
     const status = document.getElementById('botbooruTokenStatus');
     if (input) input.value = botbooruToken || getSetting?.('botbooruToken') || '';
-    if (status) status.textContent = 'Token is optional and only used for favorites.';
+    if (status) status.textContent = 'Token is optional and only used for favorites, creator follows, and Curated sync.';
     modal?.classList.remove('hidden');
     input?.focus();
 }
@@ -1042,7 +1142,7 @@ async function saveBotbooruTokenFromModal() {
     const token = input?.value?.trim() || '';
 
     if (!token) {
-        showToast?.('Paste a BotBooru token to enable favorites', 'info');
+        showToast?.('Paste a BotBooru token to enable favorites, follows, and Curated sync', 'info');
         return;
     }
 
@@ -1063,6 +1163,7 @@ async function saveBotbooruTokenFromModal() {
         showToast?.('BotBooru token saved', 'success');
         if (botbooruViewMode === 'favorites') loadBotbooruCharacters({ reset: true });
         if (botbooruSelectedChar) refreshSelectedFavoriteState();
+        if (botbooruCreatorFilter?.id) refreshBotbooruCreatorFollowState();
     } catch (err) {
         if (status) status.textContent = `Validation failed: ${err.message}`;
         showToast?.(`BotBooru token failed: ${err.message}`, 'error');
@@ -1085,6 +1186,9 @@ async function clearBotbooruTokenFromModal() {
     if (status) status.textContent = 'Token cleared. Public browsing remains available.';
     showToast?.('BotBooru token cleared', 'success');
     if (botbooruViewMode === 'favorites') loadBotbooruCharacters({ reset: true });
+    botbooruCreatorProfile = null;
+    botbooruCreatorFollowLoading = false;
+    updateBotbooruCreatorBanner();
 }
 
 async function setBotbooruSessionToken(token) {
@@ -1177,14 +1281,25 @@ async function loadBotbooruCharacters({ reset = false } = {}) {
                 limit: PAGE_SIZE,
                 offset: botbooruOffset,
                 sort: getBotbooruCreatorApiSort(getActiveBotbooruSort()),
+                auth: !!botbooruToken,
             });
         } else if (botbooruViewMode === 'favorites') {
             data = await fetchBotbooruFavorites(params);
         } else {
-            data = await fetchBotbooruPosts({ ...params, sort: getActiveBotbooruSort() });
+            data = await fetchBotbooruPosts({
+                ...params,
+                sort: getActiveBotbooruSort(),
+                auth: !!botbooruToken && getActiveBotbooruSort() === CURATED_SORT,
+            });
         }
 
         if (token !== botbooruLoadToken) return;
+
+        if (botbooruCreatorFilter?.id) {
+            setBotbooruCreatorProfile(data.user || null);
+        } else {
+            setBotbooruCreatorProfile(null);
+        }
 
         const rawPosts = data.posts || [];
         let posts = applyPersistentExcludeTags(rawPosts);
@@ -1438,6 +1553,9 @@ class BotbooruBrowseView extends BrowseView {
                         <span>Showing characters by <strong id="botbooruCreatorName"></strong></span>
                     </div>
                     <div class="chub-author-banner-actions">
+                        <button id="botbooruFollowCreatorBtn" class="glass-btn" type="button" title="Follow this creator on BotBooru" style="display: none;">
+                            <i class="fa-solid fa-heart"></i> <span>Follow</span>
+                        </button>
                         <button id="botbooruClearCreatorBtn" class="glass-btn icon-only" type="button" title="Clear creator filter">
                             <i class="fa-solid fa-times"></i>
                         </button>
@@ -1462,13 +1580,10 @@ class BotbooruBrowseView extends BrowseView {
                     <img id="botbooruCharAvatar" src="/img/ai4.png" alt="" class="browse-char-avatar">
                     <div>
                         <h2 id="botbooruCharName">Character Name</h2>
-                        <p class="browse-char-meta">by <a id="botbooruCharCreator" href="#" title="Click to see all characters by this author">Unknown</a></p>
+                        <p class="browse-char-meta">by <a id="botbooruCharCreator" href="#" title="Click to see all characters by this author">Unknown</a> • <button id="botbooruFavoriteBtn" class="botbooru-favorite-btn botbooru-favorite-btn-inline" type="button" title="Add to BotBooru favorites"><i class="fa-regular fa-heart"></i> <span id="botbooruCharFavoriteCount">0</span></button></p>
                     </div>
                 </div>
                 <div class="modal-controls">
-                    <button id="botbooruFavoriteBtn" class="action-btn secondary botbooru-favorite-btn" type="button" title="Add to BotBooru favorites">
-                        <i class="fa-regular fa-heart"></i>
-                    </button>
                     <a id="botbooruOpenInBrowserBtn" href="#" target="_blank" rel="noopener noreferrer" class="action-btn secondary" title="Open on BotBooru">
                         <i class="fa-solid fa-external-link"></i> Open
                     </a>
@@ -1539,7 +1654,7 @@ class BotbooruBrowseView extends BrowseView {
                 <button class="close-btn" id="botbooruTokenClose" type="button">&times;</button>
             </div>
             <div class="botbooru-token-body">
-                <p id="botbooruTokenStatus" class="botbooru-token-status">Token is optional and only used for favorites.</p>
+                <p id="botbooruTokenStatus" class="botbooru-token-status">Token is optional and only used for favorites, creator follows, and Curated sync.</p>
                 <input type="password" id="botbooruTokenInput" class="glass-input" placeholder="Bearer token" autocomplete="off" data-sensitive="true">
                 <div class="botbooru-token-actions">
                     <button id="botbooruSaveTokenBtn" class="action-btn primary" type="button">
@@ -1589,9 +1704,7 @@ class BotbooruBrowseView extends BrowseView {
         botbooruNsfw = getSetting?.('botbooruNsfw') !== false;
         if (options.defaults?.browseSort) botbooruSort = options.defaults.browseSort;
         if (botbooruSort !== CURATED_SORT) botbooruLastBrowseSort = botbooruSort;
-        if (options.defaults?.view === 'curated' || botbooruSort === CURATED_SORT) {
-            botbooruViewMode = 'curated';
-        }
+        setBotbooruViewMode(options.defaults?.view === 'curated' || botbooruSort === CURATED_SORT ? 'curated' : botbooruViewMode);
         if (options.domRecreated) {
             botbooruCharacters = [];
             botbooruOffset = 0;
@@ -1600,6 +1713,8 @@ class BotbooruBrowseView extends BrowseView {
             botbooruLoading = false;
             botbooruGridRenderedCount = 0;
             botbooruSelectedChar = null;
+            botbooruCreatorProfile = null;
+            botbooruCreatorFollowLoading = false;
         }
 
         const wasInitialized = this._initialized;
@@ -1654,6 +1769,7 @@ class BotbooruBrowseView extends BrowseView {
         });
 
         on('botbooruTagsBtn', 'click', openFollowedTagsModal, listenerOptions);
+        on('botbooruFollowCreatorBtn', 'click', toggleBotbooruCreatorFollow, listenerOptions);
         on('botbooruClearCreatorBtn', 'click', () => {
             clearBotbooruCreatorFilter();
             loadBotbooruCharacters({ reset: true });
@@ -1684,11 +1800,11 @@ class BotbooruBrowseView extends BrowseView {
             const selectedSort = e.target.value || DEFAULT_SORT;
             if (selectedSort === CURATED_SORT) {
                 clearBotbooruCreatorFilter();
-                botbooruSort = botbooruLastBrowseSort || DEFAULT_SORT;
                 setBotbooruViewMode('curated');
             } else {
                 botbooruSort = selectedSort;
                 botbooruLastBrowseSort = botbooruSort;
+                if (botbooruViewMode === 'curated') setBotbooruViewMode('browse');
                 syncBotbooruSortSelect();
             }
             loadBotbooruCharacters({ reset: true });

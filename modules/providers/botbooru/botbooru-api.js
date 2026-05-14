@@ -201,6 +201,7 @@ export async function fetchBotbooruPosts({
     limit = 48,
     offset = 0,
     sfwOnly = false,
+    auth = false,
 } = {}) {
     const params = new URLSearchParams();
     params.set('sort', sort);
@@ -209,8 +210,19 @@ export async function fetchBotbooruPosts({
     params.set('sfw_only', sfwOnly ? 'true' : 'false');
     if (q && q.trim()) params.set('q', q.trim());
 
-    const resp = await bbProxyFetch('/posts/', params);
-    const data = await resp.json();
+    let data;
+    if (auth) {
+        const apiRequest = requireApiRequest();
+        const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-posts?${params.toString()}`);
+        if (!resp.ok) {
+            const body = await readBodySnippet(resp);
+            throw new Error(`BotBooru posts failed (${resp.status})${body ? `: ${body}` : ''}`);
+        }
+        data = await resp.json();
+    } else {
+        const resp = await bbProxyFetch('/posts/', params);
+        data = await resp.json();
+    }
     const rawPosts = data?.posts || data?.items || data?.list || [];
 
     return {
@@ -249,8 +261,9 @@ function normalizeBotbooruUser(user) {
 
 export async function fetchBotbooruUserProfile(id, {
     uploadLimit = null,
-    uploadOffset = 0,
-    uploadSort = 'latest',
+    uploadOffset = null,
+    uploadSort = '',
+    auth = false,
 } = {}) {
     const userId = Number.parseInt(id, 10);
     if (!userId) return null;
@@ -260,6 +273,16 @@ export async function fetchBotbooruUserProfile(id, {
     if (Number.isFinite(uploadOffset)) params.set('upload_offset', String(Math.max(0, uploadOffset)));
     if (uploadSort) params.set('upload_sort', String(uploadSort));
 
+    if (auth) {
+        const apiRequest = requireApiRequest();
+        const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-users/${userId}${params.size ? `?${params.toString()}` : ''}`);
+        if (!resp.ok) {
+            const body = await readBodySnippet(resp);
+            throw new Error(`BotBooru user profile failed (${resp.status})${body ? `: ${body}` : ''}`);
+        }
+        return normalizeBotbooruUser(await resp.json());
+    }
+
     const resp = await bbProxyFetch(`/api/users/${userId}`, params);
     return normalizeBotbooruUser(await resp.json());
 }
@@ -268,6 +291,7 @@ export async function fetchBotbooruUserUploads(id, {
     limit = 48,
     offset = 0,
     sort = 'latest',
+    auth = false,
 } = {}) {
     const userId = Number.parseInt(id, 10);
     if (!userId) return { total: 0, user: null, posts: [] };
@@ -276,6 +300,7 @@ export async function fetchBotbooruUserUploads(id, {
         uploadLimit: limit,
         uploadOffset: offset,
         uploadSort: sort,
+        auth,
     });
     const rawUploads = Array.isArray(user?.uploads) ? user.uploads : [];
 
@@ -439,6 +464,24 @@ export async function unfollowBotbooruTag(entryId) {
         throw new Error(`BotBooru unfollow tag failed (${resp.status})${body ? `: ${body}` : ''}`);
     }
     return true;
+}
+
+export async function fetchBotbooruFollowState(id) {
+    return await fetchBotbooruUserProfile(id, { auth: true });
+}
+
+export async function setBotbooruFollowState(id, shouldFollow) {
+    const userId = Number.parseInt(id, 10);
+    if (!userId) throw new Error('Invalid BotBooru user id');
+
+    const apiRequest = requireApiRequest();
+    const method = shouldFollow ? 'POST' : 'DELETE';
+    const resp = await apiRequest(`${CL_HELPER_PLUGIN_BASE}/bb-users/${userId}/follow`, method);
+    if (!resp.ok) {
+        const body = await readBodySnippet(resp);
+        throw new Error(`BotBooru follow toggle failed (${resp.status})${body ? `: ${body}` : ''}`);
+    }
+    return normalizeBotbooruUser(await resp.json());
 }
 
 function toBooleanFlag(value) {

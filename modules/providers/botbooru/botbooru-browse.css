@@ -12,6 +12,48 @@
     pointer-events: none;
 }
 
+.botbooru-favorite-btn-inline {
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 8px;
+    transition: all 0.2s ease;
+}
+
+.botbooru-favorite-btn-inline:hover {
+    background: rgba(255, 100, 100, 0.15);
+}
+
+.botbooru-favorite-btn-inline i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.botbooru-favorite-btn-inline:hover i {
+    transform: scale(1.15);
+}
+
+.botbooru-favorite-btn-inline.favorited {
+    background: rgba(255, 100, 100, 0.1);
+}
+
+#botbooruFollowCreatorBtn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#botbooruFollowCreatorBtn.following {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+#botbooruFollowCreatorBtn:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
 .botbooru-card .browse-card-image img {
     object-position: center 20%;
 }
