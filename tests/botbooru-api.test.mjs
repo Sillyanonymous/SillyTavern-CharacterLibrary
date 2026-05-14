@@ -243,12 +243,33 @@ test('BotBooru preview sections use rich text rendering for entities and spacing
 test('BotBooru avatar viewer opens the full image with preview fallback', async () => {
     globalThis.window = globalThis.window || {};
     const { BrowseView } = await import('../modules/providers/browse-view.js');
-    const { openBotbooruAvatarViewer } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=avatar-viewer-${Date.now()}`);
+    const {
+        getBotbooruAvatarViewerSources,
+        openBotbooruAvatarViewer,
+    } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=avatar-viewer-${Date.now()}`);
     const originalOpenAvatarViewer = BrowseView.openAvatarViewer;
     const calls = [];
 
     try {
         BrowseView.openAvatarViewer = (...args) => calls.push(args);
+
+        assert.deepEqual(
+            getBotbooruAvatarViewerSources({
+                image_url: 'https://botbooru.test/images/full.png',
+                avatar_url: 'https://botbooru.test/images/preview.png',
+            }),
+            {
+                fullSrc: 'https://botbooru.test/images/full.png',
+                previewSrc: 'https://botbooru.test/images/preview.png',
+            },
+        );
+        assert.deepEqual(
+            getBotbooruAvatarViewerSources(null, 'https://botbooru.test/images/fallback.png'),
+            {
+                fullSrc: 'https://botbooru.test/images/fallback.png',
+                previewSrc: 'https://botbooru.test/images/fallback.png',
+            },
+        );
 
         openBotbooruAvatarViewer({
             image_url: 'https://botbooru.test/images/full.png',
@@ -301,7 +322,16 @@ test('BotBooru preview cleanup clears transient modal content', async () => {
     let viewerClosed = false;
 
     const tracked = [{ dataset: { fullContent: 'hello' } }, { dataset: { fullContent: 'world' } }];
+    const avatar = {
+        src: 'https://botbooru.test/images/full.png',
+        title: 'Click to view full image',
+        dataset: {
+            fullSrc: 'https://botbooru.test/images/full.png',
+            previewSrc: 'https://botbooru.test/images/preview.png',
+        },
+    };
     const sections = {
+        botbooruCharAvatar: avatar,
         botbooruCharAltGreetings: { innerHTML: 'greetings' },
         botbooruCharCreatorNotes: { innerHTML: 'notes' },
         botbooruCharDescription: { innerHTML: 'description' },
@@ -332,7 +362,19 @@ test('BotBooru preview cleanup clears transient modal content', async () => {
         assert.equal(viewerClosed, true);
         assert.equal(globalThis.window.currentBrowseAltGreetings, null);
         assert.deepEqual(tracked.map(entry => 'fullContent' in entry.dataset), [false, false]);
-        assert.deepEqual(Object.values(sections).map(section => section.innerHTML), ['', '', '', '', '', '', '']);
+        assert.equal(avatar.src, '/img/ai4.png');
+        assert.equal(avatar.title, '');
+        assert.equal('fullSrc' in avatar.dataset, false);
+        assert.equal('previewSrc' in avatar.dataset, false);
+        assert.deepEqual([
+            sections.botbooruCharAltGreetings.innerHTML,
+            sections.botbooruCharCreatorNotes.innerHTML,
+            sections.botbooruCharDescription.innerHTML,
+            sections.botbooruCharPersonality.innerHTML,
+            sections.botbooruCharScenario.innerHTML,
+            sections.botbooruCharExamples.innerHTML,
+            sections.botbooruCharFirstMsg.innerHTML,
+        ], ['', '', '', '', '', '', '']);
     } finally {
         BrowseView.closeAvatarViewer = originalCloseAvatarViewer;
         globalThis.document = originalDocument;

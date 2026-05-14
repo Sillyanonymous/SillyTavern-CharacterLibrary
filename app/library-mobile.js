@@ -1688,6 +1688,10 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 if (target.src.endsWith('/img/ai4.png')) return;
                 e.stopPropagation();
                 openAvatarViewer(target.src);
+            } else if (target.id === 'botbooruCharAvatar') {
+                if (target.src.endsWith('/img/ai4.png')) return;
+                e.stopPropagation();
+                openAvatarViewer(target.dataset.fullSrc || target.src, target.dataset.previewSrc || target.src);
             } else if (target.id === 'wyvernCharAvatar') {
                 if (target.src.endsWith('/img/ai4.png')) return;
                 e.stopPropagation();

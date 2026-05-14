@@ -486,6 +486,14 @@ export function cleanupBotbooruCharModal() {
     const altGreetingsCount = document.getElementById('botbooruCharAltGreetingsCount');
     if (altGreetingsCount) altGreetingsCount.textContent = '';
 
+    const avatarEl = document.getElementById('botbooruCharAvatar');
+    if (avatarEl) {
+        avatarEl.src = '/img/ai4.png';
+        avatarEl.title = '';
+        delete avatarEl.dataset.fullSrc;
+        delete avatarEl.dataset.previewSrc;
+    }
+
     botbooruSelectedChar = null;
 }
 
@@ -643,12 +651,22 @@ function renderPreviewSections(char) {
 }
 
 export function openBotbooruAvatarViewer(char, fallbackSrc = null) {
+    const sources = getBotbooruAvatarViewerSources(char, fallbackSrc);
+    if (!sources) return false;
+
+    BrowseView.openAvatarViewer(sources.fullSrc, sources.previewSrc || undefined);
+    return true;
+}
+
+export function getBotbooruAvatarViewerSources(char, fallbackSrc = null) {
     const fullSrc = char?.image_url || char?.avatar_url || fallbackSrc || '';
     const previewSrc = fallbackSrc || char?.avatar_url || char?.image_url || '';
-    if (!fullSrc) return false;
+    if (!fullSrc) return null;
 
-    BrowseView.openAvatarViewer(fullSrc, previewSrc || undefined);
-    return true;
+    return {
+        fullSrc,
+        previewSrc: previewSrc || fullSrc,
+    };
 }
 
 function applyCardPreviewData(char, card) {
@@ -705,9 +723,17 @@ async function openBotbooruCharPreview(char) {
     if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
     if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
     if (avatarEl) {
-        avatarEl.src = char.image_url || char.avatar_url || '/img/ai4.png';
+        const viewerSources = getBotbooruAvatarViewerSources(char);
+        avatarEl.src = viewerSources?.fullSrc || '/img/ai4.png';
         avatarEl.onerror = () => { avatarEl.src = '/img/ai4.png'; };
-        avatarEl.title = (char.image_url || char.avatar_url) ? 'Click to view full image' : '';
+        if (viewerSources) {
+            avatarEl.dataset.fullSrc = viewerSources.fullSrc;
+            avatarEl.dataset.previewSrc = viewerSources.previewSrc;
+        } else {
+            delete avatarEl.dataset.fullSrc;
+            delete avatarEl.dataset.previewSrc;
+        }
+        avatarEl.title = viewerSources ? 'Click to view full image' : '';
         BrowseView.adjustPortraitPosition(avatarEl);
     }
     if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
