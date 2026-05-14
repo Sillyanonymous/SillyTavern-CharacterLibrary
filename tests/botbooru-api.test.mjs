@@ -269,6 +269,52 @@ test('BotBooru preview section headings are expandable', async () => {
     assert.match(html, /data-section="botbooruCharFirstMsg"/);
 });
 
+test('BotBooru preview modal exposes a clickable creator link', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView, configureBotbooruPreviewCreatorLink } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-creator-link-${Date.now()}`);
+
+    const html = browseView.renderModals();
+    assert.match(html, /id="botbooruCharCreator" href="#"/);
+
+    const creatorEl = {
+        textContent: '',
+        href: '',
+        title: '',
+        onclick: null,
+        removeAttribute(name) {
+            if (name === 'href') this.href = '';
+        },
+    };
+
+    let selectedCreator = null;
+    configureBotbooruPreviewCreatorLink(creatorEl, {
+        creator: 'Apxangel12',
+        creator_id: 42,
+    }, (creatorId, creatorName) => {
+        selectedCreator = { creatorId, creatorName };
+    });
+
+    assert.equal(creatorEl.textContent, 'Apxangel12');
+    assert.equal(creatorEl.href, '#');
+    assert.equal(creatorEl.title, 'Click to see all characters by Apxangel12');
+    assert.equal(typeof creatorEl.onclick, 'function');
+
+    let prevented = false;
+    let stopped = false;
+    creatorEl.onclick({
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    assert.deepEqual(selectedCreator, {
+        creatorId: 42,
+        creatorName: 'Apxangel12',
+    });
+});
+
 test('BotBooru preview sections use rich text rendering for entities and spacing', async () => {
     globalThis.window = globalThis.window || {};
     const originalFormatRichText = globalThis.window.formatRichText;

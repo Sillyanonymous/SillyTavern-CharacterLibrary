@@ -543,6 +543,14 @@ export function cleanupBotbooruCharModal() {
         delete avatarEl.dataset.previewSrc;
     }
 
+    const creatorEl = document.getElementById('botbooruCharCreator');
+    if (creatorEl) {
+        creatorEl.textContent = 'Unknown';
+        creatorEl.removeAttribute?.('href');
+        creatorEl.title = '';
+        creatorEl.onclick = null;
+    }
+
     botbooruSelectedChar = null;
 }
 
@@ -711,6 +719,30 @@ export function getBotbooruPreviewAvatarDisplaySrc(char, fallbackSrc = null) {
     return char?.avatar_url || char?.image_url || fallbackSrc || '';
 }
 
+export function configureBotbooruPreviewCreatorLink(creatorEl, char, onSelectCreator = null) {
+    if (!creatorEl) return;
+
+    const creatorName = String(char?.creator || '').trim() || 'Unknown';
+    const creatorId = char?.creator_id ?? char?.uploader_id ?? null;
+
+    creatorEl.textContent = creatorName;
+    creatorEl.onclick = null;
+
+    if (!creatorId) {
+        creatorEl.removeAttribute?.('href');
+        creatorEl.title = '';
+        return;
+    }
+
+    creatorEl.href = '#';
+    creatorEl.title = `Click to see all characters by ${creatorName}`;
+    creatorEl.onclick = (e) => {
+        e?.preventDefault?.();
+        e?.stopPropagation?.();
+        onSelectCreator?.(creatorId, creatorName);
+    };
+}
+
 export function getBotbooruAvatarViewerSources(char, fallbackSrc = null) {
     const fullSrc = char?.image_url || char?.avatar_url || fallbackSrc || '';
     const previewSrc = fallbackSrc || char?.avatar_url || char?.image_url || '';
@@ -798,7 +830,11 @@ async function openBotbooruCharPreview(char) {
     const tagsEl = document.getElementById('botbooruCharTags');
 
     if (nameEl) nameEl.textContent = char.name || `BotBooru ${id}`;
-    if (creatorEl) creatorEl.textContent = char.creator || 'Unknown';
+    configureBotbooruPreviewCreatorLink(creatorEl, char, (creatorId, creatorName) => {
+        closePreviewModal();
+        setBotbooruCreatorFilter(creatorId, creatorName);
+        loadBotbooruCharacters({ reset: true });
+    });
     applyBotbooruPreviewAvatar(avatarEl, char);
     if (openBtn) openBtn.href = char.page_url || getBotbooruPostUrl(id);
     if (tagsEl) {
@@ -1426,7 +1462,7 @@ class BotbooruBrowseView extends BrowseView {
                     <img id="botbooruCharAvatar" src="/img/ai4.png" alt="" class="browse-char-avatar">
                     <div>
                         <h2 id="botbooruCharName">Character Name</h2>
-                        <p class="browse-char-meta">by <span id="botbooruCharCreator">Unknown</span></p>
+                        <p class="browse-char-meta">by <a id="botbooruCharCreator" href="#" title="Click to see all characters by this author">Unknown</a></p>
                     </div>
                 </div>
                 <div class="modal-controls">
