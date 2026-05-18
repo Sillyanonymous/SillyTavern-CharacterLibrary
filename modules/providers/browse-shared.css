@@ -157,7 +157,8 @@
 .chub-view-btn,
 .pyg-view-btn,
 .wyvern-view-btn,
-.datacat-view-btn {
+.datacat-view-btn,
+.botbooru-view-btn {
     padding: 8px 14px;
     background: transparent;
     border: none;
@@ -176,7 +177,8 @@
 .chub-view-btn:hover,
 .pyg-view-btn:hover,
 .wyvern-view-btn:hover,
-.datacat-view-btn:hover {
+.datacat-view-btn:hover,
+.botbooru-view-btn:hover {
     color: var(--text-primary);
     background: rgba(255, 255, 255, 0.05);
 }
@@ -184,7 +186,8 @@
 .chub-view-btn.active,
 .pyg-view-btn.active,
 .wyvern-view-btn.active,
-.datacat-view-btn.active {
+.datacat-view-btn.active,
+.botbooru-view-btn.active {
     background: var(--accent);
     color: var(--accent-text);
     box-shadow: 0 2px 8px var(--accent-glow);
@@ -193,7 +196,8 @@
 .chub-view-btn i,
 .pyg-view-btn i,
 .wyvern-view-btn i,
-.datacat-view-btn i {
+.datacat-view-btn i,
+.botbooru-view-btn i {
     font-size: var(--font-sm);
 }
 
@@ -2214,7 +2218,8 @@ body.collapse-all-browse-sections
     .filter-area.online-filters .chub-view-btn,
     .filter-area.online-filters .pyg-view-btn,
     .filter-area.online-filters .wyvern-view-btn,
-    .filter-area.online-filters .datacat-view-btn {
+    .filter-area.online-filters .datacat-view-btn,
+    .filter-area.online-filters .botbooru-view-btn {
         font-size: var(--font-2xs);
         padding: 4px 7px;
     }

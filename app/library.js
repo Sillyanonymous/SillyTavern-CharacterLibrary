@@ -172,14 +172,17 @@ function initCustomSelect(select) {
         menu.innerHTML = '';
         for (const child of select.children) {
             if (child.tagName === 'OPTGROUP') {
+                const visibleOptions = Array.from(child.children).filter(opt => !opt.hidden);
+                if (visibleOptions.length === 0) continue;
                 const title = document.createElement('div');
                 title.className = 'dropdown-section-title';
                 title.textContent = child.label;
                 menu.appendChild(title);
-                for (const opt of child.children) {
+                for (const opt of visibleOptions) {
                     menu.appendChild(createItem(opt));
                 }
             } else if (child.tagName === 'OPTION') {
+                if (child.hidden) continue;
                 menu.appendChild(createItem(child));
             }
         }
@@ -457,12 +460,14 @@ const DEFAULT_SETTINGS = {
     datacatReextractOnUpdate: false,
     datacatFlareSolverrUrl: '',
     ctCookie: null,
+    botbooruToken: null,
     civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
     pygmalionNsfw: false,
     wyvernNsfw: false,
     ctNsfw: false,
+    botbooruNsfw: true,
 
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
@@ -1032,6 +1037,12 @@ function setupSettingsModal() {
     const datacatPluginBanner = document.getElementById('datacatPluginBanner');
     const datacatSettingsFields = document.getElementById('datacatSettingsFields');
     const datacatSessionStatus = document.getElementById('datacatSessionStatus');
+    const botbooruTokenInput = document.getElementById('settingsBotbooruToken');
+    const toggleBotbooruTokenVisibility = document.getElementById('toggleBotbooruTokenVisibility');
+    const botbooruPluginBanner = document.getElementById('botbooruPluginBanner');
+    const botbooruSettingsFields = document.getElementById('botbooruSettingsFields');
+    const botbooruSessionStatus = document.getElementById('botbooruSessionStatus');
+    const botbooruNsfwDefaultCheckbox = document.getElementById('settingsBotbooruNsfw');
     const minScoreSlider = document.getElementById('settingsMinScore');
     const minScoreValue = document.getElementById('minScoreValue');
     
@@ -1508,6 +1519,7 @@ function setupSettingsModal() {
         { id: 'chartavern', inputId: 'ctExcludeTagsInput', pillsId: 'ctExcludeTagsPills' },
         { id: 'wyvern', inputId: 'wyvernExcludeTagsInput', pillsId: 'wyvernExcludeTagsPills' },
         { id: 'datacat', inputId: 'datacatExcludeTagsInput', pillsId: 'datacatExcludeTagsPills' },
+        { id: 'botbooru', inputId: 'botbooruExcludeTagsInput', pillsId: 'botbooruExcludeTagsPills' },
     ];
 
     function renderExcludeTagPills(providerId, pillsId) {
@@ -1573,6 +1585,8 @@ function setupSettingsModal() {
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
+        if (botbooruTokenInput) botbooruTokenInput.value = getSetting('botbooruToken') || '';
+        if (botbooruNsfwDefaultCheckbox) botbooruNsfwDefaultCheckbox.checked = getSetting('botbooruNsfw') !== false;
         const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
         if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
         const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
@@ -1672,6 +1686,7 @@ function setupSettingsModal() {
             pygmalionPluginBanner, pygmalionSettingsFields,
             ctPluginBanner, ctSettingsFields,
             datacatPluginBanner, datacatSettingsFields,
+            botbooruPluginBanner, botbooruSettingsFields,
         ).then(available => {
             if (datacatSessionStatus) {
                 if (!available) {
@@ -1681,6 +1696,18 @@ function setupSettingsModal() {
                     datacatSessionStatus.className = 'settings-status-badge inactive';
                     datacatSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Checking...';
                     updateDatacatSessionStatus();
+                }
+            }
+            if (botbooruSessionStatus) {
+                if (!available) {
+                    botbooruSessionStatus.className = 'settings-status-badge inactive';
+                    botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Plugin missing';
+                } else if (!window.botbooruValidateSession) {
+                    botbooruSessionStatus.className = 'settings-status-badge inactive';
+                    botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Module not loaded';
+                } else {
+                    botbooruSessionStatus.className = 'settings-status-badge inactive';
+                    botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Public browse active';
                 }
             }
         });
@@ -1951,6 +1978,14 @@ function setupSettingsModal() {
             toggleDatacatTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
         };
     }
+
+    if (toggleBotbooruTokenVisibility && botbooruTokenInput) {
+        toggleBotbooruTokenVisibility.onclick = () => {
+            const isPassword = botbooruTokenInput.type === 'password';
+            botbooruTokenInput.type = isPassword ? 'text' : 'password';
+            toggleBotbooruTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
     
     // Slider value display
     const formatMinScore = (val) => parseInt(val) >= 120 ? 'Exact' : val;
@@ -2051,6 +2086,7 @@ function setupSettingsModal() {
 
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
+        const botbooruTokenValue = botbooruTokenInput ? (botbooruTokenInput.value?.trim() || null) : null;
         
         setSettings({
             chubToken: chubTokenInput.value || null,
@@ -2059,6 +2095,8 @@ function setupSettingsModal() {
             pygmalionPassword: pygmalionPasswordInput ? (pygmalionPasswordInput.value || null) : null,
             pygmalionRememberCredentials: pygmalionRememberCredsCheckbox ? pygmalionRememberCredsCheckbox.checked : false,
             ctCookie: ctCookieInput ? (ctCookieInput.value?.trim() || null) : null,
+            botbooruToken: botbooruTokenValue,
+            botbooruNsfw: botbooruNsfwDefaultCheckbox ? botbooruNsfwDefaultCheckbox.checked : true,
             wyvernEmail: wyvernEmailInput ? (wyvernEmailInput.value || null) : null,
             wyvernPassword: wyvernPasswordInput ? (wyvernPasswordInput.value || null) : null,
             wyvernRememberCredentials: wyvernRememberCredsCheckbox ? wyvernRememberCredsCheckbox.checked : false,
@@ -2110,6 +2148,10 @@ function setupSettingsModal() {
             ...readProviderOrderFromUI(),
             infiniteScroll: readInfiniteScrollFromUI(),
         });
+        if (!botbooruTokenValue) {
+            Promise.resolve(window.botbooruClearSession?.())
+                .catch(err => debugLog('[BotBooru] Clear helper token failed:', err.message));
+        }
         
         // If unique gallery folders was just enabled, register overrides for all characters with gallery_ids
         const uniqueFoldersEnabled = uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false;
@@ -2314,6 +2356,7 @@ function setupSettingsModal() {
             wyvernRefreshToken: preserveWyv ? getSetting('wyvernRefreshToken') : null,
             wyvernUid: preserveWyv ? getSetting('wyvernUid') : null,
             datacatToken: getSetting('datacatToken') || null,
+            botbooruToken: getSetting('botbooruToken') || null,
             ctCookie: getSetting('ctCookie') || null,
         });
         
@@ -2485,6 +2528,72 @@ function setupSettingsModal() {
                     validateWyvernBtn.classList.remove('success', 'error');
                     validateWyvernBtn.innerHTML = originalHtml;
                 }, 3000);
+            }
+        };
+    }
+
+    // BotBooru token management
+    const validateBotbooruBtn = document.getElementById('validateBotbooruBtn');
+    if (validateBotbooruBtn && botbooruTokenInput) {
+        validateBotbooruBtn.onclick = async (e) => {
+            e.preventDefault();
+            validateBotbooruBtn.classList.remove('success', 'error');
+            const originalHtml = '<i class="fa-solid fa-check"></i>';
+            validateBotbooruBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateBotbooruBtn.disabled = true;
+            try {
+                if (!window.botbooruValidateSession) throw new Error('BotBooru module not ready');
+                const token = botbooruTokenInput.value?.trim();
+                if (!token) {
+                    await window.botbooruClearSession?.();
+                    showToast('BotBooru browsing works without a token. Paste a token only for favorites.', 'info');
+                    validateBotbooruBtn.classList.add('success');
+                    if (botbooruSessionStatus) {
+                        botbooruSessionStatus.className = 'settings-status-badge inactive';
+                        botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Public browse active';
+                    }
+                } else {
+                    const result = await window.botbooruValidateSession(token);
+                    if (!result.valid) throw new Error(result.reason || 'Invalid token');
+                    showToast('BotBooru token valid', 'success');
+                    validateBotbooruBtn.classList.add('success');
+                    if (botbooruSessionStatus) {
+                        botbooruSessionStatus.className = 'settings-status-badge active';
+                        botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Authenticated';
+                    }
+                }
+            } catch (err) {
+                showToast(`BotBooru validation failed: ${err.message}`, 'error');
+                validateBotbooruBtn.classList.add('error');
+                validateBotbooruBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+            } finally {
+                validateBotbooruBtn.disabled = false;
+                if (validateBotbooruBtn.classList.contains('success')) {
+                    validateBotbooruBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                }
+                setTimeout(() => {
+                    validateBotbooruBtn.classList.remove('success', 'error');
+                    validateBotbooruBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
+    const clearBotbooruTokenBtn = document.getElementById('clearBotbooruTokenBtn');
+    if (clearBotbooruTokenBtn && botbooruTokenInput) {
+        clearBotbooruTokenBtn.onclick = async (e) => {
+            e.preventDefault();
+            try {
+                botbooruTokenInput.value = '';
+                setSetting('botbooruToken', null);
+                await window.botbooruClearSession?.();
+                if (botbooruSessionStatus) {
+                    botbooruSessionStatus.className = 'settings-status-badge inactive';
+                    botbooruSessionStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Public browse active';
+                }
+                showToast('BotBooru token cleared', 'success');
+            } catch (err) {
+                showToast(`BotBooru clear failed: ${err.message}`, 'error');
             }
         };
     }
@@ -8803,7 +8912,7 @@ async function showLegacyFolderModal(char) {
                         <strong style="color: var(--text-primary);">Images in Old Folder Format</strong>
                     </div>
                     <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
+                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.legacyFolder)}</code>.
                         Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.currentFolder)}</code>.
                     </p>
                 </div>
@@ -13191,6 +13300,7 @@ const ADV_FILTER_PROVIDERS = [
     { value: 'pygmalion', label: 'Pygmalion' },
     { value: 'wyvern', label: 'Wyvern' },
     { value: 'datacat', label: 'DataCat' },
+    { value: 'botbooru', label: 'BotBooru' },
 ];
 
 // ========== FILTER PRESETS ==========
@@ -13727,7 +13837,7 @@ function performSearch() {
     //   "creator:john linked:yes dark elf"
     // ========================================================================
     
-    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern|datacat|dc|playlist):(?:[^\s]+))/gi;
+    const prefixPattern = /(?:^|\s)((?:creator|version|gallery|uid|favorite|fav|linked|chub|janny|charactertavern|ct|pygmalion|wyvern|datacat|dc|botbooru|bb|playlist):(?:[^\s]+))/gi;
     
     let creatorFilter = null;
     let versionFilter = null;
@@ -13764,7 +13874,7 @@ function performSearch() {
             favoriteFilter = value;
             filterFavoriteYes = value === 'yes' || value === 'true';
             filterFavoriteNo = value === 'no' || value === 'false';
-        } else if (['linked', 'chub', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern', 'datacat', 'dc'].includes(prefix)) {
+        } else if (['linked', 'chub', 'janny', 'charactertavern', 'ct', 'pygmalion', 'wyvern', 'datacat', 'dc', 'botbooru', 'bb'].includes(prefix)) {
             linkFilterPrefix = prefix;
             linkFilterWantLinked = value === 'yes' || value === 'true' || value === 'linked';
         } else if (prefix === 'playlist') {
@@ -13826,6 +13936,7 @@ function performSearch() {
                     : linkFilterPrefix === 'pygmalion' ? 'pygmalion'
                     : linkFilterPrefix === 'wyvern' ? 'wyvern'
                     : (linkFilterPrefix === 'datacat' || linkFilterPrefix === 'dc') ? 'datacat'
+                    : (linkFilterPrefix === 'botbooru' || linkFilterPrefix === 'bb') ? 'botbooru'
                     : null;
                 const prov = provId ? window.ProviderRegistry?.getProvider(provId) : null;
                 isLinked = prov ? !!prov.getLinkInfo(c) : false;
@@ -14854,7 +14965,7 @@ function getCharacterBookFromEditor() {
 // Utility Functions
 // ==============================================
 
-const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat'];
+const PROVIDER_EXT_KEYS = ['chub', 'jannyai', 'pygmalion', 'wyvern', 'chartavern', 'datacat', 'botbooru'];
 
 function getListingNameFromExtensions(char) {
     const ext = char?.data?.extensions;

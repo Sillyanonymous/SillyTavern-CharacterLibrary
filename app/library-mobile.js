@@ -814,6 +814,16 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             return window.ProviderRegistry?.getActiveMobileFilterIds?.();
         }
 
+        function syncModeLabels() {
+            const ids = getIds();
+            const browseIcon = ids?.modeBrowseIcon || 'fa-solid fa-compass';
+            const followIcon = ids?.modeFollowIcon || 'fa-solid fa-users';
+            const browseLabel = ids?.modeBrowseLabel || 'Browse';
+            const followLabel = ids?.modeFollowLabel || 'Following';
+            browseChip.innerHTML = `<i class="${browseIcon}"></i> ${browseLabel}`;
+            followChip.innerHTML = `<i class="${followIcon}"></i> ${followLabel}`;
+        }
+
         function syncMode() {
             const ids = getIds();
             if (!ids?.modeBrowseSelector) return;
@@ -1124,6 +1134,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 }
 
                 if (hasModeToggle) {
+                    syncModeLabels();
                     const realBrowseSort = ids?.sort ? document.getElementById(ids.sort) : null;
                     if (realBrowseSort) {
                         // Always re-copy options - some providers (e.g. DataCat) rebuild
@@ -1677,6 +1688,10 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 if (target.src.endsWith('/img/ai4.png')) return;
                 e.stopPropagation();
                 openAvatarViewer(target.src);
+            } else if (target.id === 'botbooruCharAvatar') {
+                if (target.src.endsWith('/img/ai4.png')) return;
+                e.stopPropagation();
+                openAvatarViewer(target.dataset.fullSrc || target.src, target.dataset.previewSrc || target.src);
             } else if (target.id === 'wyvernCharAvatar') {
                 if (target.src.endsWith('/img/ai4.png')) return;
                 e.stopPropagation();

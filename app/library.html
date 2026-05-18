@@ -788,7 +788,7 @@
                         <div class="provider-link-divider"><span>or paste URL</span></div>
                         
                         <div class="provider-link-url-row">
-                            <input type="text" id="providerLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern...)" autocomplete="one-time-code">
+                            <input type="text" id="providerLinkUrlInput" class="glass-input" placeholder="Paste character URL (ChubAI, JanitorAI, CharacterTavern, BotBooru...)" autocomplete="one-time-code">
                             <button id="providerLinkUrlBtn" class="provider-link-btn primary compact">
                                 <i class="fa-solid fa-link"></i>
                             </button>
@@ -1182,7 +1182,7 @@ https://jannyai.com/characters/uuid_slug
                             <ul>
                                 <li><strong>Characters</strong>: Your local library. Browse, search, filter, and manage all your character cards</li>
                                 <li><strong>Chats</strong>: Chat history browser. View all chat logs across characters, search by content, and see which AI model was used</li>
-                                <li><strong>Online</strong>: Browse and import characters from online providers (ChubAI, JanitorAI, CharacterTavern, Pygmalion, Wyvern)</li>
+                                <li><strong>Online</strong>: Browse and import characters from online providers (ChubAI, JanitorAI, CharacterTavern, Pygmalion, Wyvern, BotBooru)</li>
                             </ul>
                             <p>On mobile, swipe left/right on the main screen to switch between views.</p>
                         </div>
@@ -1283,6 +1283,10 @@ https://jannyai.com/characters/uuid_slug
                                     <span>Filter by DataCat link status</span>
                                 </div>
                                 <div class="info-code-item">
+                                    <code>bb:yes</code> / <code>botbooru:no</code>
+                                    <span>Filter by BotBooru link status</span>
+                                </div>
+                                <div class="info-code-item">
                                     <code>favorite:yes</code> / <code>fav:no</code>
                                     <span>Filter by favorite status</span>
                                 </div>
@@ -1350,6 +1354,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>CharacterTavern</strong>: Card linking and updates</li>
                                 <li><strong>Pygmalion</strong>: Card linking, updates, and gallery downloads</li>
                                 <li><strong>Wyvern</strong>: Card linking, updates, and gallery downloads</li>
+                                <li><strong>BotBooru</strong>: Public card browsing, imports, update checks, and optional favorites</li>
                             </ul>
                             <p></p>
                             <p><strong>How to link:</strong></p>
@@ -2159,6 +2164,70 @@ https://jannyai.com/characters/uuid_slug
                                             <input type="text" class="glass-input provider-exclude-tags-input" id="chubExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
                                         </div>
                                         <span class="settings-hint">Tags entered here are always excluded from ChubAI browse results.</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- BotBooru provider settings -->
+                        <details class="settings-provider-section" id="settingsBotbooruSection">
+                            <summary>
+                                <i class="fa-solid fa-robot provider-icon"></i> BotBooru
+                                <i class="fa-solid fa-chevron-right provider-chevron"></i>
+                            </summary>
+                            <div class="settings-provider-body">
+                                <div class="cl-helper-banner cl-hidden" id="botbooruPluginBanner">
+                                    <i class="fa-solid fa-puzzle-piece"></i>
+                                    <div>
+                                        <strong>cl-helper plugin required</strong>
+                                        <span>BotBooru browsing and downloads are public, but browser CORS requires the cl-helper server plugin to proxy requests.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group" id="botbooruSettingsFields">
+                                    <div class="settings-group-title"><i class="fa-solid fa-key"></i> Account Features</div>
+                                    <div class="settings-row">
+                                        <label>Status:</label>
+                                        <div class="settings-input-group">
+                                            <span id="botbooruSessionStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Public browse active</span>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label for="settingsBotbooruToken">Bearer Token:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsBotbooruToken" placeholder="Optional: paste BotBooru token for favorites" autocomplete="off" data-sensitive="true">
+                                            <button id="toggleBotbooruTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                            <button id="validateBotbooruBtn" class="settings-verify-btn" title="Validate Token">
+                                                <i class="fa-solid fa-check"></i>
+                                            </button>
+                                        </div>
+                                        <span class="settings-hint">Token is optional. It unlocks My Favorites and favorite/unfavorite actions only. After logging in on BotBooru, copy the bearer token from browser storage.</span>
+                                    </div>
+                                    <div class="settings-row" style="gap: 8px;">
+                                        <button id="clearBotbooruTokenBtn" class="settings-action-btn danger">
+                                            <i class="fa-solid fa-trash-can"></i> Clear Token
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-eye"></i> Browse Defaults</div>
+                                    <div class="settings-row">
+                                        <label class="settings-checkbox-label">
+                                            <input type="checkbox" id="settingsBotbooruNsfw" checked>
+                                            <span>Show NSFW by default</span>
+                                        </label>
+                                        <span class="settings-hint">When enabled, BotBooru uses sfw_only=false. Users can toggle this in the Online browse bar.</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                    <div class="settings-row">
+                                        <div class="provider-exclude-tags-container">
+                                            <div class="provider-exclude-tags-pills" id="botbooruExcludeTagsPills"></div>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="botbooruExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
+                                        </div>
+                                        <span class="settings-hint">Tags entered here are always excluded from BotBooru browse results.</span>
                                     </div>
                                 </div>
                             </div>

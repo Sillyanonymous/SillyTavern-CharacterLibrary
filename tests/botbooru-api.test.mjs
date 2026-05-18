@@ -1,0 +1,639 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import test from 'node:test';
+
+import {
+    fetchBotbooruFavorites,
+    fetchBotbooruPosts,
+    fetchBotbooruFollowState,
+    fetchBotbooruFollowedTags,
+    fetchBotbooruUserProfile,
+    fetchBotbooruUserUploads,
+    followBotbooruTag,
+    setBotbooruFollowState,
+    normalizeBotbooruPost,
+    parseBotbooruTagInput,
+    setApiRequest,
+    unfollowBotbooruTag,
+} from '../modules/providers/botbooru/botbooru-api.js';
+
+test('fetchBotbooruFavorites accepts BotBooru profile favorites arrays', async () => {
+    setApiRequest(async (path) => {
+        assert.match(path, /\/bb-favorites\?/);
+        return new Response(JSON.stringify([
+            {
+                id: 123,
+                character_name: 'Shelby',
+                uploader_name: 'DJLegnds',
+                filename: 'shelby.png',
+                favorites: 148,
+                views: 200,
+                downloads: 10,
+                tags: [{ name: 'nsfw' }],
+            },
+            {
+                id: 456,
+                character_name: 'Elise',
+                uploader_name: 'Someone',
+                filename: 'elise.png',
+                favorite_count: 12,
+            },
+        ]), { status: 200 });
+    });
+
+    const result = await fetchBotbooruFavorites({ limit: 48, offset: 0 });
+
+    assert.equal(result.total, 2);
+    assert.equal(result.posts.length, 2);
+    assert.equal(result.posts[0].id, 123);
+    assert.equal(result.posts[0].name, 'Shelby');
+    assert.equal(result.posts[0].favorites, 148);
+    assert.equal(result.posts[0].rating, 'nsfw');
+    assert.equal(result.posts[1].name, 'Elise');
+});
+
+test('fetchBotbooruPosts can route Curated loads through the helper when auth is needed', async () => {
+    setApiRequest(async (path) => {
+        assert.equal(path, '/plugins/cl-helper/bb-posts?sort=curated&limit=48&offset=0&sfw_only=false');
+        return new Response(JSON.stringify({
+            total: 1,
+            posts: [
+                {
+                    id: 8211,
+                    character_name: 'Etie',
+                    uploader_name: 'PokeTrainerIce',
+                    filename: 'etie.png',
+                    favorite_count: 7,
+                },
+            ],
+        }), { status: 200 });
+    });
+
+    const result = await fetchBotbooruPosts({ sort: 'curated', auth: true });
+
+    assert.equal(result.total, 1);
+    assert.equal(result.posts[0].creator, 'PokeTrainerIce');
+    assert.equal(result.posts[0].favorites, 7);
+});
+
+test('normalizeBotbooruPost falls back to Writer tags when browse listings omit uploader_name', () => {
+    const post = normalizeBotbooruPost({
+        id: 5827,
+        filename: 'daphne.png',
+        character_name: 'Daphne',
+        uploader_id: 91,
+        favorite_count: 4,
+        tags: [
+            { id: 1, name: 'female', category: 'General' },
+            { id: 2, name: 'spaghettiman', category: 'Writer' },
+        ],
+    });
+
+    assert.equal(post.creator, 'spaghettiman');
+    assert.equal(post.creator_id, 91);
+    assert.equal(post.favorites, 4);
+    assert.equal(post.avatar_url, '/api/plugins/cl-helper/bb-proxy/images/preview/480/daphne.png');
+});
+
+test('parseBotbooruTagInput normalizes namespaced followed-tag input', () => {
+    assert.deepEqual(parseBotbooruTagInput('character:Jane Doe'), {
+        tag_name: 'jane_doe',
+        category: 'Characters',
+    });
+    assert.deepEqual(parseBotbooruTagInput('artist:cinnabus'), {
+        tag_name: 'cinnabus',
+        category: 'Artist',
+    });
+    assert.equal(parseBotbooruTagInput('x')?.error, 'Tag must be at least 2 characters.');
+});
+
+test('followed tag helpers use the BotBooru helper routes', async () => {
+    const calls = [];
+    setApiRequest(async (path, method = 'GET', body = null) => {
+        calls.push({ path, method, body });
+        if (path.includes('/bb-followed-tags/12')) {
+            return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        }
+        if (method === 'POST') {
+            return new Response(JSON.stringify({ id: 12, tag_name: body.tag_name, category: body.category }), { status: 200 });
+        }
+        return new Response(JSON.stringify([
+            { id: 12, tag_name: 'cinnabus', category: 'Artist' },
+        ]), { status: 200 });
+    });
+
+    const followed = await fetchBotbooruFollowedTags();
+    const added = await followBotbooruTag('artist:cinnabus');
+    const removed = await unfollowBotbooruTag(12);
+
+    assert.deepEqual(followed, [{ id: 12, tag_name: 'cinnabus', category: 'Artist' }]);
+    assert.equal(added.tag_name, 'cinnabus');
+    assert.equal(added.category, 'Artist');
+    assert.equal(removed, true);
+    assert.deepEqual(calls.map(c => [c.path, c.method]), [
+        ['/plugins/cl-helper/bb-followed-tags', 'GET'],
+        ['/plugins/cl-helper/bb-followed-tags', 'POST'],
+        ['/plugins/cl-helper/bb-followed-tags/12', 'DELETE'],
+    ]);
+});
+
+test('fetchBotbooruUserUploads uses the public user profile query for creator browsing', async () => {
+    setApiRequest(async (path) => {
+        assert.equal(path, '/plugins/cl-helper/bb-proxy/api/users/5386?upload_limit=2&upload_offset=0&upload_sort=latest');
+        return new Response(JSON.stringify({
+            id: 5386,
+            username: 'PokeTrainerIce',
+            avatar_url: '/avatars/a1c141607f044d94972625594e2bb52d.jpg',
+            uploads_list_total: 129,
+            uploads: [
+                {
+                    id: 8211,
+                    filename: 'b76b98b122194eaf97d417a296e45821.png',
+                    character_name: 'Etie',
+                    favorite_count: 0,
+                    tags: ['female', 'human', 'poketrainerice'],
+                },
+            ],
+        }), { status: 200 });
+    });
+
+    const result = await fetchBotbooruUserUploads(5386, { limit: 2, offset: 0, sort: 'latest' });
+
+    assert.equal(result.total, 129);
+    assert.equal(result.user.id, 5386);
+    assert.equal(result.user.name, 'PokeTrainerIce');
+    assert.equal(result.posts.length, 1);
+    assert.equal(result.posts[0].creator, 'PokeTrainerIce');
+    assert.equal(result.posts[0].creator_id, 5386);
+});
+
+test('BotBooru creator follow helpers use dedicated helper routes', async () => {
+    const calls = [];
+    setApiRequest(async (path, method = 'GET') => {
+        calls.push({ path, method });
+        if (method === 'DELETE') {
+            return new Response(JSON.stringify({
+                id: 5386,
+                username: 'PokeTrainerIce',
+                followers: 120,
+                following: 45,
+                is_following: false,
+            }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+            id: 5386,
+            username: 'PokeTrainerIce',
+            followers: method === 'POST' ? 121 : 120,
+            following: 45,
+            is_following: method !== 'GET' || true,
+        }), { status: 200 });
+    });
+
+    const profile = await fetchBotbooruUserProfile(5386, { auth: true });
+    const followState = await fetchBotbooruFollowState(5386);
+    const followed = await setBotbooruFollowState(5386, true);
+    const unfollowed = await setBotbooruFollowState(5386, false);
+
+    assert.equal(profile.id, 5386);
+    assert.equal(profile.username, 'PokeTrainerIce');
+    assert.equal(followState.is_following, true);
+    assert.equal(followed.is_following, true);
+    assert.equal(followed.followers, 121);
+    assert.equal(unfollowed.is_following, false);
+    assert.deepEqual(calls.map(call => [call.path, call.method]), [
+        ['/plugins/cl-helper/bb-users/5386', 'GET'],
+        ['/plugins/cl-helper/bb-users/5386', 'GET'],
+        ['/plugins/cl-helper/bb-users/5386/follow', 'POST'],
+        ['/plugins/cl-helper/bb-users/5386/follow', 'DELETE'],
+    ]);
+});
+
+test('BotBooru syncs saved token for personalized loads without gating Curated', async () => {
+    globalThis.window = globalThis.window || {};
+    const { shouldSyncBotbooruTokenForLoad } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sync-token-${Date.now()}`);
+
+    assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'latest'), false);
+    assert.equal(shouldSyncBotbooruTokenForLoad('browse', 'curated'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('curated', 'latest'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('curated', 'curated'), true);
+    assert.equal(shouldSyncBotbooruTokenForLoad('favorites', 'latest'), true);
+});
+
+test('BotBooru Curated mode keeps Curated visible in Sort By', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruSortSelectValue } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=sort-select-${Date.now()}`);
+
+    assert.equal(getBotbooruSortSelectValue('latest'), 'latest');
+    assert.equal(getBotbooruSortSelectValue('favorites'), 'favorites');
+    assert.equal(getBotbooruSortSelectValue('curated'), 'curated');
+    assert.equal(getBotbooruSortSelectValue(''), 'latest');
+});
+
+test('BotBooru NSFW toggle mirrors provider label states', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruNsfwToggleState } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=nsfw-toggle-${Date.now()}`);
+
+    assert.deepEqual(getBotbooruNsfwToggleState(true), {
+        active: true,
+        icon: 'fa-solid fa-fire',
+        label: 'NSFW On',
+        title: 'NSFW content enabled - click to show SFW only',
+    });
+    assert.deepEqual(getBotbooruNsfwToggleState(false), {
+        active: false,
+        icon: 'fa-solid fa-shield-halved',
+        label: 'SFW Only',
+        title: 'Showing SFW only - click to include NSFW',
+    });
+});
+
+test('BotBooru provider accepts BotBooru direct download URLs', async () => {
+    globalThis.window = globalThis.window || {};
+    const { default: provider } = await import(`../modules/providers/botbooru/botbooru-provider.js?case=download-url-${Date.now()}`);
+
+    for (const url of [
+        'https://botbooru.com/download/png/5477',
+        'https://botbooru.com/download/json/5477',
+        'botbooru.com/download/png/5477',
+    ]) {
+        assert.equal(provider.canHandleUrl(url), true, url);
+        assert.equal(provider.parseUrl(url), '5477', url);
+    }
+});
+
+test('BotBooru import prefers card data embedded in the direct PNG download', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    const pngBytes = new Uint8Array([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]).buffer;
+
+    try {
+        const { default: provider } = await import(`../modules/providers/botbooru/botbooru-provider.js?case=direct-png-import-${Date.now()}`);
+        provider.init({
+            apiRequest: async (path) => {
+                calls.push(path);
+                if (path.includes('/download/json/')) {
+                    throw new Error('JSON endpoint should not be needed when PNG card data is present');
+                }
+                return new Response(pngBytes, { status: 200 });
+            },
+            embedCharacterDataInPng: (pngBuffer) => pngBuffer,
+            extractCharacterDataFromPng: () => ({
+                spec: 'chara_card_v2',
+                spec_version: '2.0',
+                data: { name: 'Direct PNG Bot', extensions: {} },
+            }),
+            findCharacterMediaUrls: () => [],
+            getCSRFToken: () => 'csrf',
+            getSetting: () => false,
+        });
+        globalThis.fetch = async () => new Response(JSON.stringify({ file_name: 'direct_png_bot.png' }), { status: 200 });
+
+        const result = await provider.importCharacter(5477, { id: 5477, character_name: 'Listing Name' });
+
+        assert.equal(result.success, true);
+        assert.equal(result.characterName, 'Direct PNG Bot');
+        assert.deepEqual(calls, ['/plugins/cl-helper/bb-proxy/download/png/5477']);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test('BotBooru preview exposes downloaded card sections', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruPreviewSections } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-sections-${Date.now()}`);
+    const sections = getBotbooruPreviewSections({
+        data: {
+            description: 'Description text',
+            personality: 'Personality text',
+            scenario: 'Scenario text',
+            first_mes: 'First message text',
+            mes_example: 'Example dialog text',
+            creator_notes: 'Creator notes text',
+        },
+    });
+
+    assert.deepEqual(sections.map(section => [section.id, section.label, section.content]), [
+        ['botbooruCharCreatorNotes', "Creator's Notes", 'Creator notes text'],
+        ['botbooruCharDescription', 'Description', 'Description text'],
+        ['botbooruCharPersonality', 'Personality', 'Personality text'],
+        ['botbooruCharScenario', 'Scenario', 'Scenario text'],
+        ['botbooruCharExamples', 'Example Dialogs', 'Example dialog text'],
+        ['botbooruCharFirstMsg', 'First Message', 'First message text'],
+    ]);
+});
+
+test('BotBooru preview section headings are expandable', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-expand-${Date.now()}`);
+
+    const html = browseView.renderModals();
+
+    assert.match(html, /data-section="botbooruCharCreatorNotes"/);
+    assert.match(html, /data-section="botbooruCharDescription"/);
+    assert.match(html, /data-section="botbooruCharPersonality"/);
+    assert.match(html, /data-section="botbooruCharScenario"/);
+    assert.match(html, /data-section="botbooruCharExamples"/);
+    assert.match(html, /data-section="botbooruCharFirstMsg"/);
+});
+
+test('BotBooru preview modal exposes a clickable creator link', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView, configureBotbooruPreviewCreatorLink } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-creator-link-${Date.now()}`);
+
+    const html = browseView.renderModals();
+    assert.match(html, /id="botbooruCharCreator" href="#"/);
+    assert.match(html, /id="botbooruFavoriteBtn"/);
+    assert.match(html, /id="botbooruCharFavoriteCount"/);
+
+    const creatorEl = {
+        textContent: '',
+        href: '',
+        title: '',
+        onclick: null,
+        removeAttribute(name) {
+            if (name === 'href') this.href = '';
+        },
+    };
+
+    let selectedCreator = null;
+    configureBotbooruPreviewCreatorLink(creatorEl, {
+        creator: 'Apxangel12',
+        creator_id: 42,
+    }, (creatorId, creatorName) => {
+        selectedCreator = { creatorId, creatorName };
+    });
+
+    assert.equal(creatorEl.textContent, 'Apxangel12');
+    assert.equal(creatorEl.href, '#');
+    assert.equal(creatorEl.title, 'Click to see all characters by Apxangel12');
+    assert.equal(typeof creatorEl.onclick, 'function');
+
+    let prevented = false;
+    let stopped = false;
+    creatorEl.onclick({
+        preventDefault() { prevented = true; },
+        stopPropagation() { stopped = true; },
+    });
+
+    assert.equal(prevented, true);
+    assert.equal(stopped, true);
+    assert.deepEqual(selectedCreator, {
+        creatorId: 42,
+        creatorName: 'Apxangel12',
+    });
+});
+
+test('BotBooru preview sections use rich text rendering for entities and spacing', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalFormatRichText = globalThis.window.formatRichText;
+    const originalSafePurify = globalThis.window.safePurify;
+
+    try {
+        globalThis.window.formatRichText = (text) => String(text)
+            .replace(/&quot;/g, '"')
+            .replace(/\n\n/g, '<br><br>');
+        globalThis.window.safePurify = html => `safe:${html}`;
+
+        const { getBotbooruPreviewSectionHtml } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-html-${Date.now()}`);
+
+        assert.equal(
+            getBotbooruPreviewSectionHtml('pics in &quot;Gallery&quot;\n\nLine 2', 'Daphne'),
+            'safe:pics in "Gallery"<br><br>Line 2',
+        );
+    } finally {
+        globalThis.window.formatRichText = originalFormatRichText;
+        globalThis.window.safePurify = originalSafePurify;
+    }
+});
+
+test('BotBooru avatar viewer opens the full image with preview fallback', async () => {
+    globalThis.window = globalThis.window || {};
+    const { BrowseView } = await import('../modules/providers/browse-view.js');
+    const {
+        getBotbooruAvatarViewerSources,
+        openBotbooruAvatarViewer,
+    } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=avatar-viewer-${Date.now()}`);
+    const originalOpenAvatarViewer = BrowseView.openAvatarViewer;
+    const calls = [];
+
+    try {
+        BrowseView.openAvatarViewer = (...args) => calls.push(args);
+
+        assert.deepEqual(
+            getBotbooruAvatarViewerSources({
+                image_url: 'https://botbooru.test/images/full.png',
+                avatar_url: 'https://botbooru.test/images/preview.png',
+            }),
+            {
+                fullSrc: 'https://botbooru.test/images/full.png',
+                previewSrc: 'https://botbooru.test/images/preview.png',
+            },
+        );
+        assert.deepEqual(
+            getBotbooruAvatarViewerSources(null, 'https://botbooru.test/images/fallback.png'),
+            {
+                fullSrc: 'https://botbooru.test/images/fallback.png',
+                previewSrc: 'https://botbooru.test/images/fallback.png',
+            },
+        );
+
+        openBotbooruAvatarViewer({
+            image_url: 'https://botbooru.test/images/full.png',
+            avatar_url: 'https://botbooru.test/images/preview.png',
+        });
+        openBotbooruAvatarViewer({
+            avatar_url: 'https://botbooru.test/images/preview-only.png',
+        });
+
+        assert.deepEqual(calls, [
+            ['https://botbooru.test/images/full.png', 'https://botbooru.test/images/preview.png'],
+            ['https://botbooru.test/images/preview-only.png', 'https://botbooru.test/images/preview-only.png'],
+        ]);
+    } finally {
+        BrowseView.openAvatarViewer = originalOpenAvatarViewer;
+    }
+});
+
+test('BotBooru grid render plan appends only newly visible browse cards', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruGridRenderPlan } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=grid-plan-${Date.now()}`);
+    const characters = [
+        { id: 1, name: 'Alpha' },
+        { id: 2, name: 'Bravo' },
+        { id: 3, name: 'Charlie' },
+    ];
+
+    assert.deepEqual(
+        getBotbooruGridRenderPlan(characters, 1, true),
+        {
+            mode: 'append',
+            characters: [{ id: 2, name: 'Bravo' }, { id: 3, name: 'Charlie' }],
+        },
+    );
+    assert.deepEqual(
+        getBotbooruGridRenderPlan(characters, 0, true),
+        {
+            mode: 'replace',
+            characters,
+        },
+    );
+});
+
+test('BotBooru preview cleanup clears transient modal content', async () => {
+    globalThis.window = globalThis.window || {};
+    const originalDocument = globalThis.document;
+    const { BrowseView } = await import('../modules/providers/browse-view.js');
+    const { cleanupBotbooruCharModal } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-cleanup-${Date.now()}`);
+    const originalCloseAvatarViewer = BrowseView.closeAvatarViewer;
+    let viewerClosed = false;
+
+    const tracked = [{ dataset: { fullContent: 'hello' } }, { dataset: { fullContent: 'world' } }];
+    const avatar = {
+        src: 'https://botbooru.test/images/full.png',
+        title: 'Click to view full image',
+        dataset: {
+            fullSrc: 'https://botbooru.test/images/full.png',
+            previewSrc: 'https://botbooru.test/images/preview.png',
+        },
+    };
+    const sections = {
+        botbooruCharAvatar: avatar,
+        botbooruCharAltGreetings: { innerHTML: 'greetings' },
+        botbooruCharCreatorNotes: { innerHTML: 'notes' },
+        botbooruCharDescription: { innerHTML: 'description' },
+        botbooruCharPersonality: { innerHTML: 'personality' },
+        botbooruCharScenario: { innerHTML: 'scenario' },
+        botbooruCharExamples: { innerHTML: 'examples' },
+        botbooruCharFirstMsg: { innerHTML: 'first message' },
+    };
+
+    try {
+        BrowseView.closeAvatarViewer = () => { viewerClosed = true; };
+        globalThis.window.currentBrowseAltGreetings = ['one', 'two'];
+        globalThis.document = {
+            getElementById(id) {
+                if (id === 'botbooruCharModal') {
+                    return {
+                        querySelectorAll(selector) {
+                            return selector === '[data-full-content]' ? tracked : [];
+                        },
+                    };
+                }
+                return sections[id] || null;
+            },
+        };
+
+        cleanupBotbooruCharModal();
+
+        assert.equal(viewerClosed, true);
+        assert.equal(globalThis.window.currentBrowseAltGreetings, null);
+        assert.deepEqual(tracked.map(entry => 'fullContent' in entry.dataset), [false, false]);
+        assert.equal(avatar.src, '/img/ai4.png');
+        assert.equal(avatar.title, '');
+        assert.equal('fullSrc' in avatar.dataset, false);
+        assert.equal('previewSrc' in avatar.dataset, false);
+        assert.deepEqual([
+            sections.botbooruCharAltGreetings.innerHTML,
+            sections.botbooruCharCreatorNotes.innerHTML,
+            sections.botbooruCharDescription.innerHTML,
+            sections.botbooruCharPersonality.innerHTML,
+            sections.botbooruCharScenario.innerHTML,
+            sections.botbooruCharExamples.innerHTML,
+            sections.botbooruCharFirstMsg.innerHTML,
+        ], ['', '', '', '', '', '', '']);
+    } finally {
+        BrowseView.closeAvatarViewer = originalCloseAvatarViewer;
+        globalThis.document = originalDocument;
+    }
+});
+
+test('BotBooru preview avatar display prefers preview-sized art before full image loads', async () => {
+    globalThis.window = globalThis.window || {};
+    const { getBotbooruPreviewAvatarDisplaySrc } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=preview-avatar-src-${Date.now()}`);
+
+    assert.equal(
+        getBotbooruPreviewAvatarDisplaySrc({
+            image_url: 'https://botbooru.test/images/full.png',
+            avatar_url: 'https://botbooru.test/images/preview.png',
+        }),
+        'https://botbooru.test/images/preview.png',
+    );
+    assert.equal(
+        getBotbooruPreviewAvatarDisplaySrc({
+            image_url: 'https://botbooru.test/images/full-only.png',
+        }),
+        'https://botbooru.test/images/full-only.png',
+    );
+});
+
+test('BotBooru cards render creator browse links when uploader ids are known', async () => {
+    globalThis.window = globalThis.window || {};
+    const { renderBotbooruCardMarkup } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=static-creator-${Date.now()}`);
+
+    const html = renderBotbooruCardMarkup({
+        id: 1,
+        name: 'Daphne',
+        creator: 'spaghettiman',
+        creator_id: 99,
+        avatar_url: 'https://botbooru.test/images/preview.png',
+        tags: [],
+    });
+
+    assert.match(html, /browse-card-creator-link/);
+    assert.match(html, /data-creator-id="99"/);
+    assert.match(html, /data-creator-name="spaghettiman"/);
+    assert.match(html, /src="https:\/\/botbooru\.test\/images\/preview\.png"/);
+});
+
+test('BotBooru personalized modes apply selected sort locally', async () => {
+    globalThis.window = globalThis.window || {};
+    const { sortBotbooruCharactersForView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=local-curated-sort-${Date.now()}`);
+    const posts = [
+        { id: 1, name: 'Bowsette', favorites: 1, views: 35, downloads: 3, createdAt: '2026-01-01T00:00:00Z' },
+        { id: 2, name: 'Osana Robin', favorites: 2, views: 25, downloads: 4, createdAt: '2026-01-02T00:00:00Z' },
+        { id: 3, name: 'Bowsette Alt', favorites: 0, views: 7, downloads: 5, createdAt: '2026-01-03T00:00:00Z' },
+    ];
+
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'favorites').map(post => post.id), [2, 1, 3]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'downloads').map(post => post.id), [3, 2, 1]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'curated', 'latest').map(post => post.id), [3, 2, 1]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'favorites', 'favorites').map(post => post.id), [2, 1, 3]);
+    assert.deepEqual(sortBotbooruCharactersForView(posts, 'favorites', 'downloads').map(post => post.id), [3, 2, 1]);
+    assert.equal(sortBotbooruCharactersForView(posts, 'browse', 'favorites'), posts);
+});
+
+test('BotBooru filter bar exposes Browse, Curated, and a visible Curated sort option', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=${Date.now()}`);
+
+    const html = browseView.renderFilterBar();
+
+    assert.match(html, /data-botbooru-view="browse"/);
+    assert.match(html, /data-botbooru-view="curated"/);
+    assert.match(html, />\s*Browse\s*</);
+    assert.match(html, />\s*Curated\s*</);
+    assert.match(html, /<option value="curated"/);
+    assert.doesNotMatch(html, /<option value="curated"[^>]*hidden/);
+});
+
+test('BotBooru creator banner exposes a Chub-style follow action', async () => {
+    globalThis.window = globalThis.window || {};
+    globalThis.window.escapeHtml = value => String(value ?? '');
+    const { default: browseView } = await import(`../modules/providers/botbooru/botbooru-browse.js?case=banner-follow-${Date.now()}`);
+
+    const html = browseView.renderView();
+
+    assert.match(html, /id="botbooruCreatorBanner"/);
+    assert.match(html, /id="botbooruFollowCreatorBtn"/);
+    assert.match(html, />\s*Follow\s*</);
+});
+
+test('BotBooru creator banner reuses the maintainer banner classes and stays hideable', () => {
+    const css = readFileSync(new URL('../modules/providers/botbooru/botbooru-browse.css', import.meta.url), 'utf8');
+
+    assert.doesNotMatch(css, /\.botbooru-creator-banner\s*\{/);
+});

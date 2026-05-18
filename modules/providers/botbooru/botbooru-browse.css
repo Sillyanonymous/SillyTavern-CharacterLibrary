@@ -1,0 +1,203 @@
+.botbooru-card .browse-card-footer .fa-heart,
+.botbooru-favorite-btn.favorited {
+    color: #e85d75;
+}
+
+.botbooru-favorite-btn.favorited {
+    border-color: rgba(232, 93, 117, 0.5);
+}
+
+.botbooru-favorite-btn.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.botbooru-favorite-btn-inline {
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    padding: 2px 8px;
+    transition: all 0.2s ease;
+}
+
+.botbooru-favorite-btn-inline:hover {
+    background: rgba(255, 100, 100, 0.15);
+}
+
+.botbooru-favorite-btn-inline i {
+    color: #ff6b6b;
+    transition: transform 0.2s ease;
+}
+
+.botbooru-favorite-btn-inline:hover i {
+    transform: scale(1.15);
+}
+
+.botbooru-favorite-btn-inline.favorited {
+    background: rgba(255, 100, 100, 0.1);
+}
+
+#botbooruFollowCreatorBtn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
+    border-color: rgba(231, 76, 60, 0.6);
+}
+
+#botbooruFollowCreatorBtn.following {
+    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    color: #fff;
+}
+
+#botbooruFollowCreatorBtn:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.botbooru-card .browse-card-image img {
+    object-position: center 20%;
+}
+
+.botbooru-card-creator {
+    align-items: center;
+    color: var(--text-secondary);
+    display: inline-flex;
+    font-size: var(--font-md);
+    gap: var(--space-xs);
+    margin-bottom: 8px;
+}
+
+.botbooru-card-creator::before {
+    content: 'by ';
+}
+
+.botbooru-result-count {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    white-space: nowrap;
+}
+
+.botbooru-empty-state,
+.botbooru-state {
+    align-items: center;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    justify-content: center;
+    min-height: 220px;
+    padding: 40px;
+    text-align: center;
+}
+
+.botbooru-empty-state > i,
+.botbooru-state > i {
+    color: var(--accent);
+    font-size: 2rem;
+    opacity: 0.8;
+}
+
+.botbooru-nsfl-badge {
+    background: rgba(180, 35, 35, 0.92);
+}
+
+.botbooru-token-modal {
+    max-width: 520px;
+}
+
+.botbooru-tags-modal {
+    max-width: 560px;
+}
+
+.botbooru-token-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+.botbooru-token-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.botbooru-token-status {
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.botbooru-tags-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px;
+}
+
+.botbooru-tags-copy,
+.botbooru-followed-tags-status,
+.botbooru-followed-tags-empty {
+    color: var(--text-secondary);
+    margin: 0;
+}
+
+.botbooru-followed-tags-status.error {
+    color: var(--danger, #e85d75);
+}
+
+.botbooru-followed-tags-add {
+    display: flex;
+    gap: 10px;
+}
+
+.botbooru-followed-tags-add .glass-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.botbooru-followed-tags-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 34px;
+}
+
+.botbooru-followed-tag-pill {
+    align-items: center;
+    background: rgba(80, 120, 190, 0.18);
+    border: 1px solid rgba(120, 160, 220, 0.35);
+    border-radius: 999px;
+    display: inline-flex;
+    gap: 6px;
+    max-width: 100%;
+    padding: 6px 8px 6px 10px;
+}
+
+.botbooru-followed-tag-category {
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.botbooru-followed-tag-name {
+    color: var(--text-primary);
+    font-family: monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.botbooru-followed-tag-remove {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    display: inline-flex;
+    padding: 2px;
+}
+
+.botbooru-followed-tag-remove:hover {
+    color: #e85d75;
+}

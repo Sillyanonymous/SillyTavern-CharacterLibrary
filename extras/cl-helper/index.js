@@ -780,6 +780,411 @@ function registerDataCatRoutes(router) {
 }
 
 // =============================================================================
+// BotBooru: public API proxy + optional bearer-token favorites
+// =============================================================================
+
+const BOTBOORU_BASE = 'https://botbooru.com';
+const BOTBOORU_ORIGIN = 'https://botbooru.com';
+
+let bbAccessToken = null;
+
+function bbHeaders({ json = true, auth = false } = {}) {
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': json ? 'application/json' : '*/*',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Origin': BOTBOORU_ORIGIN,
+        'Referer': BOTBOORU_ORIGIN + '/',
+    };
+    if (auth && bbAccessToken) {
+        headers.Authorization = `Bearer ${bbAccessToken}`;
+    }
+    return headers;
+}
+
+function normalizeBbToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    let value = token.trim();
+    if (value.toLowerCase().startsWith('bearer ')) value = value.slice(7).trim();
+    if (!value || value.length > 4096 || /[\r\n]/.test(value)) return null;
+    return value;
+}
+
+const BB_ALLOWED_PATHS = [
+    /^\/posts\/?$/,
+    /^\/post\/\d+$/,
+    /^\/download\/json\/\d+$/,
+    /^\/download\/png\/\d+$/,
+    /^\/images\/.+$/,
+    /^\/tags\/?$/,
+    /^\/random\/?$/,
+    /^\/api\/users\/\d+$/,
+    /^\/api\/users\/\d+\/follow$/,
+    /^\/api\/users\/\d+\/(?:followers|following)$/,
+    /^\/interactions\/\d+\/favorites$/,
+];
+
+function bbIsAllowedPath(pathname) {
+    return BB_ALLOWED_PATHS.some(re => re.test(pathname));
+}
+
+function bbParsePositiveInt(value) {
+    const n = Number.parseInt(value, 10);
+    return Number.isSafeInteger(n) && n > 0 ? n : null;
+}
+
+async function bbFetchJsonRequest(path, { method = 'GET', auth = false, body = null } = {}) {
+    const targetUrl = new URL(path, BOTBOORU_BASE);
+    const headers = bbHeaders({ auth });
+    if (body != null) headers['Content-Type'] = 'application/json';
+    const response = await fetch(targetUrl.toString(), {
+        method,
+        headers,
+        body: body == null ? undefined : JSON.stringify(body),
+        redirect: 'follow',
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+    return { response, data, text };
+}
+
+async function bbFetchJson(path, { auth = false } = {}) {
+    return bbFetchJsonRequest(path, { auth });
+}
+
+async function bbResolveCurrentUserId() {
+    if (!bbAccessToken) return null;
+    const { response, data } = await bbFetchJson('/auth/me', { auth: true });
+    if (!response.ok) return null;
+    return data?.id || data?.user?.id || data?.user_id || null;
+}
+
+function registerBotBooruRoutes(router) {
+    router.post('/bb-set-token', async (req, res) => {
+        const token = normalizeBbToken(req.body?.token);
+        if (!token) {
+            return res.status(400).json({ error: 'token string is required' });
+        }
+
+        bbAccessToken = token;
+        console.log('[cl-helper] BotBooru token stored');
+        res.json({ ok: true });
+    });
+
+    router.post('/bb-clear-token', (_req, res) => {
+        bbAccessToken = null;
+        console.log('[cl-helper] BotBooru token cleared');
+        res.json({ ok: true });
+    });
+
+    router.get('/bb-session', (_req, res) => {
+        res.json({ active: !!bbAccessToken });
+    });
+
+    router.get('/bb-validate', async (_req, res) => {
+        if (!bbAccessToken) {
+            return res.json({ valid: false, reason: 'no token stored' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJson('/auth/me', { auth: true });
+            if (!response.ok) {
+                return res.json({ valid: false, reason: `HTTP ${response.status}: ${text.slice(0, 200)}` });
+            }
+            res.json({
+                valid: true,
+                user: {
+                    id: data?.id || data?.user?.id || data?.user_id || null,
+                    username: data?.username || data?.user?.username || data?.name || null,
+                },
+            });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru validate error:', err.message);
+            res.json({ valid: false, reason: err.message });
+        }
+    });
+
+    router.get('/bb-posts', async (req, res) => {
+        const params = new URLSearchParams();
+        for (const key of ['sort', 'q', 'limit', 'offset', 'sfw_only']) {
+            const value = typeof req.query?.[key] === 'string' ? req.query[key].trim() : '';
+            if (value) params.set(key, value);
+        }
+
+        try {
+            const path = `/posts/${params.size ? `?${params.toString()}` : ''}`;
+            const { response, data, text } = await bbFetchJson(path, { auth: !!bbAccessToken });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru posts error:', err.message);
+            res.status(502).json({ error: 'Failed to fetch BotBooru posts' });
+        }
+    });
+
+    router.get('/bb-proxy/*', async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const targetUrl = new URL(targetPath, BOTBOORU_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+
+        if (targetUrl.hostname !== 'botbooru.com') {
+            return res.status(403).json({ error: 'Proxy target must be botbooru.com' });
+        }
+        if (!bbIsAllowedPath(targetUrl.pathname)) {
+            console.warn(`[cl-helper] BotBooru proxy blocked: ${targetUrl.pathname}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        try {
+            const wantsJson = !targetUrl.pathname.startsWith('/download/png/') && !targetUrl.pathname.startsWith('/images/');
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers: bbHeaders({ json: wantsJson, auth: !!bbAccessToken }),
+                redirect: 'follow',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            res.status(response.status);
+            res.set('Content-Type', contentType);
+
+            if (contentType.includes('application/json') || contentType.startsWith('text/')) {
+                res.send(await response.text());
+            } else {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                res.send(buffer);
+            }
+        } catch (err) {
+            console.error('[cl-helper] BotBooru proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru' });
+        }
+    });
+
+    router.get('/bb-favorites', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+
+        const limit = Math.min(Math.max(Number.parseInt(req.query.limit || '48', 10) || 48, 1), 100);
+        const offset = Math.max(Number.parseInt(req.query.offset || '0', 10) || 0, 0);
+        const sfwOnly = req.query.sfw_only === 'true' ? 'true' : 'false';
+        const q = typeof req.query.q === 'string' && req.query.q.trim()
+            ? `&q=${encodeURIComponent(req.query.q.trim())}`
+            : '';
+
+        try {
+            const userId = await bbResolveCurrentUserId();
+            if (!userId) {
+                return res.status(401).json({ error: 'BotBooru token is invalid or expired' });
+            }
+
+            const path = `/api/users/${userId}/favorites?limit=${limit}&offset=${offset}&sfw_only=${sfwOnly}${q}`;
+            const { response, data, text } = await bbFetchJson(path, { auth: true });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            const ct = response.headers.get('content-type') || '';
+            if (!ct.includes('json')) {
+                console.error(`[cl-helper] BotBooru favorites returned ${ct} instead of JSON`);
+                return res.status(502).json({ error: 'BotBooru favorites endpoint returned non-JSON response' });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorites error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru favorites' });
+        }
+    });
+
+    router.get('/bb-favorites/:postId', async (req, res) => {
+        const postId = bbParsePositiveInt(req.params.postId);
+        if (!postId) return res.status(400).json({ error: 'Invalid post id' });
+
+        try {
+            const { response, data, text } = await bbFetchJson(`/interactions/${postId}/favorites`, { auth: !!bbAccessToken });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json({
+                count: Number.parseInt(data?.count, 10) || 0,
+                favorited: data?.favorited === true,
+            });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorite-state error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru favorite state' });
+        }
+    });
+
+    router.post('/bb-favorite/:postId', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const postId = bbParsePositiveInt(req.params.postId);
+        if (!postId) return res.status(400).json({ error: 'Invalid post id' });
+
+        try {
+            const response = await fetch(`${BOTBOORU_BASE}/interactions/${postId}/favorite`, {
+                method: 'POST',
+                headers: bbHeaders({ auth: true }),
+                redirect: 'follow',
+            });
+            const text = await response.text();
+            let data = null;
+            try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+            res.status(response.status).json(data ?? { ok: response.ok });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru favorite-toggle error:', err.message);
+            res.status(502).json({ error: 'Failed to toggle BotBooru favorite' });
+        }
+    });
+
+    router.get('/bb-followed-tags', async (_req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJson('/auth/me/follows/tags', { auth: true });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru followed-tags error:', err.message);
+            res.status(502).json({ error: 'Failed to reach BotBooru followed tags' });
+        }
+    });
+
+    router.post('/bb-followed-tags', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const tagName = typeof req.body?.tag_name === 'string' ? req.body.tag_name.trim() : '';
+        const category = typeof req.body?.category === 'string' && req.body.category.trim()
+            ? req.body.category.trim()
+            : 'General';
+        if (!tagName) {
+            return res.status(400).json({ error: 'tag_name is required' });
+        }
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest('/auth/me/follows/tags', {
+                method: 'POST',
+                auth: true,
+                body: { tag_name: tagName, category },
+            });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru follow-tag error:', err.message);
+            res.status(502).json({ error: 'Failed to follow BotBooru tag' });
+        }
+    });
+
+    router.delete('/bb-followed-tags/:entryId', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const entryId = bbParsePositiveInt(req.params.entryId);
+        if (!entryId) return res.status(400).json({ error: 'Invalid followed tag id' });
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest(`/auth/me/follows/tags/${entryId}`, {
+                method: 'DELETE',
+                auth: true,
+            });
+            if (!response.ok && response.status !== 404) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data ?? { ok: true });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru unfollow-tag error:', err.message);
+            res.status(502).json({ error: 'Failed to unfollow BotBooru tag' });
+        }
+    });
+
+    router.get('/bb-users/:userId', async (req, res) => {
+        const userId = bbParsePositiveInt(req.params.userId);
+        if (!userId) return res.status(400).json({ error: 'Invalid BotBooru user id' });
+
+        const params = new URLSearchParams();
+        for (const key of ['upload_limit', 'upload_offset', 'upload_sort']) {
+            const value = typeof req.query?.[key] === 'string' ? req.query[key].trim() : '';
+            if (value) params.set(key, value);
+        }
+
+        try {
+            const path = `/api/users/${userId}${params.size ? `?${params.toString()}` : ''}`;
+            const { response, data, text } = await bbFetchJson(path, { auth: !!bbAccessToken });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+            res.json(data);
+        } catch (err) {
+            console.error('[cl-helper] BotBooru user fetch error:', err.message);
+            res.status(502).json({ error: 'Failed to fetch BotBooru user' });
+        }
+    });
+
+    router.post('/bb-users/:userId/follow', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const userId = bbParsePositiveInt(req.params.userId);
+        if (!userId) return res.status(400).json({ error: 'Invalid BotBooru user id' });
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest(`/api/users/${userId}/follow`, {
+                method: 'POST',
+                auth: true,
+            });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+
+            const refreshed = await bbFetchJson(`/api/users/${userId}`, { auth: true });
+            if (refreshed.response.ok) {
+                return res.json(refreshed.data);
+            }
+            res.json(data ?? { id: userId, is_following: true });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru follow-user error:', err.message);
+            res.status(502).json({ error: 'Failed to follow BotBooru user' });
+        }
+    });
+
+    router.delete('/bb-users/:userId/follow', async (req, res) => {
+        if (!bbAccessToken) {
+            return res.status(401).json({ error: 'No BotBooru token configured' });
+        }
+        const userId = bbParsePositiveInt(req.params.userId);
+        if (!userId) return res.status(400).json({ error: 'Invalid BotBooru user id' });
+
+        try {
+            const { response, data, text } = await bbFetchJsonRequest(`/api/users/${userId}/follow`, {
+                method: 'DELETE',
+                auth: true,
+            });
+            if (!response.ok) {
+                return res.status(response.status).json(data ?? { error: text });
+            }
+
+            const refreshed = await bbFetchJson(`/api/users/${userId}`, { auth: true });
+            if (refreshed.response.ok) {
+                return res.json(refreshed.data);
+            }
+            res.json(data ?? { id: userId, is_following: false });
+        } catch (err) {
+            console.error('[cl-helper] BotBooru unfollow-user error:', err.message);
+            res.status(502).json({ error: 'Failed to unfollow BotBooru user' });
+        }
+    });
+}
+
+// =============================================================================
 // Imgchest: password-protected gallery unlock
 // =============================================================================
 
@@ -1359,6 +1764,7 @@ export async function init(router) {
     registerPygmalionRoutes(router);
     registerCharacterTavernRoutes(router);
     registerDataCatRoutes(router);
+    registerBotBooruRoutes(router);
     registerImgchestRoutes(router);
     registerCivitaiRoutes(router);
     registerSaucepanRoutes(router);
