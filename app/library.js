@@ -472,6 +472,7 @@ const DEFAULT_SETTINGS = {
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
     defaultFilterPreset: '',
+    groupFavoritesFirst: false,
     searchInName: true,
     searchInListingName: true,
     searchInTags: true,
@@ -494,7 +495,7 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationPerChar: {},
     completedMediaLocalizations: [],
     notifyAdditionalContent: true,
-    fastFilenameSkip: true,
+    fastFilenameSkip: false,
     fastSkipValidateHeaders: false,
     includeExternalGalleries: true,
     galleryThumbnails: true,
@@ -505,13 +506,15 @@ const DEFAULT_SETTINGS = {
     uiScale: 3,
     modalSize: 2,
     replaceUserPlaceholder: true,
-    animateTagPills: false,
+    animateTagPills: true,
     animateKeepName: false,
     hidePlaylistBadges: false,
     debugMode: false,
     uniqueGalleryFolders: false,
     showInfoTab: false,
     themeCustomizer: false,
+    customCSS: '',
+    customCSSMode: 'raw',
     exportAsLinks: false,
     showProviderTagline: true,
     showWyvernTagline: true,
@@ -534,6 +537,7 @@ const DEFAULT_SETTINGS = {
     providerExcludeTags: {},
 
     // ---- Versions ----
+    autoSnapshotOnEdit: true,
     maxAutoBackups: 10,
 };
 
@@ -583,48 +587,59 @@ function getSTContext() {
     return null;
 }
 
-/**
- * Tell the ST main window to re-read the character data from disk so subsequent
- * messages in an open chat pick up edits made in CL without requiring a refresh.
- * Best-effort; silent if the opener is unreachable or the APIs are unavailable.
- * Capped at 3s to avoid hanging on suspended mobile tabs.
- * @param {string} avatar - The avatar filename of the edited character
- */
+// Fire-and-forget; 3s timeout. Active chat panel refreshes only when chid matches.
 async function notifySTCharacterEdited(avatar) {
     if (!avatar) return;
     const run = async () => {
         try {
             const host = getHostWindow();
-            if (!host) return;
+            const ctx = host?.SillyTavern?.getContext?.();
+            if (!ctx) return;
 
-            // Replace ST's in-memory characters array with fresh disk contents,
-            // so its next auto-persist doesn't overwrite our edit with stale data.
-            if (host.SillyTavern?.getContext) {
-                const ctx = host.SillyTavern.getContext();
-                if (typeof ctx?.getCharacters === 'function') {
-                    await ctx.getCharacters();
-                }
+            if (typeof ctx.getOneCharacter === 'function') {
+                await ctx.getOneCharacter(avatar);
             }
 
-            if (host.eventSource && host.event_types?.CHARACTER_EDITED) {
-                const charIndex = host.characters?.findIndex(c => c.avatar === avatar);
-                if (charIndex !== undefined && charIndex >= 0) {
-                    await host.eventSource.emit(
-                        host.event_types.CHARACTER_EDITED,
-                        { id: charIndex, character: host.characters[charIndex] }
-                    );
-                }
+            const charIndex = ctx.characters?.findIndex(c => c.avatar === avatar);
+            if (charIndex === undefined || charIndex < 0) return;
+
+            // characterId is a snapshot, not a live ref - re-read after the await.
+            const currentChid = host?.SillyTavern?.getContext?.()?.characterId;
+            const isActive = currentChid !== undefined && currentChid !== null
+                && String(currentChid) === String(charIndex);
+
+            // selectCharacterById on the active chid keeps chat + scroll intact.
+            if (isActive && typeof ctx.selectCharacterById === 'function') {
+                await ctx.selectCharacterById(charIndex, { switchMenu: false });
             }
 
-            if (typeof host.printCharactersDebounced === 'function') {
-                host.printCharactersDebounced();
+            if (ctx.eventSource && ctx.eventTypes?.CHARACTER_EDITED) {
+                await ctx.eventSource.emit(
+                    ctx.eventTypes.CHARACTER_EDITED,
+                    { id: charIndex, character: ctx.characters[charIndex] }
+                );
             }
         } catch (e) {
             console.warn('[CL] Could not notify main window of edit (non-fatal):', e);
         }
     };
-    const timeout = new Promise(resolve => setTimeout(resolve, 3000));
-    await Promise.race([run(), timeout]);
+    await Promise.race([run(), new Promise(r => setTimeout(r, 3000))]);
+}
+
+async function notifySTCharacterAdded(avatar) {
+    if (!avatar) return;
+    const run = async () => {
+        try {
+            const host = getHostWindow();
+            const ctx = host?.SillyTavern?.getContext?.();
+            if (typeof ctx?.getCharacters !== 'function') return;
+            await new Promise(r => setTimeout(r, 200));
+            await ctx.getCharacters();
+        } catch (e) {
+            console.warn('[CL] Could not notify main window of add (non-fatal):', e);
+        }
+    };
+    await Promise.race([run(), new Promise(r => setTimeout(r, 3000))]);
 }
 
 // Uses explicit property assignment for cross-window write reliability
@@ -830,27 +845,52 @@ function setProviderExcludeTags(providerId, tags) {
     setSetting('providerExcludeTags', map);
 }
 
-/**
- * Apply the highlight color to CSS variables and derive accent palette
- * @param {string} color - CSS color value (hex)
- */
+// Runtime tokens live in <style id="cl-runtime-tokens"> not inline on the root,
+// so user Custom CSS (later insource order) can override without !important.
+const runtimeTokens = new Map();
+function serializeRuntimeTokens() {
+    const tag = document.getElementById('cl-runtime-tokens');
+    if (!tag) return;
+    if (runtimeTokens.size === 0) {
+        tag.textContent = '';
+        return;
+    }
+    const lines = [];
+    for (const [k, v] of runtimeTokens) lines.push(`    ${k}: ${v};`);
+    tag.textContent = `:root {\n${lines.join('\n')}\n}`;
+}
+function setRuntimeToken(name, value) {
+    if (value == null || value === '') {
+        runtimeTokens.delete(name);
+    } else {
+        runtimeTokens.set(name, String(value));
+    }
+    serializeRuntimeTokens();
+}
+function removeRuntimeToken(name) {
+    runtimeTokens.delete(name);
+    serializeRuntimeTokens();
+}
+function getRuntimeToken(name) {
+    return runtimeTokens.get(name) || '';
+}
+
 function applyHighlightColor(color) {
     if (!color) color = DEFAULT_SETTINGS.highlightColor;
 
-    const root = document.documentElement.style;
-    root.setProperty('--accent', color);
+    setRuntimeToken('--accent', color);
 
     const hex = color.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
 
-    root.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
-    root.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+    setRuntimeToken('--accent-rgb', `${r}, ${g}, ${b}`);
+    setRuntimeToken('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
 
     const toHex = n => Math.min(255, n).toString(16).padStart(2, '0');
     const lighten = (v, f) => Math.round(v + (255 - v) * f);
-    root.setProperty('--accent-hover', `#${toHex(lighten(r, 0.2))}${toHex(lighten(g, 0.2))}${toHex(lighten(b, 0.2))}`);
+    setRuntimeToken('--accent-hover', `#${toHex(lighten(r, 0.2))}${toHex(lighten(g, 0.2))}${toHex(lighten(b, 0.2))}`);
 
     // Secondary: hue-shift +30deg, desaturate slightly, darken slightly
     const rn = r / 255, gn = g / 255, bn = b / 255;
@@ -883,13 +923,13 @@ function applyHighlightColor(color) {
         sg = Math.round(hue2rgb(sh) * 255);
         sb = Math.round(hue2rgb(sh - 1 / 3) * 255);
     }
-    root.setProperty('--accent-secondary', `#${toHex(sr)}${toHex(sg)}${toHex(sb)}`);
-    root.setProperty('--accent-secondary-rgb', `${sr}, ${sg}, ${sb}`);
+    setRuntimeToken('--accent-secondary', `#${toHex(sr)}${toHex(sg)}${toHex(sb)}`);
+    setRuntimeToken('--accent-secondary-rgb', `${sr}, ${sg}, ${sb}`);
 
     // WCAG relative luminance → pick white or dark text for readability on accent bg
     const srgb = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     const lum = 0.2126 * srgb(rn) + 0.7152 * srgb(gn) + 0.0722 * srgb(bn);
-    root.setProperty('--accent-text', lum > 0.36 ? '#121212' : '#ffffff');
+    setRuntimeToken('--accent-text', lum > 0.36 ? '#121212' : '#ffffff');
 }
 
 const UI_SCALE_MAP = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2 };
@@ -1014,6 +1054,7 @@ function setupSettingsModal() {
     const searchNotesCheckbox = document.getElementById('settingsSearchNotes');
     const defaultSortSelect = document.getElementById('settingsDefaultSort');
     const defaultFilterPresetSelect = document.getElementById('settingsDefaultFilterPreset');
+    const groupFavoritesFirstCheckbox = document.getElementById('settingsGroupFavoritesFirst');
     
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
@@ -1685,6 +1726,9 @@ function setupSettingsModal() {
         if (defaultFilterPresetSelect) {
             populateDefaultFilterPresetSelect(defaultFilterPresetSelect, getSetting('defaultFilterPreset') || '');
         }
+        if (groupFavoritesFirstCheckbox) {
+            groupFavoritesFirstCheckbox.checked = getSetting('groupFavoritesFirst') || false;
+        }
         
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
@@ -2028,7 +2072,18 @@ function setupSettingsModal() {
     if (openThemeCustomizerBtnEl) {
         openThemeCustomizerBtnEl.addEventListener('click', () => openThemeCustomizer());
     }
-    
+
+    const openCustomCssBtnEl = document.getElementById('openCustomCssBtn');
+    if (openCustomCssBtnEl) {
+        openCustomCssBtnEl.addEventListener('click', () => {
+            if (typeof window.openCustomCssModal === 'function') {
+                window.openCustomCssModal();
+            } else {
+                showToast('Custom CSS module not loaded yet, try again in a moment', 'warning');
+            }
+        });
+    }
+
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
         const botbooruTokenValue = botbooruTokenInput ? (botbooruTokenInput.value?.trim() || null) : null;
@@ -2053,6 +2108,7 @@ function setupSettingsModal() {
             searchInNotes: searchNotesCheckbox.checked,
             defaultSort: defaultSortSelect.value,
             defaultFilterPreset: defaultFilterPresetSelect ? defaultFilterPresetSelect.value : '',
+            groupFavoritesFirst: groupFavoritesFirstCheckbox ? groupFavoritesFirstCheckbox.checked : false,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             expandCreatorNotes: expandCreatorNotesCheckbox ? expandCreatorNotesCheckbox.checked : false,
             displayNamePreference: displayNamePreferenceSelect ? displayNamePreferenceSelect.value : 'card',
@@ -2223,6 +2279,9 @@ function setupSettingsModal() {
         defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
         if (defaultFilterPresetSelect) {
             populateDefaultFilterPresetSelect(defaultFilterPresetSelect, DEFAULT_SETTINGS.defaultFilterPreset);
+        }
+        if (groupFavoritesFirstCheckbox) {
+            groupFavoritesFirstCheckbox.checked = DEFAULT_SETTINGS.groupFavoritesFirst;
         }
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
         if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.expandCreatorNotes;
@@ -2759,7 +2818,7 @@ function setupSettingsModal() {
         galleryMigrationStatus.style.display = 'block';
         
         if (needsId === 0 && needsRegistration === 0) {
-            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: #4caf50;"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: var(--cl-success);"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
         } else if (needsId === 0 && needsRegistration > 0) {
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> All characters have IDs, but ${needsRegistration} need folder override registration.`;
         } else {
@@ -2942,7 +3001,6 @@ function setupSettingsModal() {
             
             if (errorCount === 0 && syncResult.failed === 0) {
                 showToast(resultMsg || 'Migration complete!', 'success');
-                // Important: Tell user to refresh ST
                 setTimeout(() => {
                     showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
                 }, 1500);
@@ -3120,7 +3178,7 @@ function setupSettingsModal() {
                 charsProcessed++;
                 
                 if (migrateAllStatusText) {
-                    migrateAllStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing ${char.name}... (${charsProcessed}/${uniqueNameChars.length})`;
+                    migrateAllStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing ${escapeHtml(char.name)}... (${charsProcessed}/${uniqueNameChars.length})`;
                 }
                 
                 const result = await migrateCharacterImagesToUniqueFolder(char);
@@ -3280,7 +3338,7 @@ function setupSettingsModal() {
                     showToast('Audit complete', 'success');
                 } catch (err) {
                     console.error('[GallerySync] Audit failed:', err);
-                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: #e74c3c;"></i><span>Audit failed - check console</span></div>';
+                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: var(--cl-error-bright);"></i><span>Audit failed - check console</span></div>';
                     showToast('Audit failed', 'error');
                 }
             }, 100);
@@ -3982,8 +4040,8 @@ async function moveImagesToDefaultFolders(progressCallback) {
     
     for (let i = 0; i < overrides.length; i++) {
         const { avatar, folder, char } = overrides[i];
-        
-        // Get the default folder name (just character name)
+
+        // Default folder name is just the character name.
         const defaultFolder = char?.name || folder.split('_').slice(0, -1).join('_');
         
         if (!defaultFolder || folder === defaultFolder) {
@@ -4050,7 +4108,7 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
                         Disabling will remove folder mappings from ST settings. ST's gallery will revert to default behavior (folders by character name).
                     </p>
                     
-                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                    <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 20px;">
                         <p style="margin: 0; font-size: 0.9em;">
                             <i class="fa-solid fa-info-circle"></i> Characters sharing the same name will share gallery folders again. Images in unique folders won't be accessible until moved.
                         </p>
@@ -4246,14 +4304,14 @@ function showFolderMappingModal() {
     if (orphanedMappings.length > 0) {
         contentHtml += `
             <div style="margin-bottom: 20px;">
-                <h4 style="margin: 0 0 10px 0; color: #e74c3c; display: flex; align-items: center; gap: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: var(--cl-error-bright); display: flex; align-items: center; gap: 8px;">
                     <i class="fa-solid fa-ghost"></i>
                     Orphaned Mappings (${orphanedMappings.length})
                 </h4>
                 <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
                     These folder mappings point to characters that no longer exist. They can be safely removed with "Cleanup Orphans" in Integrity Check.
                 </p>
-                <div style="max-height: 200px; overflow-y: auto; background: rgba(231, 76, 60, 0.05); border: 1px solid rgba(231, 76, 60, 0.2); border-radius: 6px; padding: 10px;">
+                <div style="max-height: 200px; overflow-y: auto; background: rgba(var(--cl-error-bright-rgb), 0.05); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.2); border-radius: var(--radius-md); padding: 10px;">
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
                         <thead>
                             <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
@@ -4264,8 +4322,8 @@ function showFolderMappingModal() {
                         <tbody>
                             ${orphanedMappings.map(({ avatar, folder }) => `
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                    <td style="padding: 6px; color: #e74c3c; font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
-                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${escapeHtml(folder)}</code></td>
+                                    <td style="padding: 6px; color: var(--cl-error-bright); font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
+                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: var(--radius-xs); font-size: 0.9em;">${escapeHtml(folder)}</code></td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -4289,7 +4347,7 @@ function showFolderMappingModal() {
             contentHtml += `
                 <div style="margin-bottom: 20px;">
                     <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                        <i class="fa-solid fa-users" style="color: #e74c3c;"></i>
+                        <i class="fa-solid fa-users" style="color: var(--cl-error-bright);"></i>
                         Characters Sharing Names (${sharedNames.size} groups)
                     </h4>
                     <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
@@ -4299,26 +4357,26 @@ function showFolderMappingModal() {
             
             for (const [name, chars] of sharedNames) {
                 contentHtml += `
-                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 12px;">
                         <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 8px;">
-                            <i class="fa-solid fa-folder" style="color: #f39c12;"></i> 
-                            Old shared folder: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">${escapeHtml(name)}</code>
+                            <i class="fa-solid fa-folder" style="color: var(--cl-warning-bright);"></i>
+                            Old shared folder: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-xs);">${escapeHtml(name)}</code>
                         </div>
                         <div style="margin-left: 20px;">
                             ${chars.map(char => {
                                 const galleryId = getCharacterGalleryId(char);
                                 const uniqueFolder = buildUniqueGalleryFolderName(char);
                                 const provInfo = window.ProviderRegistry?.getCharacterProvider(char);
-                                const provLabel = provInfo ? ` <span style="color: #3498db; font-size: 0.8em;">(${provInfo.provider.name}: ${provInfo.linkInfo.id || provInfo.linkInfo.fullPath || ''})</span>` : '';
+                                const provLabel = provInfo ? ` <span style="color: var(--cl-info-bright); font-size: 0.8em;">(${provInfo.provider.name}: ${provInfo.linkInfo.id || provInfo.linkInfo.fullPath || ''})</span>` : '';
                                 return `
-                                    <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                                    <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: var(--radius-sm);">
                                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                                             <img src="${getCharacterAvatarUrl(char.avatar)}" 
-                                                 style="width: 32px; height: 32px; border-radius: 4px; object-fit: cover;"
+                                                 style="width: 32px; height: 32px; border-radius: var(--radius-sm); object-fit: cover;"
                                                  onerror="this.src='/img/ai4.png'">
-                                            <span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent, #4a9eff); cursor: pointer;">${escapeHtml(char.name)}</span>${provLabel}
+                                            <span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent); cursor: pointer;">${escapeHtml(char.name)}</span>${provLabel}
                                             <i class="fa-solid fa-arrow-right" style="color: var(--text-muted);"></i>
-                                            <code style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 2px 6px; border-radius: 3px; font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
+                                            <code style="background: rgba(var(--cl-success-bright-rgb), 0.2); color: var(--cl-success-bright); padding: 2px 6px; border-radius: var(--radius-xs); font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
                                             <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy folder name">
                                                 <i class="fa-solid fa-copy"></i>
                                             </button>
@@ -4345,11 +4403,11 @@ function showFolderMappingModal() {
         if (otherChars.length > 0) {
             contentHtml += `
                 <details style="margin-top: 15px;">
-                    <summary style="cursor: pointer; color: var(--text-primary); padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                    <summary style="cursor: pointer; color: var(--text-primary); padding: 8px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md);">
                         <i class="fa-solid fa-folder-tree"></i> 
                         All Other Characters with Unique Folders (${otherChars.length})
                     </summary>
-                    <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px;">
+                    <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: var(--radius-md);">
                         <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
                             <thead>
                                 <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
@@ -4363,8 +4421,8 @@ function showFolderMappingModal() {
                                     const uniqueFolder = buildUniqueGalleryFolderName(char);
                                     return `
                                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                            <td style="padding: 6px;"><span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent, #4a9eff); cursor: pointer;">${escapeHtml(char.name)}</span></td>
-                                            <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${uniqueFolder}</code></td>
+                                            <td style="padding: 6px;"><span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent); cursor: pointer;">${escapeHtml(char.name)}</span></td>
+                                            <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: var(--radius-xs); font-size: 0.9em;">${uniqueFolder}</code></td>
                                             <td style="padding: 6px;">
                                                 <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy">
                                                     <i class="fa-solid fa-copy"></i>
@@ -4388,16 +4446,16 @@ function showFolderMappingModal() {
     modal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(700px * var(--modal-scale, 1)); max-height: calc(80vh * var(--modal-scale, 1));">
             <div class="confirm-modal-header">
-                <h3 style="border: none; padding: 0; margin: 0;">
+                <h3>
                     <i class="fa-solid fa-map"></i> Gallery Folder Mapping
                 </h3>
                 <button class="close-confirm-btn" id="closeFolderMappingModal">&times;</button>
             </div>
             <div class="confirm-modal-body" style="max-height: 60vh; overflow-y: auto;">
-                <div style="background: rgba(52, 152, 219, 0.1); border: 1px solid rgba(52, 152, 219, 0.3); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
+                <div style="background: rgba(var(--cl-info-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-info-bright-rgb), 0.3); border-radius: var(--radius-md); padding: 10px; margin-bottom: 15px;">
                     <p style="margin: 0; color: var(--text-secondary); font-size: 0.9em;">
-                        <i class="fa-solid fa-lightbulb" style="color: #f39c12;"></i>
-                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: 3px;">data/default-user/images/</code>
+                        <i class="fa-solid fa-lightbulb" style="color: var(--cl-warning-bright);"></i>
+                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: var(--radius-xs);">data/default-user/images/</code>
                         <br>Move files from the old <code>CharName</code> folder to the new <code>CharName_abc123xyz</code> folder.
                     </p>
                 </div>
@@ -4464,7 +4522,7 @@ function showFolderMappingModal() {
                 }
                 
                 if (success) {
-                    btn.innerHTML = '<i class="fa-solid fa-check" style="color: #2ecc71;"></i>';
+                    btn.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i>';
                     setTimeout(() => { btn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 1500);
                 } else {
                     showToast('Failed to copy to clipboard', 'error');
@@ -4649,7 +4707,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
     modal.innerHTML = `
         <div class="confirm-modal-content orphaned-folders-modal">
             <div class="confirm-modal-header">
-                <h3 style="border: none; padding: 0; margin: 0;">
+                <h3>
                     <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
                 </h3>
                 <select id="orphanedFoldersModeSelect" class="glass-select" style="margin-left: auto;">
@@ -4716,7 +4774,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (scannedFolders.length === 0) {
             body.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                     <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">No ${mode === 'duplicate' ? 'Duplicate Gallery ID' : 'Orphaned'} Folders Found</h4>
                     <p style="color: var(--text-secondary); margin: 0;">
                         ${mode === 'duplicate'
@@ -4764,7 +4822,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                         return `
                         <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
                             <div class="orphaned-folder-name">
-                                <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? '#e74c3c' : '#f39c12'};"></i>
+                                <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? 'var(--cl-error-bright)' : 'var(--cl-warning-bright)'};"></i>
                                 ${escapeHtml(folder.name)}
                             </div>
                             <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
@@ -5058,7 +5116,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                 } else {
                     body.innerHTML = `
                         <div class="empty-state" style="padding: 40px; text-align: center;">
-                            <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                            <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                             <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                             <p style="color: var(--text-secondary); margin: 0;">All folder contents have been cleared.</p>
                         </div>
@@ -5125,7 +5183,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
             } else {
                 body.innerHTML = `
                     <div class="empty-state" style="padding: 40px; text-align: center;">
-                        <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                        <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                         <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                         <p style="color: var(--text-secondary); margin: 0;">All folders have been cleaned up.</p>
                     </div>
@@ -5470,7 +5528,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                     } else {
                         body.innerHTML = `
                             <div class="empty-state" style="padding: 40px; text-align: center;">
-                                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                                 <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                                 <p style="color: var(--text-secondary); margin: 0;">
                                     All orphaned folder contents have been redistributed.
@@ -5501,7 +5559,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (orphanedFolders.length === 0) {
             body.innerHTML = `
                 <div class="empty-state" style="padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                     <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                     <p style="color: var(--text-secondary); margin: 0;">
                         Processed ${totalProcessed} file(s)${foldersCleared > 0 ? ` from ${foldersCleared} folder(s)` : ''}.
@@ -5516,7 +5574,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                     return `
                     <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
                         <div class="orphaned-folder-name">
-                            <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? '#e74c3c' : '#f39c12'};"></i>
+                            <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? 'var(--cl-error-bright)' : 'var(--cl-warning-bright)'};"></i>
                             ${escapeHtml(folder.name)}
                         </div>
                         <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
@@ -5626,8 +5684,7 @@ async function assignGalleryIdToCharacter(char) {
     };
     
     try {
-        // Save to character via merge-attributes API
-        // IMPORTANT: Spread existing data to avoid wiping other fields
+        // Save via merge-attributes; spread existing data so other fields survive.
         const existingData = char.data || {};
         const payload = {
             avatar: char.avatar,
@@ -6084,8 +6141,7 @@ async function relocateSharedFolderImages(characters, options = {}) {
         if (uniqueFolder === sharedFolderName) {
             continue;
         }
-        
-        // Check if file with same content already exists in destination
+
         const destHashes = destFolderHashes.get(uniqueFolder);
         if (destHashes && destHashes.has(hash)) {
             // File already exists in destination - just delete from source
@@ -6406,6 +6462,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Apply any saved token overrides before first render
     loadCustomTokens();
+    applyCustomCSS();
     updateThemeCustomizerVisibility();
     
     initAllCustomSelects();
@@ -6461,6 +6518,7 @@ function resetFiltersAndSearch() {
 const TOAST_ICONS = {
     success: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4L12 14.01l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     error: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
@@ -6607,8 +6665,8 @@ async function loadCharInMain(charOrAvatar) {
         charObj = allCharacters.find(c => c.avatar === avatar);
     }
 
-    // IMPORTANT: Register the gallery folder override BEFORE loading the character
-    // This ensures index.js can find the correct folder for media localization
+    // Register the gallery folder override before loading the character so index.js
+    // resolves the right folder during media localization.
     if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
         registerGalleryFolderOverride(charObj);
     }
@@ -6626,8 +6684,8 @@ async function loadCharInMain(charOrAvatar) {
             mainCharacters = host.characters;
         }
 
-        // 1. Find character INDEX in main list (Strict Filename Match)
-        // IMPORTANT: selectCharacterById takes a NUMERIC INDEX, not the avatar filename!
+        // 1. Find character INDEX in main list (Strict Filename Match);
+        //    selectCharacterById takes a numeric index, not the avatar filename.
         const characterIndex = mainCharacters.findIndex(c => c.avatar === avatar);
         const targetChar = characterIndex !== -1 ? mainCharacters[characterIndex] : null;
         
@@ -6660,8 +6718,7 @@ async function loadCharInMain(charOrAvatar) {
             });
         };
 
-        // Method 1: context.selectCharacterById (Best API) - PASS THE NUMERIC INDEX!
-        // Note: This function may not return a promise, so we call it and return immediately
+        // Method 1: context.selectCharacterById — may not return a promise.
         if (context && typeof context.selectCharacterById === 'function') {
              debugLog(`Trying context.selectCharacterById with index ${characterIndex}`);
              try {
@@ -6825,7 +6882,12 @@ let _needsCharacterRefresh = false;
  * @param {string} avatarFileName - The avatar filename returned by the import API
  * @returns {Promise<boolean>} true if the character was added successfully
  */
-async function fetchAndAddCharacter(avatarFileName) {
+async function fetchAndAddCharacter(avatarFileName, options = {}) {
+    // ST refresh runs in parallel to CL's slim add and doesn't depend on it succeeding.
+    // Batch importers pass skipNotify and fire one trailing ctx.getCharacters() themselves.
+    if (!options.skipNotify) {
+        notifySTCharacterAdded(avatarFileName);
+    }
     try {
         const response = await apiRequest(ENDPOINTS.CHARACTERS_GET, 'POST', { avatar_url: avatarFileName });
         if (!response.ok) {
@@ -7163,7 +7225,12 @@ function processAndRender(data) {
         // but don't render to a hidden grid (avoids wrong dimensions / stale virtual scroll).
         const sortSelect = document.getElementById('sortSelect');
         const sortType = sortSelect ? sortSelect.value : 'name_asc';
+        const groupFavs = getSetting('groupFavoritesFirst') || false;
         currentCharacters.sort((a, b) => {
+            if (groupFavs) {
+                const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
+                if (favA !== favB) return favA ? -1 : 1;
+            }
             if (sortType === 'name_asc') return a.name.localeCompare(b.name);
             if (sortType === 'name_desc') return b.name.localeCompare(a.name);
             if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
@@ -8019,8 +8086,15 @@ function createCharacterCard(char) {
     
     // Avatar image
     const img = document.createElement('img');
-    img.src = imgPath;
     img.className = 'card-image';
+    img.src = imgPath;
+    // Skip the fade-in when the avatar is already decoded in the browser cache;
+    // re-renders (view switch, post-import, post-recovery) won't replay the cascade.
+    if (img.complete && img.naturalWidth > 0) {
+        card.classList.add('loaded');
+    } else {
+        img.addEventListener('load', () => card.classList.add('loaded'), { once: true });
+    }
     card.appendChild(img);
     
     // Overlay
@@ -8120,7 +8194,7 @@ function resetTabScrollPositions() {
 // If unique gallery folders are enabled, we use the unique folder name
 async function fetchCharacterImages(charOrName) {
     const grid = document.getElementById('spritesGrid');
-    renderLoadingState(grid, 'Loading Media...');
+    grid.innerHTML = '<div class="cl-spinner-inline"><i class="fa-solid fa-spinner fa-spin"></i> Loading media...</div>';
     
     // Determine the folder name to use
     let folderName;
@@ -8154,15 +8228,7 @@ async function fetchCharacterImages(charOrName) {
     }
     
     debugLog(`[Gallery] Fetching images from folder: ${folderName} (display: ${displayName})`);
-    
-    // The user's images are stored in /user/images/CharacterName/...
-    // We can list files in that directory using the /api/files/list endpoint or similar if it exists.
-    // However, SillyTavern usually exposes content listing via directory APIs.
-    // Let's try to infer if we can look up the folder directly.
-    
-    // Path conventions in SillyTavern:
-    // data/default-user/user/images/<Name> mapped to /user/images/<Name> in URL
-    
+
     try {
         const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folderName, type: 7 });
 
@@ -8832,28 +8898,28 @@ async function showLegacyFolderModal(char) {
     
     modal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(800px * var(--modal-scale, 1)); max-height: calc(90vh * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(74, 158, 255, 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
-                <h3 style="border: none; padding: 0; margin: 0;">
-                    <i class="fa-solid fa-folder-tree" style="color: var(--accent-color);"></i>
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
+                <h3>
+                    <i class="fa-solid fa-folder-tree" style="color: var(--accent);"></i>
                     Legacy Folder Migration
                 </h3>
                 <button class="close-confirm-btn" id="closeLegacyModal">&times;</button>
             </div>
             <div class="confirm-modal-body" style="padding: 15px;">
-                <div style="margin-bottom: 15px; padding: 12px; background: rgba(74, 158, 255, 0.1); border-radius: 8px; border: 1px solid rgba(74, 158, 255, 0.3);">
+                <div style="margin-bottom: 15px; padding: 12px; background: rgba(var(--accent-rgb), 0.1); border-radius: var(--radius-lg); border: 1px solid rgba(var(--accent-rgb), 0.3);">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                        <i class="fa-solid fa-info-circle" style="color: var(--accent-color);"></i>
+                        <i class="fa-solid fa-info-circle" style="color: var(--accent);"></i>
                         <strong style="color: var(--text-primary);">Images in Old Folder Format</strong>
                     </div>
                     <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
-                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.currentFolder)}</code>.
+                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.legacyFolder)}</code>.
+                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.currentFolder)}</code>.
                     </p>
                 </div>
                 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary);">
-                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent-color);">
+                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent);">
                         <span>Select All (<span id="legacySelectedCount">0</span>/${legacyInfo.files.length})</span>
                     </label>
                     <div style="display: flex; gap: 8px;">
@@ -8865,13 +8931,13 @@ async function showLegacyFolderModal(char) {
                 
                 <div id="legacyImagesGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 5px;">
                     ${legacyInfo.files.map(fileName => `
-                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
                             <img src="/user/images/${encodeURIComponent(safeLegacyFolder)}/${encodeURIComponent(fileName)}" 
                                  style="width: 100%; height: 100%; object-fit: cover;"
                                  loading="lazy"
                                  onerror="this.src='/img/No-Image-Placeholder.svg'">
-                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
-                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;">
+                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;">
+                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
                             </div>
                             <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 4px; background: linear-gradient(transparent, rgba(0,0,0,0.8)); font-size: 10px; color: white; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
                                 ${escapeHtml(fileName)}
@@ -8929,8 +8995,8 @@ async function showLegacyFolderModal(char) {
         modal.querySelectorAll('.legacy-image-item').forEach(item => {
             const checkbox = item.querySelector('.legacy-file-checkbox');
             if (checkbox?.checked) {
-                item.style.borderColor = 'var(--accent-color)';
-                item.style.boxShadow = '0 0 10px rgba(74, 158, 255, 0.3)';
+                item.style.borderColor = 'var(--accent)';
+                item.style.boxShadow = '0 0 10px rgba(var(--accent-rgb), 0.3)';
             } else {
                 item.style.borderColor = 'transparent';
                 item.style.boxShadow = 'none';
@@ -9203,7 +9269,6 @@ async function openModal(char) {
         window.currentCreatorNotesContent = creatorNotes;
         // Use the shared secure rendering function
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        // Initialize handlers for this modal instance
         initCreatorNotesHandlers();
         // Show/hide expand button based on content length
         const expandBtn = document.getElementById('creatorNotesExpandBtn');
@@ -9251,7 +9316,6 @@ async function openModal(char) {
         }
     }
     
-    // Initialize content expand handlers
     initContentExpandHandlers();
     
     // Apply media localization asynchronously (if enabled)
@@ -9456,9 +9520,8 @@ function populateEditPane() {
         characterBook: characterBook ? JSON.parse(JSON.stringify(characterBook)) : null
     };
 
-    // Store original values for diff comparison
-    // IMPORTANT: Read values back from the form elements to capture any browser normalization
-    // (e.g., line ending changes from \r\n to \n)
+    // Read original values back from the form elements (not the model) so the diff
+    // sees the same browser normalization (\r\n -> \n) the eventual save will see.
     originalValues = {
         name: document.getElementById('editName').value,
         description: document.getElementById('editDescription').value,
@@ -9637,7 +9700,7 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Listing Name</span>
-            <span class="info-value">${listingName ? escapeHtml(listingName) : '<span style="color: #888;">(none)</span>'}</span>
+            <span class="info-value">${listingName ? escapeHtml(listingName) : '<span style="color: var(--text-faint);">(none)</span>'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Creator</span>
@@ -9675,15 +9738,15 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-fingerprint"></i> Unique Gallery</div>
         <div class="info-row">
             <span class="info-label">Feature Enabled</span>
-            <span class="info-value">${uniqueFoldersEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+            <span class="info-value">${uniqueFoldersEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Yes' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> No'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Gallery ID</span>
-            <span class="info-value info-code">${galleryId ? escapeHtml(galleryId) : '<span style="color: #888;">(not assigned)</span>'}</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(galleryId) : '<span style="color: var(--text-faint);">(not assigned)</span>'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Unique Folder Name</span>
-            <span class="info-value info-code">${galleryId ? escapeHtml(buildUniqueGalleryFolderName(char)) : '<span style="color: #888;">(using standard name)</span>'}</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(buildUniqueGalleryFolderName(char)) : '<span style="color: var(--text-faint);">(using standard name)</span>'}</span>
         </div>
     </div>`;
     
@@ -9692,7 +9755,7 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-link"></i> Provider Link</div>
         <div class="info-row">
             <span class="info-label">Linked</span>
-            <span class="info-value">${providerResult ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+            <span class="info-value">${providerResult ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Yes' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> No'}</span>
         </div>`;
     if (providerResult) {
         const { provider: linkedProvider, linkInfo } = providerResult;
@@ -9722,7 +9785,7 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-images"></i> Media Localization</div>
         <div class="info-row">
             <span class="info-label">Global Setting</span>
-            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Enabled' : '<i class="fa-solid fa-times" style="color: #888;"></i> Disabled'}</span>
+            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Enabled' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Disabled'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Per-Character Override</span>
@@ -9730,7 +9793,7 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Effective State</span>
-            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Active' : '<i class="fa-solid fa-times" style="color: #888;"></i> Inactive'}</span>
+            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Active' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Inactive'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Embedded Media URLs</span>
@@ -10533,9 +10596,9 @@ async function showDeleteConfirmation(char) {
     deleteModal.id = 'deleteConfirmModal';
     deleteModal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(450px * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
-                <h3 style="border: none; padding: 0; margin: 0;">
-                    <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2) 0%, rgba(var(--cl-error-bright-rgb), 0.3) 100%);">
+                <h3>
+                    <i class="fa-solid fa-triangle-exclamation" style="color: var(--cl-error-bright);"></i>
                     Delete Character
                 </h3>
                 <button class="close-confirm-btn" id="closeDeleteModal">&times;</button>
@@ -10544,7 +10607,7 @@ async function showDeleteConfirmation(char) {
                 <div style="margin-bottom: 20px;">
                     <img src="${getCharacterAvatarUrl(avatar)}" 
                          alt="${escapeHtml(charName)}" 
-                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 12px; border: 3px solid rgba(231, 76, 60, 0.5); margin-bottom: 15px;"
+                         style="width: 100px; height: 100px; object-fit: cover; border-radius: var(--radius-2xl); border: 3px solid rgba(var(--cl-error-bright-rgb), 0.5); margin-bottom: 15px;"
                          onerror="this.src='/img/ai4.png'">
                     <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
                 </div>
@@ -10556,9 +10619,9 @@ async function showDeleteConfirmation(char) {
                 <p style="color: var(--text-secondary); margin-bottom: 15px;">
                     Are you sure you want to delete this character? This action cannot be undone.
                 </p>
-                <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary);">
-                        <input type="checkbox" id="deleteChatsCheckbox" style="accent-color: #e74c3c;">
+                        <input type="checkbox" id="deleteChatsCheckbox" style="accent-color: var(--cl-error-bright);">
                         <span>Also delete all chat history with this character</span>
                     </label>
                 </div>
@@ -10605,18 +10668,18 @@ async function showDeleteConfirmation(char) {
         
         if (canDeleteGallery) {
             section.innerHTML = `
-                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                <div style="background: rgba(var(--cl-warning-bright-rgb), 0.15); border: 1px solid rgba(var(--cl-warning-bright-rgb), 0.4); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--cl-warning-bright); margin-bottom: 10px;">
                         <i class="fa-solid fa-images"></i>
                         <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                            <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="keep" checked style="accent-color: var(--cl-warning-bright);">
                             <span><strong>Keep gallery files</strong> - Leave in folder</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                            <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="delete" style="accent-color: var(--cl-error-bright);">
                             <span><strong>Delete gallery files</strong> - Remove all images</span>
                         </label>
                     </div>
@@ -10624,8 +10687,8 @@ async function showDeleteConfirmation(char) {
             `;
         } else if (hasImages) {
             section.innerHTML = `
-                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
+                <div style="background: rgba(var(--cl-warning-bright-rgb), 0.15); border: 1px solid rgba(var(--cl-warning-bright-rgb), 0.4); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--cl-warning-bright);">
                         <i class="fa-solid fa-images"></i>
                         <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
                     </div>
@@ -10741,10 +10804,8 @@ async function deleteCharacter(char, deleteChats = false) {
         // Evict from extensions cache (ST lazy loading)
         if (avatar) _extensionsCache.delete(avatar);
         
-        // CRITICAL: Trigger character refresh in main SillyTavern window
-        // This updates ST's in-memory character array and cleans up related data.
-        // Best-effort with a timeout - on mobile the opener tab may be suspended,
-        // which would hang cross-window await calls indefinitely.
+        // Trigger character refresh in the ST window. Best-effort with a timeout:
+        // on mobile the opener tab may be suspended and cross-window awaits hang.
         const refreshOpener = async () => {
             try {
                 const host = getHostWindow();
@@ -11094,17 +11155,12 @@ function showSaveConfirmation() {
         return;
     }
     
-    // Store pending payload for actual save
-    // SillyTavern's merge-attributes API expects data in the character card v2/v3 format
-    // with fields both at root level (for backwards compat) and under 'data' object
-    // IMPORTANT: Preserve existing extensions (like gallery_id, favorites, chub link) to avoid wiping them
+    // merge-attributes wants V2/V3 shape (fields at root for back-compat plus under data).
+    // Pull existing values up so the payload doesn't wipe anything the form doesn't touch.
     const existingExtensions = activeChar.data?.extensions || activeChar.extensions || {};
-    // IMPORTANT: Preserve create_date to maintain original import timestamp
     const existingCreateDate = activeChar.create_date;
-    // IMPORTANT: Preserve spec and spec_version to avoid unwanted version upgrades
     const existingSpec = activeChar.spec || activeChar.data?.spec;
     const existingSpecVersion = activeChar.spec_version || activeChar.data?.spec_version;
-    // IMPORTANT: Preserve the entire original data object to keep V3 fields (assets, nickname, depth_prompt, group_only_greetings, etc.)
     const existingData = activeChar.data || {};
     
     pendingPayload = {
@@ -11128,12 +11184,8 @@ function showSaveConfirmation() {
         character_book: currentValues.character_book,
         // Preserve original create_date
         create_date: existingCreateDate,
-        // Include under 'data' for proper v2/v3 card format
-        // CRITICAL: Spread existing data FIRST, then override with edited fields
-        // This preserves V3 fields like assets, nickname, depth_prompt, group_only_greetings, etc.
         data: {
             ...existingData,
-            // Override with edited fields
             name: currentValues.name,
             description: currentValues.description,
             first_mes: currentValues.first_mes,
@@ -11148,9 +11200,7 @@ function showSaveConfirmation() {
             tags: currentValues.tagsArray,
             alternate_greetings: currentValues.alternate_greetings,
             character_book: currentValues.character_book,
-            // Preserve original create_date
             create_date: existingCreateDate,
-            // CRITICAL: Include existing extensions to preserve gallery_id, favorites, chub link, etc.
             extensions: existingExtensions
         }
     };
@@ -11161,8 +11211,8 @@ function showSaveConfirmation() {
     if (hasAvatarChange) {
         diffEntries.unshift({
             field: 'Card Image',
-            oldHtml: `<img src="${escapeHtml(getCharacterAvatarUrl(activeChar.avatar))}" alt="Current image" style="max-width: 100px; max-height: 150px; border-radius: 6px;">`,
-            newHtml: `<img src="${escapeHtml(pendingAvatarPreviewUrl || '')}" alt="New image" style="max-width: 100px; max-height: 150px; border-radius: 6px;">`,
+            oldHtml: `<img src="${escapeHtml(getCharacterAvatarUrl(activeChar.avatar))}" alt="Current image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
+            newHtml: `<img src="${escapeHtml(pendingAvatarPreviewUrl || '')}" alt="New image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
         });
     }
     diffContainer.innerHTML = diffEntries.map(change => `
@@ -11379,7 +11429,6 @@ function refreshModalDisplay() {
         // Store raw content for fullscreen expand feature
         window.currentCreatorNotesContent = creatorNotes;
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        // Initialize handlers for this modal instance
         initCreatorNotesHandlers();
         // Show/hide expand button based on content length
         const expandBtn = document.getElementById('creatorNotesExpandBtn');
@@ -11451,7 +11500,6 @@ function refreshModalDisplay() {
         }
     }
     
-    // Initialize content expand handlers
     initContentExpandHandlers();
     
     // Update Embedded Lorebook
@@ -11831,8 +11879,7 @@ async function toggleCharacterFavorite(char) {
     const newFavStatus = !currentFavStatus;
     
     try {
-        // IMPORTANT: SillyTavern reads fav from data.extensions.fav
-        // Must include data object while preserving existing data fields
+        // fav lives in data.extensions.fav; full data must be passed through.
         const existingData = char.data || {};
         const existingExtensions = existingData.extensions || {};
         
@@ -12165,13 +12212,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Initialize expand field buttons
     initExpandFieldButtons();
-    
-    // Initialize section expand buttons (Greetings and Lorebook)
     initSectionExpandButtons();
-    
-    // Initialize browse expand buttons
     initBrowseExpandButtons();
 
 });
@@ -12971,14 +13013,13 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         return;
     }
     
-    // Check if we have full content stored (for truncated sections like First Message)
+    // Truncated sections (First Message, etc.) stash full content on the element.
     let content;
     if (sectionEl.dataset.fullContent) {
-        // Use stored full content and format it
         const charName = document.getElementById('chubCharName')?.textContent || 'Character';
         content = formatRichText(sectionEl.dataset.fullContent, charName, true);
     } else {
-        // Check if section contains an iframe (Creator's Notes uses secure iframe rendering)
+        // Creator's Notes renders through a secure iframe; pull content out if present.
         const existingIframe = sectionEl.querySelector('iframe');
         if (existingIframe && existingIframe.contentDocument?.body) {
             // Extract content from existing iframe
@@ -12995,7 +13036,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: var(--radius-sm); }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
         ::-webkit-scrollbar-corner { background: transparent; }
         body {
@@ -13008,12 +13049,12 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
             padding: 20px;
         }
         a { color: #4a9eff; }
-        img, video { max-width: 100%; height: auto; border-radius: 8px; }
-        pre, code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; }
+        img, video { max-width: 100%; height: auto; border-radius: var(--radius-lg); }
+        pre, code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm); }
         blockquote { border-left: 3px solid #4a9eff; margin-left: 0; padding-left: 15px; opacity: 0.9; }
         .char-placeholder { color: #4a9eff; font-weight: 500; }
         .user-placeholder { color: #9b59b6; font-weight: 500; }
-        iframe { max-width: 100%; border-radius: 8px; }
+        iframe { max-width: 100%; border-radius: var(--radius-lg); }
         @media (max-width: 768px) {
             body { font-size: 0.88rem; padding: 12px; }
         }
@@ -13981,10 +14022,15 @@ function performSearch() {
     // parseDateValue() (regex + Date constructor) inside the comparator
     const sortSelect = document.getElementById('sortSelect');
     const sortType = sortSelect ? sortSelect.value : 'name_asc';
+    const groupFavs = getSetting('groupFavoritesFirst') || false;
     const sorted = [...filtered].sort((a, b) => {
+        if (groupFavs) {
+            const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
+            if (favA !== favB) return favA ? -1 : 1;
+        }
         if (sortType === 'name_asc') return a.name.localeCompare(b.name);
         if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-        if (sortType === 'date_new') return b._dateAdded - a._dateAdded; 
+        if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
         if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
         if (sortType === 'created_new') return b._createDate - a._createDate;
         if (sortType === 'created_old') return a._createDate - b._createDate;
@@ -14584,7 +14630,7 @@ function setupEventListeners() {
         uploadZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadZone.style.borderColor = 'var(--accent)';
-            uploadZone.style.backgroundColor = 'rgba(74, 158, 255, 0.1)';
+            uploadZone.style.backgroundColor = 'rgba(var(--accent-rgb), 0.1)';
         });
         
         uploadZone.addEventListener('dragleave', (e) => {
@@ -15434,8 +15480,8 @@ async function uploadImages(files) {
     
     let uploadedCount = 0;
     let errorCount = 0;
-    
-    // Get the folder name (unique or standard)
+
+    // Folder name (unique or standard)
     const folderName = getGalleryFolderName(activeChar);
     
     for (let file of files) {
@@ -15568,7 +15614,7 @@ closeImportModal?.addEventListener('click', async () => {
             title: 'Cancel import?',
             message: 'Import is still running. Cancel and close?',
             icon: 'fa-solid fa-triangle-exclamation',
-            iconColor: '#f1c40f',
+            iconColor: 'var(--cl-warning-bright)',
             confirmLabel: 'Cancel Import',
             cancelLabel: 'Keep Importing',
             danger: true,
@@ -15586,7 +15632,7 @@ importModal?.addEventListener('click', async (e) => {
             title: 'Cancel import?',
             message: 'Import is still running. Cancel and close?',
             icon: 'fa-solid fa-triangle-exclamation',
-            iconColor: '#f1c40f',
+            iconColor: 'var(--cl-warning-bright)',
             confirmLabel: 'Cancel Import',
             cancelLabel: 'Keep Importing',
             danger: true,
@@ -16658,7 +16704,7 @@ startImportBtn?.addEventListener('click', async () => {
             if (importedFileNames.length > 0 && importedFileNames.length <= INCREMENTAL_THRESHOLD) {
                 let allAdded = true;
                 for (const fn of importedFileNames) {
-                    const ok = await fetchAndAddCharacter(fn);
+                    const ok = await fetchAndAddCharacter(fn, { skipNotify: true });
                     if (!ok) { allAdded = false; break; }
                 }
                 incrementalDone = allAdded;
@@ -16708,10 +16754,8 @@ let importSummaryDownloadState = {
 };
 
 function getImportSummaryFolderName(charInfo) {
-    // When galleryId is present, build the unique folder name directly
-    // (matching buildUniqueGalleryFolderName's sanitization exactly).
-    // We can't rely on resolveGalleryFolderName here because allCharacters
-    // may not have been refreshed yet with this import's gallery_id.
+    // resolveGalleryFolderName is unsafe here — allCharacters may not be refreshed yet
+    // with this import's gallery_id, so build the name directly matching buildUniqueGalleryFolderName.
     if (charInfo?.galleryId) {
         const safeName = (charInfo.name || 'Unknown').replace(/[<>:"/\\|?*]/g, '_').trim();
         return `${safeName}_${charInfo.galleryId}`;
@@ -16733,7 +16777,7 @@ async function handleImportSummaryCloseRequest() {
             title: 'Stop downloads?',
             message: 'Downloads are still running. Stop and close?',
             icon: 'fa-solid fa-triangle-exclamation',
-            iconColor: '#f1c40f',
+            iconColor: 'var(--cl-warning-bright)',
             confirmLabel: 'Stop Downloads',
             cancelLabel: 'Keep Downloading',
             danger: true,
@@ -18005,7 +18049,7 @@ function sortResultsByContentSimilarity(results, localChar) {
         let score = 0;
         let matchReasons = [];
         
-        // === NAME MATCHING (important for finding the right character) ===
+        // === NAME MATCHING ===
         
         // Exact name match gets biggest boost
         if (remoteName === charName) {
@@ -18039,7 +18083,7 @@ function sortResultsByContentSimilarity(results, localChar) {
             matchReasons.push('creator');
         }
         
-        // === CONTENT SIMILARITY (heavily weighted - this is the best signal!) ===
+        // === CONTENT SIMILARITY ===
         if (hasLocalContent && remoteContent.length > 50) {
             // Compare description to description
             const descToDescSim = calculateTextSimilarity(charDescription, remoteDescription);
@@ -21726,7 +21770,7 @@ function calculateFastSimilarity(normA, normB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON (variant-aware, aligned with full scorer) ===
+    // === NAME COMPARISON ===
     let bestNameScore = 0;
     let bestNameReason = '';
 
@@ -21760,7 +21804,7 @@ function calculateFastSimilarity(normA, normB) {
     // Early exit if names don't match at all (no point comparing content)
     if (!breakdown.name) return { score: 0, breakdown: {}, confidence: null, matchReason: '', matchReasons: [] };
     
-    // === CREATOR COMPARISON (fuzzy, aligned with full scorer) ===
+    // === CREATOR COMPARISON ===
     if (normA.creator && normB.creator) {
         if (normA.creatorCompact && normA.creatorCompact === normB.creatorCompact) {
             score += 15;
@@ -21795,7 +21839,7 @@ function calculateFastSimilarity(normA, normB) {
         }
     }
     
-    // === CONTENT COMPARISONS (using pre-computed word sets) ===
+    // === CONTENT COMPARISONS ===
     if (normA.descWords && normB.descWords) {
         const descSim = wordSetSimilarity(normA.descWords, normB.descWords);
         if (descSim >= 0.3) {
@@ -22083,7 +22127,7 @@ function calculateCharacterSimilarity(charA, charB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON (reduced weight - some creators use taglines) ===
+    // === NAME COMPARISON ===
     const nameA = getCharField(charA, 'name') || '';
     const nameB = getCharField(charB, 'name') || '';
 
@@ -22120,7 +22164,7 @@ function calculateCharacterSimilarity(charA, charB) {
         if (bestNameReason) matchReasons.push(bestNameReason);
     }
     
-    // === CREATOR COMPARISON (fuzzy - handles cross-provider name variations) ===
+    // === CREATOR COMPARISON ===
     const creatorA = getCharField(charA, 'creator') || '';
     const creatorB = getCharField(charB, 'creator') || '';
     
@@ -22144,7 +22188,7 @@ function calculateCharacterSimilarity(charA, charB) {
         }
     }
     
-    // === CREATOR NOTES COMPARISON (weighted heavily - often unique identifier) ===
+    // === CREATOR NOTES COMPARISON ===
     const notesA = getCharField(charA, 'creator_notes') || '';
     const notesB = getCharField(charB, 'creator_notes') || '';
     
@@ -22160,7 +22204,7 @@ function calculateCharacterSimilarity(charA, charB) {
         }
     }
     
-    // === DESCRIPTION COMPARISON (increased weight) ===
+    // === DESCRIPTION COMPARISON ===
     const descA = getCharField(charA, 'description') || '';
     const descB = getCharField(charB, 'description') || '';
     
@@ -23838,9 +23882,8 @@ async function deleteDuplicateChar(avatar, groupIdx) {
         });
     });
     
-    // Initialize button text
     updateButtonText();
-    
+
     // Radio button selection styling for transfer targets
     deleteModal.querySelectorAll('.dup-delete-transfer-radio').forEach(radio => {
         radio.addEventListener('click', () => {
@@ -24265,7 +24308,7 @@ function getCreatorNotesBaseStyles() {
             }
             ::-webkit-scrollbar { width: 8px; height: 8px; }
             ::-webkit-scrollbar-track { background: transparent; }
-            ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: var(--radius-sm); }
             ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
             ::-webkit-scrollbar-corner { background: transparent; }
             html {
@@ -24295,7 +24338,7 @@ function getCreatorNotesBaseStyles() {
                 height: auto !important;
                 display: block;
                 margin: 10px auto;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
             }
             
             a { color: #4a9eff; text-decoration: none; }
@@ -24315,14 +24358,14 @@ function getCreatorNotesBaseStyles() {
                 margin: 10px 0;
                 padding: 10px 15px;
                 border-left: 3px solid #4a9eff;
-                background: rgba(74, 158, 255, 0.1);
+                background: rgba(var(--accent-rgb), 0.1);
                 border-radius: 0 8px 8px 0;
             }
             
             pre {
                 background: rgba(0,0,0,0.3);
                 padding: 10px;
-                border-radius: 6px;
+                border-radius: var(--radius-md);
                 overflow-x: auto;
                 white-space: pre-wrap;
                 word-wrap: break-word;
@@ -24331,7 +24374,7 @@ function getCreatorNotesBaseStyles() {
             code {
                 background: rgba(0,0,0,0.3);
                 padding: 2px 6px;
-                border-radius: 4px;
+                border-radius: var(--radius-sm);
                 font-family: 'Consolas', 'Monaco', monospace;
             }
             
@@ -24340,7 +24383,7 @@ function getCreatorNotesBaseStyles() {
                 border-collapse: collapse;
                 margin: 10px 0;
                 background: rgba(0,0,0,0.2);
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 overflow: hidden;
             }
             td, th {
@@ -24348,7 +24391,7 @@ function getCreatorNotesBaseStyles() {
                 border: 1px solid rgba(255,255,255,0.1);
             }
             th {
-                background: rgba(74, 158, 255, 0.2);
+                background: rgba(var(--accent-rgb), 0.2);
                 color: #4a9eff;
             }
             
@@ -24364,7 +24407,7 @@ function getCreatorNotesBaseStyles() {
             .embedded-image {
                 max-width: 100% !important;
                 height: auto !important;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 margin: 10px auto;
                 display: block;
             }
@@ -24378,7 +24421,7 @@ function getCreatorNotesBaseStyles() {
                 height: 40px;
                 margin: 10px 0;
                 display: block;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 background: rgba(0, 0, 0, 0.3);
             }
             .audio-player::-webkit-media-controls-panel {
@@ -24453,7 +24496,7 @@ function createCreatorNotesIframe(srcdoc, initialHeight) {
         max-height: none;
         border: none;
         background: transparent;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         display: block;
     `;
     iframe.srcdoc = srcdoc;
@@ -24769,11 +24812,9 @@ function initCreatorNotesHandlers() {
         expandBtn._creatorNotesHandler = async (e) => {
             e.preventDefault();
             e.stopPropagation(); // Prevent toggling the details
-            
-            // Get the current creator notes content from the stored data
+
             const charName = document.getElementById('modalCharName')?.textContent || 'Character';
-            
-            // We need to get the raw content - check if it's stored
+
             if (window.currentCreatorNotesContent) {
                 // Build localization map if enabled for this character
                 let urlMap = null;
@@ -24935,7 +24976,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
         <div id="altGreetingsFullscreenModal" class="modal-overlay">
             <div class="modal-glass content-fullscreen-modal" id="altGreetingsFullscreenInner" data-size="normal">
                 <div class="modal-header">
-                    <h2><i class="fa-solid fa-comments"></i> Alternate Greetings <span style="color: #888; font-weight: 400; font-size: 0.9rem;">(${greetings.length})</span></h2>
+                    <h2><i class="fa-solid fa-comments"></i> Alternate Greetings <span style="color: var(--text-faint); font-weight: 400; font-size: 0.9rem;">(${greetings.length})</span></h2>
                     <div class="creator-notes-display-controls">
                         <div class="display-control-btns" id="altGreetingsSizeControlBtns">
                             <button type="button" class="display-control-btn" data-size="compact" title="Compact">
@@ -25173,7 +25214,7 @@ const CUSTOMIZER_LS_KEY = 'cl-custom-tokens';
 let customizerInjected = false;
 
 function applyTokenValue(name, value, unit) {
-    document.documentElement.style.setProperty(name, value + unit);
+    setRuntimeToken(name, value + unit);
 }
 
 function loadCustomTokens() {
@@ -25182,15 +25223,45 @@ function loadCustomTokens() {
         if (!stored) return;
         const vals = JSON.parse(stored);
         for (const [name, value] of Object.entries(vals)) {
-            document.documentElement.style.setProperty(name, value);
+            setRuntimeToken(name, value);
         }
     } catch (e) { /* ignore malformed data */ }
+}
+
+const CUSTOM_CSS_MAX_BYTES = 65536;
+
+function sanitizeCustomCSS(raw) {
+    let s = typeof raw === 'string' ? raw : '';
+    s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
+    s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '');
+    // Escape orphan </style so a malformed paste can't break out of the wrapper.
+    s = s.replace(/<\/style/gi, '<\\/style');
+    return s.slice(0, CUSTOM_CSS_MAX_BYTES);
+}
+
+function applyCustomCSS() {
+    const tag = document.getElementById('cl-custom-css');
+    if (!tag) return;
+    tag.textContent = sanitizeCustomCSS(getSetting('customCSS') || '');
+    updateAccentOverrideWarning();
+}
+
+// True if any --accent* declaration is in the active customCSS blob.
+function isAccentOverriddenByCustomCSS() {
+    const css = getSetting('customCSS') || '';
+    return /--accent[\w-]*\s*:/i.test(css);
+}
+
+function updateAccentOverrideWarning() {
+    const warning = document.getElementById('accentOverrideWarning');
+    if (!warning) return;
+    warning.classList.toggle('hidden', !isAccentOverriddenByCustomCSS());
 }
 
 function saveCustomTokens() {
     const vals = {};
     for (const def of TOKEN_DEFS) {
-        const current = document.documentElement.style.getPropertyValue(def.name).trim();
+        const current = getRuntimeToken(def.name);
         if (current) vals[def.name] = current;
     }
     localStorage.setItem(CUSTOMIZER_LS_KEY, JSON.stringify(vals));
@@ -25200,15 +25271,15 @@ function saveCustomTokens() {
 function resetCustomTokens() {
     localStorage.removeItem(CUSTOMIZER_LS_KEY);
     for (const def of TOKEN_DEFS) {
-        document.documentElement.style.removeProperty(def.name);
+        removeRuntimeToken(def.name);
     }
     syncCustomizerSliders();
     showToast('Tokens reset to defaults', 'info', 2000);
 }
 
 function getTokenCurrentValue(def) {
-    const inline = document.documentElement.style.getPropertyValue(def.name).trim();
-    if (inline) return parseFloat(inline);
+    const override = getRuntimeToken(def.name);
+    if (override) return parseFloat(override);
     const computed = getComputedStyle(document.documentElement).getPropertyValue(def.name).trim();
     if (computed) return parseFloat(computed);
     return def.default;
@@ -25372,6 +25443,25 @@ function closeThemeCustomizer() {
     if (el) el.classList.add('hidden');
 }
 
+// Emergency console escape hatches when custom CSS has broken the UI.
+window.clDisableCSS = function () {
+    const tag = document.getElementById('cl-custom-css');
+    if (tag) tag.textContent = '';
+    console.info('[CL] Custom CSS disabled for this session. Reload to revert, or run clResetCSS() to clear it permanently.');
+    return 'Custom CSS disabled (session-only)';
+};
+window.clResetCSS = function () {
+    try {
+        setSetting('customCSS', '');
+        applyCustomCSS();
+        console.info('[CL] Custom CSS cleared. Snippets in the editor are preserved; re-Apply them after fixing.');
+        return 'Custom CSS cleared permanently';
+    } catch (e) {
+        console.error('[CL] clResetCSS failed:', e);
+        return 'Failed, see error above';
+    }
+};
+
 // ========================================
 // CORE API BRIDGE - DO NOT USE DIRECTLY FROM MODULES
 // ========================================
@@ -25525,6 +25615,8 @@ window.setSettings = setSettings;
 window.getProviderExcludeTags = getProviderExcludeTags;
 window.setProviderExcludeTags = setProviderExcludeTags;
 window.openThemeCustomizer = openThemeCustomizer;
+window.applyCustomCSS = applyCustomCSS;
+window.CUSTOM_CSS_MAX_BYTES = CUSTOM_CSS_MAX_BYTES;
 
 // Import pipeline utilities - PNG manipulation, media download, etc.
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;
@@ -25892,7 +25984,9 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
             if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
                 await handleGalleryFolderRename(char, oldName, newName, galleryId);
             }
-            
+
+            notifySTCharacterEdited(avatar);
+
             debugLog('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
             return true;
         } else {

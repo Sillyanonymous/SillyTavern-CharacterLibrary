@@ -65,6 +65,8 @@ export const MIN_TOTAL_TOKENS = 889;
 const DC_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/dc-proxy`;
 
 let _apiRequest = null;
+let _getSavedToken = null;
+let _bootstrapInFlight = null;
 
 /**
  * Bind the CoreAPI.apiRequest function for use in proxied requests.
@@ -73,13 +75,48 @@ let _apiRequest = null;
 export function setApiRequest(fn) { _apiRequest = fn; }
 
 /**
+ * Bind a getter that returns the persisted DataCat session token (or null).
+ * Lets dcFetch lazy-bootstrap a session for out-of-browse-view callers
+ * (link modal preview, gallery download, gallery-sync) without coupling
+ * the api file to CoreAPI/settings directly. Called once from init().
+ */
+export function setSavedTokenGetter(fn) { _getSavedToken = fn; }
+
+/**
+ * Push the saved token (or a fresh anonymous one) into cl-helper. Returns
+ * true if a usable session is now active. Concurrent callers share the
+ * in-flight bootstrap promise so we never run more than one /dc-init at
+ * a time. Reset on completion so a future 401 can re-arm.
+ */
+async function tryBootstrapSession() {
+    if (_bootstrapInFlight) return _bootstrapInFlight;
+    _bootstrapInFlight = (async () => {
+        try {
+            const savedToken = _getSavedToken?.() ?? null;
+            return !!(await initDcSession(savedToken));
+        } catch {
+            return false;
+        } finally {
+            _bootstrapInFlight = null;
+        }
+    })();
+    return _bootstrapInFlight;
+}
+
+/**
  * Fetch a DataCat API path through the cl-helper plugin proxy.
+ * On 401/403, attempts to bootstrap a session once and retries.
  * @param {string} apiPath - Path relative to datacat.run (e.g. /api/characters/recent-public?...)
  * @returns {Promise<Response>}
  */
 async function dcFetch(apiPath) {
     if (!_apiRequest) throw new Error('DataCat: apiRequest not bound (cl-helper required)');
-    const resp = await _apiRequest(`${DC_PROXY_BASE}${apiPath}`);
+    let resp = await _apiRequest(`${DC_PROXY_BASE}${apiPath}`);
+    if (resp.status === 401 || resp.status === 403) {
+        if (await tryBootstrapSession()) {
+            resp = await _apiRequest(`${DC_PROXY_BASE}${apiPath}`);
+        }
+    }
     if (!resp.ok) {
         let body = '';
         try { body = await resp.clone().text(); } catch { /* ignore */ }
@@ -873,8 +910,12 @@ function normalizeMeiliHit(hit) {
 // SAUCEPAN (saucepan.ai search API)
 // ========================================
 
-const SAUCEPAN_API_URL = 'https://api2.saucepan.ai/api/v1/search';
-const SAUCEPAN_SITE_BASE = 'https://saucepan.ai';
+// Saucepan calls go through cl-helper (/saucepan-proxy/*), not ST's /proxy/.
+// Reason: Saucepan responds with zstd-compressed bodies; ST's /proxy/ forwards
+// them without the Content-Encoding header, leaving the browser unable to
+// decode them. cl-helper negotiates gzip/br/deflate (and falls back to native
+// zstd decompress) before returning plain JSON to the client.
+const SAUCEPAN_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/saucepan-proxy`;
 const SAUCEPAN_CDN_BASE = 'https://cdn.saucepan.ai/images';
 
 const SAUCEPAN_ORDER_MAP = {
@@ -882,6 +923,14 @@ const SAUCEPAN_ORDER_MAP = {
     saucepan_trending: 'trending',
     saucepan_popular: 'popularity',
 };
+
+async function saucepanFetch(method, apiPath, body) {
+    if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound (cl-helper required)');
+    const url = `${SAUCEPAN_PROXY_BASE}${apiPath}`;
+    return method === 'POST'
+        ? _apiRequest(url, 'POST', body)
+        : _apiRequest(url);
+}
 
 /**
  * Search Saucepan companions via api2.saucepan.ai.
@@ -929,16 +978,9 @@ export async function searchSaucepan(opts = {}) {
         open_definition_only: openDefinitionOnly,
     };
 
-    const headers = {
-        'Accept': '*/*',
-        'Content-Type': 'application/json',
-        'Origin': SAUCEPAN_SITE_BASE,
-        'Referer': `${SAUCEPAN_SITE_BASE}/`,
-    };
-
     let response;
     try {
-        response = await fetchWithProxy(SAUCEPAN_API_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+        response = await saucepanFetch('POST', '/api/v1/search', body);
     } catch (err) {
         throw new Error(`Saucepan search failed: ${err.message}`);
     }
@@ -993,15 +1035,9 @@ function normalizeSaucepanHit(hit) {
  */
 export async function fetchSaucepanCompanionsOfUser(handle) {
     if (!handle) return { characters: [], totalCount: 0 };
-    const url = `https://api2.saucepan.ai/api/v1/companions-of-user?handle=${encodeURIComponent(handle)}`;
-    const headers = {
-        'Accept': '*/*',
-        'Origin': SAUCEPAN_SITE_BASE,
-        'Referer': `${SAUCEPAN_SITE_BASE}/`,
-    };
     let response;
     try {
-        response = await fetchWithProxy(url, { method: 'GET', headers });
+        response = await saucepanFetch('GET', `/api/v1/companions-of-user?handle=${encodeURIComponent(handle)}`);
     } catch (err) {
         throw new Error(`Saucepan creator fetch failed: ${err.message}`);
     }
@@ -1024,14 +1060,8 @@ export async function fetchSaucepanCompanionsOfUser(handle) {
  */
 export async function fetchSaucepanCompanion(id) {
     if (!id) return null;
-    const url = `https://api2.saucepan.ai/api/v1/companion?id=${encodeURIComponent(id)}`;
-    const headers = {
-        'Accept': '*/*',
-        'Origin': SAUCEPAN_SITE_BASE,
-        'Referer': `${SAUCEPAN_SITE_BASE}/`,
-    };
     try {
-        const response = await fetchWithProxy(url, { method: 'GET', headers });
+        const response = await saucepanFetch('GET', `/api/v1/companion?id=${encodeURIComponent(id)}`);
         if (!response.ok) return null;
         const data = await response.json();
         return data?.companion || null;

@@ -15,7 +15,7 @@
 .ct-cookie-instructions details {
     background: rgba(255, 255, 255, 0.03);
     padding: 10px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
 }
 
 .ct-cookie-instructions summary {
@@ -36,14 +36,14 @@
 .ct-cookie-instructions code {
     background: rgba(255, 255, 255, 0.08);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     font-size: var(--font-md);
 }
 
 .ct-cookie-note {
     margin-top: 6px;
     font-size: var(--font-sm);
-    color: var(--text-tertiary, #888);
+    color: var(--text-muted);
     font-style: italic;
 }
 

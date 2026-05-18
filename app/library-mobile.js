@@ -367,6 +367,19 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 return false;
             },
 
+            // Tier 1.6 - registered overlays. Must close before Tier 2 confirm modals.
+            () => {
+                const regs = [...(window._overlayRegistry || [])]
+                    .sort((a, b) => a.tier - b.tier);
+                for (const reg of regs) {
+                    const el = document.getElementById(reg.id);
+                    if (!el) continue;
+                    const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
+                    if (visible) { reg.close(el); return true; }
+                }
+                return false;
+            },
+
             // Tier 2 - confirm/dialog modals (z-2000+)
             ['#disableGalleryFoldersModal',          el => el.remove()],
             ['#confirmSaveModal:not(.hidden)',        el => el.classList.add('hidden')],
@@ -402,19 +415,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
             // Tier 3 - tag editor sheet
             ['.tag-editor-sheet:not(.hidden)', el => { el.classList.add('hidden'); document.getElementById('tagEditorSheetAutocomplete')?.classList.add('hidden'); }],
-
-            // Tier 3.5 - registered overlays (populated via window.registerOverlay)
-            () => {
-                const regs = [...(window._overlayRegistry || [])]
-                    .sort((a, b) => a.tier - b.tier);
-                for (const reg of regs) {
-                    const el = document.getElementById(reg.id);
-                    if (!el) continue;
-                    const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
-                    if (visible) { reg.close(el); return true; }
-                }
-                return false;
-            },
 
             // Tier 3 - full-screen modals
             ['#chatPreviewModal:not(.hidden)',  el => el.classList.add('hidden')],
@@ -2493,7 +2493,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const handle = document.createElement('div');
         handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
         const bar = document.createElement('div');
-        bar.style.cssText = 'width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);';
+        bar.style.cssText = 'width:40px;height:4px;border-radius:var(--radius-2xs);background:rgba(255,255,255,0.3);';
         handle.appendChild(bar);
         popup.insertBefore(handle, popup.firstChild);
 
@@ -2536,7 +2536,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const handle = document.createElement('div');
         handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
         const bar = document.createElement('div');
-        bar.style.cssText = 'width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);';
+        bar.style.cssText = 'width:40px;height:4px;border-radius:var(--radius-2xs);background:rgba(255,255,255,0.3);';
         handle.appendChild(bar);
         popup.insertBefore(handle, popup.firstChild);
 
@@ -2574,7 +2574,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const handle = document.createElement('div');
         handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
         const bar = document.createElement('div');
-        bar.style.cssText = 'width:40px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);';
+        bar.style.cssText = 'width:40px;height:4px;border-radius:var(--radius-2xs);background:rgba(255,255,255,0.3);';
         handle.appendChild(bar);
         panel.insertBefore(handle, panel.firstChild);
 
@@ -2942,7 +2942,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             for (const mutation of mutations) {
                 for (const node of mutation.addedNodes) {
                     if (node.nodeType === 1) {
-                        // Check if the node itself or children are chat cards
                         if (node.matches && node.matches('.chat-card[data-chat-file], .chat-group-item[data-chat-file]')) {
                             refreshDateMap();
                             fixCardDate(node);
@@ -3234,7 +3233,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (Date.now() > suppressUntil) return;
             const target = e.target;
             if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-                // Check if this input is inside one of our containers
                 for (const sel of containerSelectors) {
                     if (target.closest(sel)) {
                         target.blur();

@@ -1,69 +1,9 @@
 /* ========================================
  * Card Recommender Modal
+ * Container chrome (shadow, border, header gradient, gradient-text icon) is provided
+ * by the canonical .cl-modal-feature modifier on .confirm-modal-content. The styles
+ * below are recommender-specific body content.
  * ======================================== */
-
-.recommender-modal-content {
-    display: flex;
-    flex-direction: column;
-    border-radius: 16px;
-    overflow: hidden;
-    background: var(--bg-secondary);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow:
-        0 24px 80px rgba(0, 0, 0, 0.6),
-        0 0 0 1px rgba(255, 255, 255, 0.04),
-        inset 0 1px 0 rgba(255, 255, 255, 0.06);
-}
-
-/* --- Header --- */
-
-.recommender-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px 20px;
-    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.10) 0%, rgba(var(--accent-secondary-rgb), 0.08) 100%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    position: relative;
-}
-
-.recommender-header-title {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm-md);
-    font-size: var(--font-md);
-    font-weight: 700;
-    color: var(--text-primary);
-    letter-spacing: -0.01em;
-}
-
-.recommender-header-title i {
-    font-size: var(--font-sm);
-    background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-}
-
-.recommender-close-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-    border: none;
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    font-size: var(--font-xs);
-}
-
-.recommender-close-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-primary);
-}
 
 /* --- Body --- */
 
@@ -89,7 +29,7 @@
 
 .recommender-body::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.12);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
 }
 
 .recommender-body::-webkit-scrollbar-thumb:hover {
@@ -109,7 +49,7 @@
     flex: 1;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     padding: 10px 14px;
     color: var(--text-primary);
     font-size: var(--font-md);
@@ -126,8 +66,8 @@
 }
 
 .recommender-prompt:focus {
-    border-color: rgba(74, 158, 255, 0.4);
-    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.08), inset 0 0 20px rgba(74, 158, 255, 0.03);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.08), inset 0 0 20px rgba(var(--accent-rgb), 0.03);
 }
 
 .recommender-submit-btn {
@@ -136,7 +76,7 @@
     justify-content: center;
     width: 40px;
     height: 40px;
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     border: none;
     background: linear-gradient(135deg, var(--accent), var(--accent-secondary));
     color: var(--accent-text);
@@ -148,13 +88,13 @@
 }
 
 .recommender-submit-btn:hover:not(:disabled) {
-    box-shadow: 0 4px 20px rgba(74, 158, 255, 0.45);
+    box-shadow: 0 4px 20px rgba(var(--accent-rgb), 0.45);
     transform: translateY(-1px);
 }
 
 .recommender-submit-btn:active:not(:disabled) {
     transform: translateY(0);
-    box-shadow: 0 2px 8px rgba(74, 158, 255, 0.3);
+    box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.3);
 }
 
 .recommender-submit-btn:disabled {
@@ -216,7 +156,7 @@
 .recommender-connection-dot {
     width: 6px;
     height: 6px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     flex-shrink: 0;
     background: var(--text-secondary);
     transition: background 0.3s ease;
@@ -227,9 +167,9 @@
     animation: recommender-pulse 1.2s ease-in-out infinite;
 }
 
-.recommender-connection-dot.connected { background: #4caf50; box-shadow: 0 0 6px rgba(76, 175, 80, 0.4); }
-.recommender-connection-dot.neutral { background: #ff9800; }
-.recommender-connection-dot.disconnected { background: #f44336; }
+.recommender-connection-dot.connected { background: var(--cl-success); box-shadow: 0 0 6px rgba(var(--cl-success-rgb), 0.4); }
+.recommender-connection-dot.neutral { background: var(--cl-warning); }
+.recommender-connection-dot.disconnected { background: var(--cl-error); }
 
 @keyframes recommender-pulse {
     0%, 100% { opacity: 0.4; }
@@ -250,7 +190,7 @@
     justify-content: center;
     width: 30px;
     height: 30px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     border: 1px solid rgba(255, 255, 255, 0.06);
     background: rgba(255, 255, 255, 0.02);
     color: var(--text-secondary);
@@ -266,8 +206,8 @@
 }
 
 .recommender-toolbar-btn.active {
-    background: rgba(74, 158, 255, 0.1);
-    border-color: rgba(74, 158, 255, 0.3);
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.3);
     color: var(--accent);
 }
 
@@ -276,7 +216,7 @@
 .recommender-settings-panel {
     background: rgba(0, 0, 0, 0.12);
     border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     margin-bottom: 10px;
     overflow: hidden;
     animation: recommender-slideDown 0.2s ease;
@@ -359,14 +299,14 @@
     display: flex;
     gap: 1px;
     background: rgba(0, 0, 0, 0.25);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     padding: 2px;
 }
 
 .recommender-tristate-btn {
     padding: 3px 10px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     background: transparent;
     color: var(--text-secondary);
     font-size: var(--font-3xs);
@@ -437,7 +377,7 @@
     -webkit-backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-top: none;
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
     z-index: 100;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
@@ -456,7 +396,7 @@
 
 .recommender-tag-ac-item:hover,
 .recommender-tag-ac-item.highlighted {
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
     color: var(--accent);
 }
 
@@ -471,20 +411,20 @@
     align-items: center;
     gap: var(--space-xs);
     padding: 2px 8px;
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     font-size: var(--font-3xs);
     font-weight: 500;
-    background: rgba(74, 158, 255, 0.08);
-    border: 1px solid rgba(74, 158, 255, 0.25);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     color: var(--accent);
     cursor: pointer;
     transition: all 0.15s ease;
 }
 
 .recommender-pill:hover {
-    background: rgba(244, 67, 54, 0.1);
-    border-color: rgba(244, 67, 54, 0.35);
-    color: #f44336;
+    background: rgba(var(--cl-error-rgb), 0.1);
+    border-color: rgba(var(--cl-error-rgb), 0.35);
+    color: var(--cl-error);
 }
 
 .recommender-pill i {
@@ -529,7 +469,7 @@
     align-items: center;
     gap: var(--space-xs);
     padding: 3px 9px;
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     font-size: var(--font-2xs);
     font-weight: 500;
     background: rgba(255, 255, 255, 0.03);
@@ -543,8 +483,8 @@
 }
 
 .recommender-toggle-chip input:checked + span {
-    background: rgba(74, 158, 255, 0.1);
-    border-color: rgba(74, 158, 255, 0.35);
+    background: rgba(var(--accent-rgb), 0.1);
+    border-color: rgba(var(--accent-rgb), 0.35);
     color: var(--accent);
 }
 
@@ -580,7 +520,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding-left: 10px;
-    border-left: 2px solid rgba(74, 158, 255, 0.15);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.15);
     margin-top: 4px;
     animation: recommender-slideDown 0.15s ease;
 }
@@ -593,7 +533,6 @@
 
 .recommender-batch-slider-row input[type="range"] {
     width: 100%;
-    accent-color: var(--accent);
     height: 3px;
 }
 
@@ -624,7 +563,6 @@
 
 .recommender-slider-row input[type="range"] {
     width: 100%;
-    accent-color: var(--accent);
     height: 3px;
 }
 
@@ -642,7 +580,7 @@
     display: flex;
     gap: 1px;
     background: rgba(0, 0, 0, 0.25);
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     padding: 2px;
     flex-shrink: 0;
 }
@@ -650,7 +588,7 @@
 .recommender-api-mode-btn {
     padding: 4px 8px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     background: transparent;
     color: var(--text-secondary);
     font-size: var(--font-3xs);
@@ -681,7 +619,7 @@
 .recommender-field {
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     padding: 6px 10px;
     color: var(--text-primary);
     font-size: var(--font-xs);
@@ -695,22 +633,22 @@
 }
 
 .recommender-field:focus {
-    border-color: rgba(74, 158, 255, 0.4);
+    border-color: rgba(var(--accent-rgb), 0.4);
 }
 
 /* --- Status --- */
 
 .recommender-status {
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     font-size: var(--font-xs);
     line-height: 1.5;
     margin-top: var(--space-sm);
 }
 
 .recommender-status-info {
-    background: rgba(74, 158, 255, 0.05);
-    border: 1px solid rgba(74, 158, 255, 0.15);
+    background: rgba(var(--accent-rgb), 0.05);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
     color: var(--text-primary);
 }
 
@@ -721,8 +659,8 @@
 }
 
 .recommender-status-error {
-    background: rgba(244, 67, 54, 0.05);
-    border: 1px solid rgba(244, 67, 54, 0.15);
+    background: rgba(var(--cl-error-rgb), 0.05);
+    border: 1px solid rgba(var(--cl-error-rgb), 0.15);
     color: var(--text-primary);
 }
 
@@ -748,9 +686,9 @@
     justify-content: center;
     width: 26px;
     height: 26px;
-    border-radius: 6px;
-    border: 1px solid rgba(244, 67, 54, 0.25);
-    background: rgba(244, 67, 54, 0.06);
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(var(--cl-error-rgb), 0.25);
+    background: rgba(var(--cl-error-rgb), 0.06);
     color: var(--text-secondary);
     cursor: pointer;
     font-size: var(--font-2xs);
@@ -758,7 +696,7 @@
 }
 
 .recommender-copy-debug:hover {
-    background: rgba(244, 67, 54, 0.15);
+    background: rgba(var(--cl-error-rgb), 0.15);
     color: var(--text-primary);
 }
 
@@ -796,7 +734,7 @@
     font-size: var(--font-3xs);
     font-weight: 500;
     padding: 2px 7px;
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
     color: var(--text-secondary);
@@ -830,7 +768,7 @@
     font-size: var(--font-3xs);
     font-weight: 600;
     padding: 3px 9px;
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     transition: opacity 0.15s, color 0.15s, background 0.15s, border-color 0.15s;
 }
 
@@ -866,7 +804,7 @@
     padding: 10px 12px;
     background: rgba(255, 255, 255, 0.015);
     border: 1px solid rgba(255, 255, 255, 0.04);
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     transition: all 0.2s ease;
     overflow: hidden;
     position: relative;
@@ -886,7 +824,7 @@
     left: 6px;
     width: 16px;
     height: 16px;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     background: rgba(0, 0, 0, 0.5);
     color: var(--text-secondary);
     font-size: var(--font-4xs);
@@ -917,7 +855,7 @@
 .recommender-result-avatar {
     width: 48px;
     height: 48px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     overflow: hidden;
     flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -926,8 +864,8 @@
 }
 
 .recommender-result-card:hover .recommender-result-avatar {
-    border-color: rgba(74, 158, 255, 0.25);
-    box-shadow: 0 2px 12px rgba(74, 158, 255, 0.15);
+    border-color: rgba(var(--accent-rgb), 0.25);
+    box-shadow: 0 2px 12px rgba(var(--accent-rgb), 0.15);
 }
 
 .recommender-result-avatar img {
@@ -1004,7 +942,7 @@
     overflow: hidden;
     opacity: 0.85;
     padding-left: 8px;
-    border-left: 2px solid rgba(74, 158, 255, 0.15);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.15);
     margin-top: 1px;
     cursor: pointer;
 }
@@ -1025,7 +963,7 @@
 .recommender-tag {
     font-size: var(--font-4xs);
     padding: 1px 6px;
-    border-radius: 100px;
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.03);
     color: var(--text-secondary);
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -1040,7 +978,7 @@
     color: var(--text-primary);
     background: rgba(0, 0, 0, 0.2);
     padding: 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     max-height: 300px;
     overflow-y: auto;
     font-family: 'Consolas', 'Fira Code', monospace;
@@ -1081,12 +1019,12 @@
         box-shadow: none !important;
     }
 
-    .recommender-header {
+    .recommender-modal-content .confirm-modal-header {
         padding: 10px 14px;
         flex-shrink: 0;
     }
 
-    .recommender-header-title {
+    .recommender-modal-content .confirm-modal-header h3 {
         font-size: var(--font-md);
     }
 
@@ -1114,7 +1052,7 @@
         font-size: var(--font-md);
         min-height: 80px;
         padding: 12px 14px;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
     }
     .recommender-prompt::placeholder { font-size: var(--font-xs); }
 
@@ -1123,7 +1061,7 @@
         height: 44px;
         min-width: unset;
         min-height: 44px;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         flex-shrink: 0;
         touch-action: manipulation;
         gap: var(--space-sm);
@@ -1135,7 +1073,7 @@
         display: inline;
     }
 
-    .recommender-close-btn {
+    .recommender-modal-content .close-confirm-btn {
         min-width: 44px;
         min-height: 44px;
         touch-action: manipulation;
@@ -1191,7 +1129,7 @@
     .recommender-settings-panel {
         overflow: visible !important;
         max-height: none !important;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         margin-bottom: 10px;
     }
 
@@ -1353,7 +1291,7 @@
     .recommender-result-card {
         gap: var(--space-sm-md);
         padding: 10px 12px;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         transform: none !important;
         box-shadow: none !important;
     }
@@ -1374,7 +1312,7 @@
     .recommender-result-avatar {
         width: 44px;
         height: 44px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         flex-shrink: 0;
     }
 
@@ -1428,7 +1366,7 @@
     .recommender-status {
         font-size: var(--font-xs);
         padding: 10px 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
     }
 
     .recommender-status-row {
@@ -1455,6 +1393,6 @@
         font-size: var(--font-xs);
         padding: 12px;
         max-height: none;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
     }
 }

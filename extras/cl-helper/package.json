@@ -1,7 +1,10 @@
 {
     "name": "cl-helper",
-    "version": "1.5.0",
+    "version": "1.5.1",
     "description": "Server-side helper plugin for SillyTavern Character Library. Provides auth proxying for providers that require custom request headers.",
     "main": "index.js",
-    "type": "module"
+    "type": "module",
+    "engines": {
+        "node": ">=22.15.0"
+    }
 }

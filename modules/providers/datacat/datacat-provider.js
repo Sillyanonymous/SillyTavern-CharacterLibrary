@@ -12,6 +12,7 @@ import {
     DATACAT_API_BASE,
     resolveDatacatAvatarUrl,
     setApiRequest,
+    setSavedTokenGetter,
     slugify,
     stripHtml,
     resolveTagNames,
@@ -76,6 +77,7 @@ class DatacatProvider extends ProviderBase {
         super.init(coreAPI);
         api = coreAPI;
         setApiRequest(coreAPI.apiRequest);
+        setSavedTokenGetter(() => coreAPI.getSetting('datacatToken') || null);
     }
 
     // ── View ────────────────────────────────────────────────
@@ -492,7 +494,6 @@ class DatacatProvider extends ProviderBase {
 
     // ── Bulk Linking ────────────────────────────────────────
 
-    // TODO: No search API discovered yet - bulk link disabled until we find one
     get supportsBulkLink() { return false; }
 }
 

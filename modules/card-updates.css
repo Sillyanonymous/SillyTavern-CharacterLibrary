@@ -37,8 +37,8 @@ body.char-modal-above .gv-modal.visible {
     position: relative;
     z-index: 1;
     width: 95%;
-    background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
-    border: 1px solid var(--cl-border, rgba(80, 80, 80, 0.5));
+    background: var(--cl-glass-bg);
+    border: 1px solid var(--cl-border);
 }
 
 .card-update-modal .cl-modal-body {
@@ -53,9 +53,9 @@ body.char-modal-above .gv-modal.visible {
 /* Status line */
 .card-update-status {
     padding: 12px 16px;
-    background: var(--cl-glass-bg, rgba(40, 40, 40, 0.9));
-    border: 1px solid var(--cl-border, rgba(80, 80, 80, 0.4));
-    border-radius: 8px;
+    background: var(--cl-glass-bg);
+    border: 1px solid var(--cl-border);
+    border-radius: var(--radius-lg);
     margin-bottom: 16px;
     display: flex;
     align-items: center;
@@ -76,8 +76,8 @@ body.char-modal-above .gv-modal.visible {
 .card-update-select-all {
     padding: 8px 12px;
     background: rgba(255,255,255,0.05);
-    border: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-    border-radius: 6px;
+    border: 1px solid var(--cl-border);
+    border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     gap: var(--space-sm);
@@ -87,8 +87,8 @@ body.char-modal-above .gv-modal.visible {
 
 /* Diff item */
 .card-update-diff-item {
-    border: 1px solid var(--cl-border, rgba(80,80,80,0.4));
-    border-radius: 8px;
+    border: 1px solid var(--cl-border);
+    border-radius: var(--radius-lg);
     overflow: hidden;
     background: rgba(0,0,0,0.2);
 }
@@ -118,11 +118,11 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-diff-values .local-value {
-    background: rgba(244, 67, 54, 0.2);
+    background: rgba(var(--cl-error-rgb), 0.2);
     color: #ff8a80;
     text-decoration: line-through;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -130,10 +130,10 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-diff-values .remote-value {
-    background: rgba(76, 175, 80, 0.2);
+    background: rgba(var(--cl-success-rgb), 0.2);
     color: #b9f6ca;
     padding: 2px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -141,7 +141,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-diff-values i {
-    color: var(--cl-text-secondary, #aaa);
+    color: var(--cl-text-secondary);
     flex-shrink: 0;
     opacity: 0.7;
 }
@@ -155,8 +155,8 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-array-column {
     padding: 10px;
-    border-radius: 8px;
-    border: 1px solid var(--cl-border, rgba(80,80,80,0.35));
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--cl-border);
     background: rgba(0,0,0,0.2);
     min-width: 0;
 }
@@ -166,13 +166,13 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     justify-content: space-between;
     font-size: var(--font-sm);
-    color: var(--cl-text-secondary, #aaa);
+    color: var(--cl-text-secondary);
     margin-bottom: 8px;
 }
 
 .card-update-array-count {
     padding: 2px 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255,255,255,0.08);
     font-size: var(--font-md);
 }
@@ -189,16 +189,16 @@ body.char-modal-above .gv-modal.visible {
     display: inline-flex;
     align-items: center;
     padding: 3px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.12);
     font-size: var(--font-sm);
 }
 
 .card-update-pill.tag {
-    color: var(--cl-accent, #4a9eff);
-    border-color: rgba(74, 158, 255, 0.4);
-    background: rgba(74, 158, 255, 0.12);
+    color: var(--cl-accent);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.12);
 }
 
 /* Highlight items unique to one side (added/removed) */
@@ -214,7 +214,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-empty {
-    color: var(--cl-text-secondary, #888);
+    color: var(--cl-text-secondary);
     font-size: var(--font-md);
 }
 
@@ -237,7 +237,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-diff-stats {
     font-size: var(--font-sm);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     flex: 1;
     text-align: right;
     padding-right: 8px;
@@ -246,21 +246,21 @@ body.char-modal-above .gv-modal.visible {
 .card-update-diff-expand {
     background: none;
     border: none;
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     cursor: pointer;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     transition: background 0.15s, color 0.15s;
     flex-shrink: 0;
 }
 
 .card-update-diff-expand:hover {
-    color: var(--cl-text-primary, #fff);
+    color: var(--cl-text-primary);
     background: rgba(255,255,255,0.1);
 }
 
 .card-update-diff-content {
-    border-top: 1px solid var(--cl-border, rgba(80,80,80,0.3));
+    border-top: 1px solid var(--cl-border);
 }
 
 .card-update-diff-content.collapsed {
@@ -281,7 +281,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-diff-panel.local {
-    border-right: 1px solid var(--cl-border, rgba(80,80,80,0.3));
+    border-right: 1px solid var(--cl-border);
 }
 
 .card-update-source-badge {
@@ -292,11 +292,11 @@ body.char-modal-above .gv-modal.visible {
     letter-spacing: 0.04em;
     padding: 2px 7px;
     margin-left: 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     vertical-align: middle;
-    background: rgba(var(--cl-accent-rgb, 74,158,255), 0.12);
-    color: var(--cl-accent, #4a9eff);
-    border: 1px solid rgba(var(--cl-accent-rgb, 74,158,255), 0.25);
+    background: rgba(var(--cl-accent-rgb), 0.12);
+    color: var(--cl-accent);
+    border: 1px solid rgba(var(--cl-accent-rgb), 0.25);
     cursor: help;
 }
 
@@ -312,15 +312,15 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-diff-panel.local .card-update-diff-panel-header {
-    background: rgba(244, 67, 54, 0.1);
+    background: rgba(var(--cl-error-rgb), 0.1);
     color: #ff8a80;
-    border-bottom: 2px solid #f44336;
+    border-bottom: 2px solid var(--cl-error);
 }
 
 .card-update-diff-panel.remote .card-update-diff-panel-header {
-    background: rgba(76, 175, 80, 0.1);
+    background: rgba(var(--cl-success-rgb), 0.1);
     color: #b9f6ca;
-    border-bottom: 2px solid #4caf50;
+    border-bottom: 2px solid var(--cl-success);
 }
 
 .card-update-diff-panel-content {
@@ -347,31 +347,31 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-diff-panel.local .diff-line.changed,
 .card-update-diff-panel.local .diff-line.removed {
-    background: rgba(244, 67, 54, 0.15);
-    border-left-color: #f44336;
+    background: rgba(var(--cl-error-rgb), 0.15);
+    border-left-color: var(--cl-error);
 }
 
 .card-update-diff-panel.remote .diff-line.changed,
 .card-update-diff-panel.remote .diff-line.added {
-    background: rgba(76, 175, 80, 0.15);
-    border-left-color: #4caf50;
+    background: rgba(var(--cl-success-rgb), 0.15);
+    border-left-color: var(--cl-success);
 }
 
 /* Word-level highlighting within side-by-side panels */
 .diff-line .word-removed {
-    background: rgba(244, 67, 54, 0.5);
+    background: rgba(var(--cl-error-rgb), 0.5);
     color: #ffcdd2;
     text-decoration: line-through;
     text-decoration-color: rgba(255, 205, 210, 0.7);
-    border-radius: 2px;
+    border-radius: var(--radius-2xs);
     padding: 1px 3px;
     margin: 0 1px;
 }
 
 .diff-line .word-added {
-    background: rgba(76, 175, 80, 0.5);
+    background: rgba(var(--cl-success-rgb), 0.5);
     color: #c8e6c9;
-    border-radius: 2px;
+    border-radius: var(--radius-2xs);
     padding: 1px 3px;
     margin: 0 1px;
 }
@@ -391,8 +391,8 @@ body.char-modal-above .gv-modal.visible {
     justify-content: space-between;
     padding: 10px 12px;
     background: rgba(0,0,0,0.2);
-    border: 1px solid var(--cl-border, rgba(80,80,80,0.3));
-    border-radius: 6px;
+    border: 1px solid var(--cl-border);
+    border-radius: var(--radius-md);
     gap: var(--space-md);
 }
 
@@ -412,7 +412,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-char-link {
     cursor: pointer;
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
 }
 .card-update-char-link:hover {
     text-decoration: underline;
@@ -420,7 +420,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-batch-item-path {
     font-size: var(--font-sm);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -438,9 +438,9 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-batch-item-status .has-updates {
     color: #b9f6ca;
-    background: rgba(76, 175, 80, 0.2);
+    background: rgba(var(--cl-success-rgb), 0.2);
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-weight: 500;
 }
 
@@ -474,17 +474,17 @@ body.char-modal-above .gv-modal.visible {
 .card-update-lock-toggle {
     background: none;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     cursor: pointer;
     padding: 4px 7px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: var(--font-sm);
     flex-shrink: 0;
     transition: all 0.15s;
 }
 
 .card-update-lock-toggle:hover {
-    color: var(--cl-text-primary, #eee);
+    color: var(--cl-text-primary);
     background: rgba(255, 255, 255, 0.08);
     border-color: rgba(255, 255, 255, 0.25);
 }
@@ -507,8 +507,8 @@ body.char-modal-above .gv-modal.visible {
     padding: 6px 14px;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 6px;
-    color: var(--cl-text-primary, #eee);
+    border-radius: var(--radius-md);
+    color: var(--cl-text-primary);
     font-size: var(--font-md);
     cursor: pointer;
     transition: all 0.15s;
@@ -521,10 +521,10 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-batch-view-btn {
     padding: 4px 10px;
-    background: var(--cl-accent, #4a9eff);
+    background: var(--cl-accent);
     color: var(--accent-text);
     border: none;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: var(--font-md);
     transition: filter 0.15s;
@@ -537,7 +537,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-progress {
     padding: 10px;
     text-align: center;
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
 }
 
 .card-update-batch-actions {
@@ -545,7 +545,7 @@ body.char-modal-above .gv-modal.visible {
     justify-content: center;
     gap: var(--space-md);
     padding-top: 12px;
-    border-top: 1px solid var(--cl-border, rgba(80,80,80,0.4));
+    border-top: 1px solid var(--cl-border);
     margin-top: 12px;
 }
 
@@ -554,20 +554,20 @@ body.char-modal-above .gv-modal.visible {
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 .card-update-pause-btn.pause {
-    background: rgba(255, 152, 0, 0.2);
-    border: 1px solid rgba(255, 152, 0, 0.45);
+    background: rgba(var(--cl-warning-rgb), 0.2);
+    border: 1px solid rgba(var(--cl-warning-rgb), 0.45);
     color: #ffcc80;
 }
 .card-update-pause-btn.pause:hover {
-    background: rgba(255, 152, 0, 0.35);
+    background: rgba(var(--cl-warning-rgb), 0.35);
 }
 .card-update-pause-btn.resume {
-    background: rgba(76, 175, 80, 0.2);
-    border: 1px solid rgba(76, 175, 80, 0.45);
+    background: rgba(var(--cl-success-rgb), 0.2);
+    border: 1px solid rgba(var(--cl-success-rgb), 0.45);
     color: #a5d6a7;
 }
 .card-update-pause-btn.resume:hover {
-    background: rgba(76, 175, 80, 0.35);
+    background: rgba(var(--cl-success-rgb), 0.35);
 }
 
 .card-update-apply-progress {
@@ -575,21 +575,21 @@ body.char-modal-above .gv-modal.visible {
     flex-direction: column;
     gap: var(--space-sm);
     padding: 12px;
-    border-radius: 10px;
-    border: 1px solid rgba(74, 158, 255, 0.3);
-    background: rgba(74, 158, 255, 0.08);
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.08);
     margin-bottom: 10px;
 }
 
 .card-update-apply-text {
     font-size: var(--font-md);
-    color: var(--cl-text-primary, #eee);
+    color: var(--cl-text-primary);
 }
 
 .card-update-apply-bar {
     width: 100%;
     height: 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255,255,255,0.1);
     overflow: hidden;
 }
@@ -604,10 +604,10 @@ body.char-modal-above .gv-modal.visible {
 .card-update-field-select {
     padding: 14px;
     border: 1px solid rgba(90, 120, 180, 0.35);
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     background: linear-gradient(135deg, rgba(30, 40, 70, 0.4), rgba(20, 20, 30, 0.6));
     margin-bottom: 16px;
-    box-shadow: inset 0 0 0 1px rgba(74, 158, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.08);
 }
 
 .card-update-field-select.hidden {
@@ -629,7 +629,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-title i {
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     font-size: var(--font-lg);
 }
 
@@ -652,7 +652,7 @@ body.char-modal-above .gv-modal.visible {
     font-size: var(--font-md);
     color: rgba(255, 255, 255, 0.75);
     padding: 4px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid rgba(255, 255, 255, 0.1);
     background: rgba(255, 255, 255, 0.05);
 }
@@ -668,7 +668,7 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-sm);
     padding: 8px 10px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.08);
     cursor: pointer;
@@ -676,12 +676,12 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-option:hover {
-    border-color: rgba(74, 158, 255, 0.4);
-    background: rgba(74, 158, 255, 0.08);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.08);
 }
 
 .card-update-field-option input {
-    accent-color: var(--cl-accent, #4a9eff);
+    accent-color: var(--cl-accent);
 }
 
 .card-update-field-label {
@@ -715,39 +715,39 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-xs);
     padding: 5px 10px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     border: 1px solid rgba(255, 255, 255, 0.12);
     background: rgba(255, 255, 255, 0.05);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     font-size: var(--font-sm);
     cursor: pointer;
     transition: all 0.15s ease;
 }
 
 .card-update-filter-pill:hover {
-    border-color: rgba(74, 158, 255, 0.4);
-    background: rgba(74, 158, 255, 0.08);
-    color: var(--cl-text-primary, #eee);
+    border-color: rgba(var(--accent-rgb), 0.4);
+    background: rgba(var(--accent-rgb), 0.08);
+    color: var(--cl-text-primary);
 }
 
 .card-update-filter-pill.active {
-    border-color: var(--cl-accent, #4a9eff);
-    background: rgba(74, 158, 255, 0.15);
-    color: var(--cl-accent, #4a9eff);
+    border-color: var(--cl-accent);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: var(--cl-accent);
     font-weight: 500;
 }
 
 .filter-count {
     font-size: var(--font-md);
     padding: 1px 5px;
-    border-radius: 999px;
+    border-radius: var(--radius-pill);
     background: rgba(255, 255, 255, 0.1);
     min-width: 16px;
     text-align: center;
 }
 
 .card-update-filter-pill.active .filter-count {
-    background: rgba(74, 158, 255, 0.25);
+    background: rgba(var(--accent-rgb), 0.25);
 }
 
 /* Batch selection controls */
@@ -761,7 +761,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-select-link {
     background: none;
     border: none;
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     cursor: pointer;
     font-size: inherit;
     padding: 2px 4px;
@@ -786,7 +786,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-checkbox {
     width: 16px;
     height: 16px;
-    accent-color: var(--cl-accent, #4a9eff);
+    accent-color: var(--cl-accent);
     cursor: pointer;
 }
 
@@ -803,9 +803,9 @@ body.char-modal-above .gv-modal.visible {
     justify-content: center;
     width: 24px;
     height: 24px;
-    border-radius: 5px;
-    background: rgba(74, 158, 255, 0.12);
-    color: var(--cl-accent, #4a9eff);
+    border-radius: var(--radius-sm-alt);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--cl-accent);
     font-size: var(--font-2xs);
 }
 
@@ -825,16 +825,16 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-sm-md);
     padding: 12px 14px;
-    background: rgba(74, 158, 255, 0.08);
-    border: 1px solid rgba(74, 158, 255, 0.2);
-    border-radius: 10px;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    border-radius: var(--radius-xl);
     margin-bottom: 14px;
     font-size: var(--font-md);
     line-height: 1.4;
 }
 
 .batch-summary-header i {
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     font-size: var(--font-md);
 }
 
@@ -861,7 +861,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .batch-summary-field-count {
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
 }
 
 .batch-summary-chars-header {
@@ -880,12 +880,12 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-xs-sm);
     font-size: var(--font-md);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     cursor: pointer;
 }
 
 .batch-summary-toggle-all input {
-    accent-color: var(--cl-accent, #4a9eff);
+    accent-color: var(--cl-accent);
 }
 
 .batch-summary-char-list {
@@ -901,7 +901,7 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-sm-md);
     padding: 8px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     background: rgba(0, 0, 0, 0.15);
     cursor: pointer;
     transition: background 0.1s;
@@ -914,7 +914,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-char-cb {
     width: 16px;
     height: 16px;
-    accent-color: var(--cl-accent, #4a9eff);
+    accent-color: var(--cl-accent);
     flex-shrink: 0;
     cursor: pointer;
 }
@@ -933,7 +933,7 @@ body.char-modal-above .gv-modal.visible {
     text-overflow: ellipsis;
 }
 .batch-summary-char-name.card-update-char-link {
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     cursor: pointer;
 }
 .batch-summary-char-name.card-update-char-link:hover {
@@ -960,13 +960,13 @@ body.char-modal-above .gv-modal.visible {
     align-items: center;
     gap: var(--space-sm);
     padding: 6px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     font-size: var(--font-md);
 }
 
-.lorebook-diff-entry.added { background: rgba(76, 175, 80, 0.1); }
-.lorebook-diff-entry.removed { background: rgba(244, 67, 54, 0.1); }
-.lorebook-diff-entry.modified { background: rgba(255, 152, 0, 0.1); }
+.lorebook-diff-entry.added { background: rgba(var(--cl-success-rgb), 0.1); }
+.lorebook-diff-entry.removed { background: rgba(var(--cl-error-rgb), 0.1); }
+.lorebook-diff-entry.modified { background: rgba(var(--cl-warning-rgb), 0.1); }
 .lorebook-diff-entry.unchanged { padding: 4px 10px; }
 
 .lorebook-diff-badge {
@@ -975,23 +975,23 @@ body.char-modal-above .gv-modal.visible {
     justify-content: center;
     width: 22px;
     height: 22px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     font-weight: bold;
     font-size: var(--font-sm);
     flex-shrink: 0;
     line-height: 1;
 }
 
-.lorebook-diff-badge.added { background: rgba(76, 175, 80, 0.25); color: #81c784; }
-.lorebook-diff-badge.removed { background: rgba(244, 67, 54, 0.25); color: #ef9a9a; }
-.lorebook-diff-badge.modified { background: rgba(255, 152, 0, 0.25); color: #ffcc80; }
+.lorebook-diff-badge.added { background: rgba(var(--cl-success-rgb), 0.25); color: var(--cl-success-pale); }
+.lorebook-diff-badge.removed { background: rgba(var(--cl-error-rgb), 0.25); color: var(--cl-error-pale); }
+.lorebook-diff-badge.modified { background: rgba(var(--cl-warning-rgb), 0.25); color: #ffcc80; }
 .lorebook-diff-badge.local-only { background: rgba(158, 158, 158, 0.25); color: #bdbdbd; font-size: var(--font-2xs); }
 .lorebook-diff-entry.local-only { opacity: 0.7; }
 
 .lorebook-diff-summary {
     padding: 6px 10px;
     font-size: var(--font-sm);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     border-bottom: 1px dashed rgba(255,255,255,0.08);
     line-height: 1.4;
 }
@@ -1001,26 +1001,26 @@ body.char-modal-above .gv-modal.visible {
     gap: var(--space-sm-md);
     padding: 10px 12px;
     margin: 6px 10px;
-    background: rgba(74, 158, 255, 0.08);
-    border: 1px solid rgba(74, 158, 255, 0.2);
-    border-radius: 8px;
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
+    border-radius: var(--radius-lg);
     font-size: var(--font-sm);
     line-height: 1.5;
-    color: var(--cl-text-secondary, #bbb);
+    color: var(--cl-text-secondary);
 }
 .lorebook-diff-info-box > i {
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     margin-top: 2px;
     flex-shrink: 0;
 }
 .lorebook-diff-info-box strong {
-    color: var(--cl-text-primary, #eee);
+    color: var(--cl-text-primary);
 }
 .lorebook-diff-help-details { margin-top: 6px; }
 .lorebook-diff-help-details summary {
     cursor: pointer;
     font-size: var(--font-md);
-    color: var(--cl-accent, #4a9eff);
+    color: var(--cl-accent);
     user-select: none;
     list-style: none;
 }
@@ -1035,7 +1035,7 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-help-body {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid rgba(74, 158, 255, 0.15);
+    border-top: 1px solid rgba(var(--accent-rgb), 0.15);
     font-size: var(--font-md);
     line-height: 1.6;
 }
@@ -1048,7 +1048,7 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-help-body code {
     background: rgba(255,255,255,0.08);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     font-size: var(--font-md);
 }
 
@@ -1056,22 +1056,22 @@ body.char-modal-above .gv-modal.visible {
     margin-left: auto;
     font-size: var(--font-xs);
     padding: 1px 7px;
-    border-radius: 9px;
+    border-radius: var(--radius-pill);
     flex-shrink: 0;
     white-space: nowrap;
     font-weight: 500;
 }
 .lorebook-diff-entry-tag.added {
-    background: rgba(76, 175, 80, 0.2);
-    color: #81c784;
+    background: rgba(var(--cl-success-rgb), 0.2);
+    color: var(--cl-success-pale);
 }
 .lorebook-diff-entry-tag.local-only {
     background: rgba(158, 158, 158, 0.15);
     color: #bdbdbd;
 }
 .lorebook-diff-entry-tag.warning {
-    background: rgba(255, 152, 0, 0.2);
-    color: #ffb74d;
+    background: rgba(var(--cl-warning-rgb), 0.2);
+    color: var(--cl-warning-pale);
 }
 
 .lorebook-world-check {
@@ -1082,8 +1082,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .lorebook-diff-local-only-section { padding: 6px 10px; border-top: 1px dashed rgba(255,255,255,0.08); }
-.lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: var(--space-xs-sm); cursor: pointer; font-size: var(--font-sm); color: var(--cl-text-secondary, #999); }
-.lorebook-diff-keep-toggle input { accent-color: var(--accent, #7b68ee); }
+.lorebook-diff-keep-toggle { display: inline-flex; align-items: center; gap: var(--space-xs-sm); cursor: pointer; font-size: var(--font-sm); color: var(--cl-text-secondary); }
 
 .lorebook-diff-entry-name {
     font-weight: 500;
@@ -1095,7 +1094,7 @@ body.char-modal-above .gv-modal.visible {
 
 .lorebook-diff-entry-keys {
     font-size: var(--font-md);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1110,7 +1109,7 @@ body.char-modal-above .gv-modal.visible {
 
 .lorebook-diff-entry-changes {
     font-size: var(--font-sm);
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     margin-left: auto;
     flex-shrink: 0;
     white-space: nowrap;
@@ -1145,7 +1144,7 @@ body.char-modal-above .gv-modal.visible {
     font-size: var(--font-xs);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--cl-text-secondary, #999);
+    color: var(--cl-text-secondary);
     margin-bottom: 6px;
     font-weight: 600;
 }
@@ -1166,20 +1165,20 @@ body.char-modal-above .gv-modal.visible {
 
 .lorebook-diff-meta-old {
     color: #ff8a80;
-    background: rgba(244, 67, 54, 0.15);
+    background: rgba(var(--cl-error-rgb), 0.15);
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
 }
 
 .lorebook-diff-meta-new {
     color: #b9f6ca;
-    background: rgba(76, 175, 80, 0.15);
+    background: rgba(var(--cl-success-rgb), 0.15);
     padding: 1px 6px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
 }
 
 .lorebook-diff-meta-row i {
-    color: var(--cl-text-secondary, #aaa);
+    color: var(--cl-text-secondary);
     font-size: var(--font-2xs);
     opacity: 0.6;
     flex-shrink: 0;
@@ -1224,7 +1223,7 @@ body.char-modal-above .gv-modal.visible {
 
     .card-update-field-select {
         padding: 12px;
-        border-radius: 14px;
+        border-radius: var(--radius-2xl-alt);
         background: linear-gradient(140deg, rgba(40, 50, 90, 0.55), rgba(20, 20, 30, 0.75));
         border: 1px solid rgba(90, 140, 210, 0.35);
     }
@@ -1258,7 +1257,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-field-label { font-size: var(--font-sm); }
     .card-update-field-option {
         padding: 10px 12px;
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid rgba(255, 255, 255, 0.1);
     }
@@ -1272,7 +1271,7 @@ body.char-modal-above .gv-modal.visible {
         max-height: none;
         overflow-y: visible;
         background: rgba(255, 255, 255, 0.04);
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
         border: 1px solid rgba(255, 255, 255, 0.08);
     }
 
@@ -1293,13 +1292,13 @@ body.char-modal-above .gv-modal.visible {
         border-bottom: none;
     }
     .card-update-batch-item:first-child {
-        border-radius: 12px 12px 0 0;
+        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
     }
     .card-update-batch-item:last-child {
-        border-radius: 0 0 12px 12px;
+        border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
     }
     .card-update-batch-item:only-child {
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
     }
 
     /* Info column - name + path, single lines, truncated */
@@ -1342,7 +1341,7 @@ body.char-modal-above .gv-modal.visible {
     /* Status badge - "3 updates" pill */
     .card-update-batch-item-status .has-updates {
         padding: 2px 8px;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         font-size: var(--font-xs);
         font-weight: 600;
         letter-spacing: 0.01em;
@@ -1352,7 +1351,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-batch-view-btn {
         width: auto;
         padding: 3px 10px;
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         font-size: var(--font-xs);
         font-weight: 600;
     }
@@ -1449,7 +1448,7 @@ body.char-modal-above .gv-modal.visible {
         display: flex;
         flex-wrap: wrap;
         border-top: 1px solid rgba(255, 255, 255, 0.08);
-        background: var(--cl-glass-bg, rgba(30, 30, 30, 0.98));
+        background: var(--cl-glass-bg);
         flex-shrink: 0;
     }
 
@@ -1458,7 +1457,7 @@ body.char-modal-above .gv-modal.visible {
     .card-update-modal .cl-modal-footer .card-update-pause-btn {
         height: 44px;
         padding: 0 16px;
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
         font-size: var(--font-md);
         font-weight: 500;
         box-sizing: border-box;
@@ -1490,7 +1489,7 @@ body.char-modal-above .gv-modal.visible {
         height: 48px;          /* slightly taller - primary action */
         font-size: var(--font-base);
         font-weight: 600;
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
         letter-spacing: 0.01em;
     }
 
@@ -1499,14 +1498,14 @@ body.char-modal-above .gv-modal.visible {
         font-weight: 600 !important;
     }
     .card-update-pause-btn.pause {
-        background: rgba(255, 152, 0, 0.18) !important;
-        border: 1px solid rgba(255, 152, 0, 0.4) !important;
-        color: #ffd54f !important;
+        background: rgba(var(--cl-warning-rgb), 0.18) !important;
+        border: 1px solid rgba(var(--cl-warning-rgb), 0.4) !important;
+        color: var(--cl-warning-pale) !important;
     }
     .card-update-pause-btn.resume {
-        background: rgba(76, 175, 80, 0.18) !important;
-        border: 1px solid rgba(76, 175, 80, 0.4) !important;
-        color: #81c784 !important;
+        background: rgba(var(--cl-success-rgb), 0.18) !important;
+        border: 1px solid rgba(var(--cl-success-rgb), 0.4) !important;
+        color: var(--cl-success-pale) !important;
     }
 
     /* Batch progress text - mobile */
@@ -1516,7 +1515,7 @@ body.char-modal-above .gv-modal.visible {
         font-weight: 500;
         color: rgba(255, 255, 255, 0.75);
         background: rgba(255, 255, 255, 0.03);
-        border-radius: 10px;
+        border-radius: var(--radius-xl);
         border: 1px solid rgba(255, 255, 255, 0.06);
         margin-top: 8px;
     }
@@ -1556,12 +1555,12 @@ body.char-modal-above .gv-modal.visible {
     .card-update-filter-pill:hover {
         border-color: rgba(255, 255, 255, 0.12);
         background: rgba(255, 255, 255, 0.05);
-        color: var(--cl-text-secondary, #999);
+        color: var(--cl-text-secondary);
     }
     .card-update-filter-pill.active:hover {
-        border-color: var(--cl-accent, #4a9eff);
-        background: rgba(74, 158, 255, 0.15);
-        color: var(--cl-accent, #4a9eff);
+        border-color: var(--cl-accent);
+        background: rgba(var(--accent-rgb), 0.15);
+        color: var(--cl-accent);
     }
 
     .filter-count {
@@ -1617,7 +1616,7 @@ body.char-modal-above .gv-modal.visible {
     /* Pre-apply summary - full-width mobile layout */
     .batch-summary-header {
         padding: 10px 12px;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         margin-bottom: 10px;
         gap: var(--space-sm);
         font-size: var(--font-md);
@@ -1658,7 +1657,7 @@ body.char-modal-above .gv-modal.visible {
         gap: var(--space-sm-md);
         padding: 10px 10px;
         min-height: 44px;
-        border-radius: 4px;
+        border-radius: var(--radius-sm);
         touch-action: manipulation;
     }
     .batch-summary-char-item:hover {
@@ -1686,7 +1685,7 @@ body.char-modal-above .gv-modal.visible {
     #cardUpdateBatchSummaryBackBtn,
     #cardUpdateBatchSummaryConfirmBtn {
         height: 44px;
-        border-radius: 12px;
+        border-radius: var(--radius-2xl);
         font-size: var(--font-md);
         font-weight: 500;
         touch-action: manipulation;

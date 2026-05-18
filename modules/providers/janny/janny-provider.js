@@ -107,7 +107,7 @@ let _puterBroken = false;
  * skip it on future calls.
  */
 async function puterFetchHtml(url) {
-    // Check if the environment even supports SharedArrayBuffer
+    // SharedArrayBuffer support depends on COOP/COEP response headers.
     if (typeof SharedArrayBuffer === 'undefined') {
         _puterBroken = true;
         throw new Error('SharedArrayBuffer not available (missing COOP/COEP headers)');

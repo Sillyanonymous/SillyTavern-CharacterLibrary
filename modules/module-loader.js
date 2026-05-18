@@ -14,7 +14,7 @@ import CoreAPI from './core-api.js';
 // CSS LOADER
 // ========================================
 
-const MODULE_CSS_VERSION = 6;
+const MODULE_CSS_VERSION = 56;
 
 function loadModuleCSS(path) {
     return new Promise((resolve) => {
@@ -90,7 +90,7 @@ const ModuleLoader = {
     register(name, module) {
         this.modules[name] = module;
         delete this._lazyLoaders[name];
-        console.log(`[ModuleLoader] Registered module: ${name}`);
+        window.debugLog?.(`[ModuleLoader] Registered module: ${name}`);
     },
 
     async initAll(dependencies) {
@@ -99,7 +99,7 @@ const ModuleLoader = {
                 if (module.init && !module._mlInitDone) {
                     await module.init(dependencies);
                     module._mlInitDone = true;
-                    console.log(`[ModuleLoader] Initialized module: ${name}`);
+                    window.debugLog?.(`[ModuleLoader] Initialized module: ${name}`);
                 }
             } catch (err) {
                 console.error(`[ModuleLoader] Failed to initialize module: ${name}`, err);
@@ -169,7 +169,7 @@ const ModuleLoader = {
 // ========================================
 
 async function initModuleSystem() {
-    console.log('[ModuleLoader] Initializing module system...');
+    window.debugLog?.('[ModuleLoader] Initializing module system...');
 
     const dependencies = {};
 
@@ -254,6 +254,29 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./custom-css.css');
+        const customCssModule = await import('./custom-css.js');
+        ModuleLoader.register('custom-css', customCssModule.default);
+
+        window.openCustomCssModal = customCssModule.openModal;
+        window.closeCustomCssModal = customCssModule.closeModal;
+        window.clearAllCustomCSSSnippets = customCssModule.clearAllSnippets;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load custom-css module:', err);
+    }
+
+    try {
+        loadModuleCSS('./css-assistant.css');
+        const cssAssistantModule = await import('./css-assistant.js');
+        ModuleLoader.register('css-assistant', cssAssistantModule.default);
+
+        window.openCssAssistant = cssAssistantModule.openModal;
+        window.closeCssAssistant = cssAssistantModule.closeModal;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load css-assistant module:', err);
+    }
+
+    try {
         loadModuleCSS('./character-creator.css');
         const creatorModule = await import('./character-creator.js');
         ModuleLoader.register('character-creator', creatorModule.default);
@@ -317,7 +340,7 @@ async function initModuleSystem() {
             window.extractGalleryImages = extractGalleryImages;
             window.isGalleryUrl = isGalleryUrl;
             window.identifyGallerySources = identifyGallerySources;
-            console.log('[ModuleLoader] Gallery extractors loaded (on demand)');
+            window.debugLog?.('[ModuleLoader] Gallery extractors loaded (on demand)');
         } catch (err) {
             _extractorsLoaded = false;
             console.warn('[ModuleLoader] Could not load gallery extractors:', err);
@@ -359,7 +382,7 @@ async function initModuleSystem() {
         }
         window.ProviderRegistry = ProviderRegistry;
         window.closeActiveBrowseDropdowns = ProviderRegistry.closeActiveBrowseDropdowns;
-        console.log(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
+        window.debugLog?.(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
     }
 
     // ============================
@@ -373,7 +396,7 @@ async function initModuleSystem() {
     // Initialize all Tier 1 modules
     await ModuleLoader.initAll(dependencies);
 
-    console.log('[ModuleLoader] Module system ready');
+    window.debugLog?.('[ModuleLoader] Module system ready');
 }
 
 
@@ -388,7 +411,7 @@ function setupLazyBatchTagging() {
         ModuleLoader.register('batch-tagging', mod.default);
         await mod.default.init({});
         mod.default._mlInitDone = true;
-        console.log('[ModuleLoader] Lazy-loaded batch-tagging');
+        window.debugLog?.('[ModuleLoader] Lazy-loaded batch-tagging');
     });
 }
 
@@ -422,7 +445,7 @@ function setupLazyChats() {
             window.openChat = chats.openChat;
             window.deleteChat = chats.deleteChat;
 
-            console.log('[ModuleLoader] Lazy-loaded chats');
+            window.debugLog?.('[ModuleLoader] Lazy-loaded chats');
         }
     );
 

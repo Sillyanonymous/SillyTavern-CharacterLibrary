@@ -423,7 +423,7 @@ async function loadCharacters(append = false) {
         if (!append && grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                     <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                     <button class="glass-btn" style="margin-top: 12px;" id="jannyRetryBtn">
                         <i class="fa-solid fa-redo"></i> Retry

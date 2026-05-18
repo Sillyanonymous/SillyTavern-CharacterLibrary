@@ -94,8 +94,7 @@ function analyzeSelectedTags(characters) {
 }
 
 function getCharacterTags(char) {
-    // Tags can be in multiple places - check for non-empty arrays
-    // Note: empty arrays are truthy, so we need explicit length checks
+    // Tags can live in multiple places; empty arrays are truthy so each check needs an explicit length test.
     let tags = [];
     
     if (Array.isArray(char.tags) && char.tags.length > 0) {
@@ -253,8 +252,7 @@ async function applyBatchTags() {
                 }
             }
             
-            // IMPORTANT: SillyTavern reads tags from data.tags, not root level
-            // Must include data object with tags while preserving existing data fields
+            // Tags live at data.tags, not root. Full data must be passed through.
             const existingData = char.data || {};
             const existingExtensions = existingData.extensions || char.extensions || {};
             

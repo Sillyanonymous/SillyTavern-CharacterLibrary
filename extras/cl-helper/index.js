@@ -9,6 +9,8 @@ import { join, resolve, sep, dirname } from 'node:path';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { stat, readFile, writeFile, open } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1443,6 +1445,155 @@ function registerCivitaiRoutes(router) {
 }
 
 // =============================================================================
+// Saucepan: read-only API proxy. Handles zstd-encoded responses that ST's
+// /proxy/ forwards without Content-Encoding (browser can't decode them).
+// Negotiates gzip/deflate/br with Saucepan; Node native zstd is fallback.
+// =============================================================================
+
+const SAUCEPAN_HOSTNAME = 'api2.saucepan.ai';
+const SAUCEPAN_BASE = 'https://api2.saucepan.ai';
+const SAUCEPAN_ORIGIN = 'https://saucepan.ai';
+const SAUCEPAN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const SAUCEPAN_MAX_BYTES = 10 * 1024 * 1024;
+const SAUCEPAN_ALLOWED_PATHS = [
+    /^\/api\/v1\/search$/,
+    /^\/api\/v1\/companions-of-user$/,
+    /^\/api\/v1\/companion$/,
+];
+const SAUCEPAN_POST_PATH = '/api/v1/search';
+const SAUCEPAN_MAX_SEARCH_LEN = 500;
+const SAUCEPAN_MAX_TAG_LEN = 64;
+const SAUCEPAN_MAX_TAGS = 100;
+const SAUCEPAN_MAX_DATE_LEN = 30;
+const SAUCEPAN_MAX_ORDER_LEN = 32;
+
+function sanitizeSaucepanSearchBody(input) {
+    if (!input || typeof input !== 'object') return null;
+
+    const asString = (v, max) => (typeof v === 'string' && v.length <= max) ? v : null;
+    const asStringOrNull = (v, max) => v === null ? null : asString(v, max);
+    const asBool = (v) => typeof v === 'boolean' ? v : false;
+    const asBoolOrNull = (v) => v === null ? null : asBool(v);
+    const asTagArray = (v) => Array.isArray(v)
+        ? v.filter(t => typeof t === 'string' && t.length <= SAUCEPAN_MAX_TAG_LEN).slice(0, SAUCEPAN_MAX_TAGS)
+        : [];
+    const asInt = (v, min, max) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n >= min && n <= max ? n : null;
+    };
+
+    const limit = asInt(input.limit, 1, 200);
+    const offset = asInt(input.offset, 0, 100000);
+    if (limit === null || offset === null) return null;
+
+    return {
+        text_search: asStringOrNull(input.text_search, SAUCEPAN_MAX_SEARCH_LEN),
+        tags: asTagArray(input.tags),
+        excluded_tags: asTagArray(input.excluded_tags),
+        fandom_tags: asTagArray(input.fandom_tags),
+        excluded_fandom_tags: asTagArray(input.excluded_fandom_tags),
+        match_all_fandom_tags: asBool(input.match_all_fandom_tags),
+        match_all_tags: asBool(input.match_all_tags),
+        limit,
+        offset,
+        sus: asBool(input.sus),
+        extra_spicy: asBoolOrNull(input.extra_spicy),
+        order_by: asString(input.order_by, SAUCEPAN_MAX_ORDER_LEN) || 'created',
+        asc: asBool(input.asc),
+        posted_at_from: asStringOrNull(input.posted_at_from, SAUCEPAN_MAX_DATE_LEN),
+        posted_at_to: asStringOrNull(input.posted_at_to, SAUCEPAN_MAX_DATE_LEN),
+        hide_hidden_content: asBool(input.hide_hidden_content),
+        open_definition_only: asBool(input.open_definition_only),
+    };
+}
+
+let _zstdDecompressAsync = null;
+function getZstdDecompressAsync() {
+    if (_zstdDecompressAsync) return _zstdDecompressAsync;
+    if (typeof zlib.zstdDecompress !== 'function') {
+        throw new Error('node:zlib zstdDecompress unavailable: requires Node >= 22.15. Upstream returned zstd; upgrade Node or ensure server respects Accept-Encoding: gzip, deflate, br.');
+    }
+    _zstdDecompressAsync = promisify(zlib.zstdDecompress);
+    return _zstdDecompressAsync;
+}
+
+async function readSaucepanBody(response) {
+    const ce = (response.headers.get('content-encoding') || '').toLowerCase();
+    if (ce.includes('zstd')) {
+        const compressed = Buffer.from(await response.arrayBuffer());
+        const decoded = await getZstdDecompressAsync()(compressed, { maxOutputLength: SAUCEPAN_MAX_BYTES });
+        return decoded.toString('utf8');
+    }
+    const text = await response.text();
+    if (text.length > SAUCEPAN_MAX_BYTES) {
+        throw new Error(`Saucepan response exceeded ${SAUCEPAN_MAX_BYTES} bytes`);
+    }
+    return text;
+}
+
+function registerSaucepanRoutes(router) {
+    const handleProxy = async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const normalizedPath = new URL(targetPath, SAUCEPAN_BASE).pathname;
+        if (!SAUCEPAN_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            console.warn(`[cl-helper] Saucepan proxy blocked: ${normalizedPath}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, SAUCEPAN_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== SAUCEPAN_HOSTNAME) {
+            return res.status(403).json({ error: `Proxy target must be ${SAUCEPAN_HOSTNAME}` });
+        }
+
+        const isPost = req.method === 'POST';
+        let bodyStr = null;
+        if (isPost) {
+            if (normalizedPath !== SAUCEPAN_POST_PATH) {
+                return res.status(400).json({ error: 'POST not allowed for this path' });
+            }
+            const sanitized = sanitizeSaucepanSearchBody(req.body);
+            if (!sanitized) {
+                return res.status(400).json({ error: 'Invalid search body' });
+            }
+            bodyStr = JSON.stringify(sanitized);
+        }
+
+        const headers = {
+            'User-Agent': SAUCEPAN_UA,
+            'Accept': '*/*',
+            // Deliberately omits zstd: undici auto-decompresses gzip/deflate/br,
+            // and Saucepan should respect the negotiated encoding. The zstd
+            // fallback in readSaucepanBody covers servers that ignore us.
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Origin': SAUCEPAN_ORIGIN,
+            'Referer': SAUCEPAN_ORIGIN + '/',
+        };
+        if (isPost) headers['Content-Type'] = 'application/json';
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: req.method,
+                headers,
+                body: bodyStr ?? undefined,
+                redirect: 'follow',
+            });
+
+            const text = await readSaucepanBody(response);
+            res.status(response.status);
+            res.set('Content-Type', response.headers.get('content-type') || 'application/json');
+            res.send(text);
+        } catch (err) {
+            console.error('[cl-helper] Saucepan proxy error:', err.message);
+            res.status(502).json({ error: `Failed to reach Saucepan: ${err.message}` });
+        }
+    };
+
+    router.get('/saucepan-proxy/*', handleProxy);
+    router.post('/saucepan-proxy/*', handleProxy);
+}
+
+// =============================================================================
 // FlareSolverr: thin POST forwarder for Cloudflare-protected endpoints
 // =============================================================================
 //
@@ -1457,6 +1608,21 @@ function registerCivitaiRoutes(router) {
 
 const FLARESOLVERR_MAX_TARGET_LENGTH = 1024;
 const FLARESOLVERR_TIMEOUT_MS = 90_000;
+
+// Allowlist of upstreams FlareSolverr is allowed to fetch on behalf of CL.
+// Matches the hostname-plus-path-regex pattern used by other cl-helper proxies.
+const FLARESOLVERR_TARGET_ALLOWLIST = [
+    { hostname: 'janitorai.com', pathPattern: /^\/hampter\/characters\/?$/ },
+];
+
+function validateFlareTargetUrl(url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { return false; }
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    return FLARESOLVERR_TARGET_ALLOWLIST.some(({ hostname, pathPattern }) =>
+        parsed.hostname === hostname && pathPattern.test(parsed.pathname)
+    );
+}
 
 function validateFlareUrl(flareUrl) {
     if (!flareUrl || typeof flareUrl !== 'string' || flareUrl.length > 256) {
@@ -1501,18 +1667,13 @@ function registerFlareSolverrRoutes(router) {
         if (targetUrl.length > FLARESOLVERR_MAX_TARGET_LENGTH) {
             return res.status(400).json({ error: 'targetUrl too long' });
         }
-
-        let parsedTarget;
-        try { parsedTarget = new URL(targetUrl); } catch {
-            return res.status(400).json({ error: 'Invalid targetUrl' });
-        }
-        if (!/^https?:$/.test(parsedTarget.protocol)) {
-            return res.status(400).json({ error: 'targetUrl must be http or https' });
+        if (!validateFlareTargetUrl(targetUrl)) {
+            return res.status(403).json({ error: 'targetUrl not in allowlist' });
         }
 
         const body = {
             cmd: 'request.get',
-            url: parsedTarget.toString(),
+            url: targetUrl,
             maxTimeout: FLARESOLVERR_TIMEOUT_MS,
         };
         if (sessionId && typeof sessionId === 'string' && sessionId.length <= 128) {
@@ -1596,7 +1757,7 @@ function registerFlareSolverrRoutes(router) {
  */
 export async function init(router) {
     router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.5.0', thumbnails: _thumbsReady });
+        res.json({ ok: true, version: '1.5.1', thumbnails: _thumbsReady });
     });
 
     registerThumbnailRoutes(router);
@@ -1606,6 +1767,7 @@ export async function init(router) {
     registerBotBooruRoutes(router);
     registerImgchestRoutes(router);
     registerCivitaiRoutes(router);
+    registerSaucepanRoutes(router);
     registerFlareSolverrRoutes(router);
 
     console.log('[cl-helper] Character Library helper plugin loaded');

@@ -610,7 +610,7 @@ class ChubBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without a token!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -629,7 +629,7 @@ class ChubBrowseView extends BrowseView {
                     <div class="chub-login-status" style="display:none;"></div>
                 </div>
 
-                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: var(--radius-lg);">
                     <summary style="cursor: pointer; color: var(--accent);">
                         <i class="fa-solid fa-question-circle"></i> How to get your URQL_TOKEN
                     </summary>
@@ -640,7 +640,7 @@ class ChubBrowseView extends BrowseView {
                             <li>Go to the <strong>Application</strong> tab (or Storage in Firefox)</li>
                             <li>In the left sidebar, expand <strong>Local Storage</strong></li>
                             <li>Click on <code>https://chub.ai</code></li>
-                            <li>Find the key <code style="color: #e74c3c; font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
+                            <li>Find the key <code style="color: var(--cl-error-bright); font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
                         </ol>
                         <p style="margin-top: 10px; font-style: italic;">
                             The token is a long string that authenticates you with ChubAI's API.
@@ -919,7 +919,7 @@ class ChubBrowseView extends BrowseView {
 }
 
 // ========================================
-// CHUB BROWSE LOGIC (moved from library.js)
+// CHUB BROWSE LOGIC
 // ========================================
 
 
@@ -1710,11 +1710,10 @@ function renderChubTagsDropdownList(filter = '') {
     
     // Filter tags
     const filterLower = filter.toLowerCase();
-    const filteredTags = filter 
+    const filteredTags = filter
         ? chubPopularTags.filter(tag => tag.toLowerCase().includes(filterLower))
         : chubPopularTags;
-    
-    // Check if the typed text exactly matches any known tag
+
     const hasExactMatch = filter && filteredTags.some(t => t.toLowerCase() === filterLower);
     const showCustomAdd = filter && filterLower.length >= 2 && !hasExactMatch;
     
@@ -2621,8 +2620,7 @@ async function updateFollowAuthorButton(authorName) {
     followBtn.style.display = '';
     followBtn.disabled = true;
     followBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    
-    // Check if we're following this author
+
     try {
         const followsList = await fetchMyFollowsList();
         chubIsFollowingCurrentAuthor = followsList && followsList.has(authorName.toLowerCase());
@@ -2872,9 +2870,7 @@ async function loadChubCharacters(forceRefresh = false) {
         if (chubMaxTokens !== 100000) {
             params.set('max_tokens', chubMaxTokens.toString());
         }
-        
-        // Note: Favorites filter is now handled by loadChubFavorites() using gateway API
-        
+
         debugLog('[ChubAI] Search params:', params.toString());
         
         const headers = getChubHeaders(true);
@@ -3155,7 +3151,6 @@ async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
             }
         }
         
-        // Check if there's more data
         chubHasMore = data.cursor !== null && nodes.length > 0;
         
         renderChubGrid(chubCurrentPage > 1);
@@ -3276,12 +3271,10 @@ function createChubCard(char, isTimeline = false) {
     const downloads = formatNumber(char.starCount || 0);
     const favorites = formatNumber(char.n_favorites || char.nFavorites || 0);
     const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
-    
-    // Check if this character is in local library
+
     const inLibrary = isCharInLocalLibrary(char);
     const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
-    
-    // Get up to 3 tags
+
     const tags = (char.topics || []).slice(0, 3);
     
     // Build feature badges
@@ -3502,9 +3495,8 @@ async function openChubCharPreview(char) {
     const favoriteCountEl = document.getElementById('chubCharFavoriteCount');
     favoriteCountEl.textContent = formatNumber(favoritesCount);
     
-    // Check if user has favorited this character (requires token)
     updateChubFavoriteButton(char);
-    
+
     // Creator's Notes (public ChubAI listing description) - use secure iframe renderer
     renderCreatorNotesSecure(char.description || char.tagline || 'No description available.', char.name, creatorNotesEl);
     
@@ -3821,7 +3813,6 @@ async function updateChubFavoriteButton(char) {
         return;
     }
     
-    // Check if user has favorited this character via API
     try {
         const charId = char.id || char.project_id;
         if (!charId) {
@@ -3850,8 +3841,7 @@ async function updateChubFavoriteButton(char) {
         if (response.ok) {
             const data = await response.json();
             debugLog('[ChubAI] Favorites response:', data);
-            
-            // Check if this character's ID is in the favorites list
+
             let isFavorited = false;
             const nodes = data.nodes || data.data || data || [];
             if (Array.isArray(nodes)) {
@@ -3936,9 +3926,7 @@ async function toggleChubCharFavorite() {
                 favoriteBtn.classList.remove('favorited');
                 favoriteBtn.querySelector('i').className = 'fa-regular fa-heart';
                 favoriteBtn.title = 'Add to favorites on ChubAI';
-                // Update stored state
                 chubSelectedChar._isFavorited = false;
-                // Decrement count
                 const currentCount = parseInt(favoriteCountEl.textContent.replace(/[KM]/g, '')) || 0;
                 if (currentCount > 0) {
                     chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 1) - 1;
@@ -3949,9 +3937,7 @@ async function toggleChubCharFavorite() {
                 favoriteBtn.classList.add('favorited');
                 favoriteBtn.querySelector('i').className = 'fa-solid fa-heart';
                 favoriteBtn.title = 'Remove from favorites on ChubAI';
-                // Update stored state
                 chubSelectedChar._isFavorited = true;
-                // Increment count
                 chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 0) + 1;
                 favoriteCountEl.textContent = formatNumber(chubSelectedChar.n_favorites);
                 showToast('Added to ChubAI favorites!', 'success');
@@ -4127,18 +4113,7 @@ async function downloadChubCharacter() {
         }
         view.buildLocalLibraryLookup();
         markChubCardAsImported(fullPath);
-        
-        // Also refresh main ST window's character list (fire-and-forget)
-        try {
-            const context = CoreAPI.getSTContext();
-            if (context && typeof context.getCharacters === 'function') {
-                debugLog('[ChubDownload] Triggering character refresh in main window...');
-                context.getCharacters().catch(e => console.warn('[ChubDownload] Main window refresh failed:', e));
-            }
-        } catch (e) {
-            console.warn('[ChubDownload] Could not access main window:', e);
-        }
-        
+
     } catch (e) {
         console.error('[ChubDownload] Download error:', e);
         showToast('Download failed: ' + e.message, 'error');

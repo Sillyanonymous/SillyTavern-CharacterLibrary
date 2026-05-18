@@ -9,7 +9,6 @@ function getExtensionUrl() {
     for (let i = 0; i < scripts.length; i++) {
         if (scripts[i].src && scripts[i].src.includes(EXTENSION_DIR)) {
             const path = scripts[i].src;
-            // Return the directory containing index.js
             return path.substring(0, path.lastIndexOf('/'));
         }
     }
@@ -41,6 +40,13 @@ async function getCsrfToken() {
 
 // Pre-fetch at load time; token is stable for the session
 getCsrfToken().then(t => { _csrfToken = t; });
+
+function clDebug(...args) {
+    try {
+        const ctx = SillyTavern?.getContext?.();
+        if (ctx?.extensionSettings?.[CL_SETTINGS_KEY]?.debugMode) console.log(...args);
+    } catch { /* swallow: settings unavailable, skip the log */ }
+}
 
 // ==============================================
 // Display Mode Setting
@@ -656,7 +662,7 @@ function setupLauncherDropdown() {
         }
     });
 
-    console.log(`${EXTENSION_NAME}: Launcher dropdown attached to Characters button`);
+    clDebug(`${EXTENSION_NAME}: Launcher dropdown attached to Characters button`);
     return true;
 }
 
@@ -695,7 +701,7 @@ function ensureStandaloneGalleryButton(shouldExist) {
     const rightNavHolder = $('#rightNavHolder');
     if (rightNavHolder.length) {
         rightNavHolder.after(galleryBtn);
-        console.log(`${EXTENSION_NAME}: Standalone button added after #rightNavHolder`);
+        clDebug(`${EXTENSION_NAME}: Standalone button added after #rightNavHolder`);
         injected = true;
     }
     
@@ -710,7 +716,7 @@ function ensureStandaloneGalleryButton(shouldExist) {
                 } else {
                     target.append(galleryBtn);
                 }
-                console.log(`${EXTENSION_NAME}: Standalone button added to ${selector}`);
+                clDebug(`${EXTENSION_NAME}: Standalone button added to ${selector}`);
                 injected = true;
                 break;
             }
@@ -783,6 +789,14 @@ function injectExtensionSettings() {
                         <span>Exclusive panels</span>
                     </label>
                     </div>
+                    <div style="margin-top: 10px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <button id="charlib-clear-css" class="menu_button" style="width: 100%; background: rgba(231, 76, 60, 0.12); border-color: rgba(231, 76, 60, 0.4); color: #e74c3c;" title="Failsafe for when custom CSS has broken the Character Library UI">
+                            <i class="fa-solid fa-eraser"></i> Clear Custom CSS
+                        </button>
+                        <div style="opacity: 0.65; font-size: 11px; margin-top: 4px; line-height: 1.4;">
+                            Failsafe if custom CSS has broken Character Library. Wipes only the active CSS; your saved snippets are preserved.
+                        </div>
+                    </div>
                 </div>
             </div>
         `;
@@ -851,6 +865,39 @@ function injectExtensionSettings() {
             }
         });
 
+        document.getElementById('charlib-clear-css').addEventListener('click', () => {
+            if (!window.confirm('Wipe Character Library\'s active custom CSS? Your saved snippets are preserved (you can re-Apply them after fixing the broken one).')) return;
+            try {
+                const context = SillyTavern?.getContext?.();
+                if (!context?.extensionSettings) {
+                    console.warn(`${EXTENSION_NAME}: SillyTavern context not available, cannot clear customCSS`);
+                    return;
+                }
+                if (!context.extensionSettings[CL_SETTINGS_KEY]) {
+                    context.extensionSettings[CL_SETTINGS_KEY] = {};
+                }
+                context.extensionSettings[CL_SETTINGS_KEY].customCSS = '';
+                if (typeof context.saveSettingsDebounced === 'function') context.saveSettingsDebounced();
+
+                // If the embedded panel is loaded, reload it so the running <style> tag clears.
+                // Tab mode users need to reload their CL tab manually.
+                if (_iframe?.contentWindow) {
+                    try { _iframe.contentWindow.location.reload(); } catch (_) { /* cross-origin guard, ignore */ }
+                }
+
+                if (typeof toastr !== 'undefined' && toastr?.success) {
+                    toastr.success('Custom CSS cleared. Reload any open Character Library tabs to apply.', EXTENSION_NAME);
+                } else {
+                    console.info(`${EXTENSION_NAME}: customCSS cleared`);
+                }
+            } catch (e) {
+                console.error(`${EXTENSION_NAME}: Failed to clear customCSS:`, e);
+                if (typeof toastr !== 'undefined' && toastr?.error) {
+                    toastr.error('Failed to clear custom CSS. See console for details.', EXTENSION_NAME);
+                }
+            }
+        });
+
         return true;
     };
 
@@ -909,11 +956,8 @@ jQuery(async () => {
     // ==============================================
     // Media Localization in SillyTavern Chat
     // ==============================================
-    
-    // Initialize media localization for chat messages
-    initMediaLocalizationInChat();
 
-    // Initialize display name override for chat messages
+    initMediaLocalizationInChat();
     initDisplayNameOverride();
 
     // Protect ST's native gallery from crashing on large image folders
@@ -924,7 +968,7 @@ jQuery(async () => {
         openGallery();
     }
     
-    console.log(`${EXTENSION_NAME}: Loaded successfully.`);
+    clDebug(`${EXTENSION_NAME}: Loaded successfully.`);
 });
 
 // ==============================================
@@ -1033,7 +1077,7 @@ function extractFilenameFromUrl(url) {
 async function buildChatMediaLocalizationMap(character) {
     const avatar = character?.avatar;
     
-    // Get the correct folder name (may be unique folder with UUID suffix)
+    // Folder name may be a unique folder with UUID suffix.
     const folderName = getGalleryFolderForCharacter(character);
     if (!folderName) {
         return {};
@@ -1212,10 +1256,8 @@ function localizeCssUrlsInElement(element, urlMap) {
  */
 async function localizeMediaInMessage(messageElement, character) {
     if (!character?.avatar || !messageElement) return;
-    
-    // Check if localization is enabled
     if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
-    
+
     const urlMap = await buildChatMediaLocalizationMap(character);
     
     if (Object.keys(urlMap).length === 0) return; // No localized files
@@ -1287,7 +1329,6 @@ let chatLocalizationObserver = null;
  */
 function initMediaLocalizationInChat() {
     try {
-        // Check if SillyTavern global is available
         if (typeof SillyTavern === 'undefined') {
             setTimeout(initMediaLocalizationInChat, 1000);
             return;
@@ -1465,11 +1506,8 @@ async function localizeCharacterInfoPanels() {
         
         const character = context.characters?.[charId];
         if (!character?.avatar) return;
-        
-        // Check if localization is enabled for this character
         if (!isMediaLocalizationEnabledForChat(character.avatar)) return;
-        
-        // Build the URL map
+
         const urlMap = await buildChatMediaLocalizationMap(character);
         if (Object.keys(urlMap).length === 0) return;
         
@@ -1733,7 +1771,7 @@ function initDisplayNameOverride() {
 
         scheduleApplyDisplayNameToUI();
 
-        console.log('[CharLib] Display name override initialized');
+        clDebug('[CharLib] Display name override initialized');
     } catch (e) {
         console.error('[CharLib] Failed to initialize display name override:', e);
     }

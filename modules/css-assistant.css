@@ -1,0 +1,333 @@
+/* CSS Assistant module styles */
+
+.css-assistant-modal .cl-modal-content {
+    max-width: calc(900px * var(--modal-scale, 1));
+    width: 96%;
+    height: calc(85vh * var(--modal-scale, 1));
+}
+
+body.modal-size-small .css-assistant-modal .cl-modal-content { max-width: 720px; max-height: 80vh; }
+body.modal-size-large .css-assistant-modal .cl-modal-content { max-width: 1125px; max-height: 100vh; }
+
+.cl-modal-body.css-assistant-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-lg);
+    flex: 1;
+    min-height: 0;
+}
+
+/* Toolbar */
+.css-assistant-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    flex-shrink: 0;
+}
+.css-assistant-profile-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1;
+    min-width: 0;
+}
+.css-assistant-profile-row label {
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    white-space: nowrap;
+}
+.css-assistant-profile-row select {
+    min-width: 160px;
+    max-width: 240px;
+}
+.css-assistant-status {
+    color: var(--text-muted);
+    font-size: var(--font-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Context banner: shows when wand opened on a specific snippet */
+.css-assistant-context-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: var(--radius-lg);
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    flex-shrink: 0;
+}
+.css-assistant-context-banner[hidden] {
+    display: none;
+}
+.css-assistant-context-banner > i {
+    color: var(--accent);
+}
+.css-assistant-context-text {
+    flex: 1;
+}
+.css-assistant-context-text strong {
+    color: var(--text-primary);
+}
+.css-assistant-context-dismiss {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: var(--space-2xs) var(--space-xs);
+    border-radius: var(--radius-sm);
+    transition: color 0.15s, background 0.15s;
+}
+.css-assistant-context-dismiss:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Chat scroll area */
+.css-assistant-chat {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    min-height: 0;
+}
+
+/* Empty state: takes over chat-area space and centers its content when
+   no conversation exists yet. Chat container collapses to allow this. */
+.css-assistant-empty {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    padding: var(--space-md);
+    line-height: 1.5;
+}
+.css-assistant-empty[hidden] {
+    display: none;
+}
+.cl-modal-body.css-assistant-body:has(.css-assistant-empty:not([hidden])) .css-assistant-chat {
+    flex: 0 0 auto;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+}
+.css-assistant-empty i {
+    font-size: var(--font-2xl);
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: var(--space-sm);
+}
+.css-assistant-empty ul {
+    margin: var(--space-sm) 0 0 0;
+    padding-left: var(--space-lg);
+    text-align: left;
+}
+.css-assistant-empty li {
+    margin-bottom: var(--space-xs);
+}
+
+/* Messages */
+.css-assistant-msg {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+.css-assistant-msg-role {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+.css-assistant-msg.user .css-assistant-msg-role {
+    color: var(--accent);
+}
+.css-assistant-msg.assistant .css-assistant-msg-role {
+    color: var(--text-secondary);
+}
+.css-assistant-msg-text {
+    color: var(--text-primary);
+    font-size: var(--font-md);
+    line-height: 1.5;
+}
+.css-assistant-msg-text p {
+    margin: 0 0 var(--space-xs) 0;
+}
+.css-assistant-msg-text p:last-child {
+    margin-bottom: 0;
+}
+.css-assistant-msg-text code {
+    background: rgba(255,255,255,0.08);
+    padding: 1px var(--space-xs);
+    border-radius: var(--radius-xs);
+    font-size: 0.92em;
+}
+
+/* Code blocks */
+.css-assistant-code-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+}
+.css-assistant-code {
+    background: rgba(0, 0, 0, 0.45);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    margin: 0;
+    overflow-x: auto;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: var(--font-sm);
+    line-height: 1.5;
+    color: var(--text-primary);
+    max-height: 400px;
+    overflow-y: auto;
+}
+.css-assistant-code code {
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+.css-assistant-code-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+/* Thinking indicator */
+.css-assistant-msg.thinking .css-assistant-thinking-dots {
+    display: inline-flex;
+    gap: var(--space-2xs);
+    align-items: center;
+    padding: var(--space-sm) 0;
+}
+.css-assistant-msg.thinking .css-assistant-thinking-dots span {
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-circle);
+    background: var(--text-secondary);
+    animation: css-assistant-pulse 1.2s ease-in-out infinite;
+}
+.css-assistant-msg.thinking .css-assistant-thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
+.css-assistant-msg.thinking .css-assistant-thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes css-assistant-pulse {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+}
+
+/* Footer with input + send */
+.cl-modal-footer.css-assistant-footer {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+}
+.css-assistant-input {
+    width: 100%;
+    resize: vertical;
+    min-height: 44px;
+    max-height: 120px;
+    font-size: var(--font-sm);
+    line-height: 1.5;
+}
+.css-assistant-footer-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+@media (max-width: 768px) {
+    /* Full-viewport modal on touch devices */
+    .css-assistant-modal .cl-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+    }
+    .cl-modal-body.css-assistant-body {
+        padding: var(--space-md);
+        gap: var(--space-md);
+    }
+
+    /* Toolbar: profile row spans full width, Reset moves below */
+    .css-assistant-toolbar {
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+    }
+    .css-assistant-profile-row {
+        flex-basis: 100%;
+        flex-wrap: wrap;
+    }
+    .css-assistant-profile-row select {
+        flex: 1;
+        min-width: 0;
+        max-width: none;
+    }
+    .css-assistant-status { flex-basis: 100%; }
+    #cssAssistantResetBtn {
+        min-height: 44px;
+        margin-left: auto;
+    }
+
+    /* Context banner: tighter padding, larger dismiss touch target */
+    .css-assistant-context-banner { padding: var(--space-sm); flex-wrap: wrap; }
+    .css-assistant-context-dismiss { min-width: 44px; min-height: 44px; }
+
+    /* Chat: tighter padding */
+    .css-assistant-chat {
+        padding: var(--space-sm);
+        gap: var(--space-sm);
+    }
+
+    /* Empty state: smaller hero icon */
+    .css-assistant-empty i { font-size: var(--font-xl); }
+
+    /* Code blocks: smaller, scroll horizontally, shorter cap */
+    .css-assistant-code {
+        font-size: 12px;
+        padding: var(--space-sm);
+        max-height: 280px;
+    }
+
+    /* Per-message action row: subordinate, smaller than cl-btn-sm default. Update X can
+       be long because of the snippet name, so allow wrap. */
+    .css-assistant-code-actions {
+        flex-wrap: wrap;
+        gap: var(--space-xs);
+    }
+    .css-assistant-code-actions .cl-btn {
+        padding: var(--space-xs) var(--space-sm);
+        font-size: var(--font-xs);
+    }
+
+    /* Footer: ensure Send/Stop are tap-friendly */
+    .cl-modal-footer.css-assistant-footer {
+        padding: var(--space-md);
+    }
+    .css-assistant-input {
+        font-size: 16px;
+        min-height: 48px;
+    }
+    .css-assistant-footer-actions .cl-btn {
+        min-height: 44px;
+    }
+}

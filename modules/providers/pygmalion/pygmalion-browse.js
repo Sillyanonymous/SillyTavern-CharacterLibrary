@@ -434,7 +434,7 @@ async function loadCharacters(append = false) {
             if (!append && grid) {
                 grid.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                         <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                         <button class="glass-btn" style="margin-top: 12px;" id="pygRetryBtn">
                             <i class="fa-solid fa-redo"></i> Retry
@@ -1547,13 +1547,13 @@ function updateLoginUI() {
             if (ttl === Infinity) {
                 ttlText = 'no expiry';
             } else if (ttl <= 0) {
-                ttlText = '<span style="color: #e74c3c;">expired</span>';
+                ttlText = '<span style="color: var(--cl-error-bright);">expired</span>';
             } else {
                 const min = Math.floor(ttl / 60);
                 ttlText = min > 0 ? `${min}m remaining` : `${ttl}s remaining`;
             }
             statusArea.innerHTML = `
-                <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                 <strong>Authenticated</strong> — token ${ttlText}
             `;
             statusArea.style.display = '';
@@ -2599,7 +2599,7 @@ class PygmalionBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without logging in!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -2614,10 +2614,10 @@ class PygmalionBrowseView extends BrowseView {
                 <div class="pyg-login-section">
                     <div class="pyg-plugin-status">
                         <span id="pygPluginStatusOk" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-check" style="color: #2ecc71;"></i> cl-helper plugin detected
+                            <i class="fa-solid fa-plug-circle-check" style="color: var(--cl-success-bright);"></i> cl-helper plugin detected
                         </span>
                         <span id="pygPluginStatusMissing" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-xmark" style="color: #e67e22;"></i>
+                            <i class="fa-solid fa-plug-circle-xmark" style="color: var(--cl-warning-bright-darker);"></i>
                             cl-helper plugin not found — see <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">setup instructions</a>
                         </span>
                     </div>
@@ -2633,7 +2633,7 @@ class PygmalionBrowseView extends BrowseView {
                         </div>
 
                         <div class="chub-login-actions" style="margin-top: 15px; display: flex; gap: 8px; justify-content: flex-start;">
-                            <button id="pygLoginBtn" class="glass-btn" disabled style="color: #2ecc71; border-color: rgba(46, 204, 113, 0.4);">
+                            <button id="pygLoginBtn" class="glass-btn" disabled style="color: var(--cl-success-bright); border-color: rgba(var(--cl-success-bright-rgb), 0.4);">
                                 <i class="fa-solid fa-sign-in-alt"></i> Log In
                             </button>
                             <a href="https://pygmalion.chat" target="_blank" class="glass-btn" title="Go to Pygmalion Website">

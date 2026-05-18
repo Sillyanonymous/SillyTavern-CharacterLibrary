@@ -393,7 +393,7 @@ async function loadCharacters(append = false) {
         if (!append && grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                     <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                     <button class="glass-btn" style="margin-top: 12px;" id="ctRetryBtn">
                         <i class="fa-solid fa-redo"></i> Retry
@@ -1414,7 +1414,7 @@ function updateCtLoginUI() {
     const statusArea = document.getElementById('ctSessionStatus');
     if (statusArea) {
         if (sessionActive) {
-            statusArea.innerHTML = '<i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i> <strong>Connected</strong> — NSFW content available';
+            statusArea.innerHTML = '<i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i> <strong>Connected</strong>, NSFW content available';
             statusArea.style.display = '';
         } else {
             statusArea.style.display = 'none';
@@ -1714,7 +1714,7 @@ class ChartavernBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without logging in!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -1729,10 +1729,10 @@ class ChartavernBrowseView extends BrowseView {
                 <div class="pyg-login-section">
                     <div class="pyg-plugin-status">
                         <span id="ctPluginStatusOk" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-check" style="color: #2ecc71;"></i> cl-helper plugin detected
+                            <i class="fa-solid fa-plug-circle-check" style="color: var(--cl-success-bright);"></i> cl-helper plugin detected
                         </span>
                         <span id="ctPluginStatusMissing" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-xmark" style="color: #e67e22;"></i>
+                            <i class="fa-solid fa-plug-circle-xmark" style="color: var(--cl-warning-bright-darker);"></i>
                             cl-helper plugin not found — see <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">setup instructions</a>
                         </span>
                     </div>

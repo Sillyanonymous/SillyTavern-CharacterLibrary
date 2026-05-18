@@ -120,13 +120,13 @@ function setOpt(key, value) {
 function createModal() {
     const html = `
     <div id="recommenderModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content recommender-modal-content">
-            <div class="recommender-header">
-                <div class="recommender-header-title">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+        <div class="confirm-modal-content recommender-modal-content cl-modal-feature">
+            <div class="confirm-modal-header">
+                <h3>
+                    <i class="fa-solid fa-wand-magic-sparkles cl-modal-header-icon"></i>
                     <span>Card Recommender</span>
-                </div>
-                <button class="recommender-close-btn" id="recommenderCloseBtn">
+                </h3>
+                <button class="close-confirm-btn" id="recommenderCloseBtn" title="Close">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>

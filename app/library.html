@@ -6,14 +6,16 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=56">
-    <link rel="stylesheet" href="library-mobile.css?v=4" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=80">
+    <link rel="stylesheet" href="library-mobile.css?v=10" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" integrity="sha384-iw3OoTErCYJJB9mCa8LNS2hbsQ7M3C0EpIsO/H5+EGAkPGc6rk+V8i04oW/K5xq0" crossorigin="anonymous">
     <!-- DOMPurify for HTML sanitization -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js" integrity="sha384-cwS6YdhLI7XS60eoDiC+egV0qHp8zI+Cms46R0nbn8JrmoAzV9uFL60etMZhAnSu" crossorigin="anonymous"></script>
+    <style id="cl-runtime-tokens"></style>
+    <style id="cl-custom-css"></style>
 </head>
 <body>
     <script>
@@ -109,7 +111,7 @@
                         <label><input type="checkbox" id="searchAuthor" checked> Author</label>
                         <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
                         <div class="dropdown-divider"></div>
-                        <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: #ffd700; margin-right: 2px;"></i> Favorites only</label>
+                        <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: var(--cl-favorite-gold); margin-right: 2px;"></i> Favorites only</label>
                     </div>
                 </div>
             </div>
@@ -421,7 +423,7 @@
                         </div>
                         
                         <div class="creator-notes-box" id="modalCreatorNotesBox" style="display:none; margin-bottom: 18px;">
-                            <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
+                            <details class="creator-notes-details" id="creatorNotesDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: var(--radius-lg); padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 8px;">
                                     <i class="fa-solid fa-feather-pointed"></i> 
                                     <span style="flex: 1;">Creator's Notes</span>
@@ -434,18 +436,18 @@
                         </div>
 
                         <div class="description-box">
-                            <h3><i class="fa-solid fa-scroll" style="margin-right: 6px; opacity: 0.7;"></i>Description</h3>
+                            <h3 class="section-h3"><i class="fa-solid fa-scroll" style="margin-right: 6px; opacity: 0.7;"></i>Description</h3>
                             <div id="modalDescription" class="scrolling-text"></div>
                         </div>
                         <div class="first-mes-box">
                             <div class="content-header">
-                                <h3 class="expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 6px; opacity: 0.7;"></i>First Message</h3>
+                                <h3 class="section-h3 expandable-section-title" id="firstMesTitleExpand" title="Click to expand"><i class="fa-solid fa-message" style="margin-right: 6px; opacity: 0.7;"></i>First Message</h3>
                             </div>
                             <div id="modalFirstMes" class="scrolling-text"></div>
                         </div>
 
                         <div class="alt-greetings-box" id="modalAltGreetingsBox" style="display:none; margin-top: 16px;">
-                            <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
+                            <details id="altGreetingsDetails" style="background: rgba(255, 255, 255, 0.05); border-radius: var(--radius-lg); padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent); display: flex; align-items: center; gap: 10px;">
                                     <span style="flex: 1;"><i class="fa-solid fa-comments" style="margin-right: 8px; opacity: 0.7;"></i>Alternate Greetings (<span id="altGreetingsCount">0</span>)</span>
                                     <button type="button" class="content-expand-btn" id="altGreetingsExpandBtn" title="Expand">
@@ -457,7 +459,7 @@
                         </div>
 
                         <div class="lorebook-box" id="modalLorebookBox" style="display:none; margin-top: 16px;">
-                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: 8px; padding: 8px; border: 1px solid var(--glass-border);">
+                            <details style="background: rgba(255, 255, 255, 0.05); border-radius: var(--radius-lg); padding: 8px; border: 1px solid var(--glass-border);">
                                 <summary style="cursor: pointer; font-weight: bold; color: var(--accent);"><i class="fa-solid fa-book"></i> Embedded Lorebook (<span id="lorebookEntryCount">0</span> entries)</summary>
                                 <div id="modalLorebookContent" class="scrolling-text" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--glass-border);"></div>
                             </details>
@@ -1837,6 +1839,10 @@ https://jannyai.com/characters/uuid_slug
                             <i class="fa-solid fa-folder-tree"></i>
                             <span>Gallery Folders</span>
                         </li>
+                        <li class="settings-nav-item" data-section="info">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <span>Info</span>
+                        </li>
                         <li class="settings-nav-item" data-section="developer">
                             <i class="fa-solid fa-code"></i>
                             <span>Developer</span>
@@ -1877,6 +1883,12 @@ https://jannyai.com/characters/uuid_slug
                                     <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
                                 </select>
                             </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsGroupFavoritesFirst"> <i class="fa-solid fa-star"></i> Group favorites first
+                                </label>
+                                <span class="settings-hint">Pin favorited characters to the top of the grid, sorted amongst themselves by the active sort.</span>
+                            </div>
                         </div>
 
                         <div class="settings-group">
@@ -1902,7 +1914,7 @@ https://jannyai.com/characters/uuid_slug
                         </div>
                         
                         <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Appearance</div>
+                            <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Theme &amp; Layout</div>
                             <div class="settings-row" id="themeCustomizerBtnRow" style="display:none;">
                                 <button id="openThemeCustomizerBtn" class="settings-action-btn primary"><i class="fa-solid fa-sliders"></i> Open UI Token Customizer</button>
                             </div>
@@ -1932,6 +1944,9 @@ https://jannyai.com/characters/uuid_slug
                                     <input type="color" id="settingsHighlightColor" value="#4a9eff">
                                     <span class="color-preview-label">Click to change</span>
                                     <button type="button" id="resetAccentColor" class="color-reset-btn" title="Reset to default"><i class="fa-solid fa-rotate-left"></i></button>
+                                    <span id="accentOverrideWarning" class="accent-override-warning hidden" title="A Custom CSS snippet is overriding --accent. The picker may not reflect what you see on screen.">
+                                        <i class="fa-solid fa-triangle-exclamation"></i>
+                                    </span>
                                 </div>
                             </div>
                             <div class="settings-row">
@@ -1942,14 +1957,24 @@ https://jannyai.com/characters/uuid_slug
                                 </select>
                                 <span class="settings-hint">Glass uses translucent buttons, Solid uses opaque fills</span>
                             </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-paintbrush"></i> Custom CSS</div>
+                            <div class="settings-row">
+                                <button id="openCustomCssBtn" class="settings-action-btn primary"><i class="fa-solid fa-code"></i> Open Custom CSS Editor</button>
+                                <span class="settings-hint">Add your own CSS to theme or tweak the UI. Persists across reloads. Use at your own risk: class names may change between versions.</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-id-card"></i> Character Details</div>
                             <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsReplaceUserPlaceholder" checked> Replace {{user}} with persona name
                                 </label>
                                 <span class="settings-hint">Show your active SillyTavern persona name instead of {{user}}</span>
                             </div>
-
-                            <div class="settings-subheading"><i class="fa-solid fa-id-card"></i> Character Details</div>
                             <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsShowProviderTagline" checked> Show provider tagline in character details
@@ -1986,7 +2011,10 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">In online browse previews, start every section collapsed except creator's notes. Click a section title to toggle it open.</span>
                             </div>
+                        </div>
 
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-signature"></i> Display Names</div>
                             <div class="settings-row">
                                 <label for="settingsDisplayNamePreference">Display name source</label>
                                 <select id="settingsDisplayNamePreference" class="glass-select">
@@ -1995,22 +2023,22 @@ https://jannyai.com/characters/uuid_slug
                                 </select>
                                 <span class="settings-hint">Use the provider's listing/page name instead of the card's internal name. Only affects linked characters with a known listing name.</span>
                             </div>
-
                             <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsShowNameToggle" checked> Show name type toggle in details
                                 </label>
                                 <span class="settings-hint">Show the card/listing name toggle button in the character detail modal header</span>
                             </div>
-
                             <div class="settings-row">
                                 <label>
                                     <input type="checkbox" id="settingsDisplayNameOverride" checked> Apply display name override in SillyTavern
                                 </label>
                                 <span class="settings-hint">When using listing name as display name, also override the character name shown in ST's chat messages and character panel</span>
                             </div>
+                        </div>
 
-                            <div class="settings-subheading"><i class="fa-solid fa-grip"></i> Card Grid</div>
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-grip"></i> Card Grid &amp; Browse</div>
                             <div class="settings-row" data-platform="desktop">
                                 <label>
                                     <input type="checkbox" id="settingsAnimateTagPills"> Animate card info on hover <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i>
@@ -2029,8 +2057,6 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Hide the playlist indicator icon on character cards</span>
                             </div>
-
-                            <div class="settings-subheading"><i class="fa-solid fa-globe"></i> Online</div>
                             <div class="settings-row" data-platform="mobile">
                                 <label>
                                     <input type="checkbox" id="settingsMobileProviderQuickSwitch" checked> Provider quick switch <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
@@ -2038,7 +2064,7 @@ https://jannyai.com/characters/uuid_slug
                                 <span class="settings-hint">Show a provider icon button next to the view tabs for quick provider switching in the Online view</span>
                             </div>
                         </div>
-                        
+
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-bell"></i> Notifications</div>
                             <div class="settings-row">
@@ -2053,7 +2079,7 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-clock-rotate-left"></i> Version History</div>
                             <div class="settings-row">
                                 <label>
-                                    <input type="checkbox" id="settingsAutoSnapshotOnEdit"> Auto-snapshot before edits and updates
+                                    <input type="checkbox" id="settingsAutoSnapshotOnEdit" checked> Auto-snapshot before edits and updates
                                 </label>
                                 <span class="settings-hint">Automatically save a snapshot of the character's current state before applying edits, card updates, or restores</span>
                             </div>
@@ -2066,7 +2092,7 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                         </div>
 
-                        <div class="settings-group">
+                        <div class="settings-group" style="display:none;">
                             <div class="settings-group-title"><i class="fa-solid fa-flask"></i> Experimental</div>
                         </div>
                     </div>
@@ -2719,12 +2745,36 @@ https://jannyai.com/characters/uuid_slug
                     </div>
                     
                     <!-- Developer Section -->
+                    <div class="settings-panel" data-section="info">
+                        <div class="settings-panel-header">
+                            <h4><i class="fa-solid fa-circle-info"></i> Info</h4>
+                            <p class="settings-panel-desc">Project information and links</p>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
+                            <div class="settings-row">
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.3.0</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-code-branch"></i> Repository</div>
+                            <div class="settings-row">
+                                <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary" target="_blank" rel="noopener noreferrer" class="settings-action-btn primary">
+                                    <i class="fa-brands fa-github"></i> View on GitHub
+                                </a>
+                                <span class="settings-hint">If you find Character Library useful, consider starring the repo <i class="fa-solid fa-star"></i></span>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="settings-panel" data-section="developer">
                         <div class="settings-panel-header">
                             <h4><i class="fa-solid fa-code"></i> Developer Options</h4>
                             <p class="settings-panel-desc">Debugging and troubleshooting tools</p>
                         </div>
-                        
+
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-terminal"></i> Logging</div>
                             <div class="settings-row">
@@ -2760,15 +2810,6 @@ https://jannyai.com/characters/uuid_slug
                                 <span class="settings-hint">Copy provider URLs to clipboard instead of downloading PNGs. Unlinked characters are skipped. Useful for sharing or reimporting in another session.</span>
                             </div>
                         </div>
-                        
-
-                        
-                        <div class="settings-group">
-                            <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
-                            <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v5.2.0</span>
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
@@ -2783,8 +2824,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=82"></script>
-    <script type="module" src="../modules/module-loader.js?v=6"></script>
-    <script src="library-mobile.js?v=2"></script>
+    <script src="library.js?v=99"></script>
+    <script type="module" src="../modules/module-loader.js?v=30"></script>
+    <script src="library-mobile.js?v=4"></script>
 </body>
 </html>

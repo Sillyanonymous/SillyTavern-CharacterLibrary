@@ -9,13 +9,13 @@ A powerful SillyTavern extension for discovering, organizing, and managing your 
 ![Main Gallery View](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Main.jpg)
 *Browse your character library with search, filtering, and sorting*
 
-![Character Details](https://github.com/Sillyanonymous/assets/blob/main/v2_Details.png)
+![Character Details](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Details.png)
 *View and edit character details, chats, media, and related characters*
 
-![Character Gallery](https://github.com/Sillyanonymous/assets/blob/main/v2_Gallery.jpg)
+![Character Gallery](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Gallery.jpg)
 *Download embedded character media*
 
-![Character Details Expanded views](https://github.com/Sillyanonymous/assets/blob/main/v2_creatorsNotes.png)
+![Character Details Expanded views](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_creatorsNotes.png)
 *Expand separate views such as Creator's notes*
 
 ![Related Characters](https://raw.githubusercontent.com/Sillyanonymous/assets/refs/heads/main/v2_Similar.png)
@@ -324,7 +324,7 @@ Controls which card metadata fields are included when sending characters to the 
 #### API Modes
 
 - **SillyTavern mode** uses your active Chat Completion connection (OpenAI, Claude, OpenRouter, etc.). If you have Connection Profiles configured, a dropdown lets you pick which profile to use. Large, RP heavy presets not recommended.
-- **Custom API mode** lets you point to any OpenAI-compatible endpoint with optional API key and model. (Mostly placeholder, still WIP)
+- **Custom API mode** lets you point to any OpenAI-compatible endpoint with optional API key and model.
 
 #### Settings
 

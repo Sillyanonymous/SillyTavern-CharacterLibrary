@@ -43,7 +43,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 7px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: background 0.15s;
 }
@@ -79,7 +79,7 @@
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     flex-shrink: 0;
 }
 
@@ -97,7 +97,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 7px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: background 0.15s;
     color: var(--cl-accent);
@@ -127,7 +127,7 @@
 /* --- Playlist Filter Dropdown --- */
 
 .playlist-filter-btn.active {
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
     border-color: var(--cl-accent);
     color: var(--cl-accent);
 }
@@ -183,7 +183,7 @@
     width: 100%;
     padding: 6px 10px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     background: transparent;
     color: var(--cl-text-secondary);
     font-size: var(--font-md);
@@ -201,7 +201,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 6px 10px;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     cursor: pointer;
     transition: background 0.15s;
     color: var(--cl-text-primary);
@@ -212,7 +212,7 @@
 }
 
 .pl-filter-item.active {
-    background: rgba(74, 158, 255, 0.12);
+    background: rgba(var(--accent-rgb), 0.12);
     color: var(--cl-accent);
 }
 
@@ -257,7 +257,7 @@
     align-items: center;
     gap: var(--space-xs);
     padding: 4px 10px;
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     font-size: var(--font-sm);
     background: rgba(255, 255, 255, 0.08);
     color: var(--cl-text-primary);
@@ -320,7 +320,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 5px 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     position: relative;
 }
 
@@ -331,7 +331,7 @@
 .pl-manage-icon-btn {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid rgba(255, 255, 255, 0.15);
     background: rgba(255, 255, 255, 0.05);
     cursor: pointer;
@@ -352,7 +352,7 @@
 .pl-color-swatch {
     width: 22px;
     height: 22px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: none;
     cursor: pointer;
     transition: transform 0.1s;
@@ -372,7 +372,7 @@
     padding: 8px;
     background: var(--cl-glass-bg);
     border: 1px solid var(--cl-border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--cl-shadow-xl);
     backdrop-filter: blur(12px);
     max-width: 260px;
@@ -408,7 +408,7 @@
 .pl-icon-option {
     width: 28px;
     height: 28px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     border: none;
     background: transparent;
     cursor: pointer;
@@ -454,7 +454,7 @@
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     flex-shrink: 0;
     white-space: nowrap;
 }
@@ -491,7 +491,7 @@
         max-width: 100% !important;
         height: auto !important;
         max-height: 75vh !important;
-        border-radius: 16px 16px 0 0 !important;
+        border-radius: var(--radius-3xl) var(--radius-3xl) 0 0 !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
         transform: translateY(100%) !important;
@@ -530,7 +530,7 @@
         bottom: 0 !important;
         width: 100% !important;
         max-height: 70vh !important;
-        border-radius: 16px 16px 0 0 !important;
+        border-radius: var(--radius-3xl) var(--radius-3xl) 0 0 !important;
         z-index: 1100 !important;
         background: var(--bg-secondary) !important;
         border: 1px solid var(--glass-border) !important;
@@ -549,7 +549,7 @@
         background: var(--bg-secondary);
         z-index: 1;
     }
-    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
+    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: var(--radius-lg); }
     #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
     #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: var(--font-md); }
     #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }

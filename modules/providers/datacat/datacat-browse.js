@@ -50,11 +50,29 @@ const {
     getCharacterGalleryId,
     showImportSummaryModal,
     formatRichText,
+    safePurify,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     getProviderExcludeTags,
     renderLoadingState,
 } = CoreAPI;
+
+// Used only for the alt-greeting render below, which is the one site that
+// passes preserveHtml=true through formatRichText. Every other DataCat field
+// uses preserveHtml=false (escape-at-source) and does not need purification.
+const BROWSE_PURIFY_CONFIG = {
+    ALLOWED_TAGS: [
+        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
+    ],
+    ALLOWED_ATTR: [
+        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
+        'width', 'height', 'loading', 'color', 'size', 'align'
+    ],
+    ALLOW_DATA_ATTR: false
+};
 
 // ========================================
 // STATE
@@ -767,7 +785,7 @@ async function loadCharacters(append = false) {
             } else if (isFlareSolverrError) {
                 grid.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted); max-width: 560px; margin: 0 auto;">
-                        <i class="fa-solid fa-fire" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <i class="fa-solid fa-fire" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                         <p style="margin-top: 12px; color: var(--text-primary);"><strong>FlareSolverr error</strong></p>
                         <p style="margin-top: 8px;">${escapeHtml(err.message)}</p>
                         <p style="margin-top: 8px;">Verify your FlareSolverr URL under Settings &rarr; Online &rarr; DataCat, or check that the service is running.</p>
@@ -779,7 +797,7 @@ async function loadCharacters(append = false) {
             } else {
                 grid.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                         <p style="margin-top: 12px;">Load failed: ${escapeHtml(err.message)}</p>
                         <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
                             <i class="fa-solid fa-redo"></i> Retry
@@ -1828,7 +1846,6 @@ function startExtractionPolling(janitorId) {
             const status = await fetchExtractionStatus();
             if (!status) return;
 
-            // Check if our extraction completed (appears in history)
             const completedEntry = status.history?.find(h => {
                 const historyId = String(h.characterId || '').trim();
                 return historyId === janitorId;
@@ -2544,6 +2561,14 @@ function openPreviewModal(hit) {
     if (greetingsStat) greetingsStat.style.display = 'none';
     window.currentBrowseAltGreetings = [];
 
+    // Hide linked-lorebooks section + stat until detail fetch reveals scripts
+    const lorebooksSection = document.getElementById('datacatCharLorebooksSection');
+    if (lorebooksSection) lorebooksSection.style.display = 'none';
+    const lorebookStat = document.getElementById('datacatCharLorebookStat');
+    if (lorebookStat) lorebookStat.style.display = 'none';
+    const lorebooksList = document.getElementById('datacatCharLorebooksList');
+    if (lorebooksList) lorebooksList.innerHTML = '';
+
     // Hide gallery until detail fetch reveals saucepan portraits
     const gallerySection = document.getElementById('datacatCharGallerySection');
     if (gallerySection) gallerySection.style.display = 'none';
@@ -2772,6 +2797,11 @@ async function fetchAndPopulateDetails(hit, token) {
             }
         }
 
+        // Linked lorebooks (external, metadata-only). DataCat stores attached
+        // lorebooks/scripts on `character.scripts[]`. Their entries are not
+        // reachable through cl-helper, so this is a heads-up surface only
+        renderDatacatLorebooks(character.scripts);
+
         // Saucepan portraits gallery
         const portraits = character?.companion_snapshot?.portraits;
         if (Array.isArray(portraits) && portraits.length > 0) {
@@ -2882,6 +2912,59 @@ async function fetchAndPopulateDetails(hit, token) {
     }
 }
 
+function renderDatacatLorebooks(scripts) {
+    const section = document.getElementById('datacatCharLorebooksSection');
+    const listEl = document.getElementById('datacatCharLorebooksList');
+    const countEl = document.getElementById('datacatCharLorebooksCount');
+    const stat = document.getElementById('datacatCharLorebookStat');
+
+    if (!section || !listEl) return;
+
+    const lorebooks = Array.isArray(scripts)
+        ? scripts.filter(s => s && s.type === 'lorebook' && s.id)
+        : [];
+
+    if (lorebooks.length === 0) {
+        section.style.display = 'none';
+        listEl.innerHTML = '';
+        if (countEl) countEl.textContent = '';
+        if (stat) stat.style.display = 'none';
+        return;
+    }
+
+    if (stat) {
+        stat.style.display = 'flex';
+        const label = lorebooks.length === 1 ? 'lorebook' : 'lorebooks';
+        stat.innerHTML = `<i class="fa-solid fa-book"></i> <span id="datacatCharLorebookCount">${lorebooks.length}</span> ${label}`;
+    }
+    if (countEl) countEl.textContent = `(${lorebooks.length})`;
+
+    section.style.display = 'block';
+    listEl.innerHTML = lorebooks.map(s => {
+        const title = escapeHtml(s.title || 'Untitled lorebook');
+        const author = s.user_name ? `<span class="datacat-lorebook-author">by @${escapeHtml(s.user_name)}</span>` : '';
+        const desc = (s.description || '').trim();
+        const descHtml = desc ? `<div class="datacat-lorebook-desc">${escapeHtml(desc)}</div>` : '';
+        const visibility = s.is_public === false
+            ? '<span class="datacat-lorebook-meta-item datacat-lorebook-private" title="Not publicly browsable on DataCat"><i class="fa-solid fa-lock"></i> Private</span>'
+            : '';
+        const meta = visibility ? `<div class="datacat-lorebook-meta">${visibility}</div>` : '';
+        return `
+            <div class="datacat-lorebook-row">
+                <div class="datacat-lorebook-row-main">
+                    <div class="datacat-lorebook-title-line">
+                        <i class="fa-solid fa-book"></i>
+                        <span class="datacat-lorebook-title">${title}</span>
+                        ${author}
+                    </div>
+                    ${descHtml}
+                    ${meta}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
 function renderAltGreetings(greetings, charName) {
     const section = document.getElementById('datacatCharAltGreetingsSection');
     const listEl = document.getElementById('datacatCharAltGreetings');
@@ -2933,7 +3016,7 @@ function renderAltGreetings(greetings, charName) {
             if (body && !body.dataset.rendered) {
                 const idx = parseInt(details.dataset.greetingIdx, 10);
                 if (greetings[idx] != null) {
-                    body.innerHTML = formatRichText(greetings[idx], charName, true);
+                    body.innerHTML = safePurify(formatRichText(greetings[idx], charName, true), BROWSE_PURIFY_CONFIG);
                 }
                 body.dataset.rendered = '1';
             }
@@ -3061,9 +3144,19 @@ async function importCharacter(charData) {
 
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
+        const hasGallery = !!result.hasGallery;
+        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
             showImportSummaryModal({
-                mediaCharacters: [{
+                galleryCharacters: hasGallery ? [{
+                    name: result.characterName,
+                    provider,
+                    linkInfo: { providerId: 'datacat', id: result.providerCharId },
+                    url: `https://datacat.run/characters/${result.providerCharId}`,
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData
+                }] : [],
+                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
                     characterName: result.characterName,
                     name: result.characterName,
                     fileName: result.fileName,
@@ -3072,7 +3165,7 @@ async function importCharacter(charData) {
                     mediaUrls,
                     galleryPageUrls,
                     cardData: result.cardData
-                }]
+                }] : []
             });
         }
 
@@ -3675,7 +3768,6 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
         const urlMatch = creatorId.match(/creators?\/([0-9a-f-]{36})/i);
         if (urlMatch) creatorId = urlMatch[1];
 
-        // Check if already followed (datacat)
         if (isCreatorFollowed(creatorId, 'datacat')) {
             showToast('Already following this creator', 'info');
             return null;
@@ -3991,6 +4083,10 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                             <i class="fa-solid fa-comment-dots"></i>
                             <span id="datacatCharGreetingsCount">0</span> greetings
                         </div>
+                        <div class="browse-stat" id="datacatCharLorebookStat" style="display: none;" title="This character has external lorebooks on DataCat. Their contents cannot be downloaded through Character Library.">
+                            <i class="fa-solid fa-book"></i>
+                            <span id="datacatCharLorebookCount">0</span> lorebook
+                        </div>
                         <div class="browse-stat">
                             <i class="fa-solid fa-calendar"></i>
                             <span id="datacatCharDate">Unknown</span>
@@ -4051,6 +4147,20 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                         <i class="fa-solid fa-comments"></i> Alternate Greetings <span class="browse-section-count" id="datacatCharAltGreetingsCount"></span>
                     </h3>
                     <div id="datacatCharAltGreetings" class="browse-alt-greetings-list"></div>
+                </div>
+
+                <!-- Linked Lorebooks (external, metadata only) -->
+                <div class="browse-char-section" id="datacatCharLorebooksSection" style="display: none;">
+                    <h3 class="browse-section-title" data-section="datacatCharLorebooks" data-label="Linked Lorebooks" data-icon="fa-solid fa-book" title="Click to expand">
+                        <i class="fa-solid fa-book"></i> Linked Lorebooks <span class="browse-section-count" id="datacatCharLorebooksCount"></span>
+                    </h3>
+                    <div id="datacatCharLorebooks">
+                        <p class="datacat-lorebooks-note">
+                            <i class="fa-solid fa-circle-info"></i>
+                            This character references external lorebooks that cannot be downloaded through Character Library.
+                        </p>
+                        <div id="datacatCharLorebooksList" class="datacat-lorebooks-list"></div>
+                    </div>
                 </div>
 
                 <!-- Gallery (Saucepan portraits) -->
@@ -4121,7 +4231,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                 const g = document.getElementById('datacatGrid');
                 if (g) g.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-plug-circle-xmark" style="font-size: 2rem; color: #e67e22;"></i>
+                        <i class="fa-solid fa-plug-circle-xmark" style="font-size: 2rem; color: var(--cl-warning-bright-darker);"></i>
                         <p style="margin-top: 12px;">The <strong>cl-helper</strong> server plugin is required for DataCat browsing.</p>
                         <p style="margin-top: 8px; font-size: 0.85em;">Copy the <code>extras/cl-helper</code> folder into your SillyTavern <code>plugins/</code> directory and restart ST.</p>
                         <p style="margin-top: 8px;"><a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">Setup instructions</a></p>
@@ -4139,7 +4249,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                 const g = document.getElementById('datacatGrid');
                 if (g) g.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; color: #e67e22;"></i>
+                        <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; color: var(--cl-warning-bright-darker);"></i>
                         <p style="margin-top: 12px;">Failed to initialize a DataCat session.</p>
                         <p style="margin-top: 8px; font-size: 0.85em;">DataCat may be temporarily unavailable. Try again later.</p>
                     </div>

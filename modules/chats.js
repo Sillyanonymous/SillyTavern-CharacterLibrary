@@ -1829,7 +1829,6 @@ async function saveChatToServer(chat, messages) {
 // ========================================
 
 function init() {
-    // Initialize chats view handlers
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initChatsView);
     } else {

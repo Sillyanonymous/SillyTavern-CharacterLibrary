@@ -846,13 +846,13 @@ function renderLorebookDiff(diff, idx) {
                     <p>The diff below compares your card's embedded lorebook against the creator's latest remote version. Applying will replace the embedded lorebook with the remote version.</p>
                     <p><strong>What the badges mean:</strong></p>
                     <ul>
-                        <li><span style="color:#81c784;">+</span> <strong>New from remote</strong> — entry exists on the remote provider but not in your card. Will be added.</li>
+                        <li><span style="color:var(--cl-success-pale);">+</span> <strong>New from remote</strong>: entry exists on the remote provider but not in your card. Will be added.</li>
                         <li><span style="color:#ffcc80;">~</span> <strong>Modified</strong> — entry exists in both but some fields differ. Will be updated to match the remote.</li>
                         <li><span style="color:#bdbdbd;">★</span> <strong>Local-only</strong> — entry is in your card but not on the remote. Since applying replaces the full embedded lorebook, this entry will be removed from the card.</li>
                     </ul>
                     <p>For local-only entries that would be removed, Character Library reads your World Info file to check whether each entry also exists there:</p>
                     <ul>
-                        <li><i class="fa-solid fa-shield-halved" style="color:#81c784;"></i> <strong>Safe in World Info</strong> — a matching entry exists in your World Info file. Removing it from the card won't affect your chats since the live copy is untouched.</li>
+                        <li><i class="fa-solid fa-shield-halved" style="color:var(--cl-success-pale);"></i> <strong>Safe in World Info</strong>: a matching entry exists in your World Info file. Removing it from the card won't affect your chats since the live copy is untouched.</li>
                         <li><i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i> <strong>Not in World Info</strong> — no match found. This entry only exists in the card's embedded data and will be permanently lost after applying.</li>
                     </ul>
                 </div>
@@ -1039,7 +1039,7 @@ async function resolveWorldFileStatus(containerEl, avatar) {
             const tag = row.querySelector('.lorebook-diff-entry-tag');
             if (found) {
                 if (check) {
-                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color: #81c784; font-size: 11px;"></i>';
+                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color: var(--cl-success-pale); font-size: 11px;"></i>';
                     check.title = `Also exists in World Info file "${worldName}" — safe, won't be affected by applying`;
                 }
                 if (tag) tag.textContent = 'local-only · safe in World Info';
@@ -1479,7 +1479,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 const diffs = compareCards(localData, remoteCard, allowedFields);
                 
                 if (diffs.length === 0) {
-                    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
+                    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Up to date';
                     if (itemEl) itemEl.dataset.status = 'up-to-date';
                 } else {
                     if (statusEl) {
@@ -1622,7 +1622,7 @@ async function applySingleUpdates() {
             if (batchItem) {
                 const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                 if (statusEl) {
-                    statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
+                    statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Updated';
                 }
                 batchItem.dataset.status = 'applied';
                 updateBatchFilterCounts();
@@ -1827,7 +1827,7 @@ async function applyAllBatchUpdates() {
                 if (batchItem) {
                     const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                     if (statusEl) {
-                        statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
+                        statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Updated';
                     }
                     batchItem.dataset.status = 'applied';
                 }

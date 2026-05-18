@@ -1,0 +1,604 @@
+/* Custom CSS Editor module styles */
+
+.custom-css-modal .cl-modal-content {
+    max-width: calc(1100px * var(--modal-scale, 1));
+    width: 92%;
+}
+.custom-css-modal .cl-modal-body.ccss-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    max-height: calc(85vh * var(--modal-scale, 1));
+    padding: var(--space-lg);
+}
+
+/* Toolbar row: mode toggle + dirty indicator */
+.ccss-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+.ccss-toolbar-spacer {
+    flex: 1;
+}
+.ccss-dirty-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    color: var(--cl-warning-pale);
+    font-size: var(--font-xs);
+    font-weight: 500;
+}
+.ccss-dirty-indicator i {
+    font-size: 0.6em;
+}
+.ccss-dirty-indicator[hidden] {
+    display: none;
+}
+
+/* Mode toggle (segmented) */
+.ccss-mode-toggle {
+    display: inline-flex;
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-2xs);
+    gap: var(--space-2xs);
+}
+.ccss-mode-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: var(--btn-pad-v-sm) var(--btn-pad-h-sm);
+    border-radius: var(--radius-md);
+    font-size: var(--btn-font-sm);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    transition: background 0.15s, color 0.15s;
+}
+.ccss-mode-btn:hover {
+    color: var(--text-primary);
+}
+.ccss-mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+}
+
+/* Guidelines block (shared by both modes) */
+.custom-css-guidelines {
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-sm-md) var(--space-md);
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+}
+.custom-css-guidelines > summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    font-weight: 500;
+    list-style: revert;
+}
+.custom-css-guidelines-body {
+    margin-top: var(--space-sm);
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--glass-border);
+}
+.custom-css-guidelines-body p {
+    margin: 0 0 var(--space-sm) 0;
+    line-height: 1.5;
+}
+.custom-css-guidelines-body ul {
+    margin: 0 0 var(--space-sm) 0;
+    padding-left: 20px;
+    line-height: 1.5;
+}
+.custom-css-guidelines-body li {
+    margin-bottom: var(--space-xs);
+}
+.custom-css-guidelines-body code {
+    background: rgba(255,255,255,0.06);
+    padding: 1px var(--space-xs);
+    border-radius: var(--radius-xs);
+    font-size: 0.92em;
+    color: var(--text-primary);
+}
+.custom-css-guidelines-body pre {
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-sm-md);
+    margin: var(--space-xs) 0;
+    overflow-x: auto;
+    font-size: 0.88em;
+    color: var(--text-primary);
+    white-space: pre;
+}
+.custom-css-guidelines-body .custom-css-tip-note {
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    margin: calc(var(--space-xs) * -1) 0 var(--space-sm) 0;
+    padding-left: var(--space-md);
+    border-left: 2px solid rgba(var(--accent-rgb), 0.3);
+}
+.custom-css-guidelines-body .custom-css-token-list {
+    margin: var(--space-xs) 0 var(--space-sm) 0;
+}
+.custom-css-guidelines-body .custom-css-token-list li {
+    margin-bottom: var(--space-2xs);
+    font-size: var(--font-sm);
+}
+
+/* Mode panes */
+.ccss-pane[hidden] {
+    display: none !important;
+}
+
+/* Snippets pane wrapper - holds the layout grid and the apply row */
+.ccss-pane-snippets {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    flex: 1;
+    min-height: 0;
+}
+.ccss-pane-snippets[hidden] {
+    display: none !important;
+}
+
+/* Snippets pane: sidebar + editor split */
+.ccss-snippets-layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: var(--space-lg);
+    min-height: 420px;
+    flex: 1;
+    overflow: hidden;
+}
+.ccss-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    padding: var(--space-md);
+    overflow: hidden;
+}
+.ccss-sidebar-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+.ccss-sidebar-new {
+    width: 100%;
+    justify-content: center;
+}
+.ccss-snippet-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-height: 0;
+}
+.ccss-sidebar-empty {
+    font-size: var(--font-sm);
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-lg) var(--space-sm);
+    line-height: 1.4;
+}
+.ccss-sidebar-empty[hidden] {
+    display: none;
+}
+.ccss-snippet-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-md);
+    background: transparent;
+    border: 1px solid transparent;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+}
+.ccss-snippet-item:hover {
+    background: rgba(255,255,255,0.04);
+}
+.ccss-snippet-item.active {
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.35);
+}
+.ccss-snippet-item.dragging {
+    opacity: 0.45;
+}
+.ccss-snippet-item.drag-over {
+    border-color: var(--accent);
+    box-shadow: 0 -2px 0 var(--accent) inset;
+}
+.ccss-snippet-drag-handle {
+    cursor: grab;
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    padding: var(--space-2xs) var(--space-xs);
+    user-select: none;
+    touch-action: none;
+}
+.ccss-snippet-drag-handle:active {
+    cursor: grabbing;
+}
+.ccss-snippet-item:hover .ccss-snippet-drag-handle {
+    color: var(--text-secondary);
+}
+.ccss-snippet-wand {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: var(--space-2xs) var(--space-xs);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-sm);
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+    flex-shrink: 0;
+}
+.ccss-snippet-item:hover .ccss-snippet-wand,
+.ccss-snippet-item:focus-within .ccss-snippet-wand {
+    opacity: 1;
+}
+.ccss-snippet-wand:hover {
+    color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.12);
+}
+
+
+.ccss-snippet-toggle {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+    cursor: pointer;
+}
+.ccss-snippet-toggle input {
+    cursor: pointer;
+}
+.ccss-snippet-name {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    text-align: left;
+    cursor: pointer;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+    font-size: var(--font-sm);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.ccss-snippet-name:hover {
+    color: var(--accent);
+}
+
+/* Editor pane */
+.ccss-editor {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    gap: var(--space-md);
+}
+/* Drawer-only elements are mobile-only. Hidden on desktop. */
+.ccss-drawer-trigger,
+.ccss-drawer-close,
+.ccss-drawer-title,
+.ccss-drawer-scrim,
+.ccss-sidebar .mobile-sheet-handle { display: none; }
+.ccss-editor-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-height: 0;
+    flex: 1;
+}
+.ccss-editor-form[hidden] {
+    display: none;
+}
+.ccss-editor-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+.ccss-editor-meta input[type='text'].glass-input {
+    flex: 1;
+    font-size: var(--font-md);
+}
+.ccss-editor-enabled {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    white-space: nowrap;
+}
+.ccss-editor-enabled input {
+}
+.ccss-editor-delete {
+    flex-shrink: 0;
+}
+
+/* Shared textarea styling. */
+.custom-css-textarea {
+    width: 100%;
+    min-height: 320px;
+    flex: 1;
+    resize: vertical;
+    padding: var(--space-md);
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: var(--font-sm);
+    line-height: 1.5;
+    tab-size: 4;
+    box-sizing: border-box;
+}
+.custom-css-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+.custom-css-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+}
+.custom-css-size.over-limit {
+    color: var(--cl-error-pale);
+    font-weight: 600;
+}
+.custom-css-status {
+    color: var(--accent);
+    font-weight: 500;
+}
+
+/* Raw pane */
+.ccss-pane-raw {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    flex: 1;
+    min-height: 0;
+}
+.ccss-raw-textarea {
+    min-height: 420px;
+}
+
+/* Footer: hint on the left, action buttons on the right. The snippets/raw mode toggle
+   swaps which Apply button (and the Clear button) are visible via .cl-hidden. */
+.cl-modal-footer.ccss-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+.ccss-footer-hint {
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+    flex: 1;
+    min-width: 0;
+}
+.ccss-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    /* Full-viewport modal on touch devices */
+    .custom-css-modal .cl-modal-content {
+        width: 100% !important;
+        max-width: 100% !important;
+        height: 100% !important;
+        max-height: 100% !important;
+        border-radius: 0 !important;
+    }
+    .custom-css-modal .cl-modal-body.ccss-body {
+        padding: var(--space-md);
+        gap: var(--space-md);
+    }
+
+    /* --- Toolbar --- */
+    .ccss-toolbar {
+        flex-wrap: wrap;
+        gap: var(--space-sm);
+    }
+    .ccss-toolbar-spacer { display: none; }
+    .ccss-mode-toggle { flex: 1; }
+    .ccss-mode-btn { flex: 1; justify-content: center; }
+
+    /* --- Guidelines: hidden on mobile, the editor is the priority here --- */
+    .custom-css-guidelines { display: none; }
+
+    /* --- Snippets pane: editor takes the whole pane; sidebar becomes a bottom sheet
+           (canonical .mobile-sheet pattern, inherits layout from library-mobile.css). --- */
+    .ccss-snippets-layout {
+        display: block;
+    }
+
+    /* Drawer trigger button (mobile-only) shows above the editor.
+       Doubles as "you're editing X" indicator via .ccss-drawer-trigger-label. */
+    .ccss-drawer-trigger {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-sm);
+        background: var(--bg-secondary);
+        border: 1px solid var(--glass-border);
+        color: var(--text-primary);
+        padding: var(--space-sm) var(--space-md);
+        border-radius: var(--radius-lg);
+        font-size: var(--font-md);
+        cursor: pointer;
+        min-height: 44px;
+        align-self: flex-start;
+        max-width: 100%;
+    }
+    .ccss-drawer-trigger:hover { border-color: var(--accent); }
+    .ccss-drawer-trigger-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        max-width: 70vw;
+        font-weight: 500;
+    }
+
+    /* Scrim behind the sheet. Tap to close. */
+    /* z-index sits above .cl-modal (10000) because openDrawer() teleports the
+       scrim and sidebar out of .cl-modal-content to document.body so they escape
+       the modal's transform containing block, but as body-level siblings they
+       have to outrank the modal in the global stacking context. */
+    .ccss-drawer-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10001;
+    }
+    .ccss-drawer-scrim[hidden] { display: none; }
+
+    /* Sidebar becomes a slide-up bottom sheet, matching the canonical mobile-sheet
+       visual style from library-mobile.css. Starts off-screen below the viewport;
+       slides up when .drawer-open is added by openDrawer(). */
+    .ccss-sidebar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 10002;
+        max-height: 80vh;
+        background: rgba(30, 30, 30, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid var(--glass-border);
+        border-bottom: none;
+        border-radius: var(--radius-3xl) var(--radius-3xl) 0 0;
+        padding: var(--space-md);
+        padding-bottom: max(20px, env(safe-area-inset-bottom));
+        overflow-y: auto;
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+        display: block;
+    }
+    .ccss-sidebar.drawer-open { transform: translateY(0); }
+
+    .ccss-sidebar .mobile-sheet-handle {
+        display: block;
+        width: 36px;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: var(--radius-2xs);
+        margin: 0 auto var(--space-sm);
+    }
+    .ccss-snippet-list {
+        display: block;
+        flex: none;
+        overflow: visible;
+    }
+
+    /* Sheet header: title on the left, close on the right, New button on its own row */
+    .ccss-sidebar-header {
+        flex-direction: row !important;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-sm);
+    }
+    .ccss-drawer-title {
+        display: block;
+        flex: 1;
+        font-size: var(--font-lg);
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .ccss-drawer-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: var(--font-lg);
+        border-radius: var(--radius-sm);
+    }
+    .ccss-drawer-close:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+    .ccss-sidebar-new {
+        flex-basis: 100%;
+        order: 99;
+        min-height: 44px;
+    }
+
+    /* --- Drawer snippet items --- */
+    .ccss-snippet-item {
+        padding: var(--space-sm) var(--space-xs);
+        min-height: 44px;
+    }
+    /* Drag handle hidden on mobile: drag-reorder is fiddly on touch and rarely needed */
+    .ccss-snippet-drag-handle { display: none; }
+    .ccss-snippet-toggle input { width: 20px; height: 20px; }
+    .ccss-snippet-name { font-size: var(--font-md); }
+    .ccss-snippet-wand {
+        opacity: 1;
+        padding: var(--space-sm);
+        font-size: var(--font-md);
+        min-width: 44px;
+        text-align: center;
+    }
+    .ccss-snippet-item:hover { transform: none; }
+
+    /* --- Editor pane: takes the whole snippets pane on mobile --- */
+    .ccss-editor {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-md);
+    }
+
+    /* Editor meta wraps; name input takes full row */
+    .ccss-editor-meta { flex-wrap: wrap; }
+    .ccss-editor-meta input[type='text'].glass-input { flex-basis: 100%; }
+    .ccss-editor-enabled { font-size: var(--font-md); }
+    .ccss-editor-delete { min-width: 44px; min-height: 44px; justify-content: center; }
+
+    /* Textarea: prevent iOS zoom-on-focus */
+    .custom-css-textarea {
+        font-size: 16px;
+        min-height: 280px;
+    }
+    .ccss-raw-textarea { min-height: 360px; }
+
+    /* Editor meta buttons: subordinate, compact */
+    .ccss-editor-meta .cl-btn {
+        padding: var(--space-xs) var(--space-sm);
+        font-size: var(--font-xs);
+    }
+
+    /* --- Footer --- */
+    .ccss-footer-hint { display: none; }
+    .cl-modal-footer.ccss-footer {
+        padding: var(--space-md);
+        gap: var(--space-sm);
+    }
+    .ccss-footer-actions {
+        flex-wrap: wrap;
+        width: 100%;
+        justify-content: flex-end;
+    }
+    .ccss-footer-actions .cl-btn {
+        min-height: 44px;
+    }
+}

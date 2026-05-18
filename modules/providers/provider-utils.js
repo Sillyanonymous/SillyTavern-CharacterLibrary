@@ -262,6 +262,40 @@ export async function importFromPng({
     catch { throw new Error(`Invalid JSON response: ${responseText}`); }
     if (result.error) throw new Error('Import failed: Server returned error');
 
+    // ST's V2 import path runs data.name through sanitize-filename, replacing
+    // path-illegal chars like '|' (creators use them as separators) with '_'.
+    // merge-attributes does NOT re-sanitize, so we restore the raw name here.
+    // Without this, update-checks flag false diffs against the remote and
+    // gallery-folder lookups (using char.name) diverge from auto-localize's
+    // raw-cardData folder.
+    const ST_ILLEGAL_NAME_CHARS = /[<>:"/\\|?*]/;
+    const rawName = characterCard.data?.name;
+    if (result.file_name && rawName && ST_ILLEGAL_NAME_CHARS.test(rawName)) {
+        // ST returns file_name without the extension; merge-attributes needs it.
+        const avatarWithExt = String(result.file_name).toLowerCase().endsWith('.png')
+            ? result.file_name
+            : `${result.file_name}.png`;
+        let restoreOk = false;
+        try {
+            const resp = await api.apiRequest?.('/characters/merge-attributes', 'POST', {
+                avatar: avatarWithExt,
+                data: { name: rawName }
+            });
+            if (resp?.ok) {
+                restoreOk = true;
+            } else if (resp) {
+                let body = '';
+                try { body = await resp.clone().text(); } catch { /* ignore */ }
+                console.warn(`[Import] data.name restore failed (HTTP ${resp.status}):`, body.slice(0, 200));
+            }
+        } catch (e) {
+            console.warn('[Import] Failed to restore raw data.name:', e?.message || e);
+        }
+        if (!restoreOk) {
+            api.showToast?.(`Imported "${characterName}" but couldn't restore special characters in the name; update checks may show false differences.`, 'warning', 6000);
+        }
+    }
+
     const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
     await window.ensureExtractorsLoaded?.();
     const galleryPageUrls = typeof window.findCharacterGalleryUrls === 'function'

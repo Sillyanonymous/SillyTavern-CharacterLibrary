@@ -464,7 +464,7 @@ class WyvernBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing, search, and NSFW Popular sort work without an account!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -1114,7 +1114,7 @@ async function wyvernLoginWithCredentials() {
         console.error('[WyvernAuth] Login failed:', e);
         if (statusEl) {
             statusEl.style.display = 'block';
-            statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle" style="color:#e74c3c;"></i> ${escapeHtml(e.message)}`;
+            statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle" style="color:var(--cl-error-bright);"></i> ${escapeHtml(e.message)}`;
         }
         showToast('Login failed: ' + e.message, 'error');
     } finally {
@@ -1295,7 +1295,7 @@ function updateWyvernLoginUI() {
         const mins = Math.floor(ttl / 60);
         if (tokenStatus) {
             tokenStatus.style.display = 'block';
-            tokenStatus.innerHTML = `<i class="fa-solid fa-check-circle" style="color:#2ecc71;"></i> Authenticated (token expires in ${mins}m)`;
+            tokenStatus.innerHTML = `<i class="fa-solid fa-check-circle" style="color:var(--cl-success-bright);"></i> Authenticated (token expires in ${mins}m)`;
         }
 
         // Populate email if stored

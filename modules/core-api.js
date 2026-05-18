@@ -117,6 +117,20 @@ export function getProviderExcludeTags(providerId) {
     return window.getProviderExcludeTags?.(providerId) || [];
 }
 
+/**
+ * Apply the current custom CSS (reads mode + content from settings, writes to live <style> tag)
+ */
+export function applyCustomCSS() {
+    window.applyCustomCSS?.();
+}
+
+/**
+ * Maximum byte size of the emitted custom CSS (raw blob or concatenated snippets)
+ */
+export function getCustomCSSMaxBytes() {
+    return window.CUSTOM_CSS_MAX_BYTES || 65536;
+}
+
 export function setProviderExcludeTags(providerId, tags) {
     window.setProviderExcludeTags?.(providerId, tags);
 }
@@ -1066,7 +1080,9 @@ export default {
     setSettings,
     getProviderExcludeTags,
     setProviderExcludeTags,
-    
+    applyCustomCSS,
+    getCustomCSSMaxBytes,
+
     // View management
     switchView,
     getCurrentView,

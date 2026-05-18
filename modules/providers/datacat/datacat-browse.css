@@ -14,7 +14,7 @@
 }
 .browse-feature-badge.source-janitor,
 .browse-feature-badge.source-saucepan {
-    font-family: var(--cl-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-weight: 800;
     font-size: var(--font-sm);
     line-height: 1;
@@ -45,25 +45,25 @@
     height: 18px;
     font-size: var(--font-2xs);
     background: rgba(0, 0, 0, 0.4);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
 }
 
 
 #datacatFollowCreatorBtn {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
-    border: 1px solid rgba(231, 76, 60, 0.4);
-    color: #e74c3c;
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2), rgba(var(--cl-error-bright-darker-rgb), 0.2));
+    border: 1px solid rgba(var(--cl-error-bright-rgb), 0.4);
+    color: var(--cl-error-bright);
     padding: 6px 12px;
     font-size: var(--font-md);
 }
 
 #datacatFollowCreatorBtn:hover {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
-    border-color: rgba(231, 76, 60, 0.6);
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.3), rgba(var(--cl-error-bright-darker-rgb), 0.3));
+    border-color: rgba(var(--cl-error-bright-rgb), 0.6);
 }
 
 #datacatFollowCreatorBtn.active {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.4), rgba(var(--cl-error-bright-darker-rgb), 0.4));
     color: #fff;
 }
 
@@ -121,7 +121,7 @@
 .datacat-extract-desc code {
     background: rgba(255, 255, 255, 0.06);
     padding: 1px 5px;
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     font-size: var(--font-sm);
 }
 
@@ -198,7 +198,7 @@
     padding: var(--space-md);
     margin: 0 auto var(--space-md);
     max-width: 480px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     background: rgba(255, 180, 60, 0.08);
     border: 1px solid rgba(255, 180, 60, 0.25);
     color: var(--text-primary);
@@ -242,7 +242,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     background: rgba(255, 255, 255, 0.04);
     margin-bottom: var(--space-lg);
     transition: background 0.3s ease;
@@ -299,6 +299,83 @@
 }
 
 
+/* Linked Lorebooks section (external, metadata-only) */
+.datacat-lorebooks-note {
+    margin: 0 0 var(--space-md);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(var(--accent-rgb), 0.08);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    line-height: 1.5;
+    display: flex;
+    gap: var(--space-sm);
+    align-items: flex-start;
+}
+.datacat-lorebooks-note i {
+    color: var(--accent);
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.datacat-lorebooks-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm-md);
+}
+
+.datacat-lorebook-row {
+    padding: var(--space-sm-md) var(--space-md);
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+}
+
+.datacat-lorebook-title-line {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+.datacat-lorebook-title-line > i.fa-book {
+    color: var(--accent);
+}
+.datacat-lorebook-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+.datacat-lorebook-author {
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+}
+
+.datacat-lorebook-desc {
+    margin-top: var(--space-xs);
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+    line-height: 1.4;
+}
+
+.datacat-lorebook-meta {
+    margin-top: var(--space-xs);
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+.datacat-lorebook-meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    font-size: var(--font-xs);
+    color: var(--text-muted);
+}
+.datacat-lorebook-meta-item.datacat-lorebook-private {
+    color: var(--text-secondary);
+}
+
+
 /* Mobile: extraction panel + in-modal CTA */
 @media screen and (max-width: 768px) {
 
@@ -347,5 +424,10 @@
         min-width: 0;
         justify-content: center;
     }
+
+    .datacat-lorebooks-note { font-size: var(--font-xs); padding: var(--space-xs) var(--space-sm); }
+    .datacat-lorebook-row { padding: var(--space-sm) var(--space-sm-md); }
+    .datacat-lorebook-author { font-size: var(--font-xs); }
+    .datacat-lorebook-desc { font-size: var(--font-xs); }
 
 }

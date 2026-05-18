@@ -1678,7 +1678,7 @@ async function resolveVersionWorldFileStatus(containerEl, avatar) {
             const check = row.querySelector('.vt-lb-world-check');
             if (found) {
                 if (check) {
-                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color:#81c784;font-size:11px;"></i>';
+                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color:var(--cl-success-pale);font-size:11px;"></i>';
                     check.title = `Also in World Info file "${worldName}"`;
                 }
             } else {
