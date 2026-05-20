@@ -1091,6 +1091,7 @@ export function openPlaylistPicker(...args) { return window.openPlaylistPicker?.
 export function closePlaylistPicker() { return window.closePlaylistPicker?.(); }
 export function setPlaylistFilter(...args) { return window.setPlaylistFilter?.(...args); }
 export function clearPlaylistFilter() { return window.clearPlaylistFilter?.(); }
+export function refreshPlaylistFilterIfActive(...args) { return window.refreshPlaylistFilterIfActive?.(...args); }
 export function openPlaylistManager() { return window.openPlaylistManager?.(); }
 export function closePlaylistManager() { return window.closePlaylistManager?.(); }
 export function refreshPlaylistBadges() { return window.refreshPlaylistBadges?.(); }
@@ -1277,6 +1278,7 @@ export default {
     closePlaylistPicker,
     setPlaylistFilter,
     clearPlaylistFilter,
+    refreshPlaylistFilterIfActive,
     openPlaylistManager,
     closePlaylistManager,
     refreshPlaylistBadges,

@@ -7373,7 +7373,6 @@ let tagExcludeMode = 'all';
 
 // Playlist filter state
 let activePlaylistFilter = null;
-let activePlaylistAvatarSet = null;
 
 function initTagLogicToggles() {
     const includeBtn = document.getElementById('includeLogicBtn');
@@ -7580,14 +7579,25 @@ function getTags(char) {
 // ========================================
 
 function setPlaylistFilter(uid) {
+    // avatar set is rebuilt fresh inside performSearch so picker/manage/bulk
+    // mutations land in the grid right away. no caching here.
     activePlaylistFilter = uid || null;
-    if (uid) {
-        activePlaylistAvatarSet = window.playlistsGetAvatarSet?.(uid) || new Set();
-    } else {
-        activePlaylistAvatarSet = null;
-    }
     updatePlaylistFilterLabel();
     performSearch();
+}
+
+// playlists.js calls this after every add/remove (and after delete). does
+// nothing unless the mutated playlist is the one currently filtering. if the
+// playlist got deleted out from under us, drop the filter so the grid doesnt
+// strand empty against a dead uid.
+function refreshPlaylistFilterIfActive(uid) {
+    if (!activePlaylistFilter || activePlaylistFilter !== uid) return;
+    const stillExists = !!window.playlistsGetPlaylist?.(uid);
+    if (stillExists) {
+        performSearch();
+    } else {
+        setPlaylistFilter(null);
+    }
 }
 
 function clearPlaylistFilter() {
@@ -7655,13 +7665,23 @@ function renderSidebarPlaylists(avatar) {
         const icon = pl.icon
             ? `<i class="pl-chip-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
             : '';
-        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}</span>`;
+        const removeBtn = `<button class="pl-chip-remove" title="Remove from playlist" aria-label="Remove from playlist"><i class="fa-solid fa-xmark"></i></button>`;
+        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}${removeBtn}</span>`;
     }).join('') + '<button class="pl-chip pl-chip-add" title="Add to playlist"><i class="fa-solid fa-plus"></i></button>';
 
     container.onclick = (e) => {
         const addBtn = e.target.closest('.pl-chip-add');
         if (addBtn) {
             window.openPlaylistPicker?.([avatar]);
+            return;
+        }
+        // x button has to be checked before the chip itself, otherwise the
+        // filter-set click would fire before the remove
+        const removeBtn = e.target.closest('.pl-chip-remove');
+        if (removeBtn) {
+            e.stopPropagation();
+            const chip = removeBtn.closest('.pl-chip[data-uid]');
+            if (chip) window.playlistsRemoveFromPlaylist?.(chip.dataset.uid, [avatar]);
             return;
         }
         const chip = e.target.closest('.pl-chip[data-uid]');
@@ -8223,6 +8243,11 @@ function createCharacterCard(char) {
 }
 
 function refreshPlaylistBadges() {
+    // detail-modal sidebar chips reflect membership too, refresh together
+    const charModal = document.getElementById('charModal');
+    if (activeChar && charModal && !charModal.classList.contains('hidden')) {
+        renderSidebarPlaylists(activeChar.avatar);
+    }
     for (const [, card] of activeCards) {
         const avatar = card.dataset.avatar;
         const existing = card.querySelector('.playlist-indicator');
@@ -13980,6 +14005,12 @@ function performSearch() {
     
     query = query.trim().toLowerCase();
 
+    // built once outside the per-char loop, picks up whatever the playlist
+    // actually contains right now (no stale cache between mutations).
+    const playlistAvatarSet = activePlaylistFilter
+        ? (window.playlistsGetAvatarSet?.(activePlaylistFilter) || null)
+        : null;
+
     const filtered = allCharacters.filter(c => {
         
         // Prefix filters: each is an AND constraint
@@ -14053,8 +14084,8 @@ function performSearch() {
         }
 
         // Playlist filter (outermost constraint)
-        if (activePlaylistFilter && activePlaylistAvatarSet) {
-            if (!activePlaylistAvatarSet.has(c.avatar)) return false;
+        if (playlistAvatarSet) {
+            if (!playlistAvatarSet.has(c.avatar)) return false;
         }
 
         // Favorites-only filter (from toolbar button)
@@ -25723,6 +25754,7 @@ window.resetChatFilterCaches = resetChatFilterCaches;
 window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
 window.setPlaylistFilter = setPlaylistFilter;
 window.clearPlaylistFilter = clearPlaylistFilter;
+window.refreshPlaylistFilterIfActive = refreshPlaylistFilterIfActive;
 window.populatePlaylistDropdown = populatePlaylistDropdown;
 window.renderSidebarPlaylists = renderSidebarPlaylists;
 window.refreshPlaylistBadges = refreshPlaylistBadges;

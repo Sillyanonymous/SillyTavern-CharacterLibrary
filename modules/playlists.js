@@ -137,6 +137,9 @@ async function deletePlaylist(uid) {
     delete playlistsData.playlists[uid];
     playlistsData.order = playlistsData.order.filter(id => id !== uid);
     await savePlaylists();
+    // drop the filter if it was pointing here, plus repaint badges/sidebar
+    CoreAPI.refreshPlaylistFilterIfActive(uid);
+    CoreAPI.refreshPlaylistBadges();
     return true;
 }
 
@@ -169,6 +172,8 @@ async function addToPlaylist(uid, avatars) {
     if (added > 0) {
         pl.modified = Date.now();
         await savePlaylists();
+        CoreAPI.refreshPlaylistFilterIfActive(uid);
+        CoreAPI.refreshPlaylistBadges();
     }
     return added;
 }
@@ -183,6 +188,8 @@ async function removeFromPlaylist(uid, avatars) {
     if (pl.characters.length !== before) {
         pl.modified = Date.now();
         await savePlaylists();
+        CoreAPI.refreshPlaylistFilterIfActive(uid);
+        CoreAPI.refreshPlaylistBadges();
     }
     return before - pl.characters.length;
 }
@@ -453,7 +460,7 @@ async function handlePickerRowClick(e) {
         if (added > 0) CoreAPI.showToast(`Added to "${pl.name}"`, 'success');
     }
     renderPickerList();
-    CoreAPI.refreshPlaylistBadges();
+    // badges + sidebar refresh now lives in the mutation primitives
 }
 
 async function handlePickerCreate() {
@@ -472,7 +479,6 @@ async function handlePickerCreate() {
     }
     input.value = '';
     renderPickerList();
-    CoreAPI.refreshPlaylistBadges();
     CoreAPI.showToast(`Created "${name}"`, 'success');
 }
 
@@ -773,7 +779,6 @@ async function handleManageDelete(uid) {
 
     await deletePlaylist(uid);
     renderManageList();
-    CoreAPI.refreshPlaylistBadges();
     CoreAPI.showToast(`Deleted "${pl.name}"`, 'info');
 }
 

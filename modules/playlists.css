@@ -253,6 +253,7 @@
 }
 
 .pl-chip {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
@@ -281,6 +282,44 @@
 .pl-chip-add:hover {
     border-color: var(--cl-accent);
     color: var(--cl-accent);
+}
+
+/* corner X that reveals on hover, lets you bail out of a playlist without
+   opening the picker. mobile keeps it hidden, the picker handles removes there */
+.pl-chip-remove {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: var(--radius-circle);
+    background: var(--cl-error);
+    color: white;
+    border: 1.5px solid var(--bg-primary);
+    font-size: var(--font-3xs);
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.pl-chip:hover .pl-chip-remove {
+    display: inline-flex;
+}
+
+.pl-chip-remove:hover {
+    background: var(--cl-error-bright);
+    transform: scale(1.1);
+}
+
+.pl-chip-add .pl-chip-remove { display: none !important; }
+
+@media (max-width: 768px) {
+    /* hover doesnt apply on touch, picker covers removes on mobile */
+    .pl-chip-remove { display: none !important; }
 }
 
 /* --- Playlist Management Modal --- */
