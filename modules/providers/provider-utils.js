@@ -11,6 +11,35 @@ export const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.o
 
 export const CL_HELPER_PLUGIN_BASE = '/plugins/cl-helper';
 
+// XSS gate for any third-party browse content rendered via innerHTML.
+// Never bypass; never duplicate this config per-provider.
+export const BROWSE_PURIFY_CONFIG = {
+    ALLOWED_TAGS: [
+        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
+    ],
+    ALLOWED_ATTR: [
+        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
+        'width', 'height', 'loading', 'color', 'size', 'align'
+    ],
+    ALLOW_DATA_ATTR: false
+};
+
+// n shimmer rows, last two tapered so it reads as a paragraph not a bar block.
+export function skeletonLines(n = 3) {
+    if (n <= 0) return '';
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const cls = i === n - 1 ? 'cl-skeleton-line shorter'
+                  : i === n - 2 ? 'cl-skeleton-line short'
+                  : 'cl-skeleton-line';
+        out.push(`<div class="${cls}"></div>`);
+    }
+    return out.join('');
+}
+
 // ========================================
 // NETWORK
 // ========================================

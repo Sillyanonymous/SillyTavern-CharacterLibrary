@@ -40,7 +40,8 @@ PARALLEL --cl-* TOKEN FAMILY (separate chain that powers module dialogs):
 
 MODAL BACKGROUND VARS:
   --modal-bg             Used by .modal-glass (character detail, creator, chat preview).
-  --cl-glass-bg          Used by .cl-modal-content shell on DESKTOP (translucent + backdrop blur), the .topbar chrome strip, AND by inner surfaces inside module dialogs (batch-tagging header/footer, playlist manage panels, custom-css editor panels, card-updates progress strip, context-menu, vt-dialog, etc).
+  --cl-glass-bg          Used by .cl-modal-content shell on DESKTOP (translucent + backdrop blur) AND by inner surfaces inside module dialogs (batch-tagging header/footer, playlist manage panels, custom-css editor panels, card-updates progress strip, context-menu, vt-dialog, etc).
+  --cl-topbar-bg         Used ONLY by the .topbar chrome strip. Default is rgba(20, 20, 20, 0.8) (darker + more see-through than --cl-glass-bg so it sits under content without competing). Override separately if you want the topbar tinted independently of modal chrome.
   --bg-secondary         Used by .cl-modal-content on MOBILE (overrides --cl-glass-bg via library-mobile.css; full-viewport bottom-sheets need solid bg or scrim-bleed reads as funhouse). Also used by .confirm-modal-content shells on both platforms.
   For a complete dark-mode reskin, override all three together. They look similar by default but read from independent vars.
 
@@ -186,6 +187,21 @@ Settings UI (defined in library.css):
   .settings-row                                                   One labelled control row inside a group.
   .settings-action-btn                                            Inline action button (Open Editor, Migrate, etc). Variants: .primary, .danger.
   .settings-hint                                                  Subdued help text under a control.
+
+Multi-select mode (defined in modules/multi-select.css; NEEDS !important). Bespoke toolbar treatment that doesn't reuse .glass-btn / .action-btn so it can carry its own personality; flag the coupling gaps below when retheming:
+  body.multi-select-mode .char-card           Body flag set when multi-select is active; gives every card a pointer cursor + reveals the per-card checkbox.
+  .char-card-checkbox                         24x24 checkbox overlay top-left on every card (display:none normally, display:flex inside body.multi-select-mode). Selected paint: ".char-card.selected .char-card-checkbox" (accent bg + accent border + the inner <i> fades in). Hover preview: ".char-card:hover .char-card-checkbox" tints border to accent.
+  .multi-select-toolbar                       Persistent action bar inserted before .gallery-content when mode is on. Bg is a HARDCODED dark blue/purple gradient (rgba(26,26,46,0.95) -> rgba(30,30,50,0.95)) NOT bound to the accent token, so a global accent retheme leaves the bar visually disconnected; retarget .multi-select-toolbar background explicitly to follow accent. Border-bottom DOES use var(--accent-rgb) and follows the accent automatically.
+  .multi-select-toolbar.hidden                Hidden state (display:none).
+  .multi-select-badge                         Count chip on the left ("3"). Accent gradient via --accent + --accent-secondary; themes automatically.
+  .multi-select-label                         "characters selected" text next to the badge. Hidden on mobile (<=768px).
+  .multi-select-left / .multi-select-actions / .multi-select-right    Three flex sections of the toolbar.
+  .ms-divider                                 Vertical 1px divider between button groups inside .multi-select-actions. Hidden on mobile.
+  .ms-btn                                     Bespoke toolbar action button (Select All, Tags, Favorite, Export, Updates, Playlist, Delete, Exit). NOT .glass-btn. Translucent white bg (rgba(255,255,255,0.08)), --SmartThemeBodyColor text, hover adds 1px lift + brighter bg. On mobile collapses to 32x32 icon-only (span hidden). Variants:
+                                                 .ms-btn.ms-btn-ghost     Transparent bg. Used by the Favorite button when ALL selected are already favorited, signaling "click to unfavorite" with reduced emphasis. The button toggles between .ms-btn (favorite) and .ms-btn.ms-btn-ghost (unfavorite) via JS.
+                                                 .ms-btn.ms-btn-danger    Red tint for Delete. HARDCODED #f87171 text + rgba(239,68,68,*) bg/border, NOT linked to --cl-error-bright; retarget the .ms-btn-danger rule explicitly if you want it to follow the status token family.
+                                                 .ms-btn.ms-btn-exit      Slightly different bg tint (rgba(100,100,120,*)) and tighter padding for the rightmost exit-mode icon button.
+  #multiSelectToggleBtn.active                Active state of the topbar's "Multi-select" toggle button (when mode is on). Accent gradient via --accent + --accent-secondary; themes automatically.
 
 Context menu (defined in modules/context-menu.css; NEEDS !important):
   .cl-context-menu / .cl-context-menu-item   Right-click context menu and rows.

@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     JANNY_SEARCH_URL,
     JANNY_IMAGE_BASE,
@@ -29,6 +29,7 @@ const {
     getCharacterGalleryId,
     showImportSummaryModal,
     formatRichText,
+    safePurify,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     debounce,
@@ -514,17 +515,19 @@ function openPreviewModal(hit) {
         if (creatorNotesEl) creatorNotesEl.innerHTML = '';
     }
 
-    // Show loading indicator in description section; hide others
+    // Skeletons across all heavy sections during the fetchAndPopulate network wait.
     const descSection = document.getElementById('jannyCharDescriptionSection');
     const descEl = document.getElementById('jannyCharDescription');
     const scenarioSection = document.getElementById('jannyCharScenarioSection');
+    const scenarioEl = document.getElementById('jannyCharScenario');
     const firstMsgSection = document.getElementById('jannyCharFirstMsgSection');
+    const firstMsgEl = document.getElementById('jannyCharFirstMsg');
     const examplesSection = document.getElementById('jannyCharExamplesSection');
-    descSection.style.display = 'block';
-    descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
-    scenarioSection.style.display = 'none';
-    firstMsgSection.style.display = 'none';
-    examplesSection.style.display = 'none';
+    const examplesEl = document.getElementById('jannyCharExamples');
+    if (descSection && descEl) { descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3); }
+    if (scenarioSection && scenarioEl) { scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2); }
+    if (firstMsgSection && firstMsgEl) { firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4); }
+    if (examplesSection && examplesEl) { examplesSection.style.display = 'block'; examplesEl.innerHTML = skeletonLines(3); }
 
     // Import button state
     const importBtn = document.getElementById('jannyImportBtn');
@@ -606,7 +609,7 @@ async function fetchAndPopulateDetails(hit, token) {
         if (descSection) {
             if (personality) {
                 descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = formatRichText(personality, name, false);
+                if (descEl) descEl.innerHTML = safePurify(formatRichText(personality, name, true), BROWSE_PURIFY_CONFIG);
             } else {
                 descSection.style.display = 'none';
             }
@@ -616,7 +619,9 @@ async function fetchAndPopulateDetails(hit, token) {
         const scenarioEl = document.getElementById('jannyCharScenario');
         if (scenarioSection && scenario) {
             scenarioSection.style.display = 'block';
-            if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
+            if (scenarioEl) scenarioEl.innerHTML = safePurify(formatRichText(scenario, name, true), BROWSE_PURIFY_CONFIG);
+        } else if (scenarioSection) {
+            scenarioSection.style.display = 'none';
         }
 
         const firstMsgSection = document.getElementById('jannyCharFirstMsgSection');
@@ -624,16 +629,20 @@ async function fetchAndPopulateDetails(hit, token) {
         if (firstMsgSection && firstMessage) {
             firstMsgSection.style.display = 'block';
             if (firstMsgEl) {
-                firstMsgEl.innerHTML = formatRichText(firstMessage, name, false);
+                firstMsgEl.innerHTML = safePurify(formatRichText(firstMessage, name, true), BROWSE_PURIFY_CONFIG);
                 firstMsgEl.dataset.fullContent = firstMessage;
             }
+        } else if (firstMsgSection) {
+            firstMsgSection.style.display = 'none';
         }
 
         const examplesSection = document.getElementById('jannyCharExamplesSection');
         const examplesEl = document.getElementById('jannyCharExamples');
         if (examplesSection && exampleDialogs) {
             examplesSection.style.display = 'block';
-            if (examplesEl) examplesEl.innerHTML = formatRichText(exampleDialogs, name, false);
+            if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(exampleDialogs, name, true), BROWSE_PURIFY_CONFIG);
+        } else if (examplesSection) {
+            examplesSection.style.display = 'none';
         }
     } catch (err) {
         debugLog('[JannyBrowse] Detail fetch error:', err);
@@ -757,28 +766,42 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(identifier, fallbackData, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
-        // Show import summary before library refresh so modal appears immediately
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                mediaCharacters: [{
-                    characterName: result.characterName,
-                    name: result.characterName,
-                    fileName: result.fileName,
-                    avatar: result.fileName,
-                    galleryId: result.galleryId,
-                    mediaUrls,
-                    galleryPageUrls,
-                    cardData: result.cardData
-                }]
-            });
+        const showSummary = (mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            mediaCharacters: [{
+                characterName: result.characterName,
+                name: result.characterName,
+                fileName: result.fileName,
+                avatar: result.fileName,
+                galleryId: result.galleryId,
+                mediaUrls,
+                galleryPageUrls,
+                cardData: result.cardData
+            }]
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         // Lightweight single-character add (avoids OOM from full list reload on mobile)
         const added = await fetchAndAddCharacter(result.fileName);

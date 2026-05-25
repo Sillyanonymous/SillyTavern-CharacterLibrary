@@ -393,7 +393,7 @@ body {
 /* Topbar */
 .topbar {
     height: 70px;
-    background: var(--cl-glass-bg);
+    background: var(--cl-topbar-bg);
     backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--glass-border);
     display: flex;
@@ -1254,12 +1254,13 @@ body {
 
 .card-overlay {
     position: absolute;
-    bottom: 0;
+    /* zoom != 100% (UI scale) makes every dimension fractional; combined with virtual-scroll layer churn this leaves a 1px gap at the overlay bottom on recycled cards. Overdraw 2px past card bottom + match padding so content stays in place; .char-card overflow:hidden clips the excess so the visible result is exact card-bottom coverage regardless. */
+    bottom: -2px;
     left: 0;
     right: 0;
     z-index: 2;
     background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
-    padding: 20px 15px 15px;
+    padding: 20px 15px 17px;
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -3993,11 +3994,13 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 .cl-skeleton-line {
     height: 8px;
+    margin-bottom: var(--space-sm);
     border-radius: var(--radius-xs);
     background: var(--glass-border);
     position: relative;
     overflow: hidden;
 }
+.cl-skeleton-line:last-child { margin-bottom: 0; }
 .cl-skeleton-line.short { width: 60%; }
 .cl-skeleton-line.shorter { width: 40%; }
 .cl-skeleton-img::before,
@@ -8336,6 +8339,11 @@ details.settings-provider-section > .settings-provider-body {
     margin-bottom: 0;
 }
 
+.settings-row.disabled {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
 .settings-row > label {
     display: block;
     margin-bottom: 6px;
@@ -11102,6 +11110,7 @@ html.cl-initial-loading .mobile-fab {
     --cl-accent: rgb(var(--cl-accent-rgb));
     --cl-accent-hover: color-mix(in srgb, var(--cl-accent), white 20%);
     --cl-glass-bg: rgba(30, 30, 30, 0.95);
+    --cl-topbar-bg: rgba(20, 20, 20, 0.8);
     --cl-border: rgba(58, 58, 58, 0.6);
     --cl-text-primary: var(--SmartThemeBodyColor, #e0e0e0);
     --cl-text-secondary: var(--SmartThemeQuoteColor, #a0a0a0);

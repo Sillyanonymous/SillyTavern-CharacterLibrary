@@ -128,9 +128,29 @@
         animation: none !important;
     }
 
-    /* Kill transitions on remaining scroll-visible elements */
+    /* Snap card-image instead of fading; mobile Chromium decode lag was already eating the visible 'empty' time, the 300ms fade just extended it. */
     .card-image {
-        transition: opacity 0.3s ease !important;
+        transition: none !important;
+    }
+
+    /* Mobile skeleton shimmer: brighter alpha for phone viewing distance, negative animation-delay so the sweep is visible from t=0, opacity cross-fade instead of desktop's display:none snap. */
+    .char-card::after {
+        transition: opacity 0.3s ease;
+    }
+    .char-card:not(.loaded)::after {
+        background: linear-gradient(
+            110deg,
+            transparent 25%,
+            rgba(255, 255, 255, 0.18) 50%,
+            transparent 75%
+        );
+        background-size: 200% 100%;
+        animation-delay: -1s;
+        opacity: 1;
+    }
+    .char-card.loaded::after {
+        display: block !important;
+        opacity: 0;
     }
     .chat-card,
     .glass-btn,

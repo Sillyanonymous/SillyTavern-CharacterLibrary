@@ -24,6 +24,7 @@ import {
     checkDcPluginAvailable,
     buildV2FromDatacat,
     buildV2FromDownload,
+    extractCharacterBookFromScripts,
     submitExtraction,
     fetchExtractionStatus,
 } from './datacat-api.js';
@@ -111,6 +112,7 @@ class DatacatProvider extends ProviderBase {
             providerId: 'datacat',
             id,
             fullPath: String(id),
+            sourceKind: dc.sourceKind || null,
             linkedAt: dc.linkedAt || null
         };
     }
@@ -124,6 +126,7 @@ class DatacatProvider extends ProviderBase {
             const existing = char.data.extensions.datacat || {};
             char.data.extensions.datacat = {
                 id: linkInfo.id,
+                sourceKind: linkInfo.sourceKind || existing.sourceKind || null,
                 linkedAt: linkInfo.linkedAt || new Date().toISOString(),
                 pageName: linkInfo.pageName || existing.pageName || null,
             };
@@ -137,7 +140,7 @@ class DatacatProvider extends ProviderBase {
     async fetchLinkStats(linkInfo) {
         if (!linkInfo?.id) return null;
         try {
-            const character = await fetchDatacatCharacter(linkInfo.id);
+            const character = await fetchDatacatCharacter(linkInfo.id, linkInfo.sourceKind || null);
             if (!character) return null;
 
             api?.debugLog?.('[DatacatProvider] fetchLinkStats raw keys:', Object.keys(character).join(', '));
@@ -165,18 +168,19 @@ class DatacatProvider extends ProviderBase {
 
     async fetchRemoteCard(linkInfo) {
         if (!linkInfo?.id) return null;
+        const sk = linkInfo.sourceKind || null;
         try {
             // Try the download endpoint first (closest to V2 format)
-            const downloadData = await fetchDatacatDownload(linkInfo.id);
+            const downloadData = await fetchDatacatDownload(linkInfo.id, sk);
             if (downloadData?.data) {
-                const character = await fetchDatacatCharacter(linkInfo.id);
+                const character = await fetchDatacatCharacter(linkInfo.id, sk);
                 const result = buildV2FromDownload(downloadData, character);
                 if (result) result._listingName = this.getListingName(character);
                 return result;
             }
 
             // Fallback to building from character metadata
-            const character = await fetchDatacatCharacter(linkInfo.id);
+            const character = await fetchDatacatCharacter(linkInfo.id, sk);
             if (character) {
                 const result = buildV2FromDatacat(character);
                 if (result) result._listingName = this.getListingName(character);
@@ -193,6 +197,17 @@ class DatacatProvider extends ProviderBase {
     normalizeRemoteCard(rawData) {
         if (rawData?.spec === 'chara_card_v2') return rawData;
         return buildV2FromDatacat(rawData);
+    }
+
+    async fetchLorebook(linkInfo) {
+        if (!linkInfo?.id) return null;
+        try {
+            const character = await fetchDatacatCharacter(linkInfo.id, linkInfo.sourceKind || null);
+            return extractCharacterBookFromScripts(character);
+        } catch (e) {
+            console.error('[DatacatProvider] fetchLorebook failed:', linkInfo.id, e);
+            return null;
+        }
     }
 
     async refreshRemoteData(linkInfo, options = {}) {
@@ -216,21 +231,32 @@ class DatacatProvider extends ProviderBase {
                 return;
             }
 
-            const janitorUrl = `https://janitorai.com/characters/${linkInfo.id}`;
+            // Backfill from probe for older cards; the post-extract fetch will persist via buildV2*.
+            let sourceKind = linkInfo.sourceKind;
+            if (!sourceKind) {
+                const probe = await fetchDatacatCharacter(linkInfo.id);
+                sourceKind = probe?.primary_content_source_kind || 'janitor';
+            }
+
+            const upstreamUrl = sourceKind === 'saucepan'
+                ? `https://saucepan.ai/companion/${linkInfo.id}`
+                : `https://janitorai.com/characters/${linkInfo.id}`;
             const publicFeed = CoreAPI.getSetting('datacatPublicFeed') === true;
 
-            report?.('Submitting extraction request...');
-            const result = await submitExtraction(janitorUrl, { publicFeed });
+            report?.('Submitting re-extraction request...');
+            const result = await submitExtraction(upstreamUrl, { publicFeed, alwaysReextract: true });
             if (!result?.success && !result?.queued && !result?.started) {
                 api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction submit failed:', result?.error);
                 return;
             }
 
+            const submitRequestId = result?.requestId || null;
+
             if (result?.queued) {
                 const pos = result.queuePosition ? ` (position ${result.queuePosition})` : '';
-                report?.(`Queued for extraction${pos}...`);
+                report?.(`Queued for re-extraction${pos}...`);
             } else {
-                report?.('Extraction started...');
+                report?.('Re-extraction started...');
             }
 
             const signal = options?.signal;
@@ -243,12 +269,14 @@ class DatacatProvider extends ProviderBase {
                 const status = await fetchExtractionStatus();
                 if (!status) continue;
 
-                const done = status.history?.find(h =>
-                    h.characterId === linkInfo.id || h.character_id === linkInfo.id
-                );
+                // Match by requestId (v0.91+ history accumulates entries per char); fall back to characterId.
+                const done = status.history?.find(h => {
+                    if (submitRequestId && h.requestId) return h.requestId === submitRequestId;
+                    return h.characterId === linkInfo.id || h.character_id === linkInfo.id;
+                });
                 if (done) {
-                    report?.('Extraction complete');
-                    api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction complete for', linkInfo.id);
+                    report?.('Re-extraction complete');
+                    api?.debugLog?.('[DatacatProvider] refreshRemoteData: re-extraction complete for', linkInfo.id);
                     return;
                 }
 
@@ -265,12 +293,12 @@ class DatacatProvider extends ProviderBase {
                     report?.(PHASE_LABELS[phase] || `Extracting (${phase})...`);
                 } else if (!status.queue || status.queue.length === 0) {
                     api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction finished (no longer in progress)');
-                    report?.('Extraction complete');
+                    report?.('Re-extraction complete');
                     return;
                 }
             }
-            report?.('Extraction timed out, using cached data');
-            api?.debugLog?.('[DatacatProvider] refreshRemoteData: extraction timed out after', MAX_POLLS * POLL_INTERVAL / 1000, 'seconds');
+            report?.('Re-extraction timed out, using cached data');
+            api?.debugLog?.('[DatacatProvider] refreshRemoteData: re-extraction timed out after', MAX_POLLS * POLL_INTERVAL / 1000, 'seconds');
         } catch (err) {
             console.error('[DatacatProvider] refreshRemoteData failed, continuing with cached data:', err);
         }
@@ -298,7 +326,7 @@ class DatacatProvider extends ProviderBase {
     async fetchGalleryImages(linkInfo) {
         if (!linkInfo?.id) return [];
         try {
-            const character = await fetchDatacatCharacter(linkInfo.id);
+            const character = await fetchDatacatCharacter(linkInfo.id, linkInfo.sourceKind || null);
             return extractSaucepanGalleryImages(character);
         } catch (e) {
             console.error('[DatacatProvider] fetchGalleryImages failed:', linkInfo.id, e);
@@ -326,7 +354,7 @@ class DatacatProvider extends ProviderBase {
         if (!charId) return null;
 
         try {
-            const character = await fetchDatacatCharacter(charId);
+            const character = await fetchDatacatCharacter(charId, linkInfo.sourceKind || null);
             if (!character) return null;
 
             return {
@@ -449,6 +477,7 @@ class DatacatProvider extends ProviderBase {
             characterCard.data.extensions.datacat = {
                 ...(characterCard.data.extensions.datacat || {}),
                 id: charId,
+                sourceKind: character.primary_content_source_kind || characterCard.data.extensions.datacat?.sourceKind || null,
                 creatorId: character.creator_id || null,
                 creatorName: character.creator_name || null,
                 pageName: this.getListingName(character),

@@ -5,7 +5,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     searchCharacters,
     fetchCharacterDetail,
@@ -86,15 +86,6 @@ const SEED_TAGS = [
 for (const t of SEED_TAGS) pygKnownTags.add(t);
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
-
-// ========================================
-// PURIFY CONFIG (for formatRichText in modal)
-// ========================================
-
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li', 'hr', 'a', 'blockquote', 'code', 'pre'],
-    ALLOWED_ATTR: ['class', 'style', 'href', 'target', 'rel'],
-};
 
 // ========================================
 // LIBRARY LOOKUP
@@ -718,6 +709,19 @@ function openPreviewModal(hit) {
         console.error('[PygBrowse] Error populating preview modal:', err);
     }
 
+    // Skeletons only when we know the network wait is coming (no inline personality).
+    if (!hit.personality) {
+        const _descSection = document.getElementById('pygCharDescriptionSection');
+        const _descEl = document.getElementById('pygCharDescription');
+        const _firstMsgSection = document.getElementById('pygCharFirstMsgSection');
+        const _firstMsgEl = document.getElementById('pygCharFirstMsg');
+        const _examplesSection = document.getElementById('pygCharExamplesSection');
+        const _examplesEl = document.getElementById('pygCharExamples');
+        if (_descSection && _descEl) { _descSection.style.display = 'block'; _descEl.innerHTML = skeletonLines(3); }
+        if (_firstMsgSection && _firstMsgEl) { _firstMsgSection.style.display = 'block'; _firstMsgEl.innerHTML = skeletonLines(4); }
+        if (_examplesSection && _examplesEl) { _examplesSection.style.display = 'block'; _examplesEl.innerHTML = skeletonLines(3); }
+    }
+
     modal.classList.remove('hidden');
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
@@ -747,43 +751,42 @@ function renderPygGalleryGrid(galleryImages) {
 }
 
 function populateDefinitionSections(name, p, altGreetings) {
-    // Creator's Notes
-    const creatorNotesEl = document.getElementById('pygCharCreatorNotes');
-    if (creatorNotesEl) {
-        if (p.characterNotes) {
-            creatorNotesEl.innerHTML = formatRichText(p.characterNotes, name, false);
-        } else {
-            creatorNotesEl.textContent = 'No creator notes available.';
+    // RAF defer so safePurify doesnt block the modal-open paint frame.
+    requestAnimationFrame(() => {
+        // Creator's Notes
+        const creatorNotesEl = document.getElementById('pygCharCreatorNotes');
+        if (creatorNotesEl) {
+            if (p.characterNotes) {
+                creatorNotesEl.innerHTML = safePurify(formatRichText(p.characterNotes, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                creatorNotesEl.textContent = 'No creator notes available.';
+            }
         }
-    }
 
-    // Description (persona)
-    const descSection = document.getElementById('pygCharDescriptionSection');
-    const descEl = document.getElementById('pygCharDescription');
-    if (descSection) {
-        if (p.persona) {
-            descSection.style.display = 'block';
-            if (descEl) descEl.innerHTML = formatRichText(p.persona, name, false);
-        } else if (!p.persona && !p.greeting) {
-            // No personality data yet - show loading
-            descSection.style.display = 'block';
-            if (descEl) descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
-        } else {
-            descSection.style.display = 'none';
+        // Description (persona)
+        const descSection = document.getElementById('pygCharDescriptionSection');
+        const descEl = document.getElementById('pygCharDescription');
+        if (descSection) {
+            if (p.persona) {
+                descSection.style.display = 'block';
+                if (descEl) descEl.innerHTML = safePurify(formatRichText(p.persona, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                descSection.style.display = 'none';
+            }
         }
-    }
 
-    // First Message
-    const firstMsgSection = document.getElementById('pygCharFirstMsgSection');
-    const firstMsgEl = document.getElementById('pygCharFirstMsg');
-    if (firstMsgSection) {
-        if (p.greeting) {
-            firstMsgSection.style.display = 'block';
-            if (firstMsgEl) firstMsgEl.innerHTML = formatRichText(p.greeting, name, false);
-        } else {
-            firstMsgSection.style.display = 'none';
+        // First Message
+        const firstMsgSection = document.getElementById('pygCharFirstMsgSection');
+        const firstMsgEl = document.getElementById('pygCharFirstMsg');
+        if (firstMsgSection) {
+            if (p.greeting) {
+                firstMsgSection.style.display = 'block';
+                if (firstMsgEl) firstMsgEl.innerHTML = safePurify(formatRichText(p.greeting, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                firstMsgSection.style.display = 'none';
+            }
         }
-    }
+    });
 
     // Alternate Greetings
     const altSection = document.getElementById('pygCharAltGreetingsSection');
@@ -834,17 +837,19 @@ function populateDefinitionSections(name, p, altGreetings) {
         }
     }
 
-    // Example Messages
-    const examplesSection = document.getElementById('pygCharExamplesSection');
-    const examplesEl = document.getElementById('pygCharExamples');
-    if (examplesSection) {
-        if (p.mesExample) {
-            examplesSection.style.display = 'block';
-            if (examplesEl) examplesEl.innerHTML = formatRichText(p.mesExample, name, false);
-        } else {
-            examplesSection.style.display = 'none';
+    // Second RAF: alt-greetings above is cheap sync, but mes_example is another safePurify heavy field.
+    requestAnimationFrame(() => {
+        const examplesSection = document.getElementById('pygCharExamplesSection');
+        const examplesEl = document.getElementById('pygCharExamples');
+        if (examplesSection) {
+            if (p.mesExample) {
+                examplesSection.style.display = 'block';
+                if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(p.mesExample, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                examplesSection.style.display = 'none';
+            }
         }
-    }
+    });
 }
 
 async function fetchAndPopulateDetails(hit, stalenessToken) {
@@ -998,36 +1003,51 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(charData.id, fullChar, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGallery ? [{
-                    name: result.characterName,
-                    fullPath: result.fullPath,
-                    provider: provider,
-                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
-                    url: getCharacterPageUrl(result.providerCharId),
-                    avatar: result.fileName,
-                    galleryId: result.galleryId
-                }] : [],
-                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
-                    name: result.characterName,
-                    avatar: result.fileName,
-                    avatarUrl: result.avatarUrl,
-                    mediaUrls: mediaUrls,
-                    galleryPageUrls: galleryPageUrls,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }] : []
-            });
+        const showSummary = (hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            galleryCharacters: hasGallery ? [{
+                name: result.characterName,
+                fullPath: result.fullPath,
+                provider: provider,
+                linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                url: getCharacterPageUrl(result.providerCharId),
+                avatar: result.fileName,
+                galleryId: result.galleryId
+            }] : [],
+            mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
+                name: result.characterName,
+                avatar: result.fileName,
+                avatarUrl: result.avatarUrl,
+                mediaUrls: mediaUrls,
+                galleryPageUrls: galleryPageUrls,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }] : []
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);

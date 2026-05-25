@@ -334,16 +334,19 @@ export class BrowseView {
             const grid = document.getElementById(gridId);
             if (!grid) continue;
 
+            // Skip the top-left source-badge container (datacat reuses the base class).
+            const BOTTOM_BADGES_SEL = '.browse-feature-badges:not(.browse-feature-badges-tl)';
+
             for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
                 if (!checkCard(card)) continue;
                 card.classList.add('in-library');
                 card.classList.remove('possible-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
+                let badgesEl = card.querySelector(BOTTOM_BADGES_SEL);
                 if (!badgesEl) {
                     const imgWrap = card.querySelector('.browse-card-image');
                     if (imgWrap) {
                         imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                        badgesEl = imgWrap.querySelector(BOTTOM_BADGES_SEL);
                     }
                 }
                 if (badgesEl) {
@@ -360,12 +363,12 @@ export class BrowseView {
                 const creator = creatorEl?.dataset.author || creatorEl?.dataset.creatorName || '';
                 if (!this.isCharPossibleMatch(name, creator)) continue;
                 card.classList.add('possible-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
+                let badgesEl = card.querySelector(BOTTOM_BADGES_SEL);
                 if (!badgesEl) {
                     const imgWrap = card.querySelector('.browse-card-image');
                     if (imgWrap) {
                         imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                        badgesEl = imgWrap.querySelector(BOTTOM_BADGES_SEL);
                     }
                 }
                 if (badgesEl && !badgesEl.querySelector('.possible-library')) {

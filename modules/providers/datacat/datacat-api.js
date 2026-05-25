@@ -242,12 +242,14 @@ export async function clearDcSession() {
 /**
  * Fetch full character data from the DataCat REST API.
  * @param {string} characterId - UUID
+ * @param {'janitor'|'saucepan'|null} [sourceKind] - upstream source hint; required for freshly-extracted chars
  * @returns {Promise<Object|null>} character object or null
  */
-export async function fetchDatacatCharacter(characterId) {
+export async function fetchDatacatCharacter(characterId, sourceKind = null) {
     if (!characterId) return null;
     try {
-        const response = await dcFetch(`/api/characters/${characterId}`);
+        const qs = sourceKind ? `?sourceKind=${encodeURIComponent(sourceKind)}` : '';
+        const response = await dcFetch(`/api/characters/${characterId}${qs}`);
         if (!response.ok) return null;
         const data = await response.json();
         return data?.character || null;
@@ -260,12 +262,15 @@ export async function fetchDatacatCharacter(characterId) {
 /**
  * Fetch the V2-like download payload for a character.
  * @param {string} characterId - UUID
+ * @param {'janitor'|'saucepan'|null} [sourceKind] - upstream source hint
  * @returns {Promise<Object|null>} { data: { name, tags, avatar, ... } }
  */
-export async function fetchDatacatDownload(characterId) {
+export async function fetchDatacatDownload(characterId, sourceKind = null) {
     if (!characterId) return null;
     try {
-        const response = await dcFetch(`/api/characters/${characterId}/download?t=${Date.now()}`);
+        const params = new URLSearchParams({ t: String(Date.now()) });
+        if (sourceKind) params.set('sourceKind', sourceKind);
+        const response = await dcFetch(`/api/characters/${characterId}/download?${params.toString()}`);
         if (!response.ok) return null;
         return response.json();
     } catch (e) {
@@ -437,6 +442,63 @@ export function pickRecoveryVariant(character) {
     return primary?.content || null;
 }
 
+// Extract V2 character_book from character.scripts[]. DataCat stores lorebook
+// entries JSON-encoded in script.script; private scripts are metadata stubs.
+// Multi-script merge: first script's title/settings win, entries concatenate.
+export function extractCharacterBookFromScripts(character) {
+    const scripts = character?.scripts;
+    if (!Array.isArray(scripts) || !scripts.length) return null;
+    const usable = scripts.filter(s => s && s.type === 'lorebook' && s.is_public && s.script);
+    if (!usable.length) return null;
+
+    const allEntries = [];
+    for (const s of usable) {
+        let parsed;
+        try { parsed = JSON.parse(s.script); } catch { continue; }
+        if (!Array.isArray(parsed)) continue;
+        for (const e of parsed) {
+            if (!e || typeof e !== 'object') continue;
+            const keys = Array.isArray(e.key)
+                ? e.key
+                : (e.keysRaw ? String(e.keysRaw).split(/,\s*/).filter(Boolean) : []);
+            allEntries.push({
+                keys,
+                secondary_keys: [],
+                content: e.content || '',
+                extensions: {},
+                enabled: e.enabled !== false,
+                insertion_order: typeof e.insertion_order === 'number' ? e.insertion_order : (e.priority || 100),
+                case_sensitive: false,
+                name: e.name || '',
+                priority: typeof e.priority === 'number' ? e.priority : 10,
+                id: e.id ?? allEntries.length,
+                comment: '',
+                selective: false,
+                constant: e.constant === true,
+                position: 'before_char',
+            });
+        }
+    }
+    if (!allEntries.length) return null;
+
+    const first = usable[0];
+    let scanDepth = 4;
+    try {
+        const settings = first.settings ? JSON.parse(first.settings) : null;
+        if (settings && typeof settings.depth === 'number') scanDepth = settings.depth;
+    } catch { /* default */ }
+
+    return {
+        name: first.title || 'Lorebook',
+        description: first.description || '',
+        scan_depth: scanDepth,
+        token_budget: 0,
+        recursive_scanning: false,
+        extensions: {},
+        entries: allEntries,
+    };
+}
+
 /**
  * Build a V2 character card from the character endpoint payload.
  *
@@ -513,11 +575,12 @@ export function buildV2FromDatacat(character) {
             extensions: {
                 datacat: {
                     id: character.character_id,
+                    sourceKind: character.primary_content_source_kind || null,
                     creatorId: character.creator_id || null,
                     creatorName: character.creator_name || null
                 }
             },
-            character_book: undefined
+            character_book: extractCharacterBookFromScripts(character) || undefined
         }
     };
 }
@@ -577,11 +640,15 @@ export function buildV2FromDownload(downloadData, character) {
                 ...(d.extensions || {}),
                 datacat: {
                     id: character?.character_id || null,
+                    sourceKind: character?.primary_content_source_kind || null,
                     creatorId: character?.creator_id || null,
                     creatorName: character?.creator_name || null
                 }
             },
-            character_book: d.character_book || undefined
+            // Download's character_book is often present-but-empty; fall through to scripts.
+            character_book: (d.character_book?.entries?.length ? d.character_book : null)
+                || extractCharacterBookFromScripts(character)
+                || undefined
         }
     };
 }
@@ -593,12 +660,15 @@ export function buildV2FromDownload(downloadData, character) {
 /**
  * Submit a JanitorAI character URL for extraction via DataCat's cloud browser.
  * @param {string} janitorUrl - Full JanitorAI character URL
- * @returns {Promise<{success: boolean, queued?: boolean, started?: boolean, queuePosition?: number, error?: string, errorCode?: string}>}
+ * @param {Object} [opts]
+ * @param {boolean} [opts.publicFeed=true]
+ * @param {boolean} [opts.alwaysReextract=false] - force re-extraction even if DataCat already has the character
+ * @returns {Promise<{success: boolean, queued?: boolean, started?: boolean, queuePosition?: number, requestId?: string, error?: string, errorCode?: string}>}
  */
-export async function submitExtraction(janitorUrl, { publicFeed = true } = {}) {
+export async function submitExtraction(janitorUrl, { publicFeed = true, alwaysReextract = false } = {}) {
     if (!_apiRequest) throw new Error('DataCat: apiRequest not bound');
     try {
-        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed });
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/dc-extract`, 'POST', { url: janitorUrl, publicFeed, alwaysReextract });
         if (!resp.ok) {
             const errText = await resp.text();
             console.error('[DataCat] dc-extract error:', resp.status, errText.substring(0, 200));
@@ -621,7 +691,7 @@ export async function submitExtraction(janitorUrl, { publicFeed = true } = {}) {
  */
 export async function fetchExtractionStatus() {
     try {
-        const resp = await dcFetch('/api/extraction/status');
+        const resp = await dcFetch('/api/extraction/status-projection');
         if (!resp.ok) return null;
         return await resp.json();
     } catch (e) {
@@ -933,7 +1003,7 @@ async function saucepanFetch(method, apiPath, body) {
 }
 
 /**
- * Search Saucepan companions via api2.saucepan.ai.
+ * Search Saucepan companions via the Saucepan API (proxied through cl-helper).
  * Returns results normalized to DataCat-compatible shape.
  * @param {Object} opts
  * @param {string} [opts.search='']

@@ -334,7 +334,8 @@ async function initModuleSystem() {
                 import('./gallery-extractors/mega.js'),
                 import('./gallery-extractors/postimg.js'),
                 import('./gallery-extractors/imgbox.js'),
-                import('./gallery-extractors/civitai.js')
+                import('./gallery-extractors/civitai.js'),
+                import('./gallery-extractors/dropbox.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;

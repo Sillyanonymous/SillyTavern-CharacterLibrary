@@ -235,7 +235,7 @@
      close     {function} - called with the element to close it
      static    {boolean}  - protect from catch-all el.remove() (default: true)
      escape    {boolean}  - respond to Escape key (default: true)
-     visible   {function} - optional override: (el) => bool. Default: !el.classList.contains('hidden')
+     visible   {function} - optional override: (el) => bool. Default auto-detects: cl-modal uses .visible, others use !.hidden.
    ======================================== */
 window._overlayRegistry = window._overlayRegistry || [];
 window.registerOverlay = window.registerOverlay || function(cfg) {
@@ -468,8 +468,16 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         let currentY = 0;
         let dragging = false;
 
+        // Both class systems get drag-dismiss when marked .cl-modal-drawer:
+        //   confirm-modal: outer .cl-confirm-overlay:not(.hidden), inner .confirm-modal-content
+        //   cl-modal:      outer .cl-modal.visible (.cl-modal-drawer), inner .cl-modal-content
+        const DRAGGABLE_SHEET_SELECTOR = [
+            '.cl-confirm-overlay:not(.hidden) .confirm-modal-content',
+            '.cl-modal.cl-modal-drawer.visible .cl-modal-content',
+        ].join(', ');
+
         document.addEventListener('touchstart', (e) => {
-            const sheet = e.target.closest('.cl-confirm-overlay:not(.hidden) .confirm-modal-content');
+            const sheet = e.target.closest(DRAGGABLE_SHEET_SELECTOR);
             if (!sheet) return;
             // Don't hijack touches on interactive controls (buttons, inputs).
             if (e.target.closest('button, a, input, textarea, select, label')) return;
@@ -494,14 +502,20 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (!dragging || !activeSheet) return;
             const delta = currentY - startY;
             const sheet = activeSheet;
-            const overlay = sheet.closest('.cl-confirm-overlay');
+            // .cl-confirm-overlay wraps confirm modals; .cl-modal IS the overlay for the cl-modal family.
+            const overlay = sheet.closest('.cl-confirm-overlay, .cl-modal');
             sheet.style.transition = 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)';
 
             if (delta > DISMISS_THRESHOLD) {
                 sheet.style.transform = 'translateY(100%)';
                 setTimeout(() => {
                     if (overlay) {
-                        overlay.classList.add('hidden');
+                        // Dual class system: confirm-modal toggles .hidden, cl-modal toggles .visible.
+                        if (overlay.classList.contains('cl-modal')) {
+                            overlay.classList.remove('visible');
+                        } else {
+                            overlay.classList.add('hidden');
+                        }
                         overlay._resolve?.(false);
                     }
                     sheet.style.transition = '';
@@ -2647,6 +2661,12 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 }
             }
         }, { passive: true });
+
+        // iOS multitasking gesture / incoming call cancels touches without firing touchend.
+        tabContainer.addEventListener('touchcancel', () => {
+            tracking = false;
+            swiping = false;
+        }, { passive: true });
     }
 
     /* ========================================
@@ -2707,6 +2727,12 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (nextIdx >= 0 && nextIdx < btns.length) {
                 btns[nextIdx].click();
             }
+        }, { passive: true });
+
+        // iOS may cancel touches mid-swipe (system gestures, calls); reset state.
+        body.addEventListener('touchcancel', () => {
+            tracking = false;
+            swiping = false;
         }, { passive: true });
     }
 
@@ -2954,6 +2980,21 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             // Clear recentTouch after the browser fires its synthetic click
             setTimeout(() => { recentTouch = false; }, 400);
         }, { passive: true });
+
+        // Snap back + reset on iOS system-canceled touches so the image isnt
+        // left mid-drag with stale tracking flags.
+        container.addEventListener('touchcancel', () => {
+            const imageContainer = container.querySelector('.gv-image-container');
+            if (imageContainer) {
+                imageContainer.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
+                imageContainer.style.transform = 'translateX(0)';
+                imageContainer.style.opacity = '1';
+            }
+            tracking = false;
+            swiping = false;
+            isPanning = false;
+            recentTouch = false;
+        }, { passive: true });
     }
 
     /* ========================================
@@ -3056,6 +3097,19 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                     img.style.opacity = '1';
                 }
             }
+            swiping = false;
+        }, { passive: true });
+
+        // Mid-swipe cancel (iOS system gesture, etc.): snap image back so it
+        // doesnt sit off-frame with the tracking flag still armed.
+        overlay.addEventListener('touchcancel', () => {
+            const img = getImg();
+            if (img) {
+                img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
+                img.style.transform = 'translateX(0)';
+                img.style.opacity = '1';
+            }
+            tracking = false;
             swiping = false;
         }, { passive: true });
     }
@@ -3205,6 +3259,19 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 clearDrag();
                 transitioning = false;
             }, { once: true });
+        }, { passive: true });
+
+        // Cancelled touches (iOS multitasking gesture, incoming call) skip
+        // touchend; snap back so the surface isnt stuck mid-drag.
+        surface.addEventListener('touchcancel', () => {
+            if (!active) return;
+            active = false;
+            locked = false;
+            if (dragging) {
+                surface.style.transition = 'transform 0.15s ease-out, opacity 0.15s ease-out';
+                clearDrag();
+                surface.addEventListener('transitionend', () => { surface.style.transition = ''; }, { once: true });
+            }
         }, { passive: true });
     }
 

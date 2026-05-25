@@ -7,7 +7,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     DATACAT_API_BASE,
     resolveDatacatAvatarUrl,
@@ -57,23 +57,6 @@ const {
     renderLoadingState,
     renderSkeletonGrid,
 } = CoreAPI;
-
-// Used only for the alt-greeting render below, which is the one site that
-// passes preserveHtml=true through formatRichText. Every other DataCat field
-// uses preserveHtml=false (escape-at-source) and does not need purification.
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
-        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
-    ],
-    ALLOWED_ATTR: [
-        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
-        'width', 'height', 'loading', 'color', 'size', 'align'
-    ],
-    ALLOW_DATA_ATTR: false
-};
 
 // ========================================
 // STATE
@@ -1669,7 +1652,7 @@ async function lookupExternalCharacter(charId, originalUrl, source = 'janitor') 
     if (loadMoreEl) loadMoreEl.style.display = 'none';
 
     try {
-        const character = await fetchDatacatCharacter(charId);
+        const character = await fetchDatacatCharacter(charId, source);
         if (character) {
             openPreviewModal(character);
             clearCreatorFilter();
@@ -1690,7 +1673,7 @@ async function openSaucepanCardPreview(hit) {
     const charId = String(getCharId(hit));
     const url = `https://saucepan.ai/companion/${charId}`;
     try {
-        const character = await fetchDatacatCharacter(charId);
+        const character = await fetchDatacatCharacter(charId, 'saucepan');
         if (character) {
             openPreviewModal(character);
             return;
@@ -1722,7 +1705,7 @@ function showExtractionPanel(charId, originalUrl, source = 'janitor') {
                 Extraction typically takes 15-60 seconds. A public account is used by default.
             </p>
             <div class="datacat-extract-actions">
-                <button id="datacatExtractBtn" class="action-btn primary" data-url="${escapeHtml(sourceUrl)}" data-id="${escapeHtml(charId)}">
+                <button id="datacatExtractBtn" class="action-btn primary" data-url="${escapeHtml(sourceUrl)}" data-id="${escapeHtml(charId)}" data-source="${escapeHtml(source)}">
                     <i class="fa-solid fa-cloud-arrow-down"></i> Extract Character
                 </button>
                 <a href="${escapeHtml(sourceUrl)}" target="_blank" class="action-btn secondary">
@@ -1736,12 +1719,12 @@ function showExtractionPanel(charId, originalUrl, source = 'janitor') {
     const extractBtn = document.getElementById('datacatExtractBtn');
     if (extractBtn) {
         extractBtn.addEventListener('click', () => {
-            startExtraction(extractBtn.dataset.url, extractBtn.dataset.id);
+            startExtraction(extractBtn.dataset.url, extractBtn.dataset.id, extractBtn.dataset.source || 'janitor');
         });
     }
 }
 
-async function startExtraction(janitorUrl, janitorId) {
+async function startExtraction(janitorUrl, janitorId, source = 'janitor') {
     const extractBtn = document.getElementById('datacatExtractBtn');
     const progressEl = document.getElementById('datacatExtractProgress');
     if (!extractBtn || !progressEl) return;
@@ -1767,7 +1750,7 @@ async function startExtraction(janitorUrl, janitorId) {
             extractBtn.innerHTML = '<i class="fa-solid fa-hourglass-half"></i> Extracting...';
             const position = result.queued ? ` (queue position: ${result.queuePosition || 1})` : '';
             updateExtractionProgress('pending', result.queued ? `Queued for extraction${position}` : 'Extraction started, waiting for completion...');
-            startExtractionPolling(janitorId);
+            startExtractionPolling(janitorId, source);
         } else if (result.requiresLogin) {
             extractBtn.disabled = false;
             extractBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract Character';
@@ -1829,7 +1812,7 @@ function updateExtractionProgress(status, message) {
     `;
 }
 
-function startExtractionPolling(janitorId) {
+function startExtractionPolling(janitorId, source = 'janitor') {
     stopExtractionPolling();
 
     let elapsedTimer = setInterval(() => {
@@ -1859,7 +1842,7 @@ function startExtractionPolling(janitorId) {
                 if (completedEntry.success !== false && completedEntry.status !== 'error') {
                     updateExtractionProgress('success', 'Extraction complete! Loading character...');
                     // Fetch the now-available character
-                    setTimeout(() => fetchExtractedCharacter(janitorId), 1000);
+                    setTimeout(() => fetchExtractedCharacter(janitorId, source), 1000);
                 } else {
                     const errMsg = humanizeExtractionError(completedEntry.error || completedEntry.message);
                     updateExtractionProgress('error', errMsg);
@@ -1908,9 +1891,9 @@ function clearExtractionState() {
     extractionStartTime = null;
 }
 
-async function fetchExtractedCharacter(janitorId) {
+async function fetchExtractedCharacter(janitorId, source = 'janitor') {
     try {
-        const character = await fetchDatacatCharacter(janitorId);
+        const character = await fetchDatacatCharacter(janitorId, source);
         if (character) {
             character._fullCharacter = character;
             openPreviewModal(character);
@@ -1918,7 +1901,7 @@ async function fetchExtractedCharacter(janitorId) {
         }
         // Might need a brief delay for DataCat indexing
         await new Promise(r => setTimeout(r, 2000));
-        const retry = await fetchDatacatCharacter(janitorId);
+        const retry = await fetchDatacatCharacter(janitorId, source);
         if (retry) {
             retry._fullCharacter = retry;
             openPreviewModal(retry);
@@ -1995,7 +1978,7 @@ async function startModalExtraction(charId, source = 'janitor') {
             importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Extracting...';
             const position = result.queued ? ` (${result.queuePosition || 1})` : '';
             updateInlineExtractionCTA('extracting', position.trim() ? `Queue position${position}` : '');
-            startModalExtractionPolling(charId);
+            startModalExtractionPolling(charId, source);
         } else if (result.requiresLogin) {
             importBtn.disabled = false;
             importBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-down"></i> Extract';
@@ -2015,7 +1998,7 @@ async function startModalExtraction(charId, source = 'janitor') {
     }
 }
 
-function startModalExtractionPolling(charId) {
+function startModalExtractionPolling(charId, source = 'janitor') {
     stopExtractionPolling();
 
     const importBtn = document.getElementById('datacatImportBtn');
@@ -2050,14 +2033,14 @@ function startModalExtractionPolling(charId) {
                     showToast('Extraction complete! Loading character...', 'success');
                     await new Promise(r => setTimeout(r, 1000));
                     try {
-                        const character = await fetchDatacatCharacter(charId);
+                        const character = await fetchDatacatCharacter(charId, source);
                         if (character) {
                             character._fullCharacter = character;
                             openPreviewModal(character);
                             return;
                         }
                         await new Promise(r => setTimeout(r, 2000));
-                        const retry = await fetchDatacatCharacter(charId);
+                        const retry = await fetchDatacatCharacter(charId, source);
                         if (retry) {
                             retry._fullCharacter = retry;
                             openPreviewModal(retry);
@@ -2528,32 +2511,32 @@ function openPreviewModal(hit) {
     const tagsEl = document.getElementById('datacatCharTags');
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
 
-    // Creator's Notes - show immediately if description is available (all sources include it)
+    // Skeleton until fetch resolves source; painting twice rebuilds the iframe and flashes.
     const creatorNotesSection = document.getElementById('datacatCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('datacatCharCreatorNotes');
-    const immediateDesc = (hit.description || '').trim();
-    datacatLastCreatorNotes = immediateDesc;
-    if (creatorNotesSection) {
-        if (immediateDesc) {
-            creatorNotesSection.style.display = 'block';
-            if (creatorNotesEl) renderCreatorNotesSecure(immediateDesc, name, creatorNotesEl);
-        } else {
-            creatorNotesSection.style.display = 'none';
-            if (creatorNotesEl) creatorNotesEl.innerHTML = '';
-        }
+    datacatLastCreatorNotes = '';
+    if (creatorNotesSection && creatorNotesEl) {
+        cleanupCreatorNotesContainer(creatorNotesEl);
+        creatorNotesSection.style.display = 'block';
+        creatorNotesEl.innerHTML = skeletonLines(2);
     }
 
     // Definition sections: all hidden, single loading indicator shown
     const defLoading = document.getElementById('datacatCharDefinitionLoading');
     if (defLoading) defLoading.style.display = 'block';
     const descSection = document.getElementById('datacatCharDescriptionSection');
+    const descEl = document.getElementById('datacatCharDescription');
     const scenarioSection = document.getElementById('datacatCharScenarioSection');
+    const scenarioEl = document.getElementById('datacatCharScenario');
     const mesExampleSection = document.getElementById('datacatCharMesExampleSection');
+    const mesExampleEl = document.getElementById('datacatCharMesExample');
     const firstMsgSection = document.getElementById('datacatCharFirstMsgSection');
-    descSection.style.display = 'none';
-    scenarioSection.style.display = 'none';
+    const firstMsgEl = document.getElementById('datacatCharFirstMsg');
+    // Body sections stay hidden until fetch resolves; defLoading covers the wait.
+    if (descSection) descSection.style.display = 'none';
+    if (scenarioSection) scenarioSection.style.display = 'none';
     if (mesExampleSection) mesExampleSection.style.display = 'none';
-    firstMsgSection.style.display = 'none';
+    if (firstMsgSection) firstMsgSection.style.display = 'none';
 
     // Hide alt greetings + greetings stat until download data arrives
     const altGreetingsSection = document.getElementById('datacatCharAltGreetingsSection');
@@ -2630,6 +2613,26 @@ async function fetchAndPopulateDetails(hit, token) {
     function showExtractionCTA(message, { locked = false } = {}) {
         const source = isSaucepanHit ? 'saucepan' : 'janitor';
         const cfg = EXTRACT_SOURCES[source];
+        // Unextracted cards have no body fields, so skeletons left from modal-open never resolve.
+        const hideIds = ['datacatCharScenarioSection', 'datacatCharFirstMsgSection', 'datacatCharMesExampleSection'];
+        for (const id of hideIds) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+        // No extraction means hit.description is all the creator-blurb we'll ever get.
+        const immediateDesc = (hit.description || '').trim();
+        const ctaNotesSection = document.getElementById('datacatCharCreatorNotesSection');
+        const ctaNotesEl = document.getElementById('datacatCharCreatorNotes');
+        if (ctaNotesSection && ctaNotesEl) {
+            if (immediateDesc) {
+                ctaNotesSection.style.display = 'block';
+                datacatLastCreatorNotes = immediateDesc;
+                renderCreatorNotesSecure(immediateDesc, name, ctaNotesEl);
+            } else {
+                ctaNotesSection.style.display = 'none';
+                cleanupCreatorNotesContainer(ctaNotesEl);
+            }
+        }
         const descSection = document.getElementById('datacatCharDescriptionSection');
         const descEl = document.getElementById('datacatCharDescription');
         if (descSection) descSection.style.display = 'block';
@@ -2660,10 +2663,11 @@ async function fetchAndPopulateDetails(hit, token) {
     }
 
     // Start download fetch early (runs in parallel with character fetch)
-    const downloadPromise = fetchDatacatDownload(charId).catch(() => null);
+    const hitSource = getSourceKind(hit);
+    const downloadPromise = fetchDatacatDownload(charId, hitSource).catch(() => null);
 
     try {
-        const character = hit._fullCharacter || await fetchDatacatCharacter(charId);
+        const character = hit._fullCharacter || await fetchDatacatCharacter(charId, hitSource);
 
         if (token !== datacatDetailFetchToken) return;
 
@@ -2728,7 +2732,7 @@ async function fetchAndPopulateDetails(hit, token) {
             const descEl = document.getElementById('datacatCharDescription');
             if (personality && canPaintBody) {
                 descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${formatRichText(personality, name, false)}`;
+                if (descEl) descEl.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${safePurify(formatRichText(personality, name, true), BROWSE_PURIFY_CONFIG)}`;
             } else if (showLockedBanner) {
                 descSection.style.display = 'block';
                 if (descEl) descEl.innerHTML = renderLockedDefBanner();
@@ -2742,7 +2746,9 @@ async function fetchAndPopulateDetails(hit, token) {
         const scenarioEl = document.getElementById('datacatCharScenario');
         if (scenarioSection && scenario && canPaintBody) {
             scenarioSection.style.display = 'block';
-            if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
+            if (scenarioEl) scenarioEl.innerHTML = safePurify(formatRichText(scenario, name, true), BROWSE_PURIFY_CONFIG);
+        } else if (scenarioSection) {
+            scenarioSection.style.display = 'none';
         }
 
         const firstMsgSection = document.getElementById('datacatCharFirstMsgSection');
@@ -2750,9 +2756,11 @@ async function fetchAndPopulateDetails(hit, token) {
         if (firstMsgSection && firstMessage && canPaintBody) {
             firstMsgSection.style.display = 'block';
             if (firstMsgEl) {
-                firstMsgEl.innerHTML = formatRichText(firstMessage, name, false);
+                firstMsgEl.innerHTML = safePurify(formatRichText(firstMessage, name, true), BROWSE_PURIFY_CONFIG);
                 firstMsgEl.dataset.fullContent = firstMessage;
             }
+        } else if (firstMsgSection) {
+            firstMsgSection.style.display = 'none';
         }
 
         // Silently update stats values if full character has better data
@@ -2872,20 +2880,20 @@ async function fetchAndPopulateDetails(hit, token) {
                     const ds = document.getElementById('datacatCharDescriptionSection');
                     const de = document.getElementById('datacatCharDescription');
                     if (ds) ds.style.display = 'block';
-                    if (de) de.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${formatRichText(dlDesc, name, false)}`;
+                    if (de) de.innerHTML = `${showLockedBanner ? renderLockedDefBanner() : ''}${safePurify(formatRichText(dlDesc, name, true), BROWSE_PURIFY_CONFIG)}`;
                 }
                 if (d.scenario && !useRecoveryAsAuthority && (needSaucepanFallback || !scenario || d.scenario !== scenario)) {
                     const ss = document.getElementById('datacatCharScenarioSection');
                     const se = document.getElementById('datacatCharScenario');
                     if (ss) ss.style.display = 'block';
-                    if (se) se.innerHTML = formatRichText(d.scenario, name, false);
+                    if (se) se.innerHTML = safePurify(formatRichText(d.scenario, name, true), BROWSE_PURIFY_CONFIG);
                 }
                 if (d.first_mes && !useRecoveryAsAuthority && (needSaucepanFallback || !firstMessage || d.first_mes !== firstMessage)) {
                     const fs = document.getElementById('datacatCharFirstMsgSection');
                     const fe = document.getElementById('datacatCharFirstMsg');
                     if (fs) fs.style.display = 'block';
                     if (fe) {
-                        fe.innerHTML = formatRichText(d.first_mes, name, false);
+                        fe.innerHTML = safePurify(formatRichText(d.first_mes, name, true), BROWSE_PURIFY_CONFIG);
                         fe.dataset.fullContent = d.first_mes;
                     }
                 }
@@ -2897,8 +2905,10 @@ async function fetchAndPopulateDetails(hit, token) {
             const mesEl = document.getElementById('datacatCharMesExample');
             if (mesExample && mesSection && mesEl) {
                 mesSection.style.display = 'block';
-                mesEl.innerHTML = formatRichText(mesExample, name, false);
+                mesEl.innerHTML = safePurify(formatRichText(mesExample, name, true), BROWSE_PURIFY_CONFIG);
                 mesEl.dataset.fullContent = mesExample;
+            } else if (mesSection) {
+                mesSection.style.display = 'none';
             }
 
             renderAltGreetings(d?.alternate_greetings, name);
@@ -2933,12 +2943,32 @@ function renderDatacatLorebooks(scripts) {
         return;
     }
 
+    const privateCount = lorebooks.filter(s => s.is_public === false).length;
+    const allPrivate = privateCount === lorebooks.length;
+    const noneDownloadable = privateCount === 0
+        ? null
+        : (allPrivate
+            ? 'These lorebooks are private and cannot be downloaded through Character Library.'
+            : 'Some of these lorebooks are private and cannot be downloaded through Character Library.');
+
     if (stat) {
         stat.style.display = 'flex';
         const label = lorebooks.length === 1 ? 'lorebook' : 'lorebooks';
         stat.innerHTML = `<i class="fa-solid fa-book"></i> <span id="datacatCharLorebookCount">${lorebooks.length}</span> ${label}`;
+        stat.title = noneDownloadable || `Public lorebooks are downloaded as embedded character_book.`;
     }
     if (countEl) countEl.textContent = `(${lorebooks.length})`;
+
+    const note = document.getElementById('datacatCharLorebooksNote');
+    const noteText = document.getElementById('datacatCharLorebooksNoteText');
+    if (note && noteText) {
+        if (!noneDownloadable) {
+            note.style.display = 'none';
+        } else {
+            note.style.display = '';
+            noteText.textContent = noneDownloadable;
+        }
+    }
 
     section.style.display = 'block';
     listEl.innerHTML = lorebooks.map(s => {
@@ -3138,37 +3168,52 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(charId, character, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
         const hasGallery = !!result.hasGallery;
-        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGallery ? [{
-                    name: result.characterName,
-                    provider,
-                    linkInfo: { providerId: 'datacat', id: result.providerCharId },
-                    url: `https://datacat.run/characters/${result.providerCharId}`,
-                    avatar: result.fileName,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }] : [],
-                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
-                    characterName: result.characterName,
-                    name: result.characterName,
-                    fileName: result.fileName,
-                    avatar: result.fileName,
-                    galleryId: result.galleryId,
-                    mediaUrls,
-                    galleryPageUrls,
-                    cardData: result.cardData
-                }] : []
-            });
+        const showSummary = (hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            galleryCharacters: hasGallery ? [{
+                name: result.characterName,
+                provider,
+                linkInfo: { providerId: 'datacat', id: result.providerCharId },
+                url: `https://datacat.run/characters/${result.providerCharId}`,
+                avatar: result.fileName,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }] : [],
+            mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
+                characterName: result.characterName,
+                name: result.characterName,
+                fileName: result.fileName,
+                avatar: result.fileName,
+                galleryId: result.galleryId,
+                mediaUrls,
+                galleryPageUrls,
+                cardData: result.cardData
+            }] : []
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
@@ -4084,7 +4129,7 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                             <i class="fa-solid fa-comment-dots"></i>
                             <span id="datacatCharGreetingsCount">0</span> greetings
                         </div>
-                        <div class="browse-stat" id="datacatCharLorebookStat" style="display: none;" title="This character has external lorebooks on DataCat. Their contents cannot be downloaded through Character Library.">
+                        <div class="browse-stat" id="datacatCharLorebookStat" style="display: none;">
                             <i class="fa-solid fa-book"></i>
                             <span id="datacatCharLorebookCount">0</span> lorebook
                         </div>
@@ -4150,15 +4195,15 @@ const datacatBrowseView = new (class DatacatBrowseView extends BrowseView {
                     <div id="datacatCharAltGreetings" class="browse-alt-greetings-list"></div>
                 </div>
 
-                <!-- Linked Lorebooks (external, metadata only) -->
+                <!-- Linked Lorebooks (public lorebooks are imported as character_book; private ones are metadata only) -->
                 <div class="browse-char-section" id="datacatCharLorebooksSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="datacatCharLorebooks" data-label="Linked Lorebooks" data-icon="fa-solid fa-book" title="Click to expand">
                         <i class="fa-solid fa-book"></i> Linked Lorebooks <span class="browse-section-count" id="datacatCharLorebooksCount"></span>
                     </h3>
                     <div id="datacatCharLorebooks">
-                        <p class="datacat-lorebooks-note">
+                        <p class="datacat-lorebooks-note" id="datacatCharLorebooksNote" style="display: none;">
                             <i class="fa-solid fa-circle-info"></i>
-                            This character references external lorebooks that cannot be downloaded through Character Library.
+                            <span id="datacatCharLorebooksNoteText"></span>
                         </p>
                         <div id="datacatCharLorebooksList" class="datacat-lorebooks-list"></div>
                     </div>

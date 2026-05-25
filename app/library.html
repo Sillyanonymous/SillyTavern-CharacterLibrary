@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=85">
-    <link rel="stylesheet" href="library-mobile.css?v=12" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=88">
+    <link rel="stylesheet" href="library-mobile.css?v=17" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -2085,6 +2085,47 @@ https://jannyai.com/characters/uuid_slug
                         </div>
 
                         <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-image"></i> Grid Card Thumbnails</div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsUseGridThumbnails"> Use thumbnails in characters view
+                                </label>
+                                <span class="settings-hint">Serve smaller images for grid cards. Helps mobile (decode cost drops sharply, fewer empty frames on fast scroll). Detail modal + gallery keep full resolution. Applies to mobile only by default; see desktop option below.</span>
+                            </div>
+                            <div class="settings-row" id="settingsGridThumbDesktopRow" style="padding-left: 24px;">
+                                <label>
+                                    <input type="checkbox" id="settingsGridThumbDesktop"> Also use on desktop
+                                </label>
+                                <span class="settings-hint">Off (default): thumbnails only on mobile-sized viewports. On: thumbnails on every viewport. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
+                            </div>
+                            <div class="settings-row" id="settingsGridThumbClHelperRow" style="padding-left: 24px;">
+                                <label>
+                                    <input type="checkbox" id="settingsGridThumbClHelper" checked> Use cl-helper to generate thumbnails (recommended)
+                                </label>
+                                <span class="settings-hint">On: cl-helper resizes via jimp + caches on disk at the size you pick below. Requires the cl-helper plugin installed. Off: ST's built-in /thumbnail endpoint, fixed at 96x144 which looks blurry on retina-DPR phones.</span>
+                            </div>
+                            <div class="settings-row" id="settingsGridThumbSizeRow" style="padding-left: 24px;">
+                                <label for="settingsGridThumbSize">Thumbnail size:</label>
+                                <select id="settingsGridThumbSize" class="glass-select">
+                                    <option value="384" data-icon="fa-solid fa-image">Small (384px wide)</option>
+                                    <option value="512" data-icon="fa-solid fa-image" selected>Medium (512px wide)</option>
+                                    <option value="640" data-icon="fa-solid fa-image">Large (640px wide)</option>
+                                    <option value="768" data-icon="fa-solid fa-image">Extra Large (768px wide)</option>
+                                </select>
+                                <span class="settings-hint">Larger = sharper on high-DPR screens, more decode cost. 512 is a good baseline.</span>
+                            </div>
+                            <div class="settings-row" id="settingsGridThumbCacheRow" style="padding-left: 24px;">
+                                <label>Cache:</label>
+                                <div class="settings-input-group">
+                                    <button id="settingsGridThumbPopulate" class="settings-action-btn primary"><i class="fa-solid fa-download"></i> Populate at current size</button>
+                                    <button id="settingsGridThumbPurge" class="settings-action-btn danger"><i class="fa-solid fa-trash"></i> Purge cache</button>
+                                </div>
+                                <span id="settingsGridThumbCacheStats" class="settings-hint">Loading...</span>
+                                <span class="settings-hint">Populate pre-generates a thumbnail for every character at the size selected above (skips already-cached). Purge deletes all cached thumbnails (any size); next scroll regenerates on demand.</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-bell"></i> Notifications</div>
                             <div class="settings-row">
                                 <label>
@@ -2840,8 +2881,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=110"></script>
+    <script src="library.js?v=140"></script>
     <script type="module" src="../modules/module-loader.js?v=31"></script>
-    <script src="library-mobile.js?v=8"></script>
+    <script src="library-mobile.js?v=9"></script>
 </body>
 </html>

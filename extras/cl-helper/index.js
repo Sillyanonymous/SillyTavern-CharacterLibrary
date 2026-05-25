@@ -89,6 +89,8 @@ async function peekImageDimensions(filePath) {
 let _cacheDir = null;
 let _Jimp = null;
 let _imagesDir = null;
+let _charactersDir = null;
+let _avatarThumbDir = null;
 let _thumbsReady = false;
 let _thumbActive = 0;
 let _thumbQueue = [];
@@ -121,6 +123,27 @@ function resolveImagesDir() {
         for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
             if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
             const candidate = join(dataDir, entry.name, 'user', 'images');
+            if (existsSync(candidate)) return candidate;
+        }
+    } catch {}
+
+    return null;
+}
+
+function resolveCharactersDir() {
+    // ST's USER_DIRECTORY_TEMPLATE puts `characters` at the user root (data/<user>/characters),
+    // NOT under user/ like gallery images (data/<user>/user/images).
+    const stRoot = process.cwd();
+    const dataDir = join(stRoot, 'data');
+    if (!existsSync(dataDir)) return null;
+
+    const defaultPath = join(dataDir, 'default-user', 'characters');
+    if (existsSync(defaultPath)) return defaultPath;
+
+    try {
+        for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+            if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+            const candidate = join(dataDir, entry.name, 'characters');
             if (existsSync(candidate)) return candidate;
         }
     } catch {}
@@ -168,8 +191,9 @@ function registerThumbnailRoutes(router) {
         const { folder, file } = req.params;
         const size = Math.min(Math.max(parseInt(req.query.s) || 384, 64), THUMB_MAX_SIZE);
 
+        // Block path separators only; benign filenames can legitimately contain ".." (eg. ellipsis).
+        // The resolve + startsWith check below catches any traversal that survives this.
         if (!folder || !file
-            || folder.includes('..') || file.includes('..')
             || folder.includes('/') || folder.includes('\\')
             || file.includes('/') || file.includes('\\')) {
             return res.status(400).json({ error: 'Invalid path' });
@@ -241,7 +265,7 @@ function registerThumbnailRoutes(router) {
         }
 
         const { folder } = req.params;
-        if (!folder || folder.includes('..') || folder.includes('/') || folder.includes('\\')) {
+        if (!folder || folder.includes('/') || folder.includes('\\')) {
             return res.status(400).json({ error: 'Invalid folder' });
         }
 
@@ -263,6 +287,206 @@ function registerThumbnailRoutes(router) {
             res.status(500).json({ error: 'Cleanup failed' });
         }
     });
+
+    // Avatar thumbnail: aspect-preserving JPEG resize of a character PNG.
+    // ST's built-in /thumbnail?type=avatar serves 96x144 which is too small
+    // for retina-DPR mobile grids; we serve a larger one (default 512w) with
+    // our own jimp pipeline + on-disk cache.
+    router.get('/avatar-thumb/:file', async (req, res) => {
+        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+
+        const { file } = req.params;
+        const size = Math.min(Math.max(parseInt(req.query.s) || 512, 64), THUMB_MAX_SIZE);
+
+        if (!file || file.includes('/') || file.includes('\\')) {
+            return res.status(400).json({ error: 'Invalid path' });
+        }
+        if (!/\.png$/i.test(file)) {
+            return res.status(400).json({ error: 'Unsupported file type' });
+        }
+
+        const originalPath = resolve(_charactersDir, file);
+        if (!originalPath.startsWith(_charactersDir + sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        let origStat;
+        try {
+            origStat = await stat(originalPath);
+        } catch {
+            return res.status(404).json({ error: 'Not found' });
+        }
+
+        if (origStat.size > THUMB_MAX_FILE_BYTES) {
+            return res.status(413).json({ error: 'Image too large' });
+        }
+
+        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+
+        try {
+            const cacheStat = await stat(cachePath);
+            if (cacheStat.mtimeMs > origStat.mtimeMs) {
+                res.set('Content-Type', 'image/jpeg');
+                res.set('Cache-Control', 'public, max-age=86400');
+                return res.send(await readFile(cachePath));
+            }
+        } catch { /* cache miss */ }
+
+        try {
+            await _thumbSemaphore();
+            const image = await _Jimp.read(originalPath);
+            // Cover to exact 2:3 (matches .char-card aspect-ratio). With matching aspect,
+            // object-fit: cover is a no-op so subpixel rounding can't expose a gap below
+            // the image when the card height lands on a fractional pixel boundary.
+            image.cover({ w: size, h: Math.round(size * 1.5) });
+            const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
+            _thumbRelease();
+
+            mkdirSync(_avatarThumbDir, { recursive: true });
+            writeFile(cachePath, buffer).catch(() => {});
+
+            res.set('Content-Type', 'image/jpeg');
+            res.set('Cache-Control', 'public, max-age=86400');
+            res.send(buffer);
+        } catch (err) {
+            _thumbRelease();
+            console.error(`[cl-helper] Avatar thumb error ${file}:`, err.message);
+            res.status(500).json({ error: 'Generation failed' });
+        }
+    });
+
+    router.get('/avatar-thumb-stats', async (req, res) => {
+        if (!_avatarThumbDir) {
+            return res.json({ count: 0, bytes: 0, available: false });
+        }
+        try {
+            if (!existsSync(_avatarThumbDir)) return res.json({ count: 0, bytes: 0, available: true });
+            const entries = readdirSync(_avatarThumbDir);
+            let bytes = 0;
+            for (const name of entries) {
+                try {
+                    const s = await stat(join(_avatarThumbDir, name));
+                    if (s.isFile()) bytes += s.size;
+                } catch { /* skip */ }
+            }
+            res.json({ count: entries.length, bytes, available: true });
+        } catch (err) {
+            console.error('[cl-helper] Avatar thumb stats error:', err.message);
+            res.status(500).json({ error: 'Stats failed' });
+        }
+    });
+
+    router.post('/avatar-thumb-cleanup', (req, res) => {
+        if (!_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+        try {
+            let deleted = 0;
+            if (existsSync(_avatarThumbDir)) {
+                deleted = readdirSync(_avatarThumbDir).length;
+                rmSync(_avatarThumbDir, { recursive: true, force: true });
+                console.log(`[cl-helper] Purged avatar thumb cache (${deleted} files)`);
+            }
+            res.json({ ok: true, deleted });
+        } catch (err) {
+            console.error('[cl-helper] Avatar thumb cleanup error:', err.message);
+            res.status(500).json({ error: 'Cleanup failed' });
+        }
+    });
+
+    // Populate runs as a background job: client kicks it off, polls /populate-status
+    // for progress. Sequential + setImmediate yield between each thumb keeps ST's
+    // event loop responsive (jimp's PNG decode is synchronous on the main thread).
+    router.post('/avatar-thumb-populate', async (req, res) => {
+        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+        if (_populateJob && _populateJob.running) {
+            return res.status(409).json({ error: 'Populate already running', job: _populateJob });
+        }
+        const size = Math.min(Math.max(parseInt(req.query.s) || 512, 64), THUMB_MAX_SIZE);
+
+        let files;
+        try {
+            files = readdirSync(_charactersDir).filter(f => /\.png$/i.test(f));
+        } catch (err) {
+            return res.status(500).json({ error: 'Failed to read characters directory' });
+        }
+
+        mkdirSync(_avatarThumbDir, { recursive: true });
+        runAvatarPopulateJob(size, files).catch(err => {
+            console.error('[cl-helper] populate job crashed:', err.message);
+            if (_populateJob) { _populateJob.running = false; _populateJob.finishedAt = Date.now(); }
+        });
+        res.json({ started: true, total: files.length, size });
+    });
+
+    router.get('/avatar-thumb-populate-status', (req, res) => {
+        res.json(_populateJob || { running: false, total: 0, processed: 0, generated: 0, skipped: 0, failed: 0 });
+    });
+}
+
+let _populateJob = null;
+
+async function runAvatarPopulateJob(size, files) {
+    _populateJob = {
+        running: true,
+        total: files.length,
+        processed: 0,
+        generated: 0,
+        skipped: 0,
+        failed: 0,
+        size,
+        startedAt: Date.now(),
+        finishedAt: null,
+    };
+
+    for (const file of files) {
+        const originalPath = resolve(_charactersDir, file);
+        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+
+        try {
+            const origStat = await stat(originalPath);
+            if (origStat.size > THUMB_MAX_FILE_BYTES) {
+                console.warn(`[cl-helper] Avatar thumb populate skipped (over ${Math.round(THUMB_MAX_FILE_BYTES / 1024 / 1024)} MB cap, ${(origStat.size / 1024 / 1024).toFixed(1)} MB): ${file}`);
+                _populateJob.failed++;
+            } else {
+                let needs = true;
+                try {
+                    const cacheStat = await stat(cachePath);
+                    if (cacheStat.mtimeMs > origStat.mtimeMs) { _populateJob.skipped++; needs = false; }
+                } catch { /* cache miss */ }
+                if (needs) {
+                    try {
+                        await _thumbSemaphore();
+                        const image = await _Jimp.read(originalPath);
+                        image.cover({ w: size, h: Math.round(size * 1.5) });
+                        const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
+                        _thumbRelease();
+                        await writeFile(cachePath, buffer);
+                        _populateJob.generated++;
+                    } catch (err) {
+                        _thumbRelease();
+                        console.warn(`[cl-helper] Avatar thumb populate failed for ${file}:`, err.message);
+                        _populateJob.failed++;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`[cl-helper] Avatar thumb populate failed for ${file} (stat):`, err.message);
+            _populateJob.failed++;
+        }
+
+        _populateJob.processed++;
+        // Yield back to the event loop between every thumb so other ST requests still get serviced during a long populate.
+        await new Promise(r => setImmediate(r));
+    }
+
+    _populateJob.running = false;
+    _populateJob.finishedAt = Date.now();
+    console.log(`[cl-helper] Avatar thumb populate done: ${_populateJob.generated} new, ${_populateJob.skipped} cached, ${_populateJob.failed} failed (size ${size})`);
 }
 
 // =============================================================================
@@ -523,7 +747,7 @@ const DC_ALLOWED_PATHS = [
     /^\/api\/creators\/[a-f0-9-]+$/,
     /^\/api\/creators\/[a-f0-9-]+\/characters\b/,
     /^\/api\/tags\/faceted\b/,
-    /^\/api\/extraction\/status$/,
+    /^\/api\/extraction\/status-projection$/,
 ];
 
 // Resolve a usable public session ID for the extraction endpoint.
@@ -670,7 +894,7 @@ function registerDataCatRoutes(router) {
             if (!isJanitor && !isSaucepan) {
                 return res.status(400).json({ error: 'Only JanitorAI or Saucepan character URLs are supported' });
             }
-            if (isJanitor && !/^\/characters\/[a-f0-9-]{8,64}\/?$/i.test(parsed.pathname)) {
+            if (isJanitor && !/^\/characters\/[a-f0-9-]{8,64}(_[\w-]+)?\/?$/i.test(parsed.pathname)) {
                 return res.status(400).json({ error: 'Invalid character URL path' });
             }
             if (isSaucepan && !/^\/companion\/[a-f0-9-]{8,64}\/?$/i.test(parsed.pathname)) {
@@ -683,6 +907,7 @@ function registerDataCatRoutes(router) {
 
         const requestId = randomUUID();
         const wantPublicFeed = req.body.publicFeed !== false;
+        const alwaysReextract = req.body.alwaysReextract === true;
 
         // Resolve a public session ID when public feed is requested
         let sessionId = null;
@@ -701,7 +926,7 @@ function registerDataCatRoutes(router) {
                     includeSearch: true,
                     extractHidden: false,
                     idempotencyKey: requestId,
-                    alwaysReextract: false,
+                    alwaysReextract,
                     vpnNamespace: 'general_scraper',
                     netnsRole: 'general_scraper',
                 };
@@ -709,11 +934,14 @@ function registerDataCatRoutes(router) {
                 endpoint = `${DATACAT_BASE}/api/character/smart-extract-v2`;
                 body = {
                     url,
+                    openLoginIfNoSession: true,
                     sessionId,
                     appearOnPublicFeed: wantPublicFeed && !!sessionId,
                     useSeparateWorkerServer: true,
                     inlinePostExtractCreatorProfile: true,
                     idempotencyKey: requestId,
+                    extractSourceMode: 'core_plus_janny',
+                    alwaysReextract,
                 };
             }
 
@@ -1045,8 +1273,8 @@ function registerCivitaiRoutes(router) {
 // Negotiates gzip/deflate/br with Saucepan; Node native zstd is fallback.
 // =============================================================================
 
-const SAUCEPAN_HOSTNAME = 'api2.saucepan.ai';
-const SAUCEPAN_BASE = 'https://api2.saucepan.ai';
+const SAUCEPAN_HOSTNAME = 'saucepan.ai';
+const SAUCEPAN_BASE = 'https://saucepan.ai';
 const SAUCEPAN_ORIGIN = 'https://saucepan.ai';
 const SAUCEPAN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const SAUCEPAN_MAX_BYTES = 10 * 1024 * 1024;
@@ -1186,6 +1414,69 @@ function registerSaucepanRoutes(router) {
 
     router.get('/saucepan-proxy/*', handleProxy);
     router.post('/saucepan-proxy/*', handleProxy);
+}
+
+// =============================================================================
+// Dropbox: GET-only proxy for public folder/file share page HTML
+// =============================================================================
+//
+// ST's built-in /proxy/ sends Dropbox a request shape (UA, accept) that
+// returns HTTP 400. The folder share page is needed to extract the embedded
+// file-list blob; image bytes themselves come from per-file URLs handled by
+// the regular media downloader. Browser-shaped headers fix the 400.
+
+const DROPBOX_HOSTNAME = 'www.dropbox.com';
+const DROPBOX_BASE = 'https://www.dropbox.com';
+const DROPBOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const DROPBOX_MAX_BYTES = 5 * 1024 * 1024;
+const DROPBOX_ALLOWED_PATHS = [
+    /^\/scl\/fo\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/?$/,
+    /^\/scl\/fi\/[A-Za-z0-9_-]+\/[^/]+$/,
+];
+
+function registerDropboxRoutes(router) {
+    router.get('/dropbox-proxy/*', async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const normalizedPath = new URL(targetPath, DROPBOX_BASE).pathname;
+        if (!DROPBOX_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, DROPBOX_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== DROPBOX_HOSTNAME) {
+            return res.status(403).json({ error: `Proxy target must be ${DROPBOX_HOSTNAME}` });
+        }
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers: {
+                    'User-Agent': DROPBOX_UA,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                },
+                redirect: 'follow',
+            });
+            const text = await response.text();
+            if (!response.ok) {
+                console.warn(`[cl-helper] Dropbox returned HTTP ${response.status} for ${targetUrl.toString()}`);
+                console.warn(`[cl-helper] Dropbox response body (first 500 chars): ${text.slice(0, 500)}`);
+            }
+            if (text.length > DROPBOX_MAX_BYTES) {
+                return res.status(502).json({ error: `Dropbox response exceeded ${DROPBOX_MAX_BYTES} bytes` });
+            }
+            res.status(response.status);
+            res.set('Content-Type', response.headers.get('content-type') || 'text/html; charset=utf-8');
+            res.send(text);
+        } catch (err) {
+            console.error('[cl-helper] Dropbox proxy error:', err.message);
+            res.status(502).json({ error: `Failed to reach Dropbox: ${err.message}` });
+        }
+    });
 }
 
 // =============================================================================
@@ -1362,6 +1653,7 @@ export async function init(router) {
     registerImgchestRoutes(router);
     registerCivitaiRoutes(router);
     registerSaucepanRoutes(router);
+    registerDropboxRoutes(router);
     registerFlareSolverrRoutes(router);
 
     console.log('[cl-helper] Character Library helper plugin loaded');
@@ -1370,6 +1662,7 @@ export async function init(router) {
     // failed jimp import never delays /health or other routes from being
     // available. Thumbnail routes degrade gracefully when _thumbsReady is false.
     _imagesDir = resolveImagesDir();
+    _charactersDir = resolveCharactersDir();
     if (_imagesDir) {
         _cacheDir = join(_imagesDir, '..', 'cl_thumbs');
         const ok = await initImageLib();
@@ -1381,5 +1674,11 @@ export async function init(router) {
         }
     } else {
         console.log('[cl-helper] Gallery thumbnails disabled (images directory not found)');
+    }
+    if (_charactersDir && _thumbsReady) {
+        _avatarThumbDir = join(_charactersDir, '..', 'cl_avatar_thumbs');
+        console.log(`[cl-helper] Avatar thumbnails enabled (characters: ${_charactersDir})`);
+    } else if (!_charactersDir) {
+        console.log('[cl-helper] Avatar thumbnails disabled (characters directory not found)');
     }
 }

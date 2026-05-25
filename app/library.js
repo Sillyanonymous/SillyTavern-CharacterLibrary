@@ -532,6 +532,10 @@ const DEFAULT_SETTINGS = {
     mobileBrowseQuickImport: true,
     mobileSwipeGestures: true,
     mobileHaptics: true,
+    useGridThumbnails: false,
+    gridThumbnailsDesktop: false,
+    gridThumbnailsClHelper: true,
+    gridThumbnailSize: 512,
 
     // ---- Provider Config ----
     chubUseV4Api: false,
@@ -1176,6 +1180,17 @@ function setupSettingsModal() {
     const mobileBrowseQuickImportCheckbox = document.getElementById('settingsMobileBrowseQuickImport');
     const mobileSwipeGesturesCheckbox = document.getElementById('settingsMobileSwipeGestures');
     const mobileHapticsCheckbox = document.getElementById('settingsMobileHaptics');
+    const useGridThumbnailsCheckbox = document.getElementById('settingsUseGridThumbnails');
+    const gridThumbDesktopCheckbox = document.getElementById('settingsGridThumbDesktop');
+    const gridThumbClHelperCheckbox = document.getElementById('settingsGridThumbClHelper');
+    const gridThumbSizeSelect = document.getElementById('settingsGridThumbSize');
+    const gridThumbDesktopRow = document.getElementById('settingsGridThumbDesktopRow');
+    const gridThumbClHelperRow = document.getElementById('settingsGridThumbClHelperRow');
+    const gridThumbSizeRow = document.getElementById('settingsGridThumbSizeRow');
+    const gridThumbCacheRow = document.getElementById('settingsGridThumbCacheRow');
+    const gridThumbCacheStats = document.getElementById('settingsGridThumbCacheStats');
+    const gridThumbPopulateBtn = document.getElementById('settingsGridThumbPopulate');
+    const gridThumbPurgeBtn = document.getElementById('settingsGridThumbPurge');
     
     // Appearance
     const uiScaleSelect = document.getElementById('settingsUiScale');
@@ -1884,6 +1899,19 @@ function setupSettingsModal() {
         if (mobileHapticsCheckbox) {
             mobileHapticsCheckbox.checked = getSetting('mobileHaptics') !== false;
         }
+        if (useGridThumbnailsCheckbox) {
+            useGridThumbnailsCheckbox.checked = getSetting('useGridThumbnails') === true;
+        }
+        if (gridThumbDesktopCheckbox) {
+            gridThumbDesktopCheckbox.checked = getSetting('gridThumbnailsDesktop') === true;
+        }
+        if (gridThumbClHelperCheckbox) {
+            gridThumbClHelperCheckbox.checked = getSetting('gridThumbnailsClHelper') !== false;
+        }
+        if (gridThumbSizeSelect) {
+            gridThumbSizeSelect.value = String(getSetting('gridThumbnailSize') || 512);
+        }
+        applyGridThumbsDisabledStates();
         if (themeCustomizerCheckbox) {
             themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
         }
@@ -1950,6 +1978,13 @@ function setupSettingsModal() {
         }
 
         settingsModal.classList.add('visible');
+        // cl-helper may not be ready at page load, so refresh stats every time the panel opens.
+        refreshGridThumbCacheStats?.();
+        // If a populate job is running (from earlier in this or a previous session), reattach to it.
+        fetch('/api/plugins/cl-helper/avatar-thumb-populate-status').then(r => r.ok ? r.json() : null).then(job => {
+            if (job?.running) startPopulatePolling?.();
+            else paintPopulateButton?.(null);
+        }).catch(() => {});
     };
     
     // Settings sidebar navigation
@@ -2139,6 +2174,125 @@ function setupSettingsModal() {
         });
     }
 
+    function applyGridThumbsDisabledStates() {
+        const masterOn = !!(useGridThumbnailsCheckbox && useGridThumbnailsCheckbox.checked);
+        const clHelperOn = !!(gridThumbClHelperCheckbox && gridThumbClHelperCheckbox.checked);
+        const sizeOn = masterOn && clHelperOn;
+        if (gridThumbDesktopCheckbox) gridThumbDesktopCheckbox.disabled = !masterOn;
+        if (gridThumbDesktopRow) gridThumbDesktopRow.classList.toggle('disabled', !masterOn);
+        if (gridThumbClHelperCheckbox) gridThumbClHelperCheckbox.disabled = !masterOn;
+        if (gridThumbClHelperRow) gridThumbClHelperRow.classList.toggle('disabled', !masterOn);
+        // Size + cache management only meaningful when master AND cl-helper are on.
+        if (gridThumbSizeSelect) gridThumbSizeSelect.disabled = !sizeOn;
+        if (gridThumbSizeRow) gridThumbSizeRow.classList.toggle('disabled', !sizeOn);
+        if (gridThumbPopulateBtn) gridThumbPopulateBtn.disabled = !sizeOn;
+        if (gridThumbPurgeBtn) gridThumbPurgeBtn.disabled = !sizeOn;
+        if (gridThumbCacheRow) gridThumbCacheRow.classList.toggle('disabled', !sizeOn);
+    }
+    if (useGridThumbnailsCheckbox) {
+        useGridThumbnailsCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
+    }
+    if (gridThumbClHelperCheckbox) {
+        gridThumbClHelperCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
+    }
+
+    function formatBytes(b) {
+        if (b < 1024) return `${b} B`;
+        if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+        if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+    async function refreshGridThumbCacheStats() {
+        if (!gridThumbCacheStats) return;
+        try {
+            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-stats');
+            if (!r.ok) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
+            const d = await r.json();
+            if (!d.available) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
+            gridThumbCacheStats.textContent = `${d.count} file(s), ${formatBytes(d.bytes)}`;
+        } catch {
+            gridThumbCacheStats.textContent = 'cl-helper unreachable';
+        }
+    }
+    let _populatePollTimer = null;
+    function stopPopulatePolling() {
+        if (_populatePollTimer) { clearInterval(_populatePollTimer); _populatePollTimer = null; }
+    }
+    function paintPopulateButton(job) {
+        if (!gridThumbPopulateBtn) return;
+        if (!job || !job.running) {
+            gridThumbPopulateBtn.innerHTML = '<i class="fa-solid fa-download"></i> Populate at current size';
+            applyGridThumbsDisabledStates();
+            return;
+        }
+        gridThumbPopulateBtn.disabled = true;
+        gridThumbPopulateBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${job.processed}/${job.total}`;
+    }
+    async function pollPopulateStatus() {
+        try {
+            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-populate-status');
+            if (!r.ok) return;
+            const job = await r.json();
+            paintPopulateButton(job);
+            refreshGridThumbCacheStats();
+            if (job && !job.running && job.finishedAt) {
+                stopPopulatePolling();
+                showToast?.(`Populate done: ${job.generated} new, ${job.skipped} cached, ${job.failed} failed`, job.failed ? 'warning' : 'success');
+            }
+        } catch { /* keep polling until next tick */ }
+    }
+    function startPopulatePolling() {
+        stopPopulatePolling();
+        pollPopulateStatus();
+        _populatePollTimer = setInterval(pollPopulateStatus, 1500);
+    }
+    if (gridThumbPopulateBtn) {
+        gridThumbPopulateBtn.addEventListener('click', async () => {
+            const size = parseInt(gridThumbSizeSelect?.value) || 512;
+            gridThumbPopulateBtn.disabled = true;
+            try {
+                const r = await apiRequest(`/plugins/cl-helper/avatar-thumb-populate?s=${size}`, 'POST');
+                if (r.ok) {
+                    const d = await r.json();
+                    showToast?.(`Populating ${d.total} characters in the background...`, 'info');
+                    startPopulatePolling();
+                } else if (r.status === 409) {
+                    showToast?.('Populate already running, attaching to existing job', 'info');
+                    startPopulatePolling();
+                } else {
+                    showToast?.(`Populate failed to start (HTTP ${r.status})`, 'error');
+                    applyGridThumbsDisabledStates();
+                }
+            } catch (e) {
+                showToast?.(`Populate failed: ${e.message}`, 'error');
+                applyGridThumbsDisabledStates();
+            }
+        });
+    }
+    if (gridThumbPurgeBtn) {
+        gridThumbPurgeBtn.addEventListener('click', async () => {
+            if (!confirm('Purge all cached avatar thumbnails? They will be regenerated on next scroll.')) return;
+            const original = gridThumbPurgeBtn.innerHTML;
+            gridThumbPurgeBtn.disabled = true;
+            gridThumbPurgeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Purging...';
+            try {
+                const r = await apiRequest('/plugins/cl-helper/avatar-thumb-cleanup', 'POST');
+                if (r.ok) {
+                    const d = await r.json();
+                    showToast?.(`Purged ${d.deleted} cached thumbnail(s)`, 'success');
+                } else {
+                    showToast?.(`Purge failed (HTTP ${r.status})`, 'error');
+                }
+            } catch (e) {
+                showToast?.(`Purge failed: ${e.message}`, 'error');
+            } finally {
+                gridThumbPurgeBtn.innerHTML = original;
+                applyGridThumbsDisabledStates();
+                refreshGridThumbCacheStats();
+            }
+        });
+    }
+
     if (themeCustomizerCheckbox) {
         themeCustomizerCheckbox.addEventListener('change', () => updateThemeCustomizerVisibility());
     }
@@ -2211,6 +2365,10 @@ function setupSettingsModal() {
             mobileBrowseQuickImport: mobileBrowseQuickImportCheckbox ? mobileBrowseQuickImportCheckbox.checked : true,
             mobileSwipeGestures: mobileSwipeGesturesCheckbox ? mobileSwipeGesturesCheckbox.checked : true,
             mobileHaptics: mobileHapticsCheckbox ? mobileHapticsCheckbox.checked : true,
+            useGridThumbnails: useGridThumbnailsCheckbox ? useGridThumbnailsCheckbox.checked : false,
+            gridThumbnailsDesktop: gridThumbDesktopCheckbox ? gridThumbDesktopCheckbox.checked : false,
+            gridThumbnailsClHelper: gridThumbClHelperCheckbox ? gridThumbClHelperCheckbox.checked : true,
+            gridThumbnailSize: gridThumbSizeSelect ? parseInt(gridThumbSizeSelect.value) || 512 : 512,
             buttonStyle: buttonStyleSelect ? buttonStyleSelect.value || 'glass' : 'glass',
             uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
             modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
@@ -2414,6 +2572,19 @@ function setupSettingsModal() {
         if (mobileHapticsCheckbox) {
             mobileHapticsCheckbox.checked = DEFAULT_SETTINGS.mobileHaptics;
         }
+        if (useGridThumbnailsCheckbox) {
+            useGridThumbnailsCheckbox.checked = DEFAULT_SETTINGS.useGridThumbnails;
+        }
+        if (gridThumbDesktopCheckbox) {
+            gridThumbDesktopCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsDesktop;
+        }
+        if (gridThumbClHelperCheckbox) {
+            gridThumbClHelperCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsClHelper;
+        }
+        if (gridThumbSizeSelect) {
+            gridThumbSizeSelect.value = String(DEFAULT_SETTINGS.gridThumbnailSize);
+        }
+        applyGridThumbsDisabledStates();
 
         // Provider Order & Defaults - reset to registration order
         resetProviderOrderUI();
@@ -7923,31 +8094,29 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     
     const { cols, cardHeight, gap } = getGridMetrics(gridWidth);
     
+    const _isMobileMetrics = window.matchMedia?.('(max-width: 768px)').matches;
     const RENDER_BUFFER_PX = clientHeight * 2.5;
-    
-    // Preload buffer: 4 screens ahead for images
-    const PRELOAD_BUFFER_PX = clientHeight * 4;
+    const PRELOAD_BUFFER_PX = clientHeight * 6;
     
     // Calculate visible row range
     const startRow = Math.floor(Math.max(0, scrollTop - RENDER_BUFFER_PX) / (cardHeight + gap));
     const endRow = Math.ceil((scrollTop + clientHeight + RENDER_BUFFER_PX) / (cardHeight + gap));
-    
+
     const startIndex = startRow * cols;
     const endIndex = Math.min(currentCharsList.length, (endRow + 1) * cols);
-    
-    // Skip if nothing changed
-    if (!force && startIndex === lastRenderedStartIndex && endIndex === lastRenderedEndIndex) {
-        return;
+
+    const rangeChanged = force || startIndex !== lastRenderedStartIndex || endIndex !== lastRenderedEndIndex;
+    if (rangeChanged) {
+        lastRenderedStartIndex = startIndex;
+        lastRenderedEndIndex = endIndex;
     }
     
-    lastRenderedStartIndex = startIndex;
-    lastRenderedEndIndex = endIndex;
-    
+    let cardsChanged = false;
+    if (rangeChanged) {
     const paddingTop = startRow * (cardHeight + gap);
     grid.style.paddingTop = `${paddingTop}px`;
-    
+
     // Remove cards outside the visible range
-    let cardsChanged = false;
     for (const [index, card] of activeCards) {
         if (index < startIndex || index >= endIndex) {
             card.remove();
@@ -7956,17 +8125,38 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
         }
     }
     
-    // Create missing cards and track which indices are new (already ascending order)
+    // Create missing cards and track which indices are new (already ascending order).
+    // Mobile: batch via innerHTML so 50+ cards in one fast-flick rAF fit in the frame budget (~10-20ms vs ~50-150ms with per-card createElement). Desktop keeps the existing per-card path.
     const newCardIndices = [];
-    for (let i = startIndex; i < endIndex; i++) {
-        if (!activeCards.has(i)) {
-            const char = currentCharsList[i];
-            if (char) {
-                const card = createCharacterCard(char);
-                card.dataset.virtualIndex = i;
-                activeCards.set(i, card);
-                newCardIndices.push(i);
-                cardsChanged = true;
+    if (_isMobileMetrics) {
+        const toCreate = [];
+        for (let i = startIndex; i < endIndex; i++) {
+            if (!activeCards.has(i)) {
+                const char = currentCharsList[i];
+                if (char) {
+                    toCreate.push({ char, index: i });
+                    newCardIndices.push(i);
+                    cardsChanged = true;
+                }
+            }
+        }
+        if (toCreate.length > 0) {
+            const cards = createCardsBatchHTML(toCreate);
+            for (let j = 0; j < toCreate.length; j++) {
+                activeCards.set(toCreate[j].index, cards[j]);
+            }
+        }
+    } else {
+        for (let i = startIndex; i < endIndex; i++) {
+            if (!activeCards.has(i)) {
+                const char = currentCharsList[i];
+                if (char) {
+                    const card = createCharacterCard(char);
+                    card.dataset.virtualIndex = i;
+                    activeCards.set(i, card);
+                    newCardIndices.push(i);
+                    cardsChanged = true;
+                }
             }
         }
     }
@@ -8039,51 +8229,54 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
             }
         }
     }
-    
-    // Preload images only on scroll-end (force=true), not during active scrolling.
-    // During fast scroll, every preload batch gets immediately aborted by the next
-    // RAF frame - wasting CPU on AbortController + 12 fetch() calls per frame.
-    if (force) {
-        const preloadStartRow = Math.floor((scrollTop + clientHeight) / (cardHeight + gap));
-        const preloadEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + gap));
-        const preloadStartIndex = preloadStartRow * cols;
-        const preloadEndIndex = Math.min(currentCharsList.length, preloadEndRow * cols);
 
-        preloadImages(preloadStartIndex, preloadEndIndex);
+    // Preload only fires when the range changed, so scroll-frame work stays bounded.
+    const visibleStartRow = Math.floor(scrollTop / (cardHeight + gap));
+    const visibleEndRow = Math.ceil((scrollTop + clientHeight) / (cardHeight + gap));
+    const aboveStartRow = Math.floor(Math.max(0, scrollTop - PRELOAD_BUFFER_PX) / (cardHeight + gap));
+    const belowEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + gap));
+    const visibleStartIndex = visibleStartRow * cols;
+    const visibleEndIndex = visibleEndRow * cols;
+    const aboveStartIndex = aboveStartRow * cols;
+    const preloadBelowEndIndex = Math.min(currentCharsList.length, belowEndRow * cols);
+    // Below-visible first (typical scroll direction), then above; interleave so the cap covers both sides.
+    const indices = [];
+    const below = [];
+    const above = [];
+    for (let i = visibleEndIndex; i < preloadBelowEndIndex; i++) below.push(i);
+    for (let i = visibleStartIndex - 1; i >= aboveStartIndex; i--) above.push(i);
+    const maxLen = Math.max(below.length, above.length);
+    for (let i = 0; i < maxLen; i++) {
+        if (i < below.length) indices.push(below[i]);
+        if (i < above.length) indices.push(above[i]);
     }
+    preloadImages(indices);
+    } // end rangeChanged guard
+
 }
 
-// Abort controller for preload fetches - cancels previous batch when a new one starts
-let preloadAbortController = null;
-
-/**
- * Preload avatar images for a range of characters.
- * Uses fetch() to warm the HTTP cache without creating orphaned Image objects
- * that hold decoded bitmaps in memory indefinitely (critical for mobile).
- * Limited to a small batch to avoid memory pressure.
- * Each call aborts any pending preloads from the previous call.
- */
-function preloadImages(startIndex, endIndex) {
-    // Cancel any pending preloads from previous scroll to avoid accumulating
-    // unconsumed response bodies in memory
-    if (preloadAbortController) {
-        preloadAbortController.abort();
-    }
-    preloadAbortController = new AbortController();
-    const signal = preloadAbortController.signal;
-    
-    const MAX_PRELOAD = 12; // Limit concurrent preloads for mobile
-    let count = 0;
-    for (let i = startIndex; i < endIndex && count < MAX_PRELOAD; i++) {
+// Pre-decode via Image().decode() so the browser's decoded-image cache holds
+// the bitmap when the real <img> lands in DOM. URL must match the shape the
+// card path picks (gated on the same setting) so the cache key lines up.
+const inFlightPreloads = new Set();
+function preloadImages(indices) {
+    const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+    const cap = isMobile ? 10 : 12;
+    if (inFlightPreloads.size >= cap) return;
+    // Match the card path's URL choice exactly so the browser cache hits.
+    const masterOn = getSetting('useGridThumbnails') === true;
+    const useThumbs = masterOn && (isMobile || getSetting('gridThumbnailsDesktop') === true);
+    for (const i of indices) {
+        if (inFlightPreloads.size >= cap) break;
+        if (inFlightPreloads.has(i)) continue;
         const char = currentCharsList[i];
-        if (char && char.avatar) {
-            // Cache-only fetch - warms browser HTTP cache without decoding image pixels.
-            // Cancel the response body immediately to prevent memory accumulation.
-            fetch(getCharacterAvatarUrl(char.avatar), { mode: 'no-cors', priority: 'low', signal })
-                .then(r => { r.body?.cancel(); })
-                .catch(() => {});
-            count++;
-        }
+        if (!char || !char.avatar) continue;
+        inFlightPreloads.add(i);
+        const img = new Image();
+        img.src = useThumbs ? getCharacterAvatarThumbUrl(char.avatar) : getCharacterAvatarUrl(char.avatar);
+        img.decode()
+            .catch(() => {})
+            .finally(() => inFlightPreloads.delete(i));
     }
 }
 
@@ -8193,6 +8386,50 @@ window.addEventListener('resize', () => {
     });
 });
 
+// Mobile innerHTML batch path. 50 cards in one parse runs ~10-20ms vs ~50-150ms for per-card createElement, so a fast-flick rAF stays under frame budget. Tooltip omitted on mobile (no hover anyway, extractPlainText was the expensive part). Output DOM matches createCharacterCard.
+function buildCharacterCardHTML(char, virtualIndex) {
+    const isFav = isCharacterFavorite(char);
+    const name = getCharacterName(char);
+    // buildCharacterCardHTML is only invoked from the mobile branch of updateVisibleCards, so the master toggle alone is enough here.
+    const imgPath = getSetting('useGridThumbnails') === true
+        ? getCharacterAvatarThumbUrl(char.avatar)
+        : getCharacterAvatarUrl(char.avatar);
+    const tagsAll = getTags(char);
+    const tags = tagsAll.length > 3 ? tagsAll.slice(0, 3) : tagsAll;
+
+    const initiallyLoaded = _seenAvatarUrls.has(imgPath);
+    const isSelected = !!(window.MultiSelect?.isSelected?.(char.avatar));
+    const playlists = window.playlistsGetForChar?.(char.avatar) || [];
+
+    const classes = ['char-card'];
+    if (isFav) classes.push('is-favorite');
+    if (initiallyLoaded) classes.push('loaded');
+    if (isSelected) classes.push('selected');
+
+    const parts = ['<div class="', classes.join(' '), '" data-avatar="', escapeHtml(char.avatar), '" data-virtual-index="', virtualIndex, '">'];
+    if (isFav) parts.push('<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
+    if (playlists.length > 0) {
+        const firstIcon = playlists.length === 1 && playlists[0].icon ? playlists[0].icon : 'fa-solid fa-list';
+        const plTitle = playlists.map(p => p.name).join(', ');
+        parts.push('<div class="playlist-indicator" title="', escapeHtml(plTitle), '"><i class="', escapeHtml(firstIcon), '"></i></div>');
+    }
+    parts.push('<div class="char-card-checkbox" aria-hidden="true"><i class="fa-solid fa-check"></i></div>');
+    parts.push('<img class="card-image" src="', escapeHtml(imgPath), '" alt="" decoding="async">');
+    parts.push('<div class="card-overlay"><div class="card-name">', escapeHtml(name), '</div><div class="card-tags">');
+    for (const tag of tags) parts.push('<span class="card-tag">', escapeHtml(tag), '</span>');
+    parts.push('</div></div></div>');
+
+    return parts.join('');
+}
+
+function createCardsBatchHTML(charsWithIndices) {
+    if (charsWithIndices.length === 0) return [];
+    const html = charsWithIndices.map(({ char, index }) => buildCharacterCardHTML(char, index)).join('');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return Array.from(tmp.children);
+}
+
 /**
  * Create a single character card element
  */
@@ -8206,7 +8443,10 @@ function createCharacterCard(char) {
     }
     
     const name = getCharacterName(char);
-    const imgPath = getCharacterAvatarUrl(char.avatar);
+    // createCharacterCard is desktop-only; thumbs require both master AND the explicit desktop opt-in.
+    const imgPath = (getSetting('useGridThumbnails') === true && getSetting('gridThumbnailsDesktop') === true)
+        ? getCharacterAvatarThumbUrl(char.avatar)
+        : getCharacterAvatarUrl(char.avatar);
     const tags = getTags(char);
     
     // Use creator_notes as hover tooltip - extract plain text only
@@ -8260,11 +8500,13 @@ function createCharacterCard(char) {
     // Avatar image
     const img = document.createElement('img');
     img.className = 'card-image';
+    img.decoding = 'async';
     img.src = imgPath;
     // Mobile sometimes reports img.complete=false right after src= even on cached avatars, so the Set lets rerenders skip the fade anyway
-    if (_seenAvatarUrls.has(imgPath) || (img.complete && img.naturalWidth > 0)) {
-        card.classList.add('loaded');
+    const looksCached = _seenAvatarUrls.has(imgPath) || (img.complete && img.naturalWidth > 0);
+    if (looksCached) {
         _seenAvatarUrls.add(imgPath);
+        card.classList.add('loaded');
     } else {
         img.addEventListener('load', () => {
             _seenAvatarUrls.add(imgPath);
@@ -13722,9 +13964,26 @@ function addAdvFilterRule() {
         operator: fields[firstField].operators[0],
         value: '',
     };
+    rule.value = getAdvFilterDefaultValue(rule);
     getAdvFilterRules().push(rule);
     rerenderAdvFilterRows();
     updateAdvFilterIndicator();
+}
+
+// Operators with a UI-displayed default (date "7", first provider, first playlist) need
+// the rule's stored value seeded to match, or evaluateAdvancedFilters skips the rule
+// for being empty while the user sees a configured filter that silently does nothing.
+function getAdvFilterDefaultValue(rule) {
+    if (rule.operator === 'in_the_last') return '7';
+    const fieldDef = getActiveAdvFilterFields()[rule.field];
+    if (!fieldDef) return '';
+    if (fieldDef.type === 'provider' && (rule.operator === 'linked_to' || rule.operator === 'not_linked_to')) {
+        return ADV_FILTER_PROVIDERS[0]?.value || '';
+    }
+    if (fieldDef.type === 'playlist' && (rule.operator === 'in' || rule.operator === 'not_in')) {
+        return (window.playlistsGetAll?.() || [])[0]?.uid || '';
+    }
+    return '';
 }
 
 function removeAdvFilterRule(id) {
@@ -14479,13 +14738,13 @@ function setupEventListeners() {
                     rule.field = e.target.value;
                     const newField = getActiveAdvFilterFields()[rule.field];
                     rule.operator = newField.operators[0];
-                    rule.value = '';
+                    rule.value = getAdvFilterDefaultValue(rule);
                     rerenderAdvFilterRows();
                     updateAdvFilterIndicator();
                     triggerAdvFilterSearch();
                 } else if (e.target.classList.contains('adv-filter-operator')) {
                     rule.operator = e.target.value;
-                    rule.value = '';
+                    rule.value = getAdvFilterDefaultValue(rule);
                     rerenderAdvFilterRows();
                     updateAdvFilterIndicator();
                     triggerAdvFilterSearch();
@@ -15191,6 +15450,21 @@ function getCharacterAvatarUrl(avatar) {
     return bust
         ? `/characters/${encodeURIComponent(avatar)}?v=${bust}`
         : `/characters/${encodeURIComponent(avatar)}`;
+}
+
+// Returns the URL the grid should request, picking based on the three-tier
+// thumbnail setting. Callers should gate on getSetting('useGridThumbnails')
+// first; this helper assumes the user wants a thumb.
+function getCharacterAvatarThumbUrl(avatar) {
+    if (!avatar) return '';
+    const bust = _avatarCacheBust.get(avatar);
+    const tail = bust ? `&v=${bust}` : '';
+    if (getSetting('gridThumbnailsClHelper') !== false) {
+        const size = getSetting('gridThumbnailSize') || 512;
+        return `/api/plugins/cl-helper/avatar-thumb/${encodeURIComponent(avatar)}?s=${size}${tail}`;
+    }
+    // ST built-in fallback: tiny 96x144 default but works without cl-helper.
+    return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}${tail}`;
 }
 
 // Per-avatar cache-bust tokens, set after an in-place image swap so freshly rendered
