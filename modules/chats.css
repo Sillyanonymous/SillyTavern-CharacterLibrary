@@ -234,6 +234,8 @@
     height: 50px;
     border-radius: var(--radius-circle);
     object-fit: cover;
+    /* Top-bias so faces (typically upper portion of a portrait) survive the circular crop. Matches .card-image on grid cards. */
+    object-position: center 20%;
     border: 2px solid var(--glass-border);
     flex-shrink: 0;
     background: rgba(0, 0, 0, 0.3);
@@ -254,6 +256,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center 20%;
     border: none;
     border-radius: 0;
     background: none;
@@ -482,6 +485,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center 20%;
     display: block;
     opacity: 0;
     transition: opacity 0.3s ease;
@@ -723,6 +727,7 @@
     height: 50px;
     border-radius: var(--radius-circle);
     object-fit: cover;
+    object-position: center 20%;
     border: 2px solid var(--accent);
 }
 
@@ -768,6 +773,7 @@
     height: 36px;
     border-radius: var(--radius-circle);
     object-fit: cover;
+    object-position: center 20%;
     flex-shrink: 0;
 }
 
@@ -1264,7 +1270,7 @@
         padding: var(--space-md) var(--space-lg) calc(var(--space-md) + var(--safe-bottom)) !important;
         gap: var(--space-sm);
         font-size: var(--btn-font-lg) !important;
-        border-radius: 0 !important;
+        border-radius: var(--radius-3xl) var(--radius-3xl) 0 0 !important;
         z-index: 50;
         justify-content: center;
         box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);

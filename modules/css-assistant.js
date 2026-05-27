@@ -169,6 +169,7 @@ Layout / Chrome (defined in library.css; no !important needed):
   .modal-glass           Full-viewport detail panel (character detail, character creator, chat preview). NOT gallery viewer (that's .gv-modal).
   .modal-sidebar         Right-side info pane inside the character detail modal.
   .tab-pane              Tab content panes inside the character detail modal. Use .tab-pane.active for the visible one.
+  .char-modal-nav        Prev/Next chevron buttons on the sides of the character detail modal (desktop only; mobile uses swipe). Variants: .char-modal-nav-prev, .char-modal-nav-next. Icon glyph is a ::before pseudo using Font Awesome 6 Free. Component-scoped vars for per-component theming (override on .char-modal-nav itself): --cmn-bg (default rgba(0,0,0,0.5)), --cmn-bg-hover (rgba(255,255,255,0.1)), --cmn-border (1px solid rgba(255,255,255,0.1)), --cmn-color (#fff), --cmn-width (50px), --cmn-height (80px), --cmn-side-offset (1%, distance from viewport edge), --cmn-icon-size (var(--font-2xl)), --cmn-icon-prev ('\\f053' = fa-chevron-left, override with any FA6 unicode), --cmn-icon-next ('\\f054' = fa-chevron-right), --cmn-disabled-opacity (0.3). Hidden on mobile via library-mobile.css; gated on the enableCharDetailNav setting.
   .toast / .toast-container  Toast notifications. Variants: .toast.success, .toast.error, .toast.warning, .toast.info.
   .toast-icon            Icon inside a toast.
   .close-btn             Generic X-close button on modals.

@@ -299,6 +299,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         setupBrowseGallerySwipe();
         setupGreetingsSwipe();
         setupTabSwipe();
+        setupCharModalNavSwipe();
         setupViewSwipe();
         setupContextMenu();
         setupViewportFix();
@@ -676,6 +677,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const HORIZONTAL_INTENT = 10;    // px to commit to horizontal swipe
         const TRIGGER_THRESHOLD = 60;    // px of damped drag to fire action
         const DAMP = 0.7;                // resistance factor on the drag
+        // Card-edge dead zones so a tab swipe starting on a card edge yields to view-swipe instead of triggering favorite/menu.
+        const EDGE_DEAD_ZONE = 0.12;     // outer 12% of card width per side
+        const BOTTOM_DEAD_ZONE = 0.75;   // touches below 75% of card height yield
         let card = null;
         let chip = null;
         let startX = 0;
@@ -694,6 +698,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (!target) return;
             // Don't engage on interactive controls inside the card.
             if (e.target.closest('button, a, .favorite-indicator')) return;
+            // Spatial dead zone: edges + bottom overlay belong to view-swipe, only the central card hero engages card-swipe.
+            const rect = target.getBoundingClientRect();
+            const xFrac = (e.touches[0].clientX - rect.left) / rect.width;
+            const yFrac = (e.touches[0].clientY - rect.top) / rect.height;
+            if (xFrac < EDGE_DEAD_ZONE || xFrac > 1 - EDGE_DEAD_ZONE || yFrac > BOTTOM_DEAD_ZONE) return;
             card = target;
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
@@ -1029,7 +1038,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                     return true;
                 }
                 const charModal = document.getElementById('charModal');
-                if (charModal && !charModal.classList.contains('hidden')) { window.closeModal?.(); return true; }
+                if (charModal && !charModal.classList.contains('hidden')) { window.maybeCloseModal?.(); return true; }
                 return false;
             },
 
@@ -1128,7 +1137,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             ['.vt-container.vt-detail-open', el => el.classList.remove('vt-detail-open')],
 
             // Tier 5 - main modals (lowest priority full-screen)
-            ['#charModal:not(.hidden)',    () => window.closeModal?.()],
+            ['#charModal:not(.hidden)',    () => window.maybeCloseModal?.()],
             ['#creatorModal:not(.hidden)', () => window.closeCharacterCreator?.()],
 
             // Tier 6 - dropdowns (browse filter dropdowns are relocated to body on mobile)
@@ -1353,6 +1362,10 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         // rearm from the input event (a fresh task). Resets on overlay close.
         let filterGuardPushed = false;
 
+        // Lock the underlying grid scroll while search is open so soft-keyboard transitions on Android dont drift the character list. Save on open, restore any drift via a scroll listener, release on close.
+        let scrollLock = null;
+        // Keyboard tracker: layout viewport stays full-size (interactive-widget=overlays-content + lvh body) so the OSK is just an overlay; visualViewport tells us how tall it is and we lift the search overlays bottom edge by that amount.
+        let viewportTracker = null;
         function openSearch() {
             if (searchBox) {
                 container.appendChild(searchBox);
@@ -1360,18 +1373,49 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             overlay.style.top = `${topbar.offsetHeight}px`;
             overlay.classList.remove('hidden');
 
+            const galleryContent = document.querySelector('.gallery-content');
+            if (galleryContent) {
+                const savedTop = galleryContent.scrollTop;
+                const onScroll = () => { if (galleryContent.scrollTop !== savedTop) galleryContent.scrollTop = savedTop; };
+                galleryContent.addEventListener('scroll', onScroll, { passive: true });
+                scrollLock = { galleryContent, onScroll };
+            }
+
+            if (window.visualViewport) {
+                const sync = () => {
+                    const vv = window.visualViewport;
+                    const keyboardH = Math.max(0, window.innerHeight - vv.height);
+                    overlay.style.bottom = keyboardH > 0 ? `${keyboardH}px` : '';
+                };
+                window.visualViewport.addEventListener('resize', sync);
+                window.visualViewport.addEventListener('scroll', sync);
+                viewportTracker = sync;
+                sync();
+            }
+
             window.pushOverlayGuard?.();
 
             setTimeout(() => {
                 const input = document.getElementById('searchInput');
-                if (input) input.focus();
+                // preventScroll: true tells the browser not to auto-scrollIntoView when focusing; some Android Chromes use that path to scroll the nearest scrollable container (.gallery-content, even as a sibling), drifting the grid.
+                if (input) input.focus({ preventScroll: true });
             }, 50);
         }
 
         function closeSearch() {
             overlay.classList.add('hidden');
+            overlay.style.bottom = '';
             if (searchBox) {
                 searchArea.insertBefore(searchBox, searchArea.firstChild);
+            }
+            if (scrollLock) {
+                scrollLock.galleryContent.removeEventListener('scroll', scrollLock.onScroll);
+                scrollLock = null;
+            }
+            if (viewportTracker && window.visualViewport) {
+                window.visualViewport.removeEventListener('resize', viewportTracker);
+                window.visualViewport.removeEventListener('scroll', viewportTracker);
+                viewportTracker = null;
             }
         }
 
@@ -2375,6 +2419,14 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const modal = document.getElementById('charModal');
         if (!modal) return;
 
+        // 32x32 target, so use ST's /thumbnail (96x144) and only fall back to the hero src for blob/data URLs (pending avatar previews where no server thumbnail exists yet).
+        const thumbSrcFor = (heroSrc) => {
+            if (!heroSrc) return heroSrc;
+            const m = /\/characters\/([^?#]+)(\?[^#]*)?/.exec(heroSrc);
+            if (!m) return heroSrc;
+            return `/thumbnail?type=avatar&file=${m[1]}${m[2] || ''}`;
+        };
+
         const observer = new MutationObserver(() => {
             if (modal.classList.contains('hidden')) return;
 
@@ -2385,13 +2437,13 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             const existing = header.querySelector('.mobile-header-avatar');
             if (existing) {
                 // Always update to current character's avatar
-                existing.src = modalImg.src;
+                existing.src = thumbSrcFor(modalImg.src);
                 return;
             }
 
             const avatar = document.createElement('img');
             avatar.className = 'mobile-header-avatar';
-            avatar.src = modalImg.src;
+            avatar.src = thumbSrcFor(modalImg.src);
             avatar.alt = 'Avatar';
             avatar.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -2404,7 +2456,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                         return;
                     }
                 }
-                openAvatarViewer(avatar.src);
+                // The header thumbnail loads a low-res variant; open the viewer with the modal hero's full src so the fullscreen image is sharp.
+                const heroSrc = document.getElementById('modalImage')?.src || avatar.src;
+                openAvatarViewer(heroSrc, avatar.src);
             });
             // Insert before the title h2
             header.insertBefore(avatar, header.firstChild);
@@ -2572,6 +2626,13 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             wireTitle(modalTitle, charModal, charModal.querySelector('.modal-glass'));
         }
 
+        // chatPreviewModal: same long-title-tap-to-scroll behaviour
+        const chatPreviewModal = document.getElementById('chatPreviewModal');
+        const chatPreviewTitle = document.getElementById('chatPreviewTitle');
+        if (chatPreviewModal && chatPreviewTitle) {
+            wireTitle(chatPreviewTitle, chatPreviewModal, chatPreviewModal.querySelector('.modal-glass'));
+        }
+
         // Browse preview modals (lazy discovery)
         const wiredTitles = new WeakSet();
         function scanBrowseTitles() {
@@ -2664,6 +2725,60 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         // iOS multitasking gesture / incoming call cancels touches without firing touchend.
         tabContainer.addEventListener('touchcancel', () => {
+            tracking = false;
+            swiping = false;
+        }, { passive: true });
+    }
+
+    /* ========================================
+       CHAR DETAIL MODAL: PREV/NEXT SWIPE
+       Bound to .modal-header only so it doesnt collide with .modal-content-tabs's tab swipe.
+       ======================================== */
+    function setupCharModalNavSwipe() {
+        const modal = document.getElementById('charModal');
+        if (!modal) return;
+        const header = modal.querySelector('.modal-header');
+        if (!header) return;
+
+        let startX = 0, startY = 0, tracking = false, swiping = false;
+        const SWIPE_THRESHOLD = 50, LOCK_THRESHOLD = 10;
+
+        function isInteractive(el) {
+            return !!(el && el.closest && el.closest('button, input, textarea, select, a, .action-btn, .close-btn'));
+        }
+
+        header.addEventListener('touchstart', (e) => {
+            if (e.touches.length !== 1) return;
+            if (isInteractive(e.target)) return;
+            if (window.getSetting?.('enableCharDetailNav') === false) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            tracking = true;
+            swiping = false;
+        }, { passive: true });
+
+        header.addEventListener('touchmove', (e) => {
+            if (!tracking || e.touches.length !== 1) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+            if (!swiping && Math.abs(dx) > LOCK_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+                swiping = true;
+            }
+            if (swiping) e.preventDefault();
+        }, { passive: false });
+
+        header.addEventListener('touchend', (e) => {
+            if (!tracking) return;
+            tracking = false;
+            if (!swiping) return;
+            const dx = (e.changedTouches[0]?.clientX || 0) - startX;
+            if (Math.abs(dx) < SWIPE_THRESHOLD) return;
+            // Swipe-left goes to NEXT, swipe-right goes to PREVIOUS (standard pager convention).
+            window.navigateModal?.(dx < 0 ? 1 : -1);
+        }, { passive: true });
+
+        // iOS multitasking gesture / incoming call cancels touches without firing touchend.
+        header.addEventListener('touchcancel', () => {
             tracking = false;
             swiping = false;
         }, { passive: true });

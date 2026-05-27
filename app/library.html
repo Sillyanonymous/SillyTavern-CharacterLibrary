@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=overlays-content">
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=88">
-    <link rel="stylesheet" href="library-mobile.css?v=18" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=91">
+    <link rel="stylesheet" href="library-mobile.css?v=27" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -334,6 +334,8 @@
 
     <!-- Edit/Detail Modal -->
     <div id="charModal" class="modal-overlay hidden">
+        <button id="charModalNavPrev" class="char-modal-nav char-modal-nav-prev" title="Previous character (←)" aria-label="Previous character" style="display: none;"></button>
+        <button id="charModalNavNext" class="char-modal-nav char-modal-nav-next" title="Next character (→)" aria-label="Next character" style="display: none;"></button>
         <div class="modal-glass">
             <div class="modal-header">
                 <h2 id="modalTitle">Character Name</h2>
@@ -2052,6 +2054,12 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Hide the playlist indicator icon on character cards</span>
                             </div>
+                            <div class="settings-row">
+                                <label>
+                                    <input type="checkbox" id="settingsEnableCharDetailNav" checked> Prev/Next navigation in character details
+                                </label>
+                                <span class="settings-hint">Desktop: arrow buttons on the sides of the modal. Mobile: swipe left/right on the modal header. Order follows current sort and filters.</span>
+                            </div>
                             <div class="settings-row" data-platform="mobile">
                                 <label>
                                     <input type="checkbox" id="settingsMobileProviderQuickSwitch" checked> Provider quick switch <i class="fa-solid fa-mobile-screen settings-platform-badge" title="Mobile only"></i>
@@ -2881,8 +2889,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=141"></script>
-    <script type="module" src="../modules/module-loader.js?v=31"></script>
-    <script src="library-mobile.js?v=9"></script>
+    <script src="library.js?v=148"></script>
+    <script type="module" src="../modules/module-loader.js?v=35"></script>
+    <script src="library-mobile.js?v=17"></script>
 </body>
 </html>

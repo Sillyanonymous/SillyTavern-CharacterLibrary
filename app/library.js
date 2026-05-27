@@ -536,6 +536,7 @@ const DEFAULT_SETTINGS = {
     gridThumbnailsDesktop: false,
     gridThumbnailsClHelper: true,
     gridThumbnailSize: 512,
+    enableCharDetailNav: true,
 
     // ---- Provider Config ----
     chubUseV4Api: false,
@@ -1200,6 +1201,7 @@ function setupSettingsModal() {
     const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
     const animateKeepNameRow = document.getElementById('animateKeepNameRow');
     const hidePlaylistBadgesCheckbox = document.getElementById('settingsHidePlaylistBadges');
+    const enableCharDetailNavCheckbox = document.getElementById('settingsEnableCharDetailNav');
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     const themeCustomizerCheckbox = document.getElementById('settingsThemeCustomizer');
     
@@ -1940,6 +1942,9 @@ function setupSettingsModal() {
         if (hidePlaylistBadgesCheckbox) {
             hidePlaylistBadgesCheckbox.checked = getSetting('hidePlaylistBadges') || false;
         }
+        if (enableCharDetailNavCheckbox) {
+            enableCharDetailNavCheckbox.checked = getSetting('enableCharDetailNav') !== false;
+        }
         if (highlightColorInput) {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
         }
@@ -2375,6 +2380,7 @@ function setupSettingsModal() {
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
             animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
             hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
+            enableCharDetailNav: enableCharDetailNavCheckbox ? enableCharDetailNavCheckbox.checked : true,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
             chubUseV4Api: chubUseV4ApiCheckbox ? chubUseV4ApiCheckbox.checked : false,
             autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
@@ -2413,6 +2419,8 @@ function setupSettingsModal() {
 
         // Apply hide playlist badges
         applyHidePlaylistBadges(hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false);
+
+        updateCharModalNavState();
 
         // Mobile back-arrow visibility toggle
         applyMobileHideBackArrows(mobileHideBackArrowsCheckbox ? mobileHideBackArrowsCheckbox.checked : false);
@@ -4650,7 +4658,7 @@ function showFolderMappingModal() {
                                 return `
                                     <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: var(--radius-sm);">
                                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                            <img src="${getCharacterAvatarUrl(char.avatar)}" 
+                                            <img src="${getCharacterAvatarStThumbUrl(char.avatar)}"
                                                  style="width: 32px; height: 32px; border-radius: var(--radius-sm); object-fit: cover;"
                                                  onerror="this.src='/img/ai4.png'">
                                             <span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent); cursor: pointer;">${escapeHtml(char.name)}</span>${provLabel}
@@ -5105,7 +5113,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                                 ${escapeHtml(folder.name)}
                             </div>
                             <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
-                            ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
+                            ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
                             ${isDuplicateMode && folder.correctFolder ? `<div class="orphaned-folder-correct" title="Correct folder: ${escapeHtml(folder.correctFolder)}"><i class="fa-solid fa-arrow-right"></i> ${escapeHtml(folder.correctFolder.length > 40 ? folder.correctFolder.slice(0, 37) + '...' : folder.correctFolder)}</div>` : ''}
                         </div>`;
                     }).join('')}
@@ -5163,7 +5171,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                                 const provLabel = provInfo ? `<span class="dest-chub-id">${provInfo.provider.name}: ${provInfo.linkInfo.id || ''}</span>` : '';
                                 return `
                                     <div class="orphaned-dest-item" data-avatar="${escapeHtml(char.avatar)}" data-folder="${escapeHtml(uniqueFolder)}" data-name="${escapeHtml(char.name.toLowerCase())}">
-                                        <img src="${getCharacterAvatarUrl(char.avatar)}" class="dest-avatar" onerror="this.src='${FALLBACK_AVATAR_SVG}'">
+                                        <img src="${getCharacterAvatarStThumbUrl(char.avatar)}" class="dest-avatar" onerror="this.src='${FALLBACK_AVATAR_SVG}'">
                                         <div class="dest-info">
                                             <div class="dest-name"><span class="dest-name-link" data-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</span> ${provLabel}</div>
                                             <div class="dest-folder">${escapeHtml(uniqueFolder)}</div>
@@ -5202,7 +5210,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (charSpan) {
             const matchChar = isDuplicateMode && folder.matchingChars?.[0];
             if (matchChar) {
-                charSpan.innerHTML = `<img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span>`;
+                charSpan.innerHTML = `<img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span>`;
             } else {
                 charSpan.innerHTML = '';
             }
@@ -5857,7 +5865,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                             ${escapeHtml(folder.name)}
                         </div>
                         <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
-                        ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
+                        ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
                         ${isDuplicateMode && folder.correctFolder ? `<div class="orphaned-folder-correct" title="Correct folder: ${escapeHtml(folder.correctFolder)}"><i class="fa-solid fa-arrow-right"></i> ${escapeHtml(folder.correctFolder.length > 40 ? folder.correctFolder.slice(0, 37) + '...' : folder.correctFolder)}</div>` : ''}
                     </div>`;
                 }).join('');
@@ -8378,6 +8386,8 @@ function setupCharacterGridDelegates() {
 // Update grid height on window resize (throttled to avoid jank during drag-resize)
 let resizeRAF = null;
 window.addEventListener('resize', () => {
+    // Soft keyboard up on mobile fires this with the shrunk layout viewport on Android; reflowing the grid then visibly shifts cards under the search-overlay scrim.
+    if (document.documentElement.classList.contains('cl-keyboard-open')) return;
     if (resizeRAF) return; // Already scheduled
     resizeRAF = requestAnimationFrame(() => {
         resizeRAF = null;
@@ -8437,7 +8447,17 @@ function createCardsBatchHTML(charsWithIndices) {
     const html = charsWithIndices.map(({ char, index }) => buildCharacterCardHTML(char, index)).join('');
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    return Array.from(tmp.children);
+    const cards = Array.from(tmp.children);
+    // Sync cache-hit promotion: buildCharacterCardHTML only consults the Set, so urls cached by the browser but not yet in the Set (eg. first view-switch) still flash. img.complete catches those.
+    for (const card of cards) {
+        if (card.classList.contains('loaded')) continue;
+        const img = card.querySelector('.card-image');
+        if (img && img.complete && img.naturalWidth > 0) {
+            _seenAvatarUrls.add(img.src);
+            card.classList.add('loaded');
+        }
+    }
+    return cards;
 }
 
 /**
@@ -9542,7 +9562,74 @@ function openCharModalElevated(char) {
     openModal(char);
 }
 
+// Walks currentCharsList (the live filtered+sorted view) so nav order tracks the user's current sort/filter state. Dirty-edit gate + teardown live inside openModal so this stays thin.
+function navigateModal(direction) {
+    if (!activeChar) return;
+    if (getSetting('enableCharDetailNav') === false) return;
+    const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+    if (idx === -1) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= currentCharsList.length) return;
+    openModal(currentCharsList[targetIdx]);
+}
+
+function isCharModalDirty() {
+    if (!activeChar || isEditLocked) return false;
+    if (pendingAvatarFile) return true;
+    try {
+        const current = collectEditValues();
+        return generateChangesDiff(originalValues, current).length > 0;
+    } catch (_) {
+        return false;
+    }
+}
+
+function confirmDiscardCharModalEdits() {
+    return showConfirm({
+        title: 'Discard unsaved edits?',
+        message: `You have unsaved changes to ${getCharacterName(activeChar) || 'this character'}. Discard them?`,
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
+    });
+}
+
+// User-initiated close. Programmatic closers (post-delete cleanup, save success) keep calling closeModal directly.
+async function maybeCloseModal() {
+    if (isCharModalDirty()) {
+        const ok = await confirmDiscardCharModalEdits();
+        if (!ok) return;
+    }
+    closeModal();
+}
+
+function updateCharModalNavState() {
+    const prevBtn = document.getElementById('charModalNavPrev');
+    const nextBtn = document.getElementById('charModalNavNext');
+    if (!prevBtn || !nextBtn) return;
+    const enabled = getSetting('enableCharDetailNav') !== false && !!activeChar;
+    const idx = enabled ? currentCharsList.findIndex(c => c.avatar === activeChar.avatar) : -1;
+    const show = idx !== -1;
+    prevBtn.style.display = show ? '' : 'none';
+    nextBtn.style.display = show ? '' : 'none';
+    if (!show) return;
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx >= currentCharsList.length - 1;
+}
+
 async function openModal(char) {
+    // Swap-while-open gate: dirty-edit prompt + per-character teardown live here so every modal-to-modal entry point (navigateModal, openRelatedCharacter, anywhere else) inherits the same protection.
+    const charModalEl = document.getElementById('charModal');
+    const isSwap = charModalEl && !charModalEl.classList.contains('hidden') && activeChar && activeChar.avatar !== char.avatar;
+    if (isSwap && isCharModalDirty()) {
+        const ok = await confirmDiscardCharModalEdits();
+        if (!ok) return;
+    }
+    if (isSwap) {
+        setEditLock(true);
+        clearPendingAvatar();
+    }
+
     if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
         const modal = document.getElementById('charModal');
         if (modal) {
@@ -9561,6 +9648,7 @@ async function openModal(char) {
 
     const gen = ++_modalOpenGen;
     activeChar = char;
+    updateCharModalNavState();
 
     // Show loading state for avatar while new image loads
     const modalImg = document.getElementById('modalImage');
@@ -9568,6 +9656,10 @@ async function openModal(char) {
 
     // Race the full-avatar fetch with hydrate so when grid uses thumbs we dont serialize the two network waits.
     new Image().src = getCharacterAvatarUrl(char.avatar);
+
+    // Update the mobile header thumbnail src as early as possible so by the time the modal becomes visible the new char's thumb is already decoded; otherwise the previous char's thumb stays painted until the lazy observer-driven update fires.
+    const _mobileHeader = document.querySelector('#charModal .mobile-header-avatar');
+    if (_mobileHeader) _mobileHeader.src = getCharacterAvatarStThumbUrl(char.avatar);
 
     // Fetch heavy fields on demand (slim index keeps only grid/search data in memory)
     await hydrateCharacter(char);
@@ -9989,9 +10081,9 @@ function populateEditAvatarPreview() {
     if (!img || !activeChar) return;
     const url = getCharacterAvatarUrl(activeChar.avatar);
     img.src = url;
-    // Mobile mirrors the hero on the small header thumbnail (sidebar is hidden).
+    // Mobile mirrors the hero on the small header thumbnail (sidebar is hidden). 32x32 target, so ST's built-in /thumbnail is plenty and avoids re-fetching the full PNG just to shrink it.
     const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
-    if (headerAvatar) headerAvatar.src = url;
+    if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
 }
 
 function clearPendingAvatar() {
@@ -10963,7 +11055,7 @@ function renderRelatedCards(related) {
         const char = r.char;
         const name = getCharField(char, 'name') || 'Unknown';
         const creator = getCharField(char, 'creator') || '';
-        const avatarPath = getCharacterAvatarUrl(char.avatar);
+        const avatarPath = getCharacterAvatarStThumbUrl(char.avatar);
         
         // Build score breakdown pills - show tag count and rarity info
         const pills = [];
@@ -11807,7 +11899,7 @@ async function performSave() {
                 const heroImg = document.getElementById('modalImage');
                 if (heroImg) heroImg.src = newUrl;
                 const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
-                if (headerAvatar) headerAvatar.src = newUrl;
+                if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
                 clearPendingAvatar();
             }
             
@@ -14942,9 +15034,40 @@ function setupEventListeners() {
     }
 
     // Close Modal
-    on('modalClose', 'click', closeModal);
+    on('modalClose', 'click', maybeCloseModal);
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
+        if (e.target === modal) maybeCloseModal();
+    });
+
+    // Char detail prev/next nav (desktop chevrons + keyboard; mobile swipe wired in library-mobile.js).
+    on('charModalNavPrev', 'click', () => navigateModal(-1));
+    on('charModalNavNext', 'click', () => navigateModal(1));
+    // Hover preload: same shape as the grid mousedown preload so the avatar is cache-warm by the time openModal sets src.
+    const navPrevBtn = document.getElementById('charModalNavPrev');
+    const navNextBtn = document.getElementById('charModalNavNext');
+    const previewSiblingAt = (offset) => {
+        if (!activeChar) return null;
+        const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+        if (idx === -1) return null;
+        return currentCharsList[idx + offset] || null;
+    };
+    navPrevBtn?.addEventListener('mouseenter', () => {
+        const s = previewSiblingAt(-1);
+        if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
+    });
+    navNextBtn?.addEventListener('mouseenter', () => {
+        const s = previewSiblingAt(1);
+        if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        if (modal.classList.contains('hidden')) return;
+        if (getSetting('enableCharDetailNav') === false) return;
+        const t = e.target;
+        const tag = t?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+        e.preventDefault();
+        navigateModal(e.key === 'ArrowLeft' ? -1 : 1);
     });
 
     // Tabs
@@ -15463,6 +15586,15 @@ function getCharacterAvatarUrl(avatar) {
     return bust
         ? `/characters/${encodeURIComponent(avatar)}?v=${bust}`
         : `/characters/${encodeURIComponent(avatar)}`;
+}
+
+// ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the cl-helper thumb is overkill. Soft above ~64px target on retina; use the cl-helper helper instead for hero-sized previews.
+function getCharacterAvatarStThumbUrl(avatar) {
+    if (!avatar) return '';
+    const bust = _avatarCacheBust.get(avatar);
+    return bust
+        ? `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}&v=${bust}`
+        : `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}`;
 }
 
 // Returns the URL the grid should request, picking based on the three-tier
@@ -18403,7 +18535,7 @@ async function runBulkAutoLinkScan() {
         const currentProgress = alreadyScanned + i + 1;
         
         // Update UI
-        document.getElementById('bulkAutoLinkScanAvatar').src = getCharacterAvatarUrl(char.avatar);
+        document.getElementById('bulkAutoLinkScanAvatar').src = getCharacterAvatarStThumbUrl(char.avatar);
         document.getElementById('bulkAutoLinkScanName').textContent = charName;
         document.getElementById('bulkAutoLinkScanStatus').textContent = `Searching ${providers.length} providers for "${charName}"...`;
         document.getElementById('bulkAutoLinkScanProgress').textContent = `${currentProgress}/${total}`;
@@ -18797,7 +18929,7 @@ function renderBulkAutoLinkConfidentList() {
                 <div class="bulk-auto-link-item-confident-header">
                     <input type="checkbox" class="bulk-auto-link-item-checkbox" ${item.selected ? 'checked' : ''}>
                     <div class="bulk-auto-link-item-local">
-                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                         <div class="bulk-auto-link-item-local-info">
                             <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                             <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -18863,7 +18995,7 @@ function renderBulkAutoLinkUncertainList() {
                 <div class="bulk-auto-link-item-uncertain-header">
                     <input type="checkbox" class="bulk-auto-link-item-checkbox" ${hasSelection ? 'checked' : ''}>
                     <div class="bulk-auto-link-item-local">
-                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                         <div class="bulk-auto-link-item-local-info">
                             <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                             <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -18905,7 +19037,7 @@ function renderBulkAutoLinkNoMatchList() {
         return `
             <div class="bulk-auto-link-item bulk-auto-link-item-nomatch">
                 <div class="bulk-auto-link-item-local">
-                    <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                     <div class="bulk-auto-link-item-local-info">
                         <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                         <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -21253,7 +21385,7 @@ function renderBulkSummaryList() {
             
             return `
             <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
-                <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                <img src="${getCharacterAvatarStThumbUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
                 <a class="char-name-link" href="#" data-avatar="${escapeHtml(r.avatar)}" title="Click to view ${escapeHtml(r.name)}">${escapeHtml(r.name)}</a>
                 <div class="char-stats">
                     ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
@@ -21543,7 +21675,7 @@ async function runBulkLocalization() {
             continue;
         }
         
-        bulkLocalizeCharAvatar.src = getCharacterAvatarUrl(char.avatar);
+        bulkLocalizeCharAvatar.src = getCharacterAvatarStThumbUrl(char.avatar);
         bulkLocalizeCharName.textContent = charName;
         bulkLocalizeProgressCount.textContent = `${i + 1}/${totalChars} characters`;
         bulkLocalizeProgressFill.style.width = `${((i + 1) / totalChars) * 100}%`;
@@ -23573,7 +23705,7 @@ function getDuplicateScoreLabel(score, isStrictIdentical = false) {
 function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const name = getCharField(char, 'name') || 'Unknown';
     const creator = getCharField(char, 'creator') || 'Unknown creator';
-    const avatarPath = getCharacterAvatarUrl(char.avatar);
+    const avatarPath = getCharacterAvatarStThumbUrl(char.avatar);
     const tokens = estimateTokens(char);
     
     // Date
@@ -23753,7 +23885,7 @@ async function renderDuplicateGroups(groups) {
     groups.forEach((group, idx) => {
         const ref = group.reference;
         const refName = getCharField(ref, 'name') || 'Unknown';
-        const refAvatar = getCharacterAvatarUrl(ref.avatar);
+        const refAvatar = getCharacterAvatarStThumbUrl(ref.avatar);
         const maxScore = Math.max(...group.duplicates.map(d => d.score || 0));
         
         // Pre-compute content identity for each duplicate to inform the header
@@ -24251,7 +24383,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                     <div class="dup-delete-transfer-select-wrapper">
                         ${transferTargets.map((t, idx) => {
                             const tName = getCharField(t, 'name') || t.avatar;
-                            const tAvatar = getCharacterAvatarUrl(t.avatar);
+                            const tAvatar = getCharacterAvatarStThumbUrl(t.avatar);
                             return `
                                 <label class="dup-delete-transfer-radio ${idx === 0 ? 'selected' : ''}" data-avatar="${escapeHtml(t.avatar)}">
                                     <input type="radio" name="transferTarget" value="${escapeHtml(t.avatar)}" ${idx === 0 ? 'checked' : ''}>
@@ -24615,7 +24747,7 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
             const existingChar = match.char;
             const existingName = getCharField(existingChar, 'name');
             const existingCreator = getCharField(existingChar, 'creator');
-            const existingAvatar = getCharacterAvatarUrl(existingChar.avatar);
+            const existingAvatar = getCharacterAvatarStThumbUrl(existingChar.avatar);
             const tokens = estimateTokens(existingChar);
             const provInfo = window.ProviderRegistry?.getCharacterProvider(existingChar);
             const sourceName = provInfo?.provider?.name || 'Local';
@@ -25933,7 +26065,7 @@ function initThemeCustomizer() {
 }
 
 // Overlay registrations for library.js modals
-window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => closeModal() });
+window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => maybeCloseModal() });
 window.registerOverlay?.({ id: 'disableGalleryFoldersModal', tier: 6, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'greetingsExpandModal', tier: 5, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'lorebookExpandModal', tier: 5, static: false, close: (el) => el.remove() });
@@ -26103,6 +26235,8 @@ window.setGallerySyncAuditDone = function(v) { gallerySyncAuditDone = v; };
 window.openModal = openModal;
 window.openCharModalElevated = openCharModalElevated;
 window.closeModal = closeModal;
+window.maybeCloseModal = maybeCloseModal;
+window.navigateModal = navigateModal;
 window.openProviderLinkModal = openProviderLinkModal;
 window.hideModal = hideModal;
 window.checkCharacterForDuplicates = checkCharacterForDuplicates;
@@ -26124,6 +26258,7 @@ window.renderEmptyState = renderEmptyState;
 window.updateMobileFilterIndicator = updateMobileFilterIndicator;
 window.getActiveFilterState = getActiveFilterState;
 window.getCharacterAvatarUrl = getCharacterAvatarUrl;
+window.getCharacterAvatarStThumbUrl = getCharacterAvatarStThumbUrl;
 window.getListingNameFromExtensions = getListingNameFromExtensions;
 window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;

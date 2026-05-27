@@ -376,11 +376,13 @@ input[type='range'] {
 body {
     font-family: 'Noto Sans', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background-color: var(--bg-primary);
-    background-image: 
+    background-image:
         radial-gradient(circle at 10% 20%, rgba(var(--accent-rgb), 0.05) 0%, transparent 20%),
         radial-gradient(circle at 90% 80%, rgba(var(--accent-secondary-rgb), 0.05) 0%, transparent 20%);
     color: var(--text-primary);
+    /* lvh = large viewport height: stays at the full screen size even when the mobile soft keyboard opens. Plain 100vh would let the body shrink under the OSK on some Android browsers, dragging .gallery-content (flex:1) with it and shifting the virtual-scroll window. */
     height: 100vh;
+    height: 100lvh;
     overflow: hidden;
 }
 
@@ -1514,6 +1516,63 @@ body.char-modal-above .cl-modal.visible {
 .modal-glass.chat-preview-modal {
     max-width: calc(800px * var(--modal-scale, 1));
     height: calc(85vh * var(--modal-scale, 1));
+}
+
+/* @canonical char-modal-nav */
+.char-modal-nav {
+    --cmn-bg: rgba(0, 0, 0, 0.5);
+    --cmn-bg-hover: rgba(255, 255, 255, 0.1);
+    --cmn-border: 1px solid rgba(255, 255, 255, 0.1);
+    --cmn-color: #fff;
+    --cmn-width: 50px;
+    --cmn-height: 80px;
+    --cmn-side-offset: 1%;
+    --cmn-icon-size: var(--font-2xl);
+    --cmn-icon-prev: '\f053';
+    --cmn-icon-next: '\f054';
+    --cmn-disabled-opacity: 0.3;
+
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--cmn-bg);
+    border: var(--cmn-border);
+    color: var(--cmn-color);
+    width: var(--cmn-width);
+    height: var(--cmn-height);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, opacity 0.2s;
+    z-index: 10;
+}
+.char-modal-nav:hover:not(:disabled) {
+    background: var(--cmn-bg-hover);
+}
+.char-modal-nav:disabled {
+    opacity: var(--cmn-disabled-opacity);
+    cursor: not-allowed;
+}
+.char-modal-nav::before {
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    font-size: var(--cmn-icon-size);
+    line-height: 1;
+}
+.char-modal-nav-prev {
+    left: var(--cmn-side-offset);
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+}
+.char-modal-nav-prev::before {
+    content: var(--cmn-icon-prev);
+}
+.char-modal-nav-next {
+    right: var(--cmn-side-offset);
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+}
+.char-modal-nav-next::before {
+    content: var(--cmn-icon-next);
 }
 
 .modal-header {

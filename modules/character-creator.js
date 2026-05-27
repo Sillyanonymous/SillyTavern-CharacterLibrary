@@ -1477,7 +1477,7 @@ function renderImportList(query, isSaveAs = false) {
     list.innerHTML = display.map(c => {
         const name = CoreAPI.escapeHtml(c.name || 'Unknown');
         const creator = c.data?.creator ? CoreAPI.escapeHtml(c.data.creator) : '';
-        const avatarPath = c.avatar ? `/characters/${encodeURIComponent(c.avatar)}` : '';
+        const avatarPath = c.avatar ? CoreAPI.getCharacterAvatarStThumbUrl(c.avatar) : '';
         return `
             <div class="creator-import-item" data-avatar="${CoreAPI.escapeHtml(c.avatar || '')}">
                 <div class="creator-import-avatar" ${avatarPath ? `style="background-image: url('${avatarPath}')"` : ''}></div>

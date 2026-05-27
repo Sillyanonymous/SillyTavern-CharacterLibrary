@@ -1734,7 +1734,7 @@ function renderResults(recommendations) {
         rank++;
         if (char.avatar) renderedAvatars.push(char.avatar);
 
-        const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+        const avatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(char.avatar);
         const tags = CoreAPI.getCharacterTags(char);
         const tagsHtml = tags.slice(0, 5).map(t =>
             `<span class="recommender-tag">${CoreAPI.escapeHtml(t)}</span>`

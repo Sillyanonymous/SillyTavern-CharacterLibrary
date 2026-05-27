@@ -270,12 +270,17 @@
         position: fixed;
         top: 0;
         right: 0;
-        bottom: 0;
+        /* End the overlay at the top of .mobile-bottom-nav so the nav stays visible and tappable below. When keyboard opens the openSearch JS sets overlay.style.bottom to the keyboard height (visualViewport tracker), overriding this rule until close. */
+        bottom: calc(var(--chrome-h-mobile) + var(--safe-bottom));
         left: 0;
         background: var(--cl-modal-scrim-heavy);
         z-index: 1200;
-        padding: max(12px, env(safe-area-inset-top, 0px) + 12px) 12px max(12px, var(--safe-bottom)) 12px;
+        padding: max(12px, env(safe-area-inset-top, 0px) + 12px) 12px var(--space-sm) 12px;
         box-sizing: border-box;
+        /* Pin search container to the bottom so it sits in the thumb zone, adjacent to the soft keyboard when focused. */
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
     }
     .mobile-search-overlay.hidden { display: none !important; }
     .mobile-search-overlay .search-box {
@@ -747,6 +752,10 @@
     .modal-glass {
         border-radius: 0 !important;
     }
+    /* Mobile uses swipe (library-mobile.js) instead of chevrons. */
+    .char-modal-nav {
+        display: none !important;
+    }
     .section-expand-modal,
     .browse-expand-modal,
     .lorebook-expand-modal,
@@ -824,6 +833,7 @@
         width: 32px; height: 32px;
         border-radius: var(--radius-md);
         object-fit: cover;
+        object-position: center 20%;
         flex-shrink: 0;
     }
 

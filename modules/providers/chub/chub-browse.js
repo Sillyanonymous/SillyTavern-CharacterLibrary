@@ -3687,7 +3687,7 @@ async function openChubCharPreview(char) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${count})`;
                 galleryGrid.innerHTML = node.galleryImages.map(img =>
-                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
+                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`
                 ).join('');
             }
         } else if (node.hasGallery && gallerySection && galleryGrid) {
@@ -3716,27 +3716,35 @@ async function openChubCharPreview(char) {
         try {
             const detailUrl = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
 
-            // Fetch definition and gallery in parallel
+            // Gateway only allow-origins https://chub.ai so direct CORS-rejects; inline /proxy/ fallback keeps the Response for the 401/403 auth-required hint.
             const galleryHeaders = { 'Accept': 'application/json' };
             if (chubToken) {
                 galleryHeaders['samwise'] = chubToken;
                 galleryHeaders['CH-API-KEY'] = chubToken;
             }
             const charProjectId = char.id || char.project_id;
-            const galleryPromise = char.hasGallery && charProjectId
-                ? fetch(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`, {
-                    headers: galleryHeaders, signal: fetchSignal
-                }).then(r => {
-                    if (r.ok) return r.json();
-                    if (r.status === 401 || r.status === 403) return { nodes: [], _authRequired: true };
-                    return { nodes: [] };
-                })
-                  .then(data => {
-                      const images = (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false }));
-                      if (data._authRequired) images._authRequired = true;
-                      return images;
-                  })
-                  .catch(err => { debugLog('[ChubAI] Gallery fetch failed:', err.message); return []; })
+            const fetchGallery = async (url) => {
+                try { return await fetch(url, { headers: galleryHeaders, signal: fetchSignal }); }
+                catch (e) {
+                    if (e.name === 'AbortError') throw e;
+                    return await fetch(`/proxy/${encodeURIComponent(url)}`, { headers: galleryHeaders, signal: fetchSignal });
+                }
+            };
+            // Search-result hasGallery is unreliable (returns false for chars whose detail says true),
+            // so always probe by project id. Empty response is fine; render already handles no-gallery.
+            const galleryPromise = charProjectId
+                ? fetchGallery(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`)
+                    .then(r => {
+                        if (r.ok) return r.json();
+                        if (r.status === 401 || r.status === 403) return { nodes: [], _authRequired: true };
+                        return { nodes: [] };
+                    })
+                    .then(data => {
+                        const images = (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false }));
+                        if (data._authRequired) images._authRequired = true;
+                        return images;
+                    })
+                    .catch(err => { debugLog('[ChubAI] Gallery fetch failed:', err.message); return []; })
                 : Promise.resolve([]);
 
             const [response, galleryImages] = await Promise.all([

@@ -555,6 +555,10 @@ export function getCharacterAvatarUrl(avatar) {
     return window.getCharacterAvatarUrl?.(avatar) ?? '';
 }
 
+export function getCharacterAvatarStThumbUrl(avatar) {
+    return window.getCharacterAvatarStThumbUrl?.(avatar) ?? '';
+}
+
 /**
  * @param {Object} char
  * @returns {string|null}
@@ -1191,6 +1195,7 @@ export default {
     renderSkeletonList,
     renderEmptyState,
     getCharacterAvatarUrl,
+    getCharacterAvatarStThumbUrl,
     getListingNameFromExtensions,
     getCharacterName,
     formatRichText,
