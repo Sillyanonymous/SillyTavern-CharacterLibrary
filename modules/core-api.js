@@ -1,4 +1,4 @@
-// Core API — proxy layer between modules and the library monolith
+// Core API - proxy layer between modules and the library monolith
 
 import ProviderRegistry from './providers/provider-registry.js';
 
@@ -20,6 +20,14 @@ export function getIsEmbedded() {
 
 export function closeEmbeddedPanel() {
     return window.closeEmbeddedPanel?.();
+}
+
+export function resolveProxyForProfile(profile) {
+    return window.resolveProxyForProfile?.(profile);
+}
+
+export function flattenContentBlocks(blocks) {
+    return window.flattenContentBlocks?.(blocks) ?? '';
 }
 
 // ========================================
@@ -117,6 +125,20 @@ export function getProviderExcludeTags(providerId) {
     return window.getProviderExcludeTags?.(providerId) || [];
 }
 
+/**
+ * Apply the current custom CSS (reads mode + content from settings, writes to live <style> tag)
+ */
+export function applyCustomCSS() {
+    window.applyCustomCSS?.();
+}
+
+/**
+ * Maximum byte size of the emitted custom CSS (raw blob or concatenated snippets)
+ */
+export function getCustomCSSMaxBytes() {
+    return window.CUSTOM_CSS_MAX_BYTES || 65536;
+}
+
 export function setProviderExcludeTags(providerId, tags) {
     window.setProviderExcludeTags?.(providerId, tags);
 }
@@ -134,7 +156,7 @@ export function openCharacterModal(char) {
 }
 
 /**
- * Open character detail modal elevated above confirm-modals
+ * Open character detail modal elevated above other open modals (confirm or cl-modal).
  * @param {Object} char - Character object
  */
 export function openCharModalElevated(char) {
@@ -181,6 +203,27 @@ export function setActiveChar(char) {
  */
 export function showToast(message, type = 'info', duration = 3000) {
     window.showToast?.(message, type, duration);
+}
+
+export function hapticFeedback(pattern) {
+    window.hapticFeedback?.(pattern);
+}
+
+/**
+ * Show a canonical confirmation dialog. Returns Promise<boolean>.
+ * @param {Object} opts
+ * @param {string} [opts.title]
+ * @param {string} [opts.message] - Plain text message (escaped)
+ * @param {string} [opts.messageHtml] - HTML message (overrides `message`)
+ * @param {string} [opts.icon] - FontAwesome class string for the title icon
+ * @param {string} [opts.iconColor] - CSS color for the title icon
+ * @param {string} [opts.confirmLabel]
+ * @param {string} [opts.cancelLabel]
+ * @param {boolean} [opts.danger] - Style confirm button as danger (red)
+ * @returns {Promise<boolean>}
+ */
+export function showConfirm(opts) {
+    return window.showConfirm?.(opts) ?? Promise.resolve(false);
 }
 
 /**
@@ -358,6 +401,17 @@ export function escapeHtml(text) {
 }
 
 /**
+ * Sanitize HTML safely. Falls back to escapeHtml if DOMPurify is unavailable
+ * and forces rel="noopener noreferrer" on links with target attributes.
+ * @param {string} html - HTML to sanitize
+ * @param {object} [config] - DOMPurify config
+ * @returns {string} Sanitized HTML
+ */
+export function safePurify(html, config) {
+    return window.safePurify?.(html, config) ?? '';
+}
+
+/**
  * Sanitize a tagline HTML string (strips dangerous elements, keeps safe formatting)
  * @param {string} html - Raw tagline HTML from external data
  * @returns {string} Sanitized HTML
@@ -480,6 +534,18 @@ export function renderLoadingState(container, message, className = 'loading-spin
     window.renderLoadingState?.(container, message, className);
 }
 
+export function renderSkeletonGrid(container, count = 12) {
+    window.renderSkeletonGrid?.(container, count);
+}
+
+export function renderSkeletonList(container, count = 6) {
+    window.renderSkeletonList?.(container, count);
+}
+
+export function renderEmptyState(container, opts) {
+    window.renderEmptyState?.(container, opts);
+}
+
 /**
  * Get avatar URL for a character
  * @param {string} avatar - Avatar filename
@@ -487,6 +553,10 @@ export function renderLoadingState(container, message, className = 'loading-spin
  */
 export function getCharacterAvatarUrl(avatar) {
     return window.getCharacterAvatarUrl?.(avatar) ?? '';
+}
+
+export function getCharacterAvatarStThumbUrl(avatar) {
+    return window.getCharacterAvatarStThumbUrl?.(avatar) ?? '';
 }
 
 /**
@@ -560,6 +630,20 @@ export function fetchCharacters(forceRefresh = false) {
  */
 export function fetchAndAddCharacter(avatarFileName) {
     return window.fetchAndAddCharacter?.(avatarFileName) || Promise.resolve(false);
+}
+
+/**
+ * @param {string} avatar
+ */
+export function notifySTCharacterAdded(avatar) {
+    return window.notifySTCharacterAdded?.(avatar);
+}
+
+/**
+ * @param {string} avatar
+ */
+export function notifySTCharacterEdited(avatar) {
+    return window.notifySTCharacterEdited?.(avatar);
 }
 
 /**
@@ -659,8 +743,8 @@ export function openCharacterCreator() {
     window.openCharacterCreator?.();
 }
 
-export async function autoSnapshotBeforeChange(char, reason) {
-    return window.autoSnapshotBeforeChange?.(char, reason);
+export async function autoSnapshotBeforeChange(char, reason, opts) {
+    return window.autoSnapshotBeforeChange?.(char, reason, opts);
 }
 
 /**
@@ -805,6 +889,15 @@ export function downloadCharacterMedia(character, folderName, options) {
  */
 export function downloadMediaToMemory(url, timeout, signal) {
     return window.downloadMediaToMemory?.(url, timeout, signal) || Promise.resolve(null);
+}
+
+/**
+ * Check if a URL is safe to download from (rejects private IPs, internal hostnames, non-http schemes).
+ * @param {string} url
+ * @returns {{ ok: boolean, reason?: string }}
+ */
+export function isUrlSafeForDownload(url) {
+    return window.isUrlSafeForDownload?.(url) || { ok: false, reason: 'safety check unavailable' };
 }
 
 /**
@@ -1010,6 +1103,7 @@ export function openPlaylistPicker(...args) { return window.openPlaylistPicker?.
 export function closePlaylistPicker() { return window.closePlaylistPicker?.(); }
 export function setPlaylistFilter(...args) { return window.setPlaylistFilter?.(...args); }
 export function clearPlaylistFilter() { return window.clearPlaylistFilter?.(); }
+export function refreshPlaylistFilterIfActive(...args) { return window.refreshPlaylistFilterIfActive?.(...args); }
 export function openPlaylistManager() { return window.openPlaylistManager?.(); }
 export function closePlaylistManager() { return window.closePlaylistManager?.(); }
 export function refreshPlaylistBadges() { return window.refreshPlaylistBadges?.(); }
@@ -1029,7 +1123,9 @@ export default {
     setSettings,
     getProviderExcludeTags,
     setProviderExcludeTags,
-    
+    applyCustomCSS,
+    getCustomCSSMaxBytes,
+
     // View management
     switchView,
     getCurrentView,
@@ -1043,6 +1139,8 @@ export default {
     getActiveChar,
     setActiveChar,
     showToast,
+    hapticFeedback,
+    showConfirm,
     refreshCharacters,
     
     // API
@@ -1075,6 +1173,7 @@ export default {
     
     // Utils
     escapeHtml,
+    safePurify,
     sanitizeTaglineHtml,
     isExtensionsRecoveryInProgress,
     debounce,
@@ -1092,7 +1191,11 @@ export default {
     
     // Rendering
     renderLoadingState,
+    renderSkeletonGrid,
+    renderSkeletonList,
+    renderEmptyState,
     getCharacterAvatarUrl,
+    getCharacterAvatarStThumbUrl,
     getListingNameFromExtensions,
     getCharacterName,
     formatRichText,
@@ -1103,6 +1206,8 @@ export default {
     deleteCharacter,
     fetchCharacters,
     fetchAndAddCharacter,
+    notifySTCharacterAdded,
+    notifySTCharacterEdited,
     removeCharacterFromList,
     hydrateCharacter,
     performSearch,
@@ -1134,6 +1239,7 @@ export default {
     buildDedupState,
     downloadCharacterMedia,
     downloadMediaToMemory,
+    isUrlSafeForDownload,
     calculateHash,
     arrayBufferToBase64,
     getEndpoints,
@@ -1185,6 +1291,7 @@ export default {
     closePlaylistPicker,
     setPlaylistFilter,
     clearPlaylistFilter,
+    refreshPlaylistFilterIfActive,
     openPlaylistManager,
     closePlaylistManager,
     refreshPlaylistBadges,
@@ -1195,4 +1302,6 @@ export default {
     getSTContext,
     getIsEmbedded,
     closeEmbeddedPanel,
+    resolveProxyForProfile,
+    flattenContentBlocks,
 };

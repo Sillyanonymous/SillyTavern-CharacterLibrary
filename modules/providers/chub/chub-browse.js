@@ -1,8 +1,8 @@
-// ChubBrowseView — ChubAI browse/search UI for the Online tab
+// ChubBrowseView - ChubAI browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG } from '../provider-utils.js';
 import {
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
@@ -24,9 +24,11 @@ const {
     debugLog,
     showToast,
     escapeHtml,
+    safePurify,
     formatRichText,
     sanitizeTaglineHtml,
     renderLoadingState,
+    renderSkeletonGrid,
     getSetting,
     setSetting,
     setSettings,
@@ -46,20 +48,6 @@ const {
 /* eslint-enable no-unused-vars */
 
 const CHUB_TOKEN_KEY = 'st_gallery_chub_urql_token'; // Legacy localStorage key for token migration
-
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
-        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
-    ],
-    ALLOWED_ATTR: [
-        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
-        'width', 'height', 'loading', 'color', 'size', 'align'
-    ],
-    ALLOW_DATA_ATTR: false
-};
 
 // ========================================
 // STATE & HELPERS
@@ -127,7 +115,7 @@ let chubModalEventsAttached = false;
 let chubDetailFetchController = null; // AbortController for in-flight detail fetches
 
 const chubDetailCache = new Map();
-const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap — keep small for mobile memory (stripped entries only)
+const CHUB_DETAIL_CACHE_MAX = 5; // LRU cap - keep small for mobile memory (stripped entries only)
 
 // Append-only rendering: track how many cards are already in DOM to avoid full re-render on Load More
 let chubGridRenderedCount = 0;
@@ -310,9 +298,7 @@ class ChubBrowseView extends BrowseView {
     }
 
     closePreview() {
-        abortChubDetailFetch();
-        cleanupChubCharModal();
-        hideModal('chubCharModal');
+        closeChubCharPreview();
     }
 
     get mobileFilterIds() {
@@ -609,7 +595,7 @@ class ChubBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without a token!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -628,7 +614,7 @@ class ChubBrowseView extends BrowseView {
                     <div class="chub-login-status" style="display:none;"></div>
                 </div>
 
-                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px;">
+                <details style="margin-top: 15px; background: rgba(255,255,255,0.03); padding: 10px; border-radius: var(--radius-lg);">
                     <summary style="cursor: pointer; color: var(--accent);">
                         <i class="fa-solid fa-question-circle"></i> How to get your URQL_TOKEN
                     </summary>
@@ -639,7 +625,7 @@ class ChubBrowseView extends BrowseView {
                             <li>Go to the <strong>Application</strong> tab (or Storage in Firefox)</li>
                             <li>In the left sidebar, expand <strong>Local Storage</strong></li>
                             <li>Click on <code>https://chub.ai</code></li>
-                            <li>Find the key <code style="color: #e74c3c; font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
+                            <li>Find the key <code style="color: var(--cl-error-bright); font-weight: bold;">URQL_TOKEN</code> and copy its value</li>
                         </ol>
                         <p style="margin-top: 10px; font-style: italic;">
                             The token is a long string that authenticates you with ChubAI's API.
@@ -810,6 +796,11 @@ class ChubBrowseView extends BrowseView {
         ]);
     }
 
+    getSearchModes() { return ['character', 'creator']; }
+    getSearchInputId(mode) {
+        return mode === 'creator' ? 'chubCreatorSearchInput' : 'chubSearchInput';
+    }
+
     applyDefaults(defaults) {
         if (defaults.view === 'timeline') {
             chubViewMode = 'timeline';
@@ -864,7 +855,7 @@ class ChubBrowseView extends BrowseView {
         super.activate(container, options);
         chubDelegatesInitialized = true;
 
-        // Ensure grid is populated — covers fresh init, provider switch, and tab re-entry
+        // Ensure grid is populated - covers fresh init, provider switch, and tab re-entry
         this.buildLocalLibraryLookup();
         const browseGrid = document.getElementById('chubGrid');
         const timelineGrid = document.getElementById('chubTimelineGrid');
@@ -900,6 +891,9 @@ class ChubBrowseView extends BrowseView {
         chubDelegatesInitialized = false;
         // Increment render token to cancel in-flight chunked renders
         chubTimelineRenderToken++;
+        // Reset in-flight flag so a stuck flag from a hung fetch can't block the
+        // next view re-entry from kicking off a fresh load.
+        chubTimelineLoadInFlight = false;
         this.disconnectImageObserver();
         // Abort any in-flight detail fetch
         if (chubDetailFetchController) {
@@ -915,7 +909,7 @@ class ChubBrowseView extends BrowseView {
 }
 
 // ========================================
-// CHUB BROWSE LOGIC (moved from library.js)
+// CHUB BROWSE LOGIC
 // ========================================
 
 
@@ -1156,7 +1150,7 @@ function initChubView() {
         }
     });
     
-    // Load more button (guard against rapid clicks — don't increment page while loading)
+    // Load more button (guard against rapid clicks - don't increment page while loading)
     on('chubLoadMoreBtn', 'click', () => {
         if (chubIsLoading) return;
         chubCurrentPage++;
@@ -1178,7 +1172,7 @@ function initChubView() {
         loadChubCharacters(); // Reload with new sort (server-side sorting)
     });
     
-    // Modal and document-level listeners — only attach once since these elements
+    // Modal and document-level listeners - only attach once since these elements
     // persist in document.body across provider switches (DOM recreation)
     if (!chubModalEventsAttached) {
         chubModalEventsAttached = true;
@@ -1202,11 +1196,7 @@ function initChubView() {
             });
         }
 
-        on('chubCharClose', 'click', () => {
-            abortChubDetailFetch();
-            cleanupChubCharModal();
-            hideModal('chubCharModal');
-        });
+        on('chubCharClose', 'click', closeChubCharPreview);
         on('chubDownloadBtn', 'click', () => downloadChubCharacter());
 
         const chubGalleryGrid = document.getElementById('chubCharGalleryGrid');
@@ -1222,11 +1212,7 @@ function initChubView() {
         }
 
         on('chubCharModal', 'click', (e) => {
-            if (e.target.id === 'chubCharModal') {
-                abortChubDetailFetch();
-                cleanupChubCharModal();
-                hideModal('chubCharModal');
-            }
+            if (e.target.id === 'chubCharModal') closeChubCharPreview();
         });
 
         on('chubLoginClose', 'click', () => hideModal('chubLoginModal'));
@@ -1238,7 +1224,7 @@ function initChubView() {
         on('chubSaveKeyBtn', 'click', saveChubToken);
         on('chubClearKeyBtn', 'click', clearChubToken);
 
-        window.registerOverlay?.({ id: 'chubCharModal', tier: 7, close: () => hideModal('chubCharModal') });
+        window.registerOverlay?.({ id: 'chubCharModal', tier: 7, close: closeChubCharPreview });
         window.registerOverlay?.({ id: 'chubLoginModal', tier: 6, close: () => hideModal('chubLoginModal') });
         window.registerOverlay?.({ id: 'chubAuthorBanner', tier: 9, close: () => clearAuthorFilter() });
     }
@@ -1332,33 +1318,43 @@ function saveChubToken() {
 
 function clearChubToken() {
     chubToken = null;
-    
+
     setSettings({
         chubToken: null,
         chubRememberToken: false
     });
     debugLog('[ChubToken] Cleared from gallery settings');
-    
+
     // Also clear old localStorage key if it exists
     try {
         localStorage.removeItem(CHUB_TOKEN_KEY);
     } catch (e) {
         // Ignore
     }
-    
+
     const tokenInput = document.getElementById('chubApiKeyInput');
     if (tokenInput) tokenInput.value = '';
-    
+
     const rememberCheckbox = document.getElementById('chubRememberKey');
     if (rememberCheckbox) rememberCheckbox.checked = false;
-    
+
     if (chubFilterFavorites) {
         chubFilterFavorites = false;
         const favCheckbox = document.getElementById('chubFilterFavorites');
         if (favCheckbox) favCheckbox.checked = false;
         updateChubFiltersButtonState();
     }
-    
+
+    // Drop timeline / follows state so logged-out users dont see stale data.
+    // Token-bump cancels any in-flight chunked render.
+    chubTimelineRenderToken++;
+    chubTimelineCharacters = [];
+    chubTimelineLookup = new Map();
+    chubFollowsNodeMap.clear();
+    if (chubViewMode === 'timeline') {
+        switchChubViewMode('browse');
+    }
+
     showToast('Token cleared', 'info');
 }
 
@@ -1596,7 +1592,7 @@ function initChubTagsDropdown() {
         // Populate tags when opening
         if (wasHidden) {
             renderChubTagsDropdownList();
-            // Skip auto-focus on mobile — it spawns the virtual keyboard
+            // Skip auto-focus on mobile - it spawns the virtual keyboard
             if (!window.matchMedia('(max-width: 768px)').matches) {
                 searchInput?.focus();
             }
@@ -1706,11 +1702,10 @@ function renderChubTagsDropdownList(filter = '') {
     
     // Filter tags
     const filterLower = filter.toLowerCase();
-    const filteredTags = filter 
+    const filteredTags = filter
         ? chubPopularTags.filter(tag => tag.toLowerCase().includes(filterLower))
         : chubPopularTags;
-    
-    // Check if the typed text exactly matches any known tag
+
     const hasExactMatch = filter && filteredTags.some(t => t.toLowerCase() === filterLower);
     const showCustomAdd = filter && filterLower.length >= 2 && !hasExactMatch;
     
@@ -1882,7 +1877,7 @@ async function switchChubViewMode(mode) {
         
         const grid = document.getElementById('chubGrid');
         if (grid) {
-            renderLoadingState(grid, 'Loading ChubAI characters...', 'browse-loading');
+            renderSkeletonGrid(grid);
         }
         
         // Always reload browse data when switching to it to avoid stale/mixed data
@@ -1900,7 +1895,7 @@ async function switchChubViewMode(mode) {
         const tsTarget = timelineSortHeader?._customSelect?.container || timelineSortHeader;
         if (dpTarget) dpTarget.classList.add('browse-filter-hidden');
         if (tsTarget) tsTarget.classList.remove('browse-filter-hidden');
-        // Hide advanced options (sort direction, token limits) — not applicable to timeline
+        // Hide advanced options (sort direction, token limits) - not applicable to timeline
         const advancedOpts = document.getElementById('chubAdvancedOptions');
         const advancedDivider = document.getElementById('chubAdvancedDivider');
         if (advancedOpts) advancedOpts.style.display = 'none';
@@ -1930,13 +1925,19 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         renderTimelineEmpty('login');
         return;
     }
-    
+
+    // Prevent concurrent top-level loads from stacking loading bars / racing renders.
+    // Auto-pagination recursion is allowed through.
+    if (!_isAutoPage && chubTimelineLoadInFlight) return;
+
     const grid = document.getElementById('chubTimelineGrid');
     const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
     const isInitialLoad = !_isAutoPage;
-    
+
+    if (!_isAutoPage) chubTimelineLoadInFlight = true;
+
     if (forceRefresh || (!chubTimelineCursor && chubTimelineCharacters.length === 0)) {
-        renderLoadingState(grid, 'Loading timeline...', 'browse-loading');
+        renderSkeletonGrid(grid);
         if (forceRefresh) {
             chubTimelineCharacters = [];
             chubTimelinePage = 1;
@@ -1945,7 +1946,7 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
             chubTimelineAuthorHasMore = false;
         }
     }
-    
+
     try {
         // Use the dedicated timeline endpoint which returns updates from followed authors
         // This API uses cursor-based pagination, not page-based
@@ -2113,16 +2114,20 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
         
     } catch (e) {
         console.error('[ChubTimeline] Load error:', e);
-        grid.innerHTML = `
-            <div class="chub-timeline-empty">
-                <i class="fa-solid fa-exclamation-triangle"></i>
-                <h3>Failed to Load Timeline</h3>
-                <p>${escapeHtml(e.message)}</p>
-                <button class="action-btn primary browse-retry-btn">
-                    <i class="fa-solid fa-refresh"></i> Retry
-                </button>
-            </div>
-        `;
+        if (grid) {
+            grid.innerHTML = `
+                <div class="chub-timeline-empty">
+                    <i class="fa-solid fa-exclamation-triangle"></i>
+                    <h3>Failed to Load Timeline</h3>
+                    <p>${escapeHtml(e.message)}</p>
+                    <button class="action-btn primary browse-retry-btn">
+                        <i class="fa-solid fa-refresh"></i> Retry
+                    </button>
+                </div>
+            `;
+        }
+    } finally {
+        if (!_isAutoPage) chubTimelineLoadInFlight = false;
     }
 }
 
@@ -2370,7 +2375,7 @@ function renderChubTimeline(appendOnly = false) {
             if (chubFilterHideOwned && isCharInLocalLibrary(c)) return false;
             if (chubFilterHidePossible && isCharPossibleMatchObj(c)) return false;
             if (chubFilterFavorites && chubUserFavoriteIds.size > 0 && !chubUserFavoriteIds.has(c.id || c.project_id)) return false;
-            // Tag filters (client-side — timeline data already has topics)
+            // Tag filters (client-side - timeline data already has topics)
             if (includeTags.length > 0 || excludeTags.length > 0) {
                 const charTopics = (c.topics || []).map(t => t.toLowerCase());
                 if (includeTags.length > 0 && !includeTags.every(t => charTopics.includes(t))) return false;
@@ -2465,7 +2470,7 @@ function performChubCreatorSearch() {
 }
 
 function filterByAuthor(authorName) {
-    // Set filter state BEFORE mode switch — switchChubViewMode('browse')
+    // Set filter state BEFORE mode switch - switchChubViewMode('browse')
     // triggers loadChubCharacters() internally, which must see the author filter
     chubAuthorFilter = authorName;
     chubCurrentSearch = '';
@@ -2607,8 +2612,7 @@ async function updateFollowAuthorButton(authorName) {
     followBtn.style.display = '';
     followBtn.disabled = true;
     followBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
-    
-    // Check if we're following this author
+
     try {
         const followsList = await fetchMyFollowsList();
         chubIsFollowingCurrentAuthor = followsList && followsList.has(authorName.toLowerCase());
@@ -2755,7 +2759,7 @@ async function loadChubCharacters(forceRefresh = false) {
     const loadMoreBtn = document.getElementById('chubLoadMoreBtn');
 
     if (chubCurrentPage === 1) {
-        renderLoadingState(grid, 'Loading ChubAI characters...', 'browse-loading');
+        renderSkeletonGrid(grid);
     }
     
     chubIsLoading = true;
@@ -2858,9 +2862,7 @@ async function loadChubCharacters(forceRefresh = false) {
         if (chubMaxTokens !== 100000) {
             params.set('max_tokens', chubMaxTokens.toString());
         }
-        
-        // Note: Favorites filter is now handled by loadChubFavorites() using gateway API
-        
+
         debugLog('[ChubAI] Search params:', params.toString());
         
         const headers = getChubHeaders(true);
@@ -3038,7 +3040,7 @@ async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
     const loadMoreContainer = document.getElementById('chubLoadMore');
     
     if (chubCurrentPage === 1) {
-        renderLoadingState(grid, 'Loading your favorites...', 'browse-loading');
+        renderSkeletonGrid(grid);
     }
     
     chubIsLoading = true;
@@ -3141,7 +3143,6 @@ async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
             }
         }
         
-        // Check if there's more data
         chubHasMore = data.cursor !== null && nodes.length > 0;
         
         renderChubGrid(chubCurrentPage > 1);
@@ -3262,12 +3263,10 @@ function createChubCard(char, isTimeline = false) {
     const downloads = formatNumber(char.starCount || 0);
     const favorites = formatNumber(char.n_favorites || char.nFavorites || 0);
     const avatarUrl = char.avatar_url || (fullPath ? `https://avatars.charhub.io/avatars/${fullPath}/avatar.webp` : '/img/ai4.png');
-    
-    // Check if this character is in local library
+
     const inLibrary = isCharInLocalLibrary(char);
     const possibleMatch = !inLibrary && view.isCharPossibleMatch(char.name || '', creatorName);
-    
-    // Get up to 3 tags
+
     const tags = (char.topics || []).slice(0, 3);
     
     // Build feature badges
@@ -3395,12 +3394,21 @@ function abortChubDetailFetch() {
     }
 }
 
+// Canonical close path. Match sibling-provider closePreviewModal shape so the
+// back-button / Escape registerOverlay close goes through the same cleanup.
+function closeChubCharPreview() {
+    abortChubDetailFetch();
+    cleanupChubCharModal();
+    hideModal('chubCharModal');
+}
+
 async function openChubCharPreview(char) {
     // Abort any in-flight detail fetch from a previous preview
     abortChubDetailFetch();
     chubSelectedChar = char;
     
     const modal = document.getElementById('chubCharModal');
+    window.resetBrowseSectionCollapseState?.(modal);
     const avatarImg = document.getElementById('chubCharAvatar');
     const nameEl = document.getElementById('chubCharName');
     const creatorLink = document.getElementById('chubCharCreator');
@@ -3487,9 +3495,8 @@ async function openChubCharPreview(char) {
     const favoriteCountEl = document.getElementById('chubCharFavoriteCount');
     favoriteCountEl.textContent = formatNumber(favoritesCount);
     
-    // Check if user has favorited this character (requires token)
     updateChubFavoriteButton(char);
-    
+
     // Creator's Notes (public ChubAI listing description) - use secure iframe renderer
     renderCreatorNotesSecure(char.description || char.tagline || 'No description available.', char.name, creatorNotesEl);
     
@@ -3517,10 +3524,10 @@ async function openChubCharPreview(char) {
         lorebookStat.style.display = 'none';
     }
 
-    // Gallery stat — hidden until detail data loads with actual count
+    // Gallery stat - hidden until detail data loads with actual count
     if (galleryStat) galleryStat.style.display = 'none';
     
-    // Reset definition sections — show loading indicator until detail fetch completes
+    // Reset definition sections - show loading indicator until detail fetch completes
     const defLoading = document.getElementById('chubCharDefinitionLoading');
     descSection.style.display = 'none';
     personalitySection.style.display = 'none';
@@ -3533,7 +3540,7 @@ async function openChubCharPreview(char) {
     if (galleryGrid) galleryGrid.innerHTML = '';
     if (defLoading) defLoading.style.display = 'block';
     
-    // Import button state — show "In Library" if already imported
+    // Import button state - show "In Library" if already imported
     const downloadBtn = document.getElementById('chubDownloadBtn');
     if (downloadBtn) {
         if (inLibrary) {
@@ -3555,7 +3562,7 @@ async function openChubCharPreview(char) {
     modal.classList.remove('hidden');
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
-    
+
     const renderAltGreetings = (greetings) => {
         if (!altGreetingsSection || !altGreetingsEl) return;
         if (!Array.isArray(greetings) || greetings.length === 0) {
@@ -3571,7 +3578,7 @@ async function openChubCharPreview(char) {
             return cleaned.length > 90 ? `${cleaned.slice(0, 87)}...` : cleaned;
         };
         altGreetingsSection.style.display = 'block';
-        // Build HTML with empty bodies — content is rendered lazily on toggle to save memory
+        // Build HTML with empty bodies - content is rendered lazily on toggle to save memory
         altGreetingsEl.innerHTML = greetings.map((greeting, idx) => {
             const label = `#${idx + 1}`;
             const preview = escapeHtml(buildPreview(greeting));
@@ -3594,7 +3601,7 @@ async function openChubCharPreview(char) {
                 if (body && !body.dataset.rendered) {
                     const idx = parseInt(details.dataset.greetingIdx, 10);
                     if (greetings[idx] != null) {
-                        body.innerHTML = DOMPurify.sanitize(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
+                        body.innerHTML = safePurify(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
                     }
                     body.dataset.rendered = '1';
                 }
@@ -3620,35 +3627,43 @@ async function openChubCharPreview(char) {
             renderCreatorNotesSecure(node.description, char.name, creatorNotesEl);
         }
 
-        // Character Definition (def.personality in ChubAI API = character description/definition for prompt)
-        // This is confusingly named in ChubAI's API - "personality" is actually the main character definition
-        if (def.personality) {
-            descSection.style.display = 'block';
-            descEl.innerHTML = DOMPurify.sanitize(formatRichText(def.personality, char.name, true), BROWSE_PURIFY_CONFIG);
-            descEl.dataset.fullContent = def.personality;
-        }
-
-        // Scenario
-        if (def.scenario) {
-            scenarioSection.style.display = 'block';
-            scenarioEl.innerHTML = DOMPurify.sanitize(formatRichText(def.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
-            scenarioEl.dataset.fullContent = def.scenario;
-        }
-
-        // Example Dialogs
-        if (def.mes_example) {
-            examplesSection.style.display = 'block';
-            examplesEl.innerHTML = DOMPurify.sanitize(formatRichText(def.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
-            examplesEl.dataset.fullContent = def.mes_example;
-        }
-
-        // First message - ChubAI uses first_message, not first_mes
+        // ChubAI quirk: def.personality is the main character definition, not a personality field.
         const firstMsg = def.first_message || def.first_mes;
-        if (firstMsg) {
-            firstMsgSection.style.display = 'block';
-            firstMsgEl.innerHTML = DOMPurify.sanitize(formatRichText(firstMsg, char.name, true), BROWSE_PURIFY_CONFIG);
-            firstMsgEl.dataset.fullContent = firstMsg;
-        }
+
+        // RAF defer so safePurify doesnt block the modal-open paint frame.
+        requestAnimationFrame(() => {
+            if (def.personality) {
+                descSection.style.display = 'block';
+                descEl.innerHTML = safePurify(formatRichText(def.personality, char.name, true), BROWSE_PURIFY_CONFIG);
+                descEl.dataset.fullContent = def.personality;
+            } else if (descSection) {
+                descSection.style.display = 'none';
+            }
+
+            if (def.scenario) {
+                scenarioSection.style.display = 'block';
+                scenarioEl.innerHTML = safePurify(formatRichText(def.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
+                scenarioEl.dataset.fullContent = def.scenario;
+            } else if (scenarioSection) {
+                scenarioSection.style.display = 'none';
+            }
+
+            if (def.mes_example) {
+                examplesSection.style.display = 'block';
+                examplesEl.innerHTML = safePurify(formatRichText(def.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
+                examplesEl.dataset.fullContent = def.mes_example;
+            } else if (examplesSection) {
+                examplesSection.style.display = 'none';
+            }
+
+            if (firstMsg) {
+                firstMsgSection.style.display = 'block';
+                firstMsgEl.innerHTML = safePurify(formatRichText(firstMsg, char.name, true), BROWSE_PURIFY_CONFIG);
+                firstMsgEl.dataset.fullContent = firstMsg;
+            } else if (firstMsgSection) {
+                firstMsgSection.style.display = 'none';
+            }
+        });
 
         // Update greetings count if we have better data
         if (def.alternate_greetings?.length > 0) {
@@ -3672,7 +3687,7 @@ async function openChubCharPreview(char) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${count})`;
                 galleryGrid.innerHTML = node.galleryImages.map(img =>
-                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
+                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`
                 ).join('');
             }
         } else if (node.hasGallery && gallerySection && galleryGrid) {
@@ -3701,27 +3716,35 @@ async function openChubCharPreview(char) {
         try {
             const detailUrl = `https://api.chub.ai/api/characters/${fullPath}?full=true`;
 
-            // Fetch definition and gallery in parallel
+            // Gateway only allow-origins https://chub.ai so direct CORS-rejects; inline /proxy/ fallback keeps the Response for the 401/403 auth-required hint.
             const galleryHeaders = { 'Accept': 'application/json' };
             if (chubToken) {
                 galleryHeaders['samwise'] = chubToken;
                 galleryHeaders['CH-API-KEY'] = chubToken;
             }
             const charProjectId = char.id || char.project_id;
-            const galleryPromise = char.hasGallery && charProjectId
-                ? fetch(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`, {
-                    headers: galleryHeaders, signal: fetchSignal
-                }).then(r => {
-                    if (r.ok) return r.json();
-                    if (r.status === 401 || r.status === 403) return { nodes: [], _authRequired: true };
-                    return { nodes: [] };
-                })
-                  .then(data => {
-                      const images = (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false }));
-                      if (data._authRequired) images._authRequired = true;
-                      return images;
-                  })
-                  .catch(err => { debugLog('[ChubAI] Gallery fetch failed:', err.message); return []; })
+            const fetchGallery = async (url) => {
+                try { return await fetch(url, { headers: galleryHeaders, signal: fetchSignal }); }
+                catch (e) {
+                    if (e.name === 'AbortError') throw e;
+                    return await fetch(`/proxy/${encodeURIComponent(url)}`, { headers: galleryHeaders, signal: fetchSignal });
+                }
+            };
+            // Search-result hasGallery is unreliable (returns false for chars whose detail says true),
+            // so always probe by project id. Empty response is fine; render already handles no-gallery.
+            const galleryPromise = charProjectId
+                ? fetchGallery(`${CHUB_GATEWAY_BASE}/api/gallery/project/${charProjectId}?limit=100&count=false`)
+                    .then(r => {
+                        if (r.ok) return r.json();
+                        if (r.status === 401 || r.status === 403) return { nodes: [], _authRequired: true };
+                        return { nodes: [] };
+                    })
+                    .then(data => {
+                        const images = (data.nodes || []).map(n => ({ url: n.primary_image_path, id: n.uuid, nsfw: n.nsfw_image || false }));
+                        if (data._authRequired) images._authRequired = true;
+                        return images;
+                    })
+                    .catch(err => { debugLog('[ChubAI] Gallery fetch failed:', err.message); return []; })
                 : Promise.resolve([]);
 
             const [response, galleryImages] = await Promise.all([
@@ -3737,7 +3760,7 @@ async function openChubCharPreview(char) {
                     debugLog('[ChubAI] Detail fetch completed but modal moved on — discarding');
                 } else {
                     const node = detailData.node || detailData;
-                    // Strip heavy data we never display — character_book (lorebook) can be
+                    // Strip heavy data we never display - character_book (lorebook) can be
                     // 100KB-1MB by itself, mes_example and extensions add more.
                     // Only keep fields actually used in applyDetailData.
                     const stripped = {
@@ -3754,7 +3777,7 @@ async function openChubCharPreview(char) {
                         galleryAuthRequired: !!(galleryImages?._authRequired && !galleryImages.length),
                         hasGallery: char.hasGallery || node.hasGallery || false,
                     };
-                    // Enforce LRU cap — evict oldest entries
+                    // Enforce LRU cap - evict oldest entries
                     while (chubDetailCache.size >= CHUB_DETAIL_CACHE_MAX) {
                         const oldestKey = chubDetailCache.keys().next().value;
                         chubDetailCache.delete(oldestKey);
@@ -3806,7 +3829,6 @@ async function updateChubFavoriteButton(char) {
         return;
     }
     
-    // Check if user has favorited this character via API
     try {
         const charId = char.id || char.project_id;
         if (!charId) {
@@ -3835,8 +3857,7 @@ async function updateChubFavoriteButton(char) {
         if (response.ok) {
             const data = await response.json();
             debugLog('[ChubAI] Favorites response:', data);
-            
-            // Check if this character's ID is in the favorites list
+
             let isFavorited = false;
             const nodes = data.nodes || data.data || data || [];
             if (Array.isArray(nodes)) {
@@ -3921,9 +3942,7 @@ async function toggleChubCharFavorite() {
                 favoriteBtn.classList.remove('favorited');
                 favoriteBtn.querySelector('i').className = 'fa-regular fa-heart';
                 favoriteBtn.title = 'Add to favorites on ChubAI';
-                // Update stored state
                 chubSelectedChar._isFavorited = false;
-                // Decrement count
                 const currentCount = parseInt(favoriteCountEl.textContent.replace(/[KM]/g, '')) || 0;
                 if (currentCount > 0) {
                     chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 1) - 1;
@@ -3934,9 +3953,7 @@ async function toggleChubCharFavorite() {
                 favoriteBtn.classList.add('favorited');
                 favoriteBtn.querySelector('i').className = 'fa-solid fa-heart';
                 favoriteBtn.title = 'Remove from favorites on ChubAI';
-                // Update stored state
                 chubSelectedChar._isFavorited = true;
-                // Increment count
                 chubSelectedChar.n_favorites = (chubSelectedChar.n_favorites || 0) + 1;
                 favoriteCountEl.textContent = formatNumber(chubSelectedChar.n_favorites);
                 showToast('Added to ChubAI favorites!', 'success');
@@ -3987,7 +4004,7 @@ function cleanupChubCharModal() {
             if (el) el.innerHTML = '';
         }
         
-        // Clear creator notes iframe — disconnect ResizeObserver and release its document
+        // Clear creator notes iframe - disconnect ResizeObserver and release its document
         const creatorNotesEl = document.getElementById('chubCreatorNotes');
         cleanupCreatorNotesContainer(creatorNotesEl);
     }
@@ -4066,43 +4083,55 @@ async function downloadChubCharacter() {
         const result = await provider.importCharacter(fullPath, chubSelectedChar, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        // Close the character modal and free preview data
-        cleanupChubCharModal();
-        document.getElementById('chubCharModal').classList.add('hidden');
-
-        await new Promise(r => requestAnimationFrame(r));
-        
-        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
-        
-        // Show import summary if character has gallery or embedded media
         const localAvatarFileName = result.fileName;
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        
-        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGallery ? [{
-                    name: result.characterName,
-                    fullPath: result.fullPath,
-                    provider: provider,
-                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
-                    url: `https://chub.ai/characters/${result.fullPath}`,
-                    avatar: localAvatarFileName,
-                    galleryId: result.galleryId
-                }] : [],
-                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
-                    name: result.characterName,
-                    avatar: localAvatarFileName,
-                    avatarUrl: result.avatarUrl,
-                    mediaUrls: mediaUrls,
-                    galleryPageUrls: galleryPageUrls,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }] : []
-            });
+        const showSummary = (hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            galleryCharacters: hasGallery ? [{
+                name: result.characterName,
+                fullPath: result.fullPath,
+                provider: provider,
+                linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                url: `https://chub.ai/characters/${result.fullPath}`,
+                avatar: localAvatarFileName,
+                galleryId: result.galleryId
+            }] : [],
+            mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
+                name: result.characterName,
+                avatar: localAvatarFileName,
+                avatarUrl: result.avatarUrl,
+                mediaUrls: mediaUrls,
+                galleryPageUrls: galleryPageUrls,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }] : []
+        };
+
+        // Mobile holds the preview behind the summary while it fades in (small-viewport
+        // fade is too visible). Desktop snaps the preview off first then opens summary,
+        // matching the pre-mobile-pass behaviour.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closeChubCharPreview();
+            } else {
+                closeChubCharPreview();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closeChubCharPreview();
         }
-        
+
+        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
+
         // === REFRESH + SYNC ===
         await new Promise(r => setTimeout(r, 200));
         const added = await fetchAndAddCharacter(localAvatarFileName);
@@ -4112,18 +4141,7 @@ async function downloadChubCharacter() {
         }
         view.buildLocalLibraryLookup();
         markChubCardAsImported(fullPath);
-        
-        // Also refresh main ST window's character list (fire-and-forget)
-        try {
-            const context = CoreAPI.getSTContext();
-            if (context && typeof context.getCharacters === 'function') {
-                debugLog('[ChubDownload] Triggering character refresh in main window...');
-                context.getCharacters().catch(e => console.warn('[ChubDownload] Main window refresh failed:', e));
-            }
-        } catch (e) {
-            console.warn('[ChubDownload] Could not access main window:', e);
-        }
-        
+
     } catch (e) {
         console.error('[ChubDownload] Download error:', e);
         showToast('Download failed: ' + e.message, 'error');

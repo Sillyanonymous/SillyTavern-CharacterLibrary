@@ -1,4 +1,4 @@
-// Shared JannyAI API utilities — used by both janny-provider.js and janny-browse.js
+// Shared JannyAI API utilities - used by both janny-provider.js and janny-browse.js
 //
 // Contains constants, tag mapping, MeiliSearch token management,
 // proxy fetch helpers, and text utilities.

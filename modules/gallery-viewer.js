@@ -402,6 +402,7 @@ function showImage(index) {
     
     if (filenameEl) {
         filenameEl.textContent = media.name;
+        filenameEl.title = media.name;
     }
     
     updateCounter();

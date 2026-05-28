@@ -118,6 +118,10 @@ export function findCharacterGalleryUrls(character) {
 const EXTRACT_TIMEOUT_MS = 15000;
 
 export async function extractGalleryImages(url, opts = {}) {
+    const safety = window.isUrlSafeForDownload?.(url);
+    if (safety && !safety.ok) {
+        return { images: [], error: `URL rejected: ${safety.reason}` };
+    }
     for (const ext of extractors) {
         if (ext.patterns.some(p => p.test(url))) {
             const timeout = ext.extractTimeout ?? EXTRACT_TIMEOUT_MS;

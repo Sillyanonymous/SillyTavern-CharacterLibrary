@@ -1,8 +1,8 @@
-// JannyBrowseView — JannyAI browse/search UI for the Online tab
+// JannyBrowseView - JannyAI browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     JANNY_SEARCH_URL,
     JANNY_IMAGE_BASE,
@@ -29,10 +29,14 @@ const {
     getCharacterGalleryId,
     showImportSummaryModal,
     formatRichText,
+    safePurify,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     debounce,
     getProviderExcludeTags,
+    renderLoadingState,
+    renderSkeletonGrid,
+    renderEmptyState,
 } = CoreAPI;
 
 // ========================================
@@ -56,7 +60,7 @@ let jannySortMode = 'newest';
 let jannySelectedChar = null;
 let jannyGridRenderedCount = 0;
 
-// Filter state — mirrors Chub's filter model for parity
+// Filter state - mirrors Chub's filter model for parity
 let jannyShowLowQuality = false;
 let jannyMinTokens = 29;
 let jannyMaxTokens = 100000;
@@ -319,12 +323,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('jannyLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching JannyAI...</p>
-            </div>
-        `;
+        renderSkeletonGrid(grid);
     }
 
     if (loadMoreBtn) {
@@ -410,12 +409,21 @@ async function loadCharacters(append = false) {
         renderGrid(jannyCharacters, append);
 
         if (!append && jannyCharacters.length === 0) {
-            grid.innerHTML = `
-                <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-search" style="font-size: 2rem; opacity: 0.5;"></i>
-                    <p style="margin-top: 12px;">No characters found</p>
-                </div>
-            `;
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            if (isMobile) {
+                renderEmptyState(grid, {
+                    icon: 'fa-solid fa-ghost',
+                    title: 'No matches on JannyAI',
+                    hint: 'Try a different search term or relax your tag filters. JannyAI search is keyword-based, broad terms tend to surface more results.',
+                });
+            } else {
+                grid.innerHTML = `
+                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
+                        <i class="fa-solid fa-search" style="font-size: 2rem; opacity: 0.5;"></i>
+                        <p style="margin-top: 12px;">No characters found</p>
+                    </div>
+                `;
+            }
         }
 
         debugLog('[JannyBrowse] Loaded', hits.length, 'characters, page', jannyCurrentPage, '/', totalPages);
@@ -427,7 +435,7 @@ async function loadCharacters(append = false) {
         if (!append && grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                     <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                     <button class="glass-btn" style="margin-top: 12px;" id="jannyRetryBtn">
                         <i class="fa-solid fa-redo"></i> Retry
@@ -460,6 +468,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('jannyCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.name || 'Unknown';
     const creatorNotes = stripHtml(hit.description) || '';
@@ -494,7 +503,7 @@ function openPreviewModal(hit) {
     tagsEl.innerHTML = tags.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
     requestAnimationFrame(() => applyTagsClamp(tagsEl));
 
-    // Creator's Notes (website description — may include inline images from ella.janitorai.com)
+    // Creator's Notes (website description - may include inline images from ella.janitorai.com)
     const rawDescription = hit.description || '';
     const creatorNotesSection = document.getElementById('jannyCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('jannyCharCreatorNotes');
@@ -506,17 +515,19 @@ function openPreviewModal(hit) {
         if (creatorNotesEl) creatorNotesEl.innerHTML = '';
     }
 
-    // Show loading indicator in description section; hide others
+    // Skeletons across all heavy sections during the fetchAndPopulate network wait.
     const descSection = document.getElementById('jannyCharDescriptionSection');
     const descEl = document.getElementById('jannyCharDescription');
     const scenarioSection = document.getElementById('jannyCharScenarioSection');
+    const scenarioEl = document.getElementById('jannyCharScenario');
     const firstMsgSection = document.getElementById('jannyCharFirstMsgSection');
+    const firstMsgEl = document.getElementById('jannyCharFirstMsg');
     const examplesSection = document.getElementById('jannyCharExamplesSection');
-    descSection.style.display = 'block';
-    descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
-    scenarioSection.style.display = 'none';
-    firstMsgSection.style.display = 'none';
-    examplesSection.style.display = 'none';
+    const examplesEl = document.getElementById('jannyCharExamples');
+    if (descSection && descEl) { descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3); }
+    if (scenarioSection && scenarioEl) { scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2); }
+    if (firstMsgSection && firstMsgEl) { firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4); }
+    if (examplesSection && examplesEl) { examplesSection.style.display = 'block'; examplesEl.innerHTML = skeletonLines(3); }
 
     // Import button state
     const importBtn = document.getElementById('jannyImportBtn');
@@ -539,7 +550,7 @@ function openPreviewModal(hit) {
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
 
-    // Fetch full details in background — store promise so Import can await it
+    // Fetch full details in background - store promise so Import can await it
     const fetchToken = ++jannyDetailFetchToken;
     jannyDetailFetchPromise = fetchAndPopulateDetails(hit, fetchToken);
 }
@@ -561,7 +572,7 @@ async function fetchAndPopulateDetails(hit, token) {
             console.warn('[JannyBrowse] Detail fetch failed:', e.message);
         }
 
-        // Stale check — user may have opened a different card
+        // Stale check - user may have opened a different card
         if (token !== jannyDetailFetchToken) return;
 
         if (!charData) {
@@ -598,7 +609,7 @@ async function fetchAndPopulateDetails(hit, token) {
         if (descSection) {
             if (personality) {
                 descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = formatRichText(personality, name, false);
+                if (descEl) descEl.innerHTML = safePurify(formatRichText(personality, name, true), BROWSE_PURIFY_CONFIG);
             } else {
                 descSection.style.display = 'none';
             }
@@ -608,7 +619,9 @@ async function fetchAndPopulateDetails(hit, token) {
         const scenarioEl = document.getElementById('jannyCharScenario');
         if (scenarioSection && scenario) {
             scenarioSection.style.display = 'block';
-            if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
+            if (scenarioEl) scenarioEl.innerHTML = safePurify(formatRichText(scenario, name, true), BROWSE_PURIFY_CONFIG);
+        } else if (scenarioSection) {
+            scenarioSection.style.display = 'none';
         }
 
         const firstMsgSection = document.getElementById('jannyCharFirstMsgSection');
@@ -616,16 +629,20 @@ async function fetchAndPopulateDetails(hit, token) {
         if (firstMsgSection && firstMessage) {
             firstMsgSection.style.display = 'block';
             if (firstMsgEl) {
-                firstMsgEl.innerHTML = formatRichText(firstMessage, name, false);
+                firstMsgEl.innerHTML = safePurify(formatRichText(firstMessage, name, true), BROWSE_PURIFY_CONFIG);
                 firstMsgEl.dataset.fullContent = firstMessage;
             }
+        } else if (firstMsgSection) {
+            firstMsgSection.style.display = 'none';
         }
 
         const examplesSection = document.getElementById('jannyCharExamplesSection');
         const examplesEl = document.getElementById('jannyCharExamples');
         if (examplesSection && exampleDialogs) {
             examplesSection.style.display = 'block';
-            if (examplesEl) examplesEl.innerHTML = formatRichText(exampleDialogs, name, false);
+            if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(exampleDialogs, name, true), BROWSE_PURIFY_CONFIG);
+        } else if (examplesSection) {
+            examplesSection.style.display = 'none';
         }
     } catch (err) {
         debugLog('[JannyBrowse] Detail fetch error:', err);
@@ -749,28 +766,42 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(identifier, fallbackData, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
-        // Show import summary before library refresh so modal appears immediately
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                mediaCharacters: [{
-                    characterName: result.characterName,
-                    name: result.characterName,
-                    fileName: result.fileName,
-                    avatar: result.fileName,
-                    galleryId: result.galleryId,
-                    mediaUrls,
-                    galleryPageUrls,
-                    cardData: result.cardData
-                }]
-            });
+        const showSummary = (mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            mediaCharacters: [{
+                characterName: result.characterName,
+                name: result.characterName,
+                fileName: result.fileName,
+                avatar: result.fileName,
+                galleryId: result.galleryId,
+                mediaUrls,
+                galleryPageUrls,
+                cardData: result.cardData
+            }]
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         // Lightweight single-character add (avoids OOM from full list reload on mobile)
         const added = await fetchAndAddCharacter(result.fileName);
@@ -1085,7 +1116,7 @@ function initJannyView() {
         { dropdownId: 'jannyFiltersDropdown', buttonId: 'jannyFiltersBtn' }
     ]);
 
-    // ── Preview modal events (only attach once — modal DOM persists across provider switches) ──
+    // ── Preview modal events (only attach once - modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
 
@@ -1480,6 +1511,10 @@ class JannyBrowseView extends BrowseView {
         const grid = document.getElementById('jannyGrid');
         if (grid) this.observeImages(grid);
         loadCharacters(false);
+    }
+
+    getSearchInputId(mode) {
+        return mode === 'character' ? 'jannySearchInput' : null;
     }
 
     applyDefaults(defaults) {

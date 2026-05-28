@@ -1,8 +1,8 @@
-// ChartavernBrowseView — CharacterTavern browse/search UI for the Online tab
+// ChartavernBrowseView - CharacterTavern browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     searchCards,
     fetchCharacterDetail,
@@ -23,6 +23,7 @@ const {
     onElement: on,
     showToast,
     escapeHtml,
+    safePurify,
     debugLog,
     getSetting,
     setSetting,
@@ -38,27 +39,9 @@ const {
     apiRequest,
     cleanupCreatorNotesContainer,
     getProviderExcludeTags,
+    renderLoadingState,
+    renderSkeletonGrid,
 } = CoreAPI;
-
-// ========================================
-// CONSTANTS
-// ========================================
-
-
-
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
-        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
-    ],
-    ALLOWED_ATTR: [
-        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
-        'width', 'height', 'loading', 'color', 'size', 'align'
-    ],
-    ALLOW_DATA_ATTR: false
-};
 
 // ========================================
 // STATE
@@ -288,12 +271,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('ctLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching CharacterTavern...</p>
-            </div>
-        `;
+        renderSkeletonGrid(grid);
     }
 
     if (loadMoreBtn) {
@@ -396,7 +374,7 @@ async function loadCharacters(append = false) {
         if (!append && grid) {
             grid.innerHTML = `
                 <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                    <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                     <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                     <button class="glass-btn" style="margin-top: 12px;" id="ctRetryBtn">
                         <i class="fa-solid fa-redo"></i> Retry
@@ -428,6 +406,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('ctCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.name || 'Unknown';
     const author = hit.author || hit.path?.split('/')[0] || 'Unknown';
@@ -472,7 +451,7 @@ function openPreviewModal(hit) {
         const openBtn = document.getElementById('ctOpenInBrowserBtn');
         if (openBtn) openBtn.href = ctUrl;
 
-        // Tagline (above meta grid, no section header — matches Chub pattern)
+        // Tagline (above meta grid, no section header - matches Chub pattern)
         const taglineSection = document.getElementById('ctCharTaglineSection');
         const taglineEl = document.getElementById('ctCharTagline');
         if (taglineSection) {
@@ -520,55 +499,52 @@ function openPreviewModal(hit) {
             requestAnimationFrame(() => applyTagsClamp(tagsEl));
         }
 
-        // Creator's Notes (public listing description — always visible)
+        // Skeletons sync, safePurify pipeline RAF-deferred so it doesnt block the modal-open paint.
         const creatorNotesEl = document.getElementById('ctCharCreatorNotes');
-        if (creatorNotesEl) {
-            if (creatorNotes) {
-                creatorNotesEl.innerHTML = formatRichText(creatorNotes, name, false);
-            } else {
-                creatorNotesEl.textContent = 'No description available.';
-            }
-        }
-
-        // Description (character definition)
         const descSection = document.getElementById('ctCharDescriptionSection');
         const descEl = document.getElementById('ctCharDescription');
-        charDef = hit.characterDefinition || '';
-        if (descSection) {
-            if (charDef) {
-                descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = formatRichText(charDef, name, false);
-            } else {
-                descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
-            }
-        }
-
         const scenarioSection = document.getElementById('ctCharScenarioSection');
         const scenarioEl = document.getElementById('ctCharScenario');
-        const scenario = hit.characterScenario || '';
-        if (scenarioSection) {
-            if (scenario) {
-                scenarioSection.style.display = 'block';
-                if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
-            } else {
-                scenarioSection.style.display = 'none';
-            }
-        }
-
         const firstMsgSection = document.getElementById('ctCharFirstMsgSection');
         const firstMsgEl = document.getElementById('ctCharFirstMsg');
+        charDef = hit.characterDefinition || '';
+        const scenario = hit.characterScenario || '';
         const firstMsg = hit.characterFirstMessage || '';
-        if (firstMsgSection) {
-            if (firstMsg) {
-                firstMsgSection.style.display = 'block';
-                if (firstMsgEl) firstMsgEl.innerHTML = formatRichText(firstMsg, name, false);
-            } else {
-                firstMsgSection.style.display = 'none';
+        if (creatorNotesEl) creatorNotesEl.innerHTML = skeletonLines(3);
+        if (descSection && descEl) { descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3); }
+        if (scenarioSection && scenarioEl) { scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2); }
+        if (firstMsgSection && firstMsgEl) { firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4); }
+        requestAnimationFrame(() => {
+            if (creatorNotesEl) {
+                if (creatorNotes) {
+                    creatorNotesEl.innerHTML = safePurify(formatRichText(creatorNotes, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    creatorNotesEl.textContent = 'No description available.';
+                }
             }
-        }
+            if (descSection && descEl) {
+                if (charDef) {
+                    descEl.innerHTML = safePurify(formatRichText(charDef, name, true), BROWSE_PURIFY_CONFIG);
+                }
+                // No charDef: keep skeleton, fetchAndPopulateDetails fills it.
+            }
+            if (scenarioSection) {
+                if (scenario) {
+                    if (scenarioEl) scenarioEl.innerHTML = safePurify(formatRichText(scenario, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    scenarioSection.style.display = 'none';
+                }
+            }
+            if (firstMsgSection) {
+                if (firstMsg) {
+                    if (firstMsgEl) firstMsgEl.innerHTML = safePurify(formatRichText(firstMsg, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    firstMsgSection.style.display = 'none';
+                }
+            }
+        });
 
-        // Alternate Greetings — collapsible details with lazy rendering (matches Chub pattern)
+        // Alternate Greetings - collapsible details with lazy rendering (matches Chub pattern)
         const altGreetingsSection = document.getElementById('ctCharAltGreetingsSection');
         const altGreetingsEl = document.getElementById('ctCharAltGreetings');
         const altGreetingsCountEl = document.getElementById('ctCharAltGreetingsCount');
@@ -604,7 +580,7 @@ function openPreviewModal(hit) {
                             if (body && !body.dataset.rendered) {
                                 const idx = parseInt(details.dataset.greetingIdx, 10);
                                 if (altGreetings[idx] != null) {
-                                    body.innerHTML = DOMPurify.sanitize(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
+                                    body.innerHTML = safePurify(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
                                 }
                                 body.dataset.rendered = '1';
                             }
@@ -621,14 +597,16 @@ function openPreviewModal(hit) {
         const examplesSection = document.getElementById('ctCharExamplesSection');
         const examplesEl = document.getElementById('ctCharExamples');
         const examples = hit.characterExampleMessages || '';
-        if (examplesSection) {
-            if (examples) {
-                examplesSection.style.display = 'block';
-                if (examplesEl) examplesEl.innerHTML = formatRichText(examples, name, false);
-            } else {
-                examplesSection.style.display = 'none';
+        if (examplesSection && examplesEl) { examplesSection.style.display = 'block'; examplesEl.innerHTML = skeletonLines(3); }
+        requestAnimationFrame(() => {
+            if (examplesSection) {
+                if (examples) {
+                    if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(examples, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    examplesSection.style.display = 'none';
+                }
             }
-        }
+        });
 
         // Import button state
         const importBtn = document.getElementById('ctImportBtn');
@@ -686,48 +664,58 @@ async function fetchAndPopulateDetails(hit, token) {
             ctSelectedChar._fullDetail = card;
         }
 
-        // Creator's Notes from detail API (richer than search hit's pageDescription)
+        // Detail-API populate (richer than the search hit). RAF defer in case the modal-open transition is still running.
         const creatorNotesEl = document.getElementById('ctCharCreatorNotes');
         const detailNotes = card.description || '';
-        if (detailNotes && creatorNotesEl) {
-            creatorNotesEl.innerHTML = formatRichText(detailNotes, name, false);
-        }
-
         const descSection = document.getElementById('ctCharDescriptionSection');
         const descEl = document.getElementById('ctCharDescription');
         const charDef = card.definition_character_description || '';
-        if (descSection) {
-            if (charDef) {
-                descSection.style.display = 'block';
-                if (descEl) descEl.innerHTML = formatRichText(charDef, name, false);
-            } else {
-                descSection.style.display = 'none';
-            }
-        }
-
         const scenarioSection = document.getElementById('ctCharScenarioSection');
         const scenarioEl = document.getElementById('ctCharScenario');
         const scenario = card.definition_scenario || '';
-        if (scenarioSection && scenario) {
-            scenarioSection.style.display = 'block';
-            if (scenarioEl) scenarioEl.innerHTML = formatRichText(scenario, name, false);
-        }
-
         const firstMsgSection = document.getElementById('ctCharFirstMsgSection');
         const firstMsgEl = document.getElementById('ctCharFirstMsg');
         const firstMsg = card.definition_first_message || '';
-        if (firstMsgSection && firstMsg) {
-            firstMsgSection.style.display = 'block';
-            if (firstMsgEl) firstMsgEl.innerHTML = formatRichText(firstMsg, name, false);
-        }
-
         const examplesSection = document.getElementById('ctCharExamplesSection');
         const examplesEl = document.getElementById('ctCharExamples');
         const examples = card.definition_example_messages || '';
-        if (examplesSection && examples) {
-            examplesSection.style.display = 'block';
-            if (examplesEl) examplesEl.innerHTML = formatRichText(examples, name, false);
-        }
+        requestAnimationFrame(() => {
+            if (detailNotes && creatorNotesEl) {
+                creatorNotesEl.innerHTML = safePurify(formatRichText(detailNotes, name, true), BROWSE_PURIFY_CONFIG);
+            }
+            if (descSection) {
+                if (charDef) {
+                    descSection.style.display = 'block';
+                    if (descEl) descEl.innerHTML = safePurify(formatRichText(charDef, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    descSection.style.display = 'none';
+                }
+            }
+            if (scenarioSection) {
+                if (scenario) {
+                    scenarioSection.style.display = 'block';
+                    if (scenarioEl) scenarioEl.innerHTML = safePurify(formatRichText(scenario, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    scenarioSection.style.display = 'none';
+                }
+            }
+            if (firstMsgSection) {
+                if (firstMsg) {
+                    firstMsgSection.style.display = 'block';
+                    if (firstMsgEl) firstMsgEl.innerHTML = safePurify(formatRichText(firstMsg, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    firstMsgSection.style.display = 'none';
+                }
+            }
+            if (examplesSection) {
+                if (examples) {
+                    examplesSection.style.display = 'block';
+                    if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(examples, name, true), BROWSE_PURIFY_CONFIG);
+                } else {
+                    examplesSection.style.display = 'none';
+                }
+            }
+        });
 
         // Lorebook stat (detail API has lorebookId; search hit might not)
         const lorebookStat = document.getElementById('ctCharLorebookStat');
@@ -840,27 +828,41 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(charData.path, charData, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
-        // Show import summary if character has embedded media
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                mediaCharacters: [{
-                    name: result.characterName,
-                    avatar: result.fileName,
-                    avatarUrl: result.avatarUrl,
-                    mediaUrls: mediaUrls,
-                    galleryPageUrls: galleryPageUrls,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }]
-            });
+        const showSummary = (mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            mediaCharacters: [{
+                name: result.characterName,
+                avatar: result.fileName,
+                avatarUrl: result.avatarUrl,
+                mediaUrls: mediaUrls,
+                galleryPageUrls: galleryPageUrls,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }]
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         // Lightweight single-character add (avoids OOM from full list reload on mobile)
         const added = await fetchAndAddCharacter(result.fileName);
@@ -1092,7 +1094,7 @@ function initCtView() {
         loadCharacters(true);
     });
 
-    // NSFW toggle — requires active session for NSFW
+    // NSFW toggle - requires active session for NSFW
     on('ctNsfwToggle', 'click', () => {
         if (!isCtSessionActive()) {
             showToast('Login required for NSFW content. Use the login option in Settings or click here to log in.', 'warning');
@@ -1216,13 +1218,13 @@ function initCtView() {
         loadCharacters(false);
     });
 
-    // Close dropdowns when clicking outside (uses .contains() — works after mobile relocation to body)
+    // Close dropdowns when clicking outside (uses .contains() - works after mobile relocation to body)
     chartavernBrowseView._registerDropdownDismiss([
         { dropdownId: 'ctTagsDropdown', buttonId: 'ctTagsBtn' },
         { dropdownId: 'ctFiltersDropdown', buttonId: 'ctFiltersBtn' },
     ]);
 
-    // ── Preview modal events (attached once — modal DOM persists across provider switches) ──
+    // ── Preview modal events (attached once - modal DOM persists across provider switches) ──
     if (!modalEventsAttached) {
         modalEventsAttached = true;
 
@@ -1370,7 +1372,7 @@ function updateNsfwToggle() {
 }
 
 // ========================================
-// AUTH — CT COOKIE SESSION VIA CL-HELPER
+// AUTH - CT COOKIE SESSION VIA CL-HELPER
 // ========================================
 
 async function openCtLoginModal() {
@@ -1416,7 +1418,7 @@ function updateCtLoginUI() {
     const statusArea = document.getElementById('ctSessionStatus');
     if (statusArea) {
         if (sessionActive) {
-            statusArea.innerHTML = '<i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i> <strong>Connected</strong> — NSFW content available';
+            statusArea.innerHTML = '<i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i> <strong>Connected</strong>, NSFW content available';
             statusArea.style.display = '';
         } else {
             statusArea.style.display = 'none';
@@ -1519,7 +1521,7 @@ async function tryCheckSession() {
         if (savedNsfw) ctNsfwEnabled = true;
         updateNsfwToggle();
     } else {
-        // No active session in cl-helper — try to restore from saved cookie
+        // No active session in cl-helper - try to restore from saved cookie
         const savedCookie = getSetting('ctCookie');
         if (savedCookie) {
             const result = await ctSetCookie(apiRequest, savedCookie);
@@ -1716,7 +1718,7 @@ class ChartavernBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without logging in!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -1731,10 +1733,10 @@ class ChartavernBrowseView extends BrowseView {
                 <div class="pyg-login-section">
                     <div class="pyg-plugin-status">
                         <span id="ctPluginStatusOk" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-check" style="color: #2ecc71;"></i> cl-helper plugin detected
+                            <i class="fa-solid fa-plug-circle-check" style="color: var(--cl-success-bright);"></i> cl-helper plugin detected
                         </span>
                         <span id="ctPluginStatusMissing" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-xmark" style="color: #e67e22;"></i>
+                            <i class="fa-solid fa-plug-circle-xmark" style="color: var(--cl-warning-bright-darker);"></i>
                             cl-helper plugin not found — see <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">setup instructions</a>
                         </span>
                     </div>
@@ -1911,8 +1913,12 @@ class ChartavernBrowseView extends BrowseView {
         initCtView();
         const grid = document.getElementById('ctGrid');
         if (grid) this.observeImages(grid);
-        // Check session silently — if logged in, update toggle and reload with NSFW
+        // Check session silently - if logged in, update toggle and reload with NSFW
         tryCheckSession().then(() => loadCharacters(false));
+    }
+
+    getSearchInputId(mode) {
+        return mode === 'character' ? 'ctSearchInput' : null;
     }
 
     applyDefaults(defaults) {

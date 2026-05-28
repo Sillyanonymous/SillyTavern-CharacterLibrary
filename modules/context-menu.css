@@ -8,7 +8,7 @@
     background: var(--cl-glass-bg);
     backdrop-filter: blur(16px);
     border: 1px solid rgba(var(--cl-accent-rgb), 0.2);
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     box-shadow:
         var(--cl-shadow-xl),
         0 0 40px rgba(0, 0, 0, 0.3),
@@ -39,7 +39,7 @@
 .cl-context-menu-item {
     padding: 7px 12px;
     cursor: pointer;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     transition: background 0.03s;
     display: flex;
     align-items: center;
@@ -69,7 +69,7 @@
 }
 
 .cl-context-menu-item.danger:hover {
-    background: rgba(244, 67, 54, 0.25);
+    background: rgba(var(--cl-error-rgb), 0.25);
 }
 
 .cl-context-menu-item.secondary {
@@ -114,7 +114,7 @@
         display: none;
         position: fixed;
         inset: 0;
-        background: rgba(0,0,0,0.5);
+        background: var(--cl-modal-scrim);
         z-index: 9000;
     }
     .mobile-ctx-scrim.visible { display: block; }
@@ -122,16 +122,18 @@
     .mobile-ctx-sheet {
         position: fixed;
         bottom: 0; left: 0; right: 0;
-        background: var(--bg-secondary, #1e1e2e);
-        border-top: 1px solid rgba(255,255,255,0.1);
-        border-radius: 16px 16px 0 0;
+        background: var(--cl-glass-bg);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-top: 1px solid var(--glass-border);
+        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
         z-index: 9001;
         max-height: 75vh;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
-        padding: 0 0 env(safe-area-inset-bottom, 8px) 0;
+        padding: 0 0 max(8px, var(--safe-bottom)) 0;
         transform: translateY(100%);
-        transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+        transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
     }
     .mobile-ctx-sheet.visible {
         transform: translateY(0);
@@ -141,19 +143,20 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 12px 0 4px;
+        padding: 8px 0 4px;
         cursor: pointer;
     }
     .mobile-ctx-handle-bar {
         width: 40px; height: 4px;
-        border-radius: 2px;
-        background: rgba(255,255,255,0.3);
+        border-radius: var(--radius-2xs);
+        background: var(--text-faint);
+        opacity: 0.4;
     }
 
     /* Items inside the sheet inherit context-menu styling */
     .mobile-ctx-sheet .cl-context-menu-separator {
         height: 1px;
-        background: rgba(255,255,255,0.08);
+        background: var(--glass-border);
         margin: 4px 12px;
     }
     .mobile-ctx-sheet .cl-context-menu-header {

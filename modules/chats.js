@@ -33,6 +33,8 @@ let _modalChatsChar = null;
 const PAGE_SIZE = 50;
 let _renderedCount = 0;
 let _sortedChats = [];
+// Avatar URLs known-loaded this session, used to skip the opacity fade on re-renders.
+const _seenAvatarUrls = new Set();
 let _previewObserver = null;
 let _sentinelObserver = null;
 
@@ -84,7 +86,7 @@ function clearChatCache() {
 }
 
 // ========================================
-// CHARACTER MODAL — CHATS TAB
+// CHARACTER MODAL - CHATS TAB
 // ========================================
 
 async function fetchCharacterChats(char) {
@@ -172,6 +174,17 @@ async function openChat(char, chatFile) {
             CoreAPI.registerGalleryFolderOverride(char, true);
         }
 
+        // Embedded mode: single postMessage so ST handles it atomically (matches cl-open-character flow)
+        if (CoreAPI.getIsEmbedded() && window.parent !== window) {
+            window.parent.postMessage({
+                source: 'character-library',
+                type: 'cl-open-chat',
+                avatar: char.avatar,
+                chatName,
+            }, window.location.origin);
+            return;
+        }
+
         const host = CoreAPI.getHostWindow();
         if (host) {
             let context = null;
@@ -191,10 +204,6 @@ async function openChat(char, chatFile) {
 
                 if (context.openCharacterChat) {
                     await context.openCharacterChat(chatName);
-                }
-
-                if (CoreAPI.getIsEmbedded()) {
-                    CoreAPI.closeEmbeddedPanel();
                 }
 
                 return;
@@ -251,6 +260,19 @@ async function createNewChat(char) {
 // ========================================
 
 function initChatsView() {
+    // Capture-phase load delegate populates the seen-Set independent of promoteCachedChatAvatars's per-img listener-add timing, which races with the parser on mobile and would otherwise leak fades into re-renders. Set key is the raw src attribute so it matches what promote reads on detached <template> content.
+    const chatsView = document.getElementById('chatsView');
+    if (chatsView) {
+        chatsView.addEventListener('load', (e) => {
+            const img = e.target;
+            if (!img || img.tagName !== 'IMG') return;
+            if (img.closest('.chat-avatar-wrap, .chat-group-composite')) {
+                const key = img.getAttribute('src');
+                if (key) _seenAvatarUrls.add(key);
+            }
+        }, true);
+    }
+
     // Register chats lazy-load: load on first visit
     CoreAPI.onViewEnter('chats', () => {
         if (allChats.length === 0) {
@@ -625,13 +647,25 @@ async function fetchFreshChats(isBackground = false) {
 
         if (signal.aborted) return;
         if (newChats.length === 0 && !isBackground) {
-            chatsGrid.innerHTML = `
-                <div class="chats-empty">
-                    <i class="fa-solid fa-comments"></i>
-                    <h3>No Chats Found</h3>
-                    <p>Start a conversation with a character to see it here.</p>
-                </div>
-            `;
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            if (isMobile) {
+                CoreAPI.renderEmptyState(chatsGrid, {
+                    icon: 'fa-solid fa-ghost',
+                    title: 'No chats yet',
+                    hint: 'Start a conversation with any character to see it here. Open a character from the Characters tab and send your first message.',
+                    actionLabel: 'Browse characters',
+                    actionIcon: 'fa-solid fa-users',
+                    onAction: () => CoreAPI.switchView?.('characters'),
+                });
+            } else {
+                chatsGrid.innerHTML = `
+                    <div class="chats-empty">
+                        <i class="fa-solid fa-comments"></i>
+                        <h3>No Chats Found</h3>
+                        <p>Start a conversation with a character to see it here.</p>
+                    </div>
+                `;
+            }
             return;
         }
 
@@ -856,7 +890,7 @@ function renderGroupedChats(chats) {
             groupDataAttr = `data-group-id="${CoreAPI.escapeHtml(entity.group.id)}"`;
         } else {
             const char = entity.character;
-            const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+            const avatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(char.avatar);
             avatarHtml = avatarUrl
                 ? `<div class="chat-avatar-wrap chat-group-avatar-size"><img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-group-avatar" onload="this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'"></div>`
                 : `<div class="chat-group-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
@@ -881,6 +915,7 @@ function renderGroupedChats(chats) {
         `;
     }).join('');
 
+    promoteCachedChatAvatars(groupedView);
     setupPreviewObserver();
 }
 
@@ -897,7 +932,9 @@ function appendFlatPage(container) {
     for (let i = start; i < end; i++) {
         const tmp = document.createElement('template');
         tmp.innerHTML = createChatCard(_sortedChats[i]);
-        fragment.appendChild(tmp.content.firstElementChild);
+        const card = tmp.content.firstElementChild;
+        promoteCachedChatAvatars(card);
+        fragment.appendChild(card);
     }
     container.appendChild(fragment);
     _renderedCount = end;
@@ -1085,6 +1122,37 @@ function getGroupAvatarUrl(group) {
     return null;
 }
 
+// Cache-hit promotion: skip the opacity fade when an avatar is already in the browser cache. Uses the raw src attribute (not img.src) as the Set key because on mobile a detached <template>-content img can resolve img.src differently than the attached form, breaking sync lookups across renders.
+function promoteCachedChatAvatars(root) {
+    if (!root || !root.querySelectorAll) return;
+    for (const wrap of root.querySelectorAll('.chat-avatar-wrap:not(.loaded)')) {
+        const img = wrap.querySelector('img');
+        if (!img) continue;
+        const key = img.getAttribute('src');
+        if (key && (_seenAvatarUrls.has(key) || (img.complete && img.naturalWidth > 0))) {
+            _seenAvatarUrls.add(key);
+            wrap.classList.add('loaded');
+        } else if (key) {
+            img.addEventListener('load', () => _seenAvatarUrls.add(key), { once: true });
+        }
+    }
+    for (const composite of root.querySelectorAll('.chat-group-composite:not(.loaded)')) {
+        const imgs = composite.querySelectorAll('img');
+        let allCached = imgs.length > 0;
+        for (const img of imgs) {
+            const key = img.getAttribute('src');
+            if (key && (_seenAvatarUrls.has(key) || (img.complete && img.naturalWidth > 0))) {
+                _seenAvatarUrls.add(key);
+                img.classList.add('loaded');
+            } else {
+                allCached = false;
+                if (key) img.addEventListener('load', () => _seenAvatarUrls.add(key), { once: true });
+            }
+        }
+        if (allCached) composite.classList.add('loaded');
+    }
+}
+
 function buildGroupAvatarHtml(group, cssClass = 'chat-card-avatar') {
     const activeMembers = (group.members || []).filter(m => m && !(group.disabled_members || []).includes(m));
     const display = activeMembers.slice(0, 4);
@@ -1098,7 +1166,7 @@ function buildGroupAvatarHtml(group, cssClass = 'chat-card-avatar') {
 
     const count = display.length;
     const imgs = display.map(avatar => {
-        const url = CoreAPI.escapeHtml(CoreAPI.getCharacterAvatarUrl(avatar) || '/img/ai4.png');
+        const url = CoreAPI.escapeHtml(CoreAPI.getCharacterAvatarStThumbUrl(avatar) || '/img/ai4.png');
         return `<img src="${url}" alt="" onload="this.classList.add('loaded');this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'">`;
     }).join('');
 
@@ -1136,7 +1204,7 @@ function createChatCard(chat) {
         isActive = false;
     } else {
         const char = chat.character;
-        const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+        const avatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(char.avatar);
         avatarHtml = avatarUrl
             ? `<div class="chat-avatar-wrap chat-card-avatar-size"><img src="${avatarUrl}" alt="${CoreAPI.escapeHtml(char.name)}" class="chat-card-avatar" onload="this.parentElement.classList.add('loaded')" onerror="this.src='/img/ai4.png'"></div>`
             : `<div class="chat-card-avatar-fallback"><i class="fa-solid fa-user"></i></div>`;
@@ -1260,7 +1328,7 @@ async function openChatPreview(chat) {
         avatarImg.style.display = '';
         avatarImg.parentElement.querySelector('.chat-group-composite')?.remove();
         avatarImg.parentElement.querySelector('.chat-avatar-wrap')?.remove();
-        const avatarUrl = CoreAPI.getCharacterAvatarUrl(chat.character.avatar) || '/img/ai4.png';
+        const avatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(chat.character.avatar) || '/img/ai4.png';
         avatarImg.src = avatarUrl;
         title.textContent = chatName;
         charName.textContent = chat.character.name;
@@ -1355,7 +1423,7 @@ function renderChatMessages(messages, character, isGroupChat = false) {
 
     currentChatMessages = messages;
 
-    const charAvatarUrl = character ? (CoreAPI.getCharacterAvatarUrl(character.avatar) || '/img/ai4.png') : '/img/ai4.png';
+    const charAvatarUrl = character ? (CoreAPI.getCharacterAvatarStThumbUrl(character.avatar) || '/img/ai4.png') : '/img/ai4.png';
     const charName = character?.name || 'Character';
 
     const formattedTexts = [];
@@ -1406,7 +1474,7 @@ function renderChatMessages(messages, character, isGroupChat = false) {
         let nameClass = 'chat-message-name';
         let nameDataAttr = '';
         if (isGroupChat && !isUser && msg.original_avatar) {
-            msgAvatarUrl = CoreAPI.getCharacterAvatarUrl(msg.original_avatar) || '/img/ai4.png';
+            msgAvatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(msg.original_avatar) || '/img/ai4.png';
             nameClass = 'chat-message-name clickable-char-name';
             nameDataAttr = ` data-char-avatar="${CoreAPI.escapeHtml(msg.original_avatar)}" title="View character details"`;
         }
@@ -1829,7 +1897,6 @@ async function saveChatToServer(chat, messages) {
 // ========================================
 
 function init() {
-    // Initialize chats view handlers
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', initChatsView);
     } else {

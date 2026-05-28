@@ -10,7 +10,7 @@ let batchCheckedCount = 0;
 let batchSelectedAvatars = new Set(); // Characters checked for inclusion in Apply All
 let batchStatusFilter = 'all'; // Active filter: 'all' | 'has-updates' | 'up-to-date' | 'errors' | 'unavailable' | 'applied'
 
-// Base fields to compare (key -> display label) — provider fields merged at init
+// Base fields to compare (key -> display label) - provider fields merged at init
 const BASE_COMPARABLE_FIELDS = {
     // Core character fields
     'name': 'Name',
@@ -60,12 +60,12 @@ const BASE_FIELD_ICONS = {
     'listing_name': 'fa-solid fa-store',
 };
 
-// Effective fields — rebuilt after providers register
+// Effective fields - rebuilt after providers register
 let COMPARABLE_FIELDS = { ...BASE_COMPARABLE_FIELDS };
 let FIELD_ICONS = { ...BASE_FIELD_ICONS };
 
 // Maps provider-specific field paths to their provider ID
-// Base fields are NOT in this map — only provider-contributed fields.
+// Base fields are NOT in this map - only provider-contributed fields.
 let fieldProviderMap = {};
 
 // Groups of provider fields that share a single filter checkbox.
@@ -495,7 +495,7 @@ function compareCards(localData, remoteCard, allowedFields = null) {
             const remoteEntries = remoteValue?.entries || [];
             const localEntries = localValue?.entries || [];
 
-            // Remote has no lorebook but local does — lorebook was removed upstream
+            // Remote has no lorebook but local does - lorebook was removed upstream
             if (remoteEntries.length === 0 && !hasRemoteLorebookMeta(remoteValue)) {
                 if (localEntries.length > 0) {
                     diffs.push({ field, label, local: localValue, remote: remoteValue, isLongText: false });
@@ -573,26 +573,8 @@ function valuesEqual(a, b) {
 let singleModalAvatar = null;
 let singleModalClosedAt = 0;
 
-/**
- * Open the character details modal above the update checker modals.
- * Adds body class that boosts z-index for the overlay and any child modals
- * (confirm-modals, gallery viewer) so they all stack above the update checker.
- * Restores when the overlay is hidden.
- */
 function openCharModalAbove(char) {
-    const overlay = document.getElementById('charModal')?.closest('.modal-overlay')
-                 || document.querySelector('.modal-overlay');
-    if (!overlay) return;
-    document.body.classList.add('char-modal-above');
-    const restore = () => {
-        document.body.classList.remove('char-modal-above');
-        observer.disconnect();
-    };
-    const observer = new MutationObserver(() => {
-        if (overlay.classList.contains('hidden')) restore();
-    });
-    observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
-    CoreAPI.openCharacterModal(char);
+    CoreAPI.openCharModalElevated(char);
 }
 
 /**
@@ -830,7 +812,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Help & tips — collapsible explainer
+    // Help & tips - collapsible explainer
     entriesHtml += `<div class="lorebook-diff-info-box">
         <i class="fa-solid fa-circle-info"></i>
         <div>
@@ -846,13 +828,13 @@ function renderLorebookDiff(diff, idx) {
                     <p>The diff below compares your card's embedded lorebook against the creator's latest remote version. Applying will replace the embedded lorebook with the remote version.</p>
                     <p><strong>What the badges mean:</strong></p>
                     <ul>
-                        <li><span style="color:#81c784;">+</span> <strong>New from remote</strong> — entry exists on the remote provider but not in your card. Will be added.</li>
+                        <li><span style="color:var(--cl-success-pale);">+</span> <strong>New from remote</strong>: entry exists on the remote provider but not in your card. Will be added.</li>
                         <li><span style="color:#ffcc80;">~</span> <strong>Modified</strong> — entry exists in both but some fields differ. Will be updated to match the remote.</li>
                         <li><span style="color:#bdbdbd;">★</span> <strong>Local-only</strong> — entry is in your card but not on the remote. Since applying replaces the full embedded lorebook, this entry will be removed from the card.</li>
                     </ul>
                     <p>For local-only entries that would be removed, Character Library reads your World Info file to check whether each entry also exists there:</p>
                     <ul>
-                        <li><i class="fa-solid fa-shield-halved" style="color:#81c784;"></i> <strong>Safe in World Info</strong> — a matching entry exists in your World Info file. Removing it from the card won't affect your chats since the live copy is untouched.</li>
+                        <li><i class="fa-solid fa-shield-halved" style="color:var(--cl-success-pale);"></i> <strong>Safe in World Info</strong>: a matching entry exists in your World Info file. Removing it from the card won't affect your chats since the live copy is untouched.</li>
                         <li><i class="fa-solid fa-triangle-exclamation" style="color:#ffb74d;"></i> <strong>Not in World Info</strong> — no match found. This entry only exists in the card's embedded data and will be permanently lost after applying.</li>
                     </ul>
                 </div>
@@ -872,7 +854,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Entries that exist on remote but not locally — will be added
+    // Entries that exist on remote but not locally - will be added
     for (const entry of added) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
@@ -884,7 +866,7 @@ function renderLorebookDiff(diff, idx) {
         </div>`;
     }
 
-    // Entries in embedded lorebook but not on remote — will be lost from embedded on apply
+    // Entries in embedded lorebook but not on remote - will be lost from embedded on apply
     for (const entry of localOnly) {
         const name = lorebookEntryName(entry);
         const keys = (entry.keys || []).slice(0, 4).join(', ');
@@ -1039,7 +1021,7 @@ async function resolveWorldFileStatus(containerEl, avatar) {
             const tag = row.querySelector('.lorebook-diff-entry-tag');
             if (found) {
                 if (check) {
-                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color: #81c784; font-size: 11px;"></i>';
+                    check.innerHTML = '<i class="fa-solid fa-shield-halved" style="color: var(--cl-success-pale); font-size: 11px;"></i>';
                     check.title = `Also exists in World Info file "${worldName}" — safe, won't be affected by applying`;
                 }
                 if (tag) tag.textContent = 'local-only · safe in World Info';
@@ -1139,7 +1121,7 @@ function lorebookEntryMatchScore(a, b) {
         if (aName.includes(bName) || bName.includes(aName)) return 0.8;
     }
 
-    // Content similarity fallback — first 200 chars
+    // Content similarity fallback - first 200 chars
     const aCont = (a.content || '').slice(0, 200).toLowerCase().trim();
     const bCont = (b.content || '').slice(0, 200).toLowerCase().trim();
     if (aCont.length > 20 && bCont.length > 20 && aCont === bCont) return 0.7;
@@ -1184,7 +1166,7 @@ const LOREBOOK_META_FIELDS = {
     recursive_scanning: 'Recursive Scanning',
 };
 
-// V2-spec entry fields — everything else (uid, display_index, vectorized, etc.) is ST-internal
+// V2-spec entry fields - everything else (uid, display_index, vectorized, etc.) is ST-internal
 const LOREBOOK_ENTRY_FIELDS = [
     'keys', 'secondary_keys', 'content', 'enabled', 'selective',
     'constant', 'position', 'insertion_order', 'priority', 'case_sensitive',
@@ -1207,10 +1189,10 @@ function normalizeLorebookEntry(entry) {
 //
 // How SillyTavern's lorebook storage works:
 //
-//   character_book (in card PNG)  — Snapshot created at import time. ST does NOT
+//   character_book (in card PNG)  - Snapshot created at import time. ST does NOT
 //                                   re-embed /worlds data on normal saves.
 //
-//   /worlds/{name}.json           — The live working copy. All edits in ST's
+//   /worlds/{name}.json           - The live working copy. All edits in ST's
 //                                   World Info editor go here. Linked via
 //                                   char.data.extensions.world.
 //
@@ -1341,7 +1323,7 @@ function showBatchCheckModal(characters) {
         if (linkInfo?.providerId) representedProviders.add(linkInfo.providerId);
     }
 
-    // Build relevant fields — base fields always included, provider fields only if that provider is represented
+    // Build relevant fields - base fields always included, provider fields only if that provider is represented
     batchRelevantFields = new Set();
     for (const field of Object.keys(COMPARABLE_FIELDS)) {
         const ownerProvider = fieldProviderMap[field];
@@ -1376,7 +1358,7 @@ function showBatchCheckModal(characters) {
             `);
         }
 
-        // Grouped fields — one checkbox per group (only if any path in the group is relevant)
+        // Grouped fields - one checkbox per group (only if any path in the group is relevant)
         for (const [groupName, group] of Object.entries(fieldGroups)) {
             const relevantPaths = group.paths.filter(p => batchRelevantFields.has(p));
             if (relevantPaths.length === 0) continue;
@@ -1479,7 +1461,7 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 const diffs = compareCards(localData, remoteCard, allowedFields);
                 
                 if (diffs.length === 0) {
-                    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Up to date';
+                    if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Up to date';
                     if (itemEl) itemEl.dataset.status = 'up-to-date';
                 } else {
                     if (statusEl) {
@@ -1598,7 +1580,7 @@ async function applySingleUpdates() {
         const field = cb.dataset.field;
         if (field === 'listing_name') { hasListingName = true; return; }
         const remoteValue = getFieldValue(remoteData, field);
-        // null means "clear this field" — undefined would be silently dropped by JSON
+        // null means "clear this field" - undefined would be silently dropped by JSON
         updatedFields[field] = remoteValue ?? null;
     });
     
@@ -1622,7 +1604,7 @@ async function applySingleUpdates() {
             if (batchItem) {
                 const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                 if (statusEl) {
-                    statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
+                    statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Updated';
                 }
                 batchItem.dataset.status = 'applied';
                 updateBatchFilterCounts();
@@ -1827,7 +1809,7 @@ async function applyAllBatchUpdates() {
                 if (batchItem) {
                     const statusEl = batchItem.querySelector('.card-update-batch-item-status');
                     if (statusEl) {
-                        statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--success-color, #4caf50);"></i> Updated';
+                        statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Updated';
                     }
                     batchItem.dataset.status = 'applied';
                 }
@@ -1905,7 +1887,7 @@ function updateSourceBadge(modal, char) {
         }
     }
 
-    // Batch / no character — hide badge (mixed providers)
+    // Batch / no character - hide badge (mixed providers)
     badge.style.display = 'none';
 }
 
@@ -2028,7 +2010,7 @@ function updateBatchFieldCount() {
 }
 
 function handleBatchFieldSelectionChange(e) {
-    // Group checkbox — toggles all paths in the group
+    // Group checkbox - toggles all paths in the group
     const groupCheckbox = e.target.closest('input[type="checkbox"][data-group]');
     if (groupCheckbox) {
         const group = fieldGroups[groupCheckbox.dataset.group];

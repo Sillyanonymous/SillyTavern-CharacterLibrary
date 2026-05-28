@@ -1,11 +1,11 @@
-// Pygmalion Browse View — Online tab UI for pygmalion.chat character browsing
+// Pygmalion Browse View - Online tab UI for pygmalion.chat character browsing
 //
 // Grid-based browse with search, sort, NSFW toggle.
 // Preview modal fetches full character detail via Connect RPC API.
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     searchCharacters,
     fetchCharacterDetail,
@@ -23,13 +23,15 @@ import {
 } from './pygmalion-api.js';
 
 const {
-    onElement: on, showToast, escapeHtml, debugLog, getSetting, setSetting,
+    onElement: on, showToast, escapeHtml, safePurify, debugLog, getSetting, setSetting,
     fetchCharacters, fetchAndAddCharacter,
     checkCharacterForDuplicatesAsync, showPreImportDuplicateWarning,
     deleteCharacter, getCharacterGalleryId, showImportSummaryModal,
     formatRichText, debounce,
     apiRequest, cleanupCreatorNotesContainer,
     getProviderExcludeTags,
+    renderLoadingState,
+    renderSkeletonGrid,
 } = CoreAPI;
 
 // ========================================
@@ -84,15 +86,6 @@ const SEED_TAGS = [
 for (const t of SEED_TAGS) pygKnownTags.add(t);
 
 let view; // module-scoped BrowseView instance reference (set once in constructor)
-
-// ========================================
-// PURIFY CONFIG (for formatRichText in modal)
-// ========================================
-
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'br', 'p', 'span', 'div', 'ul', 'ol', 'li', 'hr', 'a', 'blockquote', 'code', 'pre'],
-    ALLOWED_ATTR: ['class', 'style', 'href', 'target', 'rel'],
-};
 
 // ========================================
 // LIBRARY LOOKUP
@@ -277,12 +270,7 @@ async function loadCharacters(append = false) {
     const loadMoreBtn = document.getElementById('pygLoadMoreBtn');
 
     if (!append && grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Searching Pygmalion...</p>
-            </div>
-        `;
+        renderSkeletonGrid(grid);
     }
 
     if (loadMoreBtn) {
@@ -438,7 +426,7 @@ async function loadCharacters(append = false) {
             if (!append && grid) {
                 grid.innerHTML = `
                     <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: #e74c3c;"></i>
+                        <i class="fa-solid fa-exclamation-triangle" style="font-size: 2rem; color: var(--cl-error-bright);"></i>
                         <p style="margin-top: 12px;">Search failed: ${escapeHtml(err.message)}</p>
                         <button class="glass-btn" style="margin-top: 12px;" id="pygRetryBtn">
                             <i class="fa-solid fa-redo"></i> Retry
@@ -579,6 +567,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('pygCharModal');
     if (!modal) return;
+    window.resetBrowseSectionCollapseState?.(modal);
 
     const name = hit.displayName || hit.personality?.name || 'Unknown';
     const owner = hit.owner || {};
@@ -720,11 +709,24 @@ function openPreviewModal(hit) {
         console.error('[PygBrowse] Error populating preview modal:', err);
     }
 
+    // Skeletons only when we know the network wait is coming (no inline personality).
+    if (!hit.personality) {
+        const _descSection = document.getElementById('pygCharDescriptionSection');
+        const _descEl = document.getElementById('pygCharDescription');
+        const _firstMsgSection = document.getElementById('pygCharFirstMsgSection');
+        const _firstMsgEl = document.getElementById('pygCharFirstMsg');
+        const _examplesSection = document.getElementById('pygCharExamplesSection');
+        const _examplesEl = document.getElementById('pygCharExamples');
+        if (_descSection && _descEl) { _descSection.style.display = 'block'; _descEl.innerHTML = skeletonLines(3); }
+        if (_firstMsgSection && _firstMsgEl) { _firstMsgSection.style.display = 'block'; _firstMsgEl.innerHTML = skeletonLines(4); }
+        if (_examplesSection && _examplesEl) { _examplesSection.style.display = 'block'; _examplesEl.innerHTML = skeletonLines(3); }
+    }
+
     modal.classList.remove('hidden');
     const charBody = modal.querySelector('.browse-char-body');
     if (charBody) charBody.scrollTop = 0;
 
-    // Search results don't include personality — always fetch full detail
+    // Search results don't include personality - always fetch full detail
     if (!hit.personality) {
         const fetchToken = ++pygDetailFetchToken;
         fetchAndPopulateDetails(hit, fetchToken);
@@ -749,43 +751,42 @@ function renderPygGalleryGrid(galleryImages) {
 }
 
 function populateDefinitionSections(name, p, altGreetings) {
-    // Creator's Notes
-    const creatorNotesEl = document.getElementById('pygCharCreatorNotes');
-    if (creatorNotesEl) {
-        if (p.characterNotes) {
-            creatorNotesEl.innerHTML = formatRichText(p.characterNotes, name, false);
-        } else {
-            creatorNotesEl.textContent = 'No creator notes available.';
+    // RAF defer so safePurify doesnt block the modal-open paint frame.
+    requestAnimationFrame(() => {
+        // Creator's Notes
+        const creatorNotesEl = document.getElementById('pygCharCreatorNotes');
+        if (creatorNotesEl) {
+            if (p.characterNotes) {
+                creatorNotesEl.innerHTML = safePurify(formatRichText(p.characterNotes, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                creatorNotesEl.textContent = 'No creator notes available.';
+            }
         }
-    }
 
-    // Description (persona)
-    const descSection = document.getElementById('pygCharDescriptionSection');
-    const descEl = document.getElementById('pygCharDescription');
-    if (descSection) {
-        if (p.persona) {
-            descSection.style.display = 'block';
-            if (descEl) descEl.innerHTML = formatRichText(p.persona, name, false);
-        } else if (!p.persona && !p.greeting) {
-            // No personality data yet — show loading
-            descSection.style.display = 'block';
-            if (descEl) descEl.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>';
-        } else {
-            descSection.style.display = 'none';
+        // Description (persona)
+        const descSection = document.getElementById('pygCharDescriptionSection');
+        const descEl = document.getElementById('pygCharDescription');
+        if (descSection) {
+            if (p.persona) {
+                descSection.style.display = 'block';
+                if (descEl) descEl.innerHTML = safePurify(formatRichText(p.persona, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                descSection.style.display = 'none';
+            }
         }
-    }
 
-    // First Message
-    const firstMsgSection = document.getElementById('pygCharFirstMsgSection');
-    const firstMsgEl = document.getElementById('pygCharFirstMsg');
-    if (firstMsgSection) {
-        if (p.greeting) {
-            firstMsgSection.style.display = 'block';
-            if (firstMsgEl) firstMsgEl.innerHTML = formatRichText(p.greeting, name, false);
-        } else {
-            firstMsgSection.style.display = 'none';
+        // First Message
+        const firstMsgSection = document.getElementById('pygCharFirstMsgSection');
+        const firstMsgEl = document.getElementById('pygCharFirstMsg');
+        if (firstMsgSection) {
+            if (p.greeting) {
+                firstMsgSection.style.display = 'block';
+                if (firstMsgEl) firstMsgEl.innerHTML = safePurify(formatRichText(p.greeting, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                firstMsgSection.style.display = 'none';
+            }
         }
-    }
+    });
 
     // Alternate Greetings
     const altSection = document.getElementById('pygCharAltGreetingsSection');
@@ -823,7 +824,7 @@ function populateDefinitionSections(name, p, altGreetings) {
                         if (body && !body.dataset.rendered) {
                             const idx = parseInt(details.dataset.greetingIdx, 10);
                             if (altGreetings[idx] != null) {
-                                body.innerHTML = DOMPurify.sanitize(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
+                                body.innerHTML = safePurify(formatRichText(altGreetings[idx], name, true), BROWSE_PURIFY_CONFIG);
                             }
                             body.dataset.rendered = '1';
                         }
@@ -836,17 +837,19 @@ function populateDefinitionSections(name, p, altGreetings) {
         }
     }
 
-    // Example Messages
-    const examplesSection = document.getElementById('pygCharExamplesSection');
-    const examplesEl = document.getElementById('pygCharExamples');
-    if (examplesSection) {
-        if (p.mesExample) {
-            examplesSection.style.display = 'block';
-            if (examplesEl) examplesEl.innerHTML = formatRichText(p.mesExample, name, false);
-        } else {
-            examplesSection.style.display = 'none';
+    // Second RAF: alt-greetings above is cheap sync, but mes_example is another safePurify heavy field.
+    requestAnimationFrame(() => {
+        const examplesSection = document.getElementById('pygCharExamplesSection');
+        const examplesEl = document.getElementById('pygCharExamples');
+        if (examplesSection) {
+            if (p.mesExample) {
+                examplesSection.style.display = 'block';
+                if (examplesEl) examplesEl.innerHTML = safePurify(formatRichText(p.mesExample, name, true), BROWSE_PURIFY_CONFIG);
+            } else {
+                examplesSection.style.display = 'none';
+            }
         }
-    }
+    });
 }
 
 async function fetchAndPopulateDetails(hit, stalenessToken) {
@@ -1000,36 +1003,51 @@ async function importCharacter(charData) {
         const result = await provider.importCharacter(charData.id, fullChar, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        closePreviewModal();
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
-        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGallery ? [{
-                    name: result.characterName,
-                    fullPath: result.fullPath,
-                    provider: provider,
-                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
-                    url: getCharacterPageUrl(result.providerCharId),
-                    avatar: result.fileName,
-                    galleryId: result.galleryId
-                }] : [],
-                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
-                    name: result.characterName,
-                    avatar: result.fileName,
-                    avatarUrl: result.avatarUrl,
-                    mediaUrls: mediaUrls,
-                    galleryPageUrls: galleryPageUrls,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }] : []
-            });
+        const showSummary = (hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
+
+        const summaryArgs = {
+            galleryCharacters: hasGallery ? [{
+                name: result.characterName,
+                fullPath: result.fullPath,
+                provider: provider,
+                linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                url: getCharacterPageUrl(result.providerCharId),
+                avatar: result.fileName,
+                galleryId: result.galleryId
+            }] : [],
+            mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
+                name: result.characterName,
+                avatar: result.fileName,
+                avatarUrl: result.avatarUrl,
+                mediaUrls: mediaUrls,
+                galleryPageUrls: galleryPageUrls,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }] : []
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closePreviewModal();
+            } else {
+                closePreviewModal();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closePreviewModal();
         }
+
+        showToast(`Imported "${result.characterName}"`, 'success');
 
         const added = await fetchAndAddCharacter(result.fileName);
         if (!added) await fetchCharacters(true);
@@ -1184,12 +1202,7 @@ async function switchPygViewMode(mode) {
 
         const grid = document.getElementById('pygGrid');
         if (grid) {
-            grid.innerHTML = `
-                <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                    <p style="margin-top: 12px; color: var(--text-muted);">Loading Pygmalion characters...</p>
-                </div>
-            `;
+            renderSkeletonGrid(grid);
         }
 
         pygCharacters = [];
@@ -1233,12 +1246,7 @@ async function loadPygFollowingTimeline(forceRefresh = false) {
     }
 
     if (grid) {
-        grid.innerHTML = `
-            <div class="browse-loading-overlay" style="grid-column: 1 / -1; padding: 40px; text-align: center;">
-                <i class="fa-solid fa-spinner fa-spin" style="font-size: 2rem; color: var(--accent);"></i>
-                <p style="margin-top: 12px; color: var(--text-muted);">Loading timeline...</p>
-            </div>
-        `;
+        renderSkeletonGrid(grid);
     }
 
     let shouldRetry = false;
@@ -1560,13 +1568,13 @@ function updateLoginUI() {
             if (ttl === Infinity) {
                 ttlText = 'no expiry';
             } else if (ttl <= 0) {
-                ttlText = '<span style="color: #e74c3c;">expired</span>';
+                ttlText = '<span style="color: var(--cl-error-bright);">expired</span>';
             } else {
                 const min = Math.floor(ttl / 60);
                 ttlText = min > 0 ? `${min}m remaining` : `${ttl}s remaining`;
             }
             statusArea.innerHTML = `
-                <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                 <strong>Authenticated</strong> — token ${ttlText}
             `;
             statusArea.style.display = '';
@@ -1748,7 +1756,7 @@ async function attemptTokenRecovery() {
 
 /**
  * Auto-login with stored credentials if plugin available and no valid token.
- * Called on activate() — runs silently, no toasts on failure.
+ * Called on activate() - runs silently, no toasts on failure.
  */
 async function tryAutoLogin() {
     if (pygToken && getTokenTTL(pygToken) > 60) return;
@@ -1798,7 +1806,7 @@ async function tryAutoLogin() {
 // ========================================
 
 let pygIsFollowingCurrentAuthor = false;
-let pygFollowedUserIds = null; // Set<string> — cached followed user IDs
+let pygFollowedUserIds = null; // Set<string> - cached followed user IDs
 
 async function fetchPygFollowedUserIds() {
     if (!pygToken) return new Set();
@@ -2196,7 +2204,7 @@ function initPygView() {
         followingGrid.addEventListener('click', _handleFollowingCardClick);
     }
 
-    // ── Preview modal events (attached once — persist across provider switches)
+    // ── Preview modal events (attached once - persist across provider switches)
     if (!modalEventsAttached) {
         modalEventsAttached = true;
         const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
@@ -2612,7 +2620,7 @@ class PygmalionBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing and downloading public characters works without logging in!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -2627,10 +2635,10 @@ class PygmalionBrowseView extends BrowseView {
                 <div class="pyg-login-section">
                     <div class="pyg-plugin-status">
                         <span id="pygPluginStatusOk" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-check" style="color: #2ecc71;"></i> cl-helper plugin detected
+                            <i class="fa-solid fa-plug-circle-check" style="color: var(--cl-success-bright);"></i> cl-helper plugin detected
                         </span>
                         <span id="pygPluginStatusMissing" style="display:none;">
-                            <i class="fa-solid fa-plug-circle-xmark" style="color: #e67e22;"></i>
+                            <i class="fa-solid fa-plug-circle-xmark" style="color: var(--cl-warning-bright-darker);"></i>
                             cl-helper plugin not found — see <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" style="color: var(--accent);">setup instructions</a>
                         </span>
                     </div>
@@ -2646,7 +2654,7 @@ class PygmalionBrowseView extends BrowseView {
                         </div>
 
                         <div class="chub-login-actions" style="margin-top: 15px; display: flex; gap: 8px; justify-content: flex-start;">
-                            <button id="pygLoginBtn" class="glass-btn" disabled style="color: #2ecc71; border-color: rgba(46, 204, 113, 0.4);">
+                            <button id="pygLoginBtn" class="glass-btn" disabled style="color: var(--cl-success-bright); border-color: rgba(var(--cl-success-bright-rgb), 0.4);">
                                 <i class="fa-solid fa-sign-in-alt"></i> Log In
                             </button>
                             <a href="https://pygmalion.chat" target="_blank" class="glass-btn" title="Go to Pygmalion Website">
@@ -2813,6 +2821,10 @@ class PygmalionBrowseView extends BrowseView {
         loadCharacters(false);
     }
 
+    getSearchInputId(mode) {
+        return mode === 'character' ? 'pygSearchInput' : null;
+    }
+
     applyDefaults(defaults) {
         if (defaults.view === 'following') {
             pygViewMode = 'following';
@@ -2907,6 +2919,9 @@ class PygmalionBrowseView extends BrowseView {
     deactivate() {
         pygDetailFetchToken++;
         delegatesInitialized = false;
+        // Reset following-tab in-flight flag so a stuck flag from a hung fetch
+        // can't block the next view re-entry from kicking off a fresh load.
+        pygFollowingLoading = false;
         super.deactivate();
         this.disconnectImageObserver();
     }

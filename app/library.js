@@ -1,5 +1,11 @@
 // SillyTavern Character Library Logic
 
+// Overlay registry bootstrap - must exist before any registerOverlay() calls
+// elsewhere in this file. library-mobile.js (loaded after this script) reuses
+// this same array via `window._overlayRegistry = window._overlayRegistry || []`.
+window._overlayRegistry = window._overlayRegistry || [];
+window.registerOverlay = window.registerOverlay || function(cfg) { window._overlayRegistry.push(cfg); };
+
 const API_BASE = '/api'; 
 const isEmbedded = new URLSearchParams(window.location.search).get('embedded') === '1';
 const embeddedShowTopBar = new URLSearchParams(window.location.search).get('showTopBar') === '1';
@@ -14,7 +20,11 @@ let isEditLocked = true;
 let originalValues = {};  // Form values for diff comparison
 let originalRawData = {}; // Raw character data for cancel/restore
 let pendingPayload = null;
-let _editPanePopulated = false; // Deferred — set true after Edit tab first opened
+let _editPanePopulated = false; // Deferred - set true after Edit tab first opened
+
+// Pending avatar (card image) replacement state — set when user picks a new image in the Edit tab.
+let pendingAvatarFile = null;
+let pendingAvatarPreviewUrl = null;
 
 // Favorites filter state
 let showFavoritesOnly = false;
@@ -118,7 +128,7 @@ function clearCache() {
 // CUSTOM SELECT
 // ========================================================================
 
-// Native <select> is hidden but remains the data model — .value and 'change'
+// Native <select> is hidden but remains the data model - .value and 'change'
 // events work transparently so existing code needs no changes.
 function initCustomSelect(select) {
     if (!select || select._customSelect) return null;
@@ -184,6 +194,12 @@ function initCustomSelect(select) {
         const isSelected = option.value === nativeValueGetter.call(select);
         if (isSelected) item.classList.add('selected');
 
+        if (option.disabled) {
+            item.classList.add('disabled');
+            item.setAttribute('aria-disabled', 'true');
+            if (option.title) item.title = option.title;
+        }
+
         const iconClass = option.dataset.icon;
         const iconUrl = option.dataset.iconUrl;
         let iconHtml = '';
@@ -197,6 +213,7 @@ function initCustomSelect(select) {
 
         item.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (option.disabled) return;
             nativeValueSetter.call(select, option.value);
             select.dispatchEvent(new Event('change', { bubbles: true }));
             syncVisuals();
@@ -303,7 +320,7 @@ function initCustomSelect(select) {
         }
     });
 
-    // Close on scroll — only if the trigger's viewport position actually changed
+    // Close on scroll - only if the trigger's viewport position actually changed
     // (avoids false closes from unrelated scrolls behind fixed-position modals)
     window.addEventListener('scroll', (e) => {
         if (menu.classList.contains('hidden') || e.target === menu || Date.now() - openedAt <= 150) return;
@@ -328,7 +345,7 @@ function initCustomSelect(select) {
     // Lock trigger width to the widest option so it doesn't resize on selection change.
     // Uses IntersectionObserver because selects in hidden views (chats, chub) have zero
     // scrollWidth until their container becomes visible.
-    // Skip for selects inside .browse-sort-container — they use CSS min-width instead.
+    // Skip for selects inside .browse-sort-container - they use CSS min-width instead.
     const triggerText = trigger.querySelector('.trigger-text');
     const skipWidthLock = select.closest('.browse-sort-container');
     function lockTriggerWidth() {
@@ -380,6 +397,27 @@ function initAllCustomSelects() {
  *   - parseDateValue() inside sort comparator (130k+ calls per sort at 10k chars)
  *   - getTags() + join() + toLowerCase() per character per search
  */
+// Stable random-sort keys; re-rolled by reshuffleRandomSort().
+const _randomSortKeys = new Map();
+function getRandomSortKey(char) {
+    const k = char?.avatar;
+    if (!k) return 0;
+    let v = _randomSortKeys.get(k);
+    if (v === undefined) {
+        v = Math.random();
+        _randomSortKeys.set(k, v);
+    }
+    return v;
+}
+function reshuffleRandomSort() {
+    _randomSortKeys.clear();
+    if (Array.isArray(allCharacters)) {
+        for (const c of allCharacters) {
+            if (c?.avatar) _randomSortKeys.set(c.avatar, Math.random());
+        }
+    }
+}
+
 function prepareCharacterKeys(chars) {
     for (let i = 0; i < chars.length; i++) {
         const c = chars[i];
@@ -424,7 +462,9 @@ const DEFAULT_SETTINGS = {
     datacatToken: null,
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
+    datacatFlareSolverrUrl: '',
     ctCookie: null,
+    civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
     pygmalionNsfw: false,
@@ -433,6 +473,8 @@ const DEFAULT_SETTINGS = {
 
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
+    defaultFilterPreset: '',
+    groupFavoritesFirst: false,
     searchInName: true,
     searchInListingName: true,
     searchInTags: true,
@@ -455,7 +497,7 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationPerChar: {},
     completedMediaLocalizations: [],
     notifyAdditionalContent: true,
-    fastFilenameSkip: true,
+    fastFilenameSkip: false,
     fastSkipValidateHeaders: false,
     includeExternalGalleries: true,
     galleryThumbnails: true,
@@ -466,13 +508,15 @@ const DEFAULT_SETTINGS = {
     uiScale: 3,
     modalSize: 2,
     replaceUserPlaceholder: true,
-    animateTagPills: false,
+    animateTagPills: true,
     animateKeepName: false,
     hidePlaylistBadges: false,
     debugMode: false,
     uniqueGalleryFolders: false,
     showInfoTab: false,
     themeCustomizer: false,
+    customCSS: '',
+    customCSSMode: 'raw',
     exportAsLinks: false,
     showProviderTagline: true,
     showWyvernTagline: true,
@@ -482,7 +526,17 @@ const DEFAULT_SETTINGS = {
     showNameToggle: true,
     namePreferences: {},
     browseSnapSections: false,
+    collapseAllBrowseSections: false,
     mobileProviderQuickSwitch: true,
+    mobileHideBackArrows: false,
+    mobileBrowseQuickImport: true,
+    mobileSwipeGestures: true,
+    mobileHaptics: true,
+    useGridThumbnails: false,
+    gridThumbnailsDesktop: false,
+    gridThumbnailsClHelper: true,
+    gridThumbnailSize: 512,
+    enableCharDetailNav: true,
 
     // ---- Provider Config ----
     chubUseV4Api: false,
@@ -494,6 +548,7 @@ const DEFAULT_SETTINGS = {
     providerExcludeTags: {},
 
     // ---- Versions ----
+    autoSnapshotOnEdit: true,
     maxAutoBackups: 10,
 };
 
@@ -541,6 +596,92 @@ function getSTContext() {
         console.warn('[Settings] Cannot access main window context:', e);
     }
     return null;
+}
+
+// Mirrors STs name-to-url proxy lookup; "None" forced empty to stop shared-entry leak.
+async function resolveProxyForProfile(profile) {
+    try {
+        const response = await apiRequest('/settings/get', 'POST', {});
+        if (!response.ok) return { url: '', password: '' };
+        const data = await response.json();
+        const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+        if (!settings) return { url: '', password: '' };
+        const oai = settings.oai_settings || {};
+        const proxies = settings.proxies || oai.proxies || [];
+
+        if (profile) {
+            if (!profile.proxy || profile.proxy === 'None') return { url: '', password: '' };
+            const entry = proxies.find(p => p.name === profile.proxy);
+            return { url: entry?.url || '', password: entry?.password || '' };
+        }
+        return { url: oai.reverse_proxy || '', password: oai.proxy_password || '' };
+    } catch {
+        return { url: '', password: '' };
+    }
+}
+
+// Anthropic-format responses use content blocks: [{type, text}, ...] instead of a string.
+function flattenContentBlocks(blocks) {
+    if (!Array.isArray(blocks)) return '';
+    return blocks
+        .filter(b => b?.type === 'text' && typeof b?.text === 'string')
+        .map(b => b.text)
+        .join('');
+}
+
+// Fire-and-forget; 3s timeout. Active chat panel refreshes only when chid matches.
+async function notifySTCharacterEdited(avatar) {
+    if (!avatar) return;
+    const run = async () => {
+        try {
+            const host = getHostWindow();
+            const ctx = host?.SillyTavern?.getContext?.();
+            if (!ctx) return;
+
+            if (typeof ctx.getOneCharacter === 'function') {
+                await ctx.getOneCharacter(avatar);
+            }
+
+            const charIndex = ctx.characters?.findIndex(c => c.avatar === avatar);
+            if (charIndex === undefined || charIndex < 0) return;
+
+            // characterId is a snapshot, not a live ref - re-read after the await.
+            const currentChid = host?.SillyTavern?.getContext?.()?.characterId;
+            const isActive = currentChid !== undefined && currentChid !== null
+                && String(currentChid) === String(charIndex);
+
+            // selectCharacterById on the active chid keeps chat + scroll intact.
+            if (isActive && typeof ctx.selectCharacterById === 'function') {
+                await ctx.selectCharacterById(charIndex, { switchMenu: false });
+            }
+
+            if (ctx.eventSource && ctx.eventTypes?.CHARACTER_EDITED) {
+                await ctx.eventSource.emit(
+                    ctx.eventTypes.CHARACTER_EDITED,
+                    { id: charIndex, character: ctx.characters[charIndex] }
+                );
+            }
+        } catch (e) {
+            console.warn('[CL] Could not notify main window of edit (non-fatal):', e);
+        }
+    };
+    await Promise.race([run(), new Promise(r => setTimeout(r, 3000))]);
+}
+
+async function notifySTCharacterAdded(avatar) {
+    if (!avatar) return;
+    const run = async () => {
+        try {
+            const host = getHostWindow();
+            const ctx = host?.SillyTavern?.getContext?.();
+            if (typeof ctx?.getCharacters !== 'function') return;
+            await new Promise(r => setTimeout(r, 200));
+            await ctx.getCharacters();
+        } catch (e) {
+            console.warn('[CL] Could not notify main window of add (non-fatal):', e);
+        }
+    };
+    await Promise.race([run(), new Promise(r => setTimeout(r, 3000))]);
 }
 
 // Uses explicit property assignment for cross-window write reliability
@@ -734,6 +875,14 @@ function setSettings(settings) {
     saveGallerySettings();
 }
 
+// Respects mobileHaptics setting and silently no-ops on unsupported devices.
+function hapticFeedback(pattern) {
+    if (getSetting('mobileHaptics') === false) return;
+    if (typeof navigator.vibrate !== 'function') return;
+    try { navigator.vibrate(pattern); } catch { /* unsupported */ }
+}
+window.hapticFeedback = hapticFeedback;
+
 function getProviderExcludeTags(providerId) {
     const map = getSetting('providerExcludeTags') || {};
     const tags = map[providerId];
@@ -746,27 +895,52 @@ function setProviderExcludeTags(providerId, tags) {
     setSetting('providerExcludeTags', map);
 }
 
-/**
- * Apply the highlight color to CSS variables and derive accent palette
- * @param {string} color - CSS color value (hex)
- */
+// Runtime tokens live in <style id="cl-runtime-tokens"> not inline on the root,
+// so user Custom CSS (later insource order) can override without !important.
+const runtimeTokens = new Map();
+function serializeRuntimeTokens() {
+    const tag = document.getElementById('cl-runtime-tokens');
+    if (!tag) return;
+    if (runtimeTokens.size === 0) {
+        tag.textContent = '';
+        return;
+    }
+    const lines = [];
+    for (const [k, v] of runtimeTokens) lines.push(`    ${k}: ${v};`);
+    tag.textContent = `:root {\n${lines.join('\n')}\n}`;
+}
+function setRuntimeToken(name, value) {
+    if (value == null || value === '') {
+        runtimeTokens.delete(name);
+    } else {
+        runtimeTokens.set(name, String(value));
+    }
+    serializeRuntimeTokens();
+}
+function removeRuntimeToken(name) {
+    runtimeTokens.delete(name);
+    serializeRuntimeTokens();
+}
+function getRuntimeToken(name) {
+    return runtimeTokens.get(name) || '';
+}
+
 function applyHighlightColor(color) {
     if (!color) color = DEFAULT_SETTINGS.highlightColor;
 
-    const root = document.documentElement.style;
-    root.setProperty('--accent', color);
+    setRuntimeToken('--accent', color);
 
     const hex = color.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16);
     const g = parseInt(hex.substring(2, 4), 16);
     const b = parseInt(hex.substring(4, 6), 16);
 
-    root.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
-    root.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
+    setRuntimeToken('--accent-rgb', `${r}, ${g}, ${b}`);
+    setRuntimeToken('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.3)`);
 
     const toHex = n => Math.min(255, n).toString(16).padStart(2, '0');
     const lighten = (v, f) => Math.round(v + (255 - v) * f);
-    root.setProperty('--accent-hover', `#${toHex(lighten(r, 0.2))}${toHex(lighten(g, 0.2))}${toHex(lighten(b, 0.2))}`);
+    setRuntimeToken('--accent-hover', `#${toHex(lighten(r, 0.2))}${toHex(lighten(g, 0.2))}${toHex(lighten(b, 0.2))}`);
 
     // Secondary: hue-shift +30deg, desaturate slightly, darken slightly
     const rn = r / 255, gn = g / 255, bn = b / 255;
@@ -799,13 +973,13 @@ function applyHighlightColor(color) {
         sg = Math.round(hue2rgb(sh) * 255);
         sb = Math.round(hue2rgb(sh - 1 / 3) * 255);
     }
-    root.setProperty('--accent-secondary', `#${toHex(sr)}${toHex(sg)}${toHex(sb)}`);
-    root.setProperty('--accent-secondary-rgb', `${sr}, ${sg}, ${sb}`);
+    setRuntimeToken('--accent-secondary', `#${toHex(sr)}${toHex(sg)}${toHex(sb)}`);
+    setRuntimeToken('--accent-secondary-rgb', `${sr}, ${sg}, ${sb}`);
 
     // WCAG relative luminance → pick white or dark text for readability on accent bg
     const srgb = c => c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     const lum = 0.2126 * srgb(rn) + 0.7152 * srgb(gn) + 0.0722 * srgb(bn);
-    root.setProperty('--accent-text', lum > 0.36 ? '#121212' : '#ffffff');
+    setRuntimeToken('--accent-text', lum > 0.36 ? '#121212' : '#ffffff');
 }
 
 const UI_SCALE_MAP = { 1: 0.8, 2: 0.9, 3: 1, 4: 1.1, 5: 1.2 };
@@ -816,18 +990,39 @@ function applyUiScale(level) {
     document.body.style.height = zoom !== 1 ? `calc(100vh / ${zoom})` : '';
 }
 
-const MODAL_SIZE_MAP = { 1: 0.8, 2: 1, 3: 1.25 };
+const MODAL_SIZE_MAP = { 1: 0.8, 2: 1, 3: 1.25, 4: 1.4 };
 
 function applyModalSize(level) {
     const scale = MODAL_SIZE_MAP[level] || 1;
     document.body.style.setProperty('--modal-scale', scale);
-    document.body.classList.remove('modal-size-small', 'modal-size-large');
+    document.body.classList.remove('modal-size-small', 'modal-size-large', 'modal-size-xlarge');
     if (level === 1) document.body.classList.add('modal-size-small');
     else if (level === 3) document.body.classList.add('modal-size-large');
+    else if (level === 4) document.body.classList.add('modal-size-xlarge');
+}
+
+// XL only fits at 80% ui scale, grey it out otherwise and downgrade to medium if it was active
+function syncXlModalSizeAvailability() {
+    const sel = document.getElementById('settingsModalSize');
+    const xlOption = sel?.querySelector('option[value="4"]');
+    if (!sel || !xlOption) return;
+    const allow = (parseInt(getSetting('uiScale')) || 3) === 1;
+    xlOption.disabled = !allow;
+    xlOption.title = allow ? '' : 'Available only at the smallest UI Scale (80%)';
+    if (!allow && sel.value === '4') {
+        sel.value = '2';
+        setSetting('modalSize', 2);
+        applyModalSize(2);
+    }
+    sel._customSelect?.refresh();
 }
 
 function applyButtonStyle(style) {
     document.documentElement.dataset.btnStyle = style === 'solid' ? 'solid' : 'glass';
+}
+
+function applyCollapseAllBrowseSections(enabled) {
+    document.body.classList.toggle('collapse-all-browse-sections', !!enabled);
 }
 
 function applyAnimateTagPills(enabled, keepName) {
@@ -837,6 +1032,31 @@ function applyAnimateTagPills(enabled, keepName) {
 
 function applyHidePlaylistBadges(hidden) {
     document.documentElement.classList.toggle('hide-playlist-badges', !!hidden);
+}
+
+function applyMobileHideBackArrows(hidden) {
+    document.documentElement.classList.toggle('cl-hide-back-arrows', !!hidden);
+}
+
+function applyMobileBrowseQuickImport(enabled) {
+    document.documentElement.classList.toggle('cl-browse-quick-import', !!enabled);
+}
+
+function applyMobileProviderQuickSwitch(enabled) {
+    document.documentElement.classList.toggle('cl-no-provider-quick-switch', !enabled);
+}
+
+function getActiveFilterState() {
+    return {
+        fav: !!document.getElementById('searchFavoritesOnly')?.checked,
+        tag: !!(activeTagFilters && activeTagFilters.size > 0),
+        playlist: !!activePlaylistFilter,
+    };
+}
+
+function updateMobileFilterIndicator() {
+    const s = getActiveFilterState();
+    document.documentElement.classList.toggle('cl-filters-active', s.fav || s.tag || s.playlist);
 }
 
 function updateThemeCustomizerVisibility() {
@@ -919,6 +1139,8 @@ function setupSettingsModal() {
     const searchAuthorCheckbox = document.getElementById('settingsSearchAuthor');
     const searchNotesCheckbox = document.getElementById('settingsSearchNotes');
     const defaultSortSelect = document.getElementById('settingsDefaultSort');
+    const defaultFilterPresetSelect = document.getElementById('settingsDefaultFilterPreset');
+    const groupFavoritesFirstCheckbox = document.getElementById('settingsGroupFavoritesFirst');
     
     // Experimental features
     const richCreatorNotesCheckbox = document.getElementById('settingsRichCreatorNotes');
@@ -953,7 +1175,23 @@ function setupSettingsModal() {
     const showProviderTaglineCheckbox = document.getElementById('settingsShowProviderTagline');
     const allowRichTaglineCheckbox = document.getElementById('settingsAllowRichTagline');
     const browseSnapSectionsCheckbox = document.getElementById('settingsBrowseSnapSections');
+    const collapseAllBrowseSectionsCheckbox = document.getElementById('settingsCollapseAllBrowseSections');
     const mobileProviderQuickSwitchCheckbox = document.getElementById('settingsMobileProviderQuickSwitch');
+    const mobileHideBackArrowsCheckbox = document.getElementById('settingsMobileHideBackArrows');
+    const mobileBrowseQuickImportCheckbox = document.getElementById('settingsMobileBrowseQuickImport');
+    const mobileSwipeGesturesCheckbox = document.getElementById('settingsMobileSwipeGestures');
+    const mobileHapticsCheckbox = document.getElementById('settingsMobileHaptics');
+    const useGridThumbnailsCheckbox = document.getElementById('settingsUseGridThumbnails');
+    const gridThumbDesktopCheckbox = document.getElementById('settingsGridThumbDesktop');
+    const gridThumbClHelperCheckbox = document.getElementById('settingsGridThumbClHelper');
+    const gridThumbSizeSelect = document.getElementById('settingsGridThumbSize');
+    const gridThumbDesktopRow = document.getElementById('settingsGridThumbDesktopRow');
+    const gridThumbClHelperRow = document.getElementById('settingsGridThumbClHelperRow');
+    const gridThumbSizeRow = document.getElementById('settingsGridThumbSizeRow');
+    const gridThumbCacheRow = document.getElementById('settingsGridThumbCacheRow');
+    const gridThumbCacheStats = document.getElementById('settingsGridThumbCacheStats');
+    const gridThumbPopulateBtn = document.getElementById('settingsGridThumbPopulate');
+    const gridThumbPurgeBtn = document.getElementById('settingsGridThumbPurge');
     
     // Appearance
     const uiScaleSelect = document.getElementById('settingsUiScale');
@@ -963,6 +1201,7 @@ function setupSettingsModal() {
     const animateKeepNameCheckbox = document.getElementById('settingsAnimateKeepName');
     const animateKeepNameRow = document.getElementById('animateKeepNameRow');
     const hidePlaylistBadgesCheckbox = document.getElementById('settingsHidePlaylistBadges');
+    const enableCharDetailNavCheckbox = document.getElementById('settingsEnableCharDetailNav');
     const highlightColorInput = document.getElementById('settingsHighlightColor');
     const themeCustomizerCheckbox = document.getElementById('settingsThemeCustomizer');
     
@@ -1086,7 +1325,7 @@ function setupSettingsModal() {
                 </select>`;
             }
 
-            // Build default sort dropdown — shows browse sorts initially, adapts to selected view
+            // Build default sort dropdown - shows browse sorts initially, adapts to selected view
             const browseSorts = config.browseSortOptions || [];
             const followSorts = config.followingSortOptions || [];
             let sortOpts = '';
@@ -1447,6 +1686,8 @@ function setupSettingsModal() {
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
+        const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
+        if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
         const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
         if (datacatPublicFeedCheckbox) {
             datacatPublicFeedCheckbox.checked = getSetting('datacatPublicFeed') === true;
@@ -1461,7 +1702,84 @@ function setupSettingsModal() {
                 setSetting('datacatReextractOnUpdate', datacatReextractCheckbox.checked);
             });
         }
-        
+
+        // FlareSolverr endpoint for Hampter sort orders
+        const datacatFlareSolverrInput = document.getElementById('settingsDatacatFlareSolverrUrl');
+        const datacatFlareSolverrStatus = document.getElementById('datacatFlareSolverrStatus');
+        const testDatacatFlareSolverrBtn = document.getElementById('testDatacatFlareSolverrBtn');
+
+        const updateFlareSolverrStatusBadge = () => {
+            if (!datacatFlareSolverrStatus) return;
+            const url = (getSetting('datacatFlareSolverrUrl') || '').trim();
+            if (!url) {
+                datacatFlareSolverrStatus.className = 'settings-status-badge inactive';
+                datacatFlareSolverrStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Not configured';
+            } else {
+                datacatFlareSolverrStatus.className = 'settings-status-badge active';
+                datacatFlareSolverrStatus.innerHTML = '<i class="fa-solid fa-circle"></i> Configured (untested)';
+            }
+        };
+
+        if (datacatFlareSolverrInput) {
+            datacatFlareSolverrInput.value = getSetting('datacatFlareSolverrUrl') || '';
+            datacatFlareSolverrInput.addEventListener('change', () => {
+                setSetting('datacatFlareSolverrUrl', datacatFlareSolverrInput.value.trim());
+                updateFlareSolverrStatusBadge();
+            });
+            datacatFlareSolverrInput.addEventListener('blur', () => {
+                setSetting('datacatFlareSolverrUrl', datacatFlareSolverrInput.value.trim());
+                updateFlareSolverrStatusBadge();
+            });
+        }
+        updateFlareSolverrStatusBadge();
+
+        if (testDatacatFlareSolverrBtn) {
+            testDatacatFlareSolverrBtn.addEventListener('click', async () => {
+                const url = (datacatFlareSolverrInput?.value || '').trim();
+                if (!url) {
+                    showToast('Enter a FlareSolverr URL first', 'warning');
+                    return;
+                }
+                setSetting('datacatFlareSolverrUrl', url);
+                if (datacatFlareSolverrStatus) {
+                    datacatFlareSolverrStatus.className = 'settings-status-badge inactive';
+                    datacatFlareSolverrStatus.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Testing...';
+                }
+                testDatacatFlareSolverrBtn.disabled = true;
+                try {
+                    const resp = await apiRequest(`/plugins/cl-helper/flaresolverr-fetch`, 'POST', {
+                        flareUrl: url,
+                        targetUrl: 'https://janitorai.com/hampter/characters?sort=trending&page=1',
+                    });
+                    const payload = await resp.json().catch(() => null);
+                    if (!resp.ok || !payload) {
+                        const msg = payload?.error || `HTTP ${resp.status}`;
+                        throw new Error(msg);
+                    }
+                    if (payload.status !== 'ok') {
+                        throw new Error(payload.message || 'FlareSolverr did not return ok');
+                    }
+                    const upstreamStatus = payload.solution?.status;
+                    if (typeof upstreamStatus === 'number' && upstreamStatus >= 400) {
+                        throw new Error(`Upstream HTTP ${upstreamStatus} (challenge not bypassed)`);
+                    }
+                    if (datacatFlareSolverrStatus) {
+                        datacatFlareSolverrStatus.className = 'settings-status-badge active';
+                        datacatFlareSolverrStatus.innerHTML = '<i class="fa-solid fa-circle-check"></i> Connected';
+                    }
+                    showToast('FlareSolverr connection successful', 'success');
+                } catch (err) {
+                    if (datacatFlareSolverrStatus) {
+                        datacatFlareSolverrStatus.className = 'settings-status-badge inactive';
+                        datacatFlareSolverrStatus.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> Failed`;
+                    }
+                    showToast(`FlareSolverr test failed: ${err.message}`, 'error');
+                } finally {
+                    testDatacatFlareSolverrBtn.disabled = false;
+                }
+            });
+        }
+
         // Check cl-helper plugin availability for provider sections
         checkClHelperPlugin(
             pygmalionPluginBanner, pygmalionSettingsFields,
@@ -1491,6 +1809,12 @@ function setupSettingsModal() {
         searchAuthorCheckbox.checked = getSetting('searchInAuthor') || false;
         searchNotesCheckbox.checked = getSetting('searchInNotes') || false;
         defaultSortSelect.value = getSetting('defaultSort') || 'name_asc';
+        if (defaultFilterPresetSelect) {
+            populateDefaultFilterPresetSelect(defaultFilterPresetSelect, getSetting('defaultFilterPreset') || '');
+        }
+        if (groupFavoritesFirstCheckbox) {
+            groupFavoritesFirstCheckbox.checked = getSetting('groupFavoritesFirst') || false;
+        }
         
         // Experimental features
         richCreatorNotesCheckbox.checked = getSetting('richCreatorNotes') || false;
@@ -1559,9 +1883,37 @@ function setupSettingsModal() {
         if (browseSnapSectionsCheckbox) {
             browseSnapSectionsCheckbox.checked = getSetting('browseSnapSections') === true;
         }
+        if (collapseAllBrowseSectionsCheckbox) {
+            collapseAllBrowseSectionsCheckbox.checked = getSetting('collapseAllBrowseSections') === true;
+        }
         if (mobileProviderQuickSwitchCheckbox) {
             mobileProviderQuickSwitchCheckbox.checked = getSetting('mobileProviderQuickSwitch') !== false;
         }
+        if (mobileHideBackArrowsCheckbox) {
+            mobileHideBackArrowsCheckbox.checked = getSetting('mobileHideBackArrows') === true;
+        }
+        if (mobileBrowseQuickImportCheckbox) {
+            mobileBrowseQuickImportCheckbox.checked = getSetting('mobileBrowseQuickImport') !== false;
+        }
+        if (mobileSwipeGesturesCheckbox) {
+            mobileSwipeGesturesCheckbox.checked = getSetting('mobileSwipeGestures') !== false;
+        }
+        if (mobileHapticsCheckbox) {
+            mobileHapticsCheckbox.checked = getSetting('mobileHaptics') !== false;
+        }
+        if (useGridThumbnailsCheckbox) {
+            useGridThumbnailsCheckbox.checked = getSetting('useGridThumbnails') === true;
+        }
+        if (gridThumbDesktopCheckbox) {
+            gridThumbDesktopCheckbox.checked = getSetting('gridThumbnailsDesktop') === true;
+        }
+        if (gridThumbClHelperCheckbox) {
+            gridThumbClHelperCheckbox.checked = getSetting('gridThumbnailsClHelper') !== false;
+        }
+        if (gridThumbSizeSelect) {
+            gridThumbSizeSelect.value = String(getSetting('gridThumbnailSize') || 512);
+        }
+        applyGridThumbsDisabledStates();
         if (themeCustomizerCheckbox) {
             themeCustomizerCheckbox.checked = getSetting('themeCustomizer') || false;
         }
@@ -1575,6 +1927,7 @@ function setupSettingsModal() {
             modalSizeSelect.value = String(getSetting('modalSize') ?? 2);
             if (modalSizeSelect._customSelect) modalSizeSelect._customSelect.refresh();
         }
+        syncXlModalSizeAvailability();
         if (buttonStyleSelect) {
             buttonStyleSelect.value = getSetting('buttonStyle') || 'glass';
             if (buttonStyleSelect._customSelect) buttonStyleSelect._customSelect.refresh();
@@ -1588,6 +1941,9 @@ function setupSettingsModal() {
         }
         if (hidePlaylistBadgesCheckbox) {
             hidePlaylistBadgesCheckbox.checked = getSetting('hidePlaylistBadges') || false;
+        }
+        if (enableCharDetailNavCheckbox) {
+            enableCharDetailNavCheckbox.checked = getSetting('enableCharDetailNav') !== false;
         }
         if (highlightColorInput) {
             highlightColorInput.value = getSetting('highlightColor') || DEFAULT_SETTINGS.highlightColor;
@@ -1625,8 +1981,15 @@ function setupSettingsModal() {
             settingsSearchInput.value = '';
             settingsSearchInput.dispatchEvent(new Event('input'));
         }
-        
-        settingsModal.classList.remove('hidden');
+
+        settingsModal.classList.add('visible');
+        // cl-helper may not be ready at page load, so refresh stats every time the panel opens.
+        refreshGridThumbCacheStats?.();
+        // If a populate job is running (from earlier in this or a previous session), reattach to it.
+        fetch('/api/plugins/cl-helper/avatar-thumb-populate-status').then(r => r.ok ? r.json() : null).then(job => {
+            if (job?.running) startPopulatePolling?.();
+            else paintPopulateButton?.(null);
+        }).catch(() => {});
     };
     
     // Settings sidebar navigation
@@ -1701,7 +2064,7 @@ function setupSettingsModal() {
     }
     
     // Close modal
-    const closeModal = () => settingsModal.classList.add('hidden');
+    const closeModal = () => settingsModal.classList.remove('visible');
     closeSettingsModal.onclick = closeModal;
     settingsModal.onclick = (e) => {
         if (e.target === settingsModal) closeModal();
@@ -1780,6 +2143,7 @@ function setupSettingsModal() {
             const level = parseInt(uiScaleSelect.value) || 3;
             setSetting('uiScale', level);
             applyUiScale(level);
+            syncXlModalSizeAvailability();
         });
     }
 
@@ -1801,10 +2165,136 @@ function setupSettingsModal() {
         });
     }
 
+    // Collapse all browse sections: apply immediately on change
+    if (collapseAllBrowseSectionsCheckbox) {
+        collapseAllBrowseSectionsCheckbox.addEventListener('change', () => {
+            applyCollapseAllBrowseSections(collapseAllBrowseSectionsCheckbox.checked);
+        });
+    }
+
     // Animate card info sub-option visibility
     if (animateTagPillsCheckbox && animateKeepNameRow) {
         animateTagPillsCheckbox.addEventListener('change', () => {
             animateKeepNameRow.style.display = animateTagPillsCheckbox.checked ? '' : 'none';
+        });
+    }
+
+    function applyGridThumbsDisabledStates() {
+        const masterOn = !!(useGridThumbnailsCheckbox && useGridThumbnailsCheckbox.checked);
+        const clHelperOn = !!(gridThumbClHelperCheckbox && gridThumbClHelperCheckbox.checked);
+        const sizeOn = masterOn && clHelperOn;
+        if (gridThumbDesktopCheckbox) gridThumbDesktopCheckbox.disabled = !masterOn;
+        if (gridThumbDesktopRow) gridThumbDesktopRow.classList.toggle('disabled', !masterOn);
+        if (gridThumbClHelperCheckbox) gridThumbClHelperCheckbox.disabled = !masterOn;
+        if (gridThumbClHelperRow) gridThumbClHelperRow.classList.toggle('disabled', !masterOn);
+        // Size + cache management only meaningful when master AND cl-helper are on.
+        if (gridThumbSizeSelect) gridThumbSizeSelect.disabled = !sizeOn;
+        if (gridThumbSizeRow) gridThumbSizeRow.classList.toggle('disabled', !sizeOn);
+        if (gridThumbPopulateBtn) gridThumbPopulateBtn.disabled = !sizeOn;
+        if (gridThumbPurgeBtn) gridThumbPurgeBtn.disabled = !sizeOn;
+        if (gridThumbCacheRow) gridThumbCacheRow.classList.toggle('disabled', !sizeOn);
+    }
+    if (useGridThumbnailsCheckbox) {
+        useGridThumbnailsCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
+    }
+    if (gridThumbClHelperCheckbox) {
+        gridThumbClHelperCheckbox.addEventListener('change', applyGridThumbsDisabledStates);
+    }
+
+    function formatBytes(b) {
+        if (b < 1024) return `${b} B`;
+        if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+        if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
+        return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+    }
+    async function refreshGridThumbCacheStats() {
+        if (!gridThumbCacheStats) return;
+        try {
+            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-stats');
+            if (!r.ok) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
+            const d = await r.json();
+            if (!d.available) { gridThumbCacheStats.textContent = 'cl-helper unavailable'; return; }
+            gridThumbCacheStats.textContent = `${d.count} file(s), ${formatBytes(d.bytes)}`;
+        } catch {
+            gridThumbCacheStats.textContent = 'cl-helper unreachable';
+        }
+    }
+    let _populatePollTimer = null;
+    function stopPopulatePolling() {
+        if (_populatePollTimer) { clearInterval(_populatePollTimer); _populatePollTimer = null; }
+    }
+    function paintPopulateButton(job) {
+        if (!gridThumbPopulateBtn) return;
+        if (!job || !job.running) {
+            gridThumbPopulateBtn.innerHTML = '<i class="fa-solid fa-download"></i> Populate at current size';
+            applyGridThumbsDisabledStates();
+            return;
+        }
+        gridThumbPopulateBtn.disabled = true;
+        gridThumbPopulateBtn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${job.processed}/${job.total}`;
+    }
+    async function pollPopulateStatus() {
+        try {
+            const r = await fetch('/api/plugins/cl-helper/avatar-thumb-populate-status');
+            if (!r.ok) return;
+            const job = await r.json();
+            paintPopulateButton(job);
+            refreshGridThumbCacheStats();
+            if (job && !job.running && job.finishedAt) {
+                stopPopulatePolling();
+                showToast?.(`Populate done: ${job.generated} new, ${job.skipped} cached, ${job.failed} failed`, job.failed ? 'warning' : 'success');
+            }
+        } catch { /* keep polling until next tick */ }
+    }
+    function startPopulatePolling() {
+        stopPopulatePolling();
+        pollPopulateStatus();
+        _populatePollTimer = setInterval(pollPopulateStatus, 1500);
+    }
+    if (gridThumbPopulateBtn) {
+        gridThumbPopulateBtn.addEventListener('click', async () => {
+            const size = parseInt(gridThumbSizeSelect?.value) || 512;
+            gridThumbPopulateBtn.disabled = true;
+            try {
+                const r = await apiRequest(`/plugins/cl-helper/avatar-thumb-populate?s=${size}`, 'POST');
+                if (r.ok) {
+                    const d = await r.json();
+                    showToast?.(`Populating ${d.total} characters in the background...`, 'info');
+                    startPopulatePolling();
+                } else if (r.status === 409) {
+                    showToast?.('Populate already running, attaching to existing job', 'info');
+                    startPopulatePolling();
+                } else {
+                    showToast?.(`Populate failed to start (HTTP ${r.status})`, 'error');
+                    applyGridThumbsDisabledStates();
+                }
+            } catch (e) {
+                showToast?.(`Populate failed: ${e.message}`, 'error');
+                applyGridThumbsDisabledStates();
+            }
+        });
+    }
+    if (gridThumbPurgeBtn) {
+        gridThumbPurgeBtn.addEventListener('click', async () => {
+            if (!confirm('Purge all cached avatar thumbnails? They will be regenerated on next scroll.')) return;
+            const original = gridThumbPurgeBtn.innerHTML;
+            gridThumbPurgeBtn.disabled = true;
+            gridThumbPurgeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Purging...';
+            try {
+                const r = await apiRequest('/plugins/cl-helper/avatar-thumb-cleanup', 'POST');
+                if (r.ok) {
+                    const d = await r.json();
+                    showToast?.(`Purged ${d.deleted} cached thumbnail(s)`, 'success');
+                } else {
+                    showToast?.(`Purge failed (HTTP ${r.status})`, 'error');
+                }
+            } catch (e) {
+                showToast?.(`Purge failed: ${e.message}`, 'error');
+            } finally {
+                gridThumbPurgeBtn.innerHTML = original;
+                applyGridThumbsDisabledStates();
+                refreshGridThumbCacheStats();
+            }
         });
     }
 
@@ -1816,7 +2306,18 @@ function setupSettingsModal() {
     if (openThemeCustomizerBtnEl) {
         openThemeCustomizerBtnEl.addEventListener('click', () => openThemeCustomizer());
     }
-    
+
+    const openCustomCssBtnEl = document.getElementById('openCustomCssBtn');
+    if (openCustomCssBtnEl) {
+        openCustomCssBtnEl.addEventListener('click', () => {
+            if (typeof window.openCustomCssModal === 'function') {
+                window.openCustomCssModal();
+            } else {
+                showToast('Custom CSS module not loaded yet, try again in a moment', 'warning');
+            }
+        });
+    }
+
     const doSaveSettings = () => {
         const newHighlightColor = highlightColorInput ? highlightColorInput.value : DEFAULT_SETTINGS.highlightColor;
         
@@ -1837,6 +2338,8 @@ function setupSettingsModal() {
             searchInAuthor: searchAuthorCheckbox.checked,
             searchInNotes: searchNotesCheckbox.checked,
             defaultSort: defaultSortSelect.value,
+            defaultFilterPreset: defaultFilterPresetSelect ? defaultFilterPresetSelect.value : '',
+            groupFavoritesFirst: groupFavoritesFirstCheckbox ? groupFavoritesFirstCheckbox.checked : false,
             richCreatorNotes: richCreatorNotesCheckbox.checked,
             expandCreatorNotes: expandCreatorNotesCheckbox ? expandCreatorNotesCheckbox.checked : false,
             displayNamePreference: displayNamePreferenceSelect ? displayNamePreferenceSelect.value : 'card',
@@ -1861,13 +2364,23 @@ function setupSettingsModal() {
             showProviderTagline: showProviderTaglineCheckbox ? showProviderTaglineCheckbox.checked : true,
             allowRichTagline: allowRichTaglineCheckbox ? allowRichTaglineCheckbox.checked : false,
             browseSnapSections: browseSnapSectionsCheckbox ? browseSnapSectionsCheckbox.checked : false,
+            collapseAllBrowseSections: collapseAllBrowseSectionsCheckbox ? collapseAllBrowseSectionsCheckbox.checked : false,
             mobileProviderQuickSwitch: mobileProviderQuickSwitchCheckbox ? mobileProviderQuickSwitchCheckbox.checked : true,
+            mobileHideBackArrows: mobileHideBackArrowsCheckbox ? mobileHideBackArrowsCheckbox.checked : false,
+            mobileBrowseQuickImport: mobileBrowseQuickImportCheckbox ? mobileBrowseQuickImportCheckbox.checked : true,
+            mobileSwipeGestures: mobileSwipeGesturesCheckbox ? mobileSwipeGesturesCheckbox.checked : true,
+            mobileHaptics: mobileHapticsCheckbox ? mobileHapticsCheckbox.checked : true,
+            useGridThumbnails: useGridThumbnailsCheckbox ? useGridThumbnailsCheckbox.checked : false,
+            gridThumbnailsDesktop: gridThumbDesktopCheckbox ? gridThumbDesktopCheckbox.checked : false,
+            gridThumbnailsClHelper: gridThumbClHelperCheckbox ? gridThumbClHelperCheckbox.checked : true,
+            gridThumbnailSize: gridThumbSizeSelect ? parseInt(gridThumbSizeSelect.value) || 512 : 512,
             buttonStyle: buttonStyleSelect ? buttonStyleSelect.value || 'glass' : 'glass',
             uiScale: uiScaleSelect ? parseInt(uiScaleSelect.value) || 3 : 3,
             modalSize: modalSizeSelect ? parseInt(modalSizeSelect.value) || 2 : 2,
             animateTagPills: animateTagPillsCheckbox ? animateTagPillsCheckbox.checked : false,
             animateKeepName: animateKeepNameCheckbox ? animateKeepNameCheckbox.checked : false,
             hidePlaylistBadges: hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false,
+            enableCharDetailNav: enableCharDetailNavCheckbox ? enableCharDetailNavCheckbox.checked : true,
             uniqueGalleryFolders: uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false,
             chubUseV4Api: chubUseV4ApiCheckbox ? chubUseV4ApiCheckbox.checked : false,
             autoSnapshotOnEdit: autoSnapshotOnEditCheckbox ? autoSnapshotOnEditCheckbox.checked : false,
@@ -1906,6 +2419,17 @@ function setupSettingsModal() {
 
         // Apply hide playlist badges
         applyHidePlaylistBadges(hidePlaylistBadgesCheckbox ? hidePlaylistBadgesCheckbox.checked : false);
+
+        updateCharModalNavState();
+
+        // Mobile back-arrow visibility toggle
+        applyMobileHideBackArrows(mobileHideBackArrowsCheckbox ? mobileHideBackArrowsCheckbox.checked : false);
+
+        // Mobile compact-import on browse preview modals
+        applyMobileBrowseQuickImport(mobileBrowseQuickImportCheckbox ? mobileBrowseQuickImportCheckbox.checked : true);
+
+        // Mobile provider quick-switch (topbar icon + Online dropdown)
+        applyMobileProviderQuickSwitch(mobileProviderQuickSwitchCheckbox ? mobileProviderQuickSwitchCheckbox.checked : true);
 
         // Keep import modal defaults in sync with settings
         syncImportAutoDownloadGallery();
@@ -2000,6 +2524,12 @@ function setupSettingsModal() {
         searchAuthorCheckbox.checked = DEFAULT_SETTINGS.searchInAuthor;
         searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
         defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
+        if (defaultFilterPresetSelect) {
+            populateDefaultFilterPresetSelect(defaultFilterPresetSelect, DEFAULT_SETTINGS.defaultFilterPreset);
+        }
+        if (groupFavoritesFirstCheckbox) {
+            groupFavoritesFirstCheckbox.checked = DEFAULT_SETTINGS.groupFavoritesFirst;
+        }
         richCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.richCreatorNotes;
         if (expandCreatorNotesCheckbox) expandCreatorNotesCheckbox.checked = DEFAULT_SETTINGS.expandCreatorNotes;
         if (displayNamePreferenceSelect) displayNamePreferenceSelect.value = DEFAULT_SETTINGS.displayNamePreference;
@@ -2032,20 +2562,48 @@ function setupSettingsModal() {
         if (browseSnapSectionsCheckbox) {
             browseSnapSectionsCheckbox.checked = DEFAULT_SETTINGS.browseSnapSections;
         }
+        if (collapseAllBrowseSectionsCheckbox) {
+            collapseAllBrowseSectionsCheckbox.checked = DEFAULT_SETTINGS.collapseAllBrowseSections;
+        }
         if (mobileProviderQuickSwitchCheckbox) {
             mobileProviderQuickSwitchCheckbox.checked = DEFAULT_SETTINGS.mobileProviderQuickSwitch;
         }
+        if (mobileHideBackArrowsCheckbox) {
+            mobileHideBackArrowsCheckbox.checked = DEFAULT_SETTINGS.mobileHideBackArrows;
+        }
+        if (mobileBrowseQuickImportCheckbox) {
+            mobileBrowseQuickImportCheckbox.checked = DEFAULT_SETTINGS.mobileBrowseQuickImport;
+        }
+        if (mobileSwipeGesturesCheckbox) {
+            mobileSwipeGesturesCheckbox.checked = DEFAULT_SETTINGS.mobileSwipeGestures;
+        }
+        if (mobileHapticsCheckbox) {
+            mobileHapticsCheckbox.checked = DEFAULT_SETTINGS.mobileHaptics;
+        }
+        if (useGridThumbnailsCheckbox) {
+            useGridThumbnailsCheckbox.checked = DEFAULT_SETTINGS.useGridThumbnails;
+        }
+        if (gridThumbDesktopCheckbox) {
+            gridThumbDesktopCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsDesktop;
+        }
+        if (gridThumbClHelperCheckbox) {
+            gridThumbClHelperCheckbox.checked = DEFAULT_SETTINGS.gridThumbnailsClHelper;
+        }
+        if (gridThumbSizeSelect) {
+            gridThumbSizeSelect.value = String(DEFAULT_SETTINGS.gridThumbnailSize);
+        }
+        applyGridThumbsDisabledStates();
 
-        // Provider Order & Defaults — reset to registration order
+        // Provider Order & Defaults - reset to registration order
         resetProviderOrderUI();
 
-        // Infinite Scroll — reset all to enabled
+        // Infinite Scroll - reset all to enabled
         const isContainer = document.getElementById('infiniteScrollToggles');
         if (isContainer) {
             isContainer.querySelectorAll('.infinite-scroll-toggle').forEach(cb => { cb.checked = true; });
         }
 
-        // Exclude Tags — clear pills
+        // Exclude Tags - clear pills
         populateAllExcludeTagPills();
         
         // Apply default highlight color immediately
@@ -2351,6 +2909,97 @@ function setupSettingsModal() {
         };
     }
 
+    // ---- Civitai API Key ----
+    const civitaiApiKeyInputEl = document.getElementById('settingsCivitaiApiKey');
+    const toggleCivitaiKeyVisibilityBtn = document.getElementById('toggleCivitaiKeyVisibility');
+    const saveCivitaiKeyBtn = document.getElementById('saveCivitaiKeyBtn');
+    const clearCivitaiKeyBtn = document.getElementById('clearCivitaiKeyBtn');
+    const validateCivitaiKeyBtn = document.getElementById('validateCivitaiKeyBtn');
+
+    if (toggleCivitaiKeyVisibilityBtn && civitaiApiKeyInputEl) {
+        toggleCivitaiKeyVisibilityBtn.onclick = () => {
+            const isPassword = civitaiApiKeyInputEl.type === 'password';
+            civitaiApiKeyInputEl.type = isPassword ? 'text' : 'password';
+            toggleCivitaiKeyVisibilityBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+
+    if (saveCivitaiKeyBtn && civitaiApiKeyInputEl) {
+        saveCivitaiKeyBtn.onclick = async () => {
+            const key = (civitaiApiKeyInputEl.value || '').trim();
+            if (!key) {
+                showToast('Enter a key first', 'warning');
+                return;
+            }
+            setSetting('civitaiApiKey', key);
+            try {
+                const resp = await apiRequest('/plugins/cl-helper/civitai-set-key', 'POST', { key });
+                if (resp?.ok) {
+                    window.invalidateCivitaiAuthCache?.();
+                    showToast('Civitai key saved', 'success');
+                } else {
+                    showToast('Saved locally, cl-helper unavailable', 'warning');
+                }
+            } catch {
+                showToast('Saved locally, cl-helper unreachable', 'warning');
+            }
+        };
+    }
+
+    if (clearCivitaiKeyBtn) {
+        clearCivitaiKeyBtn.onclick = async () => {
+            setSetting('civitaiApiKey', null);
+            if (civitaiApiKeyInputEl) civitaiApiKeyInputEl.value = '';
+            try {
+                await apiRequest('/plugins/cl-helper/civitai-clear-key', 'POST', {});
+            } catch {}
+            window.invalidateCivitaiAuthCache?.();
+            showToast('Civitai key cleared', 'info');
+        };
+    }
+
+    if (validateCivitaiKeyBtn) {
+        validateCivitaiKeyBtn.onclick = async () => {
+            const originalHtml = validateCivitaiKeyBtn.innerHTML;
+            validateCivitaiKeyBtn.classList.remove('success', 'error');
+            validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateCivitaiKeyBtn.disabled = true;
+            try {
+                // Resync the stored key to cl-helper before validating. Covers the
+                // case where cl-helper lost it (plugin reload, ST restart, or the
+                // user upgrading the plugin after saving the setting).
+                const inputKey = (civitaiApiKeyInputEl?.value || '').trim();
+                const savedKey = getSetting('civitaiApiKey') || '';
+                const key = inputKey || savedKey;
+                if (key) {
+                    try { await apiRequest('/plugins/cl-helper/civitai-set-key', 'POST', { key }); } catch {}
+                    window.invalidateCivitaiAuthCache?.();
+                }
+                const resp = await apiRequest('/plugins/cl-helper/civitai-validate');
+                const data = resp ? await resp.json() : null;
+                if (data?.valid) {
+                    validateCivitaiKeyBtn.classList.add('success');
+                    validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    showToast('Civitai key is valid', 'success');
+                } else {
+                    validateCivitaiKeyBtn.classList.add('error');
+                    validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    showToast(data?.error || `Key invalid (status ${data?.status ?? '?'})`, 'error');
+                }
+            } catch (err) {
+                validateCivitaiKeyBtn.classList.add('error');
+                validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                showToast(`Validation error: ${err.message}`, 'error');
+            } finally {
+                validateCivitaiKeyBtn.disabled = false;
+                setTimeout(() => {
+                    validateCivitaiKeyBtn.classList.remove('success', 'error');
+                    validateCivitaiKeyBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
     // Update gallery migration status display
     function updateGalleryMigrationStatus() {
         if (!galleryMigrationStatus || !galleryMigrationStatusText) return;
@@ -2374,7 +3023,7 @@ function setupSettingsModal() {
         galleryMigrationStatus.style.display = 'block';
         
         if (needsId === 0 && needsRegistration === 0) {
-            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: #4caf50;"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: var(--cl-success);"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
         } else if (needsId === 0 && needsRegistration > 0) {
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> All characters have IDs, but ${needsRegistration} need folder override registration.`;
         } else {
@@ -2387,7 +3036,7 @@ function setupSettingsModal() {
     if (batchCheckUpdatesBtn) {
         batchCheckUpdatesBtn.onclick = () => {
             if (typeof window.checkAllCardUpdates === 'function') {
-                settingsModal.classList.add('hidden');
+                settingsModal.classList.remove('visible');
                 window.checkAllCardUpdates();
             } else {
                 showToast('Card updates module not loaded', 'error');
@@ -2557,7 +3206,6 @@ function setupSettingsModal() {
             
             if (errorCount === 0 && syncResult.failed === 0) {
                 showToast(resultMsg || 'Migration complete!', 'success');
-                // Important: Tell user to refresh ST
                 setTimeout(() => {
                     showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
                 }, 1500);
@@ -2735,7 +3383,7 @@ function setupSettingsModal() {
                 charsProcessed++;
                 
                 if (migrateAllStatusText) {
-                    migrateAllStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing ${char.name}... (${charsProcessed}/${uniqueNameChars.length})`;
+                    migrateAllStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Processing ${escapeHtml(char.name)}... (${charsProcessed}/${uniqueNameChars.length})`;
                 }
                 
                 const result = await migrateCharacterImagesToUniqueFolder(char);
@@ -2895,7 +3543,7 @@ function setupSettingsModal() {
                     showToast('Audit complete', 'success');
                 } catch (err) {
                     console.error('[GallerySync] Audit failed:', err);
-                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: #e74c3c;"></i><span>Audit failed - check console</span></div>';
+                    gallerySyncStatus.innerHTML = '<div class="sync-status-placeholder"><i class="fa-solid fa-circle-xmark" style="color: var(--cl-error-bright);"></i><span>Audit failed - check console</span></div>';
                     showToast('Audit failed', 'error');
                 }
             }, 100);
@@ -3277,18 +3925,17 @@ function switchView(view) {
             mainSearch.style.pointerEvents = '';
         }
         show('chatsView');
-        // Trigger lazy-load of chats module and initial data fetch
-        window.chatsModule?.loadAllChats?.();
+        // rAF defer so swipe transitions can paint first
+        requestAnimationFrame(() => window.chatsModule?.loadAllChats?.());
     } else if (view === 'online') {
         if (onlineFilters) onlineFilters.style.display = 'flex';
         if (importBtn) importBtn.style.display = 'none';
         if (searchSettings) searchSettings.style.display = 'none';
-        // Hide search area entirely — each provider has its own search
         if (mainSearch) {
             mainSearch.style.display = 'none';
         }
         show('onlineView');
-        activateOnlineProvider();
+        requestAnimationFrame(() => activateOnlineProvider());
     }
 
     // Fire registered callbacks for this view
@@ -3342,7 +3989,14 @@ async function withLoadingState(button, loadingText, operation) {
 function renderLoadingState(container, message, className = 'loading-spinner') {
     const el = typeof container === 'string' ? document.getElementById(container) : container;
     if (el) {
-        el.innerHTML = `<div class="${className}"><i class="fa-solid fa-spinner fa-spin"></i> ${escapeHtml(message)}</div>`;
+        const cleaned = String(message ?? '').replace(/[.\u2026]+\s*$/, '');
+        el.innerHTML = `
+            <div class="${className} cl-loading">
+                <div class="cl-loading-icon"><i class="fa-solid fa-layer-group"></i></div>
+                <div class="cl-loading-label">${escapeHtml(cleaned)}</div>
+                <div class="cl-loading-bar" aria-hidden="true"><span></span></div>
+            </div>
+        `;
     }
 }
 
@@ -3357,6 +4011,89 @@ function renderSimpleEmpty(container, message, className = 'empty-state') {
     if (el) {
         el.innerHTML = `<div class="${className}">${escapeHtml(message)}</div>`;
     }
+}
+
+/**
+ * Skeleton card grid for loading states. Mobile shows shimmer cards;
+ * desktop falls back to the hero spinner so canon UX is unchanged.
+ * Cards inject as direct children of `container` so the parent's grid
+ * layout drives placement (no layout shift when real cards arrive).
+ * @param {HTMLElement|string} container
+ * @param {number} [count=12]
+ * @param {string} [desktopLabel='Loading…'] hero spinner text on desktop
+ */
+function renderSkeletonGrid(container, count = 12, desktopLabel = 'Loading…') {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (!isMobile) {
+        renderLoadingState(container, desktopLabel, 'browse-loading');
+        return;
+    }
+    const el = typeof container === 'string' ? document.getElementById(container) : container;
+    if (!el) return;
+    const cards = Array.from({ length: count }, () => `
+        <div class="cl-skeleton-card">
+            <div class="cl-skeleton-img"></div>
+            <div class="cl-skeleton-meta">
+                <div class="cl-skeleton-line"></div>
+                <div class="cl-skeleton-line short"></div>
+            </div>
+        </div>
+    `).join('');
+    el.innerHTML = cards;
+}
+
+/**
+ * Rich empty-state UI. Mobile shows icon + headline + hint + CTA; desktop
+ * falls back to renderSimpleEmpty using `desktopText` (or `title`).
+ * @param {HTMLElement|string} container
+ * @param {{icon?:string, title:string, hint?:string, actionLabel?:string,
+ *          onAction?:Function, actionIcon?:string, desktopText?:string}} opts
+ */
+function renderEmptyState(container, opts = {}) {
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    if (!isMobile) {
+        renderSimpleEmpty(container, opts.desktopText || opts.title || '');
+        return;
+    }
+    const el = typeof container === 'string' ? document.getElementById(container) : container;
+    if (!el) return;
+    const { icon, title, hint, actionLabel, onAction, actionIcon } = opts;
+    const iconClass = icon || 'fa-solid fa-ghost';
+    const actionHtml = (actionLabel && onAction)
+        ? `<button type="button" class="action-btn primary cl-empty-state-action">${actionIcon ? `<i class="${actionIcon}"></i> ` : ''}${escapeHtml(actionLabel)}</button>`
+        : '';
+    el.innerHTML = `
+        <div class="cl-empty-state">
+            <div class="cl-empty-state-icon"><i class="${iconClass}"></i></div>
+            <h3 class="cl-empty-state-title">${escapeHtml(title || '')}</h3>
+            ${hint ? `<p class="cl-empty-state-hint">${escapeHtml(hint)}</p>` : ''}
+            ${actionHtml}
+        </div>
+    `;
+    if (actionLabel && onAction) {
+        el.querySelector('.cl-empty-state-action')?.addEventListener('click', onAction);
+    }
+}
+
+/**
+ * Render a shimmering skeleton list of rows. For chats and other row-based
+ * surfaces.
+ * @param {HTMLElement|string} container
+ * @param {number} count - row count, default 6
+ */
+function renderSkeletonList(container, count = 6) {
+    const el = typeof container === 'string' ? document.getElementById(container) : container;
+    if (!el) return;
+    const rows = Array.from({ length: count }, () => `
+        <div class="cl-skeleton-row">
+            <div class="cl-skeleton-avatar"></div>
+            <div class="cl-skeleton-content">
+                <div class="cl-skeleton-line"></div>
+                <div class="cl-skeleton-line shorter"></div>
+            </div>
+        </div>
+    `).join('');
+    el.innerHTML = `<div class="cl-skeleton-list">${rows}</div>`;
 }
 
 // ========================================
@@ -3590,8 +4327,8 @@ async function moveImagesToDefaultFolders(progressCallback) {
     
     for (let i = 0; i < overrides.length; i++) {
         const { avatar, folder, char } = overrides[i];
-        
-        // Get the default folder name (just character name)
+
+        // Default folder name is just the character name.
         const defaultFolder = char?.name || folder.split('_').slice(0, -1).join('_');
         
         if (!defaultFolder || folder === defaultFolder) {
@@ -3645,7 +4382,7 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
     }
     
     const modalHtml = `
-        <div id="disableGalleryFoldersModal" class="confirm-modal">
+        <div id="disableGalleryFoldersModal" class="confirm-modal cl-modal-drawer">
             <div class="confirm-modal-content" style="max-width: calc(500px * var(--modal-scale, 1));">
                     <button class="close-confirm-btn" id="closeDisableGalleryModal">&times;</button>
                 </div>
@@ -3658,7 +4395,7 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
                         Disabling will remove folder mappings from ST settings. ST's gallery will revert to default behavior (folders by character name).
                     </p>
                     
-                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 20px;">
+                    <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 20px;">
                         <p style="margin: 0; font-size: 0.9em;">
                             <i class="fa-solid fa-info-circle"></i> Characters sharing the same name will share gallery folders again. Images in unique folders won't be accessible until moved.
                         </p>
@@ -3854,14 +4591,14 @@ function showFolderMappingModal() {
     if (orphanedMappings.length > 0) {
         contentHtml += `
             <div style="margin-bottom: 20px;">
-                <h4 style="margin: 0 0 10px 0; color: #e74c3c; display: flex; align-items: center; gap: 8px;">
+                <h4 style="margin: 0 0 10px 0; color: var(--cl-error-bright); display: flex; align-items: center; gap: 8px;">
                     <i class="fa-solid fa-ghost"></i>
                     Orphaned Mappings (${orphanedMappings.length})
                 </h4>
                 <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
                     These folder mappings point to characters that no longer exist. They can be safely removed with "Cleanup Orphans" in Integrity Check.
                 </p>
-                <div style="max-height: 200px; overflow-y: auto; background: rgba(231, 76, 60, 0.05); border: 1px solid rgba(231, 76, 60, 0.2); border-radius: 6px; padding: 10px;">
+                <div style="max-height: 200px; overflow-y: auto; background: rgba(var(--cl-error-bright-rgb), 0.05); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.2); border-radius: var(--radius-md); padding: 10px;">
                     <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
                         <thead>
                             <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
@@ -3872,8 +4609,8 @@ function showFolderMappingModal() {
                         <tbody>
                             ${orphanedMappings.map(({ avatar, folder }) => `
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                    <td style="padding: 6px; color: #e74c3c; font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
-                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${escapeHtml(folder)}</code></td>
+                                    <td style="padding: 6px; color: var(--cl-error-bright); font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
+                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: var(--radius-xs); font-size: 0.9em;">${escapeHtml(folder)}</code></td>
                                 </tr>
                             `).join('')}
                         </tbody>
@@ -3897,7 +4634,7 @@ function showFolderMappingModal() {
             contentHtml += `
                 <div style="margin-bottom: 20px;">
                     <h4 style="margin: 0 0 10px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-                        <i class="fa-solid fa-users" style="color: #e74c3c;"></i>
+                        <i class="fa-solid fa-users" style="color: var(--cl-error-bright);"></i>
                         Characters Sharing Names (${sharedNames.size} groups)
                     </h4>
                     <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
@@ -3907,26 +4644,26 @@ function showFolderMappingModal() {
             
             for (const [name, chars] of sharedNames) {
                 contentHtml += `
-                    <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 12px;">
                         <div style="font-weight: bold; color: var(--text-primary); margin-bottom: 8px;">
-                            <i class="fa-solid fa-folder" style="color: #f39c12;"></i> 
-                            Old shared folder: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 3px;">${escapeHtml(name)}</code>
+                            <i class="fa-solid fa-folder" style="color: var(--cl-warning-bright);"></i>
+                            Old shared folder: <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-xs);">${escapeHtml(name)}</code>
                         </div>
                         <div style="margin-left: 20px;">
                             ${chars.map(char => {
                                 const galleryId = getCharacterGalleryId(char);
                                 const uniqueFolder = buildUniqueGalleryFolderName(char);
                                 const provInfo = window.ProviderRegistry?.getCharacterProvider(char);
-                                const provLabel = provInfo ? ` <span style="color: #3498db; font-size: 0.8em;">(${provInfo.provider.name}: ${provInfo.linkInfo.id || provInfo.linkInfo.fullPath || ''})</span>` : '';
+                                const provLabel = provInfo ? ` <span style="color: var(--cl-info-bright); font-size: 0.8em;">(${provInfo.provider.name}: ${provInfo.linkInfo.id || provInfo.linkInfo.fullPath || ''})</span>` : '';
                                 return `
-                                    <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: 4px;">
+                                    <div style="margin: 6px 0; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: var(--radius-sm);">
                                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                                            <img src="${getCharacterAvatarUrl(char.avatar)}" 
-                                                 style="width: 32px; height: 32px; border-radius: 4px; object-fit: cover;"
+                                            <img src="${getCharacterAvatarStThumbUrl(char.avatar)}"
+                                                 style="width: 32px; height: 32px; border-radius: var(--radius-sm); object-fit: cover;"
                                                  onerror="this.src='/img/ai4.png'">
-                                            <span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent, #4a9eff); cursor: pointer;">${escapeHtml(char.name)}</span>${provLabel}
+                                            <span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent); cursor: pointer;">${escapeHtml(char.name)}</span>${provLabel}
                                             <i class="fa-solid fa-arrow-right" style="color: var(--text-muted);"></i>
-                                            <code style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; padding: 2px 6px; border-radius: 3px; font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
+                                            <code style="background: rgba(var(--cl-success-bright-rgb), 0.2); color: var(--cl-success-bright); padding: 2px 6px; border-radius: var(--radius-xs); font-size: 0.85em;">${uniqueFolder || '(no ID)'}</code>
                                             <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy folder name">
                                                 <i class="fa-solid fa-copy"></i>
                                             </button>
@@ -3953,11 +4690,11 @@ function showFolderMappingModal() {
         if (otherChars.length > 0) {
             contentHtml += `
                 <details style="margin-top: 15px;">
-                    <summary style="cursor: pointer; color: var(--text-primary); padding: 8px; background: rgba(255,255,255,0.03); border-radius: 6px;">
+                    <summary style="cursor: pointer; color: var(--text-primary); padding: 8px; background: rgba(255,255,255,0.03); border-radius: var(--radius-md);">
                         <i class="fa-solid fa-folder-tree"></i> 
                         All Other Characters with Unique Folders (${otherChars.length})
                     </summary>
-                    <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px;">
+                    <div style="max-height: 300px; overflow-y: auto; margin-top: 10px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: var(--radius-md);">
                         <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
                             <thead>
                                 <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
@@ -3971,8 +4708,8 @@ function showFolderMappingModal() {
                                     const uniqueFolder = buildUniqueGalleryFolderName(char);
                                     return `
                                         <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                            <td style="padding: 6px;"><span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent, #4a9eff); cursor: pointer;">${escapeHtml(char.name)}</span></td>
-                                            <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 3px; font-size: 0.9em;">${uniqueFolder}</code></td>
+                                            <td style="padding: 6px;"><span class="folder-map-char-link" data-avatar="${escapeHtml(char.avatar)}" style="color: var(--accent); cursor: pointer;">${escapeHtml(char.name)}</span></td>
+                                            <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: var(--radius-xs); font-size: 0.9em;">${uniqueFolder}</code></td>
                                             <td style="padding: 6px;">
                                                 <button class="copy-folder-btn" data-folder="${escapeHtml(uniqueFolder || '')}" title="Copy">
                                                     <i class="fa-solid fa-copy"></i>
@@ -3991,21 +4728,21 @@ function showFolderMappingModal() {
     
     // Create modal
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal';
+    modal.className = 'confirm-modal cl-modal-drawer';
     modal.id = 'folderMappingModal';
     modal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(700px * var(--modal-scale, 1)); max-height: calc(80vh * var(--modal-scale, 1));">
             <div class="confirm-modal-header">
-                <h3 style="border: none; padding: 0; margin: 0;">
+                <h3>
                     <i class="fa-solid fa-map"></i> Gallery Folder Mapping
                 </h3>
                 <button class="close-confirm-btn" id="closeFolderMappingModal">&times;</button>
             </div>
             <div class="confirm-modal-body" style="max-height: 60vh; overflow-y: auto;">
-                <div style="background: rgba(52, 152, 219, 0.1); border: 1px solid rgba(52, 152, 219, 0.3); border-radius: 6px; padding: 10px; margin-bottom: 15px;">
+                <div style="background: rgba(var(--cl-info-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-info-bright-rgb), 0.3); border-radius: var(--radius-md); padding: 10px; margin-bottom: 15px;">
                     <p style="margin: 0; color: var(--text-secondary); font-size: 0.9em;">
-                        <i class="fa-solid fa-lightbulb" style="color: #f39c12;"></i>
-                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: 3px;">data/default-user/images/</code>
+                        <i class="fa-solid fa-lightbulb" style="color: var(--cl-warning-bright);"></i>
+                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: var(--radius-xs);">data/default-user/images/</code>
                         <br>Move files from the old <code>CharName</code> folder to the new <code>CharName_abc123xyz</code> folder.
                     </p>
                 </div>
@@ -4035,7 +4772,7 @@ function showFolderMappingModal() {
         if (!avatar) return;
         const char = allCharacters.find(c => c.avatar === avatar);
         if (!char) return;
-        openCharModalElevated(char, modal);
+        openCharModalElevated(char);
     });
 
     // Setup copy buttons with fallback for non-secure contexts
@@ -4072,7 +4809,7 @@ function showFolderMappingModal() {
                 }
                 
                 if (success) {
-                    btn.innerHTML = '<i class="fa-solid fa-check" style="color: #2ecc71;"></i>';
+                    btn.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i>';
                     setTimeout(() => { btn.innerHTML = '<i class="fa-solid fa-copy"></i>'; }, 1500);
                 } else {
                     showToast('Failed to copy to clipboard', 'error');
@@ -4252,12 +4989,12 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
 
     // Create initial modal with loading state
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal';
+    modal.className = 'confirm-modal cl-modal-drawer';
     modal.id = 'orphanedFoldersModal';
     modal.innerHTML = `
         <div class="confirm-modal-content orphaned-folders-modal">
             <div class="confirm-modal-header">
-                <h3 style="border: none; padding: 0; margin: 0;">
+                <h3>
                     <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
                 </h3>
                 <select id="orphanedFoldersModeSelect" class="glass-select" style="margin-left: auto;">
@@ -4295,7 +5032,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
     document.getElementById('closeOrphanedFoldersBtn').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
     
-    // Escape key handler — skip if char details modal is open above us
+    // Escape key handler - skip if char details modal is open above us
     const escHandler = (e) => {
         if (e.key === 'Escape') {
             const charModal = document.getElementById('charModal');
@@ -4324,7 +5061,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (scannedFolders.length === 0) {
             body.innerHTML = `
                 <div style="display: flex; flex-direction: column; align-items: center; padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                     <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">No ${mode === 'duplicate' ? 'Duplicate Gallery ID' : 'Orphaned'} Folders Found</h4>
                     <p style="color: var(--text-secondary); margin: 0;">
                         ${mode === 'duplicate'
@@ -4372,11 +5109,11 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                         return `
                         <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
                             <div class="orphaned-folder-name">
-                                <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? '#e74c3c' : '#f39c12'};"></i>
+                                <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? 'var(--cl-error-bright)' : 'var(--cl-warning-bright)'};"></i>
                                 ${escapeHtml(folder.name)}
                             </div>
                             <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
-                            ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
+                            ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
                             ${isDuplicateMode && folder.correctFolder ? `<div class="orphaned-folder-correct" title="Correct folder: ${escapeHtml(folder.correctFolder)}"><i class="fa-solid fa-arrow-right"></i> ${escapeHtml(folder.correctFolder.length > 40 ? folder.correctFolder.slice(0, 37) + '...' : folder.correctFolder)}</div>` : ''}
                         </div>`;
                     }).join('')}
@@ -4434,7 +5171,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                                 const provLabel = provInfo ? `<span class="dest-chub-id">${provInfo.provider.name}: ${provInfo.linkInfo.id || ''}</span>` : '';
                                 return `
                                     <div class="orphaned-dest-item" data-avatar="${escapeHtml(char.avatar)}" data-folder="${escapeHtml(uniqueFolder)}" data-name="${escapeHtml(char.name.toLowerCase())}">
-                                        <img src="${getCharacterAvatarUrl(char.avatar)}" class="dest-avatar" onerror="this.src='${FALLBACK_AVATAR_SVG}'">
+                                        <img src="${getCharacterAvatarStThumbUrl(char.avatar)}" class="dest-avatar" onerror="this.src='${FALLBACK_AVATAR_SVG}'">
                                         <div class="dest-info">
                                             <div class="dest-name"><span class="dest-name-link" data-avatar="${escapeHtml(char.avatar)}" title="View character details">${escapeHtml(char.name)}</span> ${provLabel}</div>
                                             <div class="dest-folder">${escapeHtml(uniqueFolder)}</div>
@@ -4459,7 +5196,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         
         const grid = document.getElementById('orphanedImagesGrid');
 
-        // Use raw folder name from scanner — it came from disk via IMAGES_FOLDERS.
+        // Use raw folder name from scanner - it came from disk via IMAGES_FOLDERS.
         // encodeURIComponent throws on lone surrogates from mangled emoji.
         let encodedFolderName;
         try { encodedFolderName = encodeURIComponent(folder.name); } catch { encodedFolderName = null; }
@@ -4473,7 +5210,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (charSpan) {
             const matchChar = isDuplicateMode && folder.matchingChars?.[0];
             if (matchChar) {
-                charSpan.innerHTML = `<img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span>`;
+                charSpan.innerHTML = `<img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span>`;
             } else {
                 charSpan.innerHTML = '';
             }
@@ -4666,7 +5403,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                 } else {
                     body.innerHTML = `
                         <div class="empty-state" style="padding: 40px; text-align: center;">
-                            <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                            <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                             <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                             <p style="color: var(--text-secondary); margin: 0;">All folder contents have been cleared.</p>
                         </div>
@@ -4685,7 +5422,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         showToast(`Deleted ${deleted} file(s)${errors > 0 ? `, ${errors} error(s)` : ''}`, errors > 0 ? 'warning' : 'success');
     });
 
-    // Delete Folder handler — deletes ALL files then attempts to remove the empty folder
+    // Delete Folder handler - deletes ALL files then attempts to remove the empty folder
     document.getElementById('orphanedDeleteFolderBtn').addEventListener('click', async () => {
         if (!currentFolder) return;
 
@@ -4717,7 +5454,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         selectedFiles.clear();
 
         // Track as dismissed so it won't reappear on next scan
-        // (ST has no directory deletion API — fs.unlinkSync can't remove dirs)
+        // (ST has no directory deletion API - fs.unlinkSync can't remove dirs)
         addDismissedFolder(currentFolder.name);
         cleanupThumbCache(currentFolder.name);
 
@@ -4733,7 +5470,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
             } else {
                 body.innerHTML = `
                     <div class="empty-state" style="padding: 40px; text-align: center;">
-                        <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                        <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                         <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                         <p style="color: var(--text-secondary); margin: 0;">All folders have been cleaned up.</p>
                     </div>
@@ -4829,7 +5566,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
             return;
         }
 
-        // Legacy mode — original clear duplicates logic
+        // Legacy mode - original clear duplicates logic
         if (!confirm(`Clear Duplicates\n\nThis will scan ALL ${orphanedFolders.length} orphaned folder(s) and remove any files that already exist in their matching unique folders.\n\nContinue?`)) {
             return;
         }
@@ -4999,11 +5736,11 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         });
     });
     
-    // Character name click handler — open details modal above orphaned modal
+    // Character name click handler - open details modal above orphaned modal
     function openCharAboveOrphaned(avatar) {
         const char = allCharacters.find(c => c.avatar === avatar);
         if (!char) return;
-        openCharModalElevated(char, document.getElementById('orphanedFoldersModal'));
+        openCharModalElevated(char);
     }
 
     body.addEventListener('click', (e) => {
@@ -5078,7 +5815,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                     } else {
                         body.innerHTML = `
                             <div class="empty-state" style="padding: 40px; text-align: center;">
-                                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                                <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                                 <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                                 <p style="color: var(--text-secondary); margin: 0;">
                                     All orphaned folder contents have been redistributed.
@@ -5109,7 +5846,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         if (orphanedFolders.length === 0) {
             body.innerHTML = `
                 <div class="empty-state" style="padding: 40px; text-align: center;">
-                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: #2ecc71; margin-bottom: 15px;"></i>
+                    <i class="fa-solid fa-check-circle" style="font-size: 48px; color: var(--cl-success-bright); margin-bottom: 15px;"></i>
                     <h4 style="color: var(--text-primary); margin: 0 0 10px 0;">All Done!</h4>
                     <p style="color: var(--text-secondary); margin: 0;">
                         Processed ${totalProcessed} file(s)${foldersCleared > 0 ? ` from ${foldersCleared} folder(s)` : ''}.
@@ -5124,11 +5861,11 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
                     return `
                     <div class="orphaned-folder-item ${idx === 0 ? 'active' : ''}" data-folder="${escapeHtml(folder.name)}">
                         <div class="orphaned-folder-name">
-                            <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? '#e74c3c' : '#f39c12'};"></i>
+                            <i class="fa-solid fa-folder" style="color: ${isDuplicateMode ? 'var(--cl-error-bright)' : 'var(--cl-warning-bright)'};"></i>
                             ${escapeHtml(folder.name)}
                         </div>
                         <div class="orphaned-folder-count">${folder.files.length} file${folder.files.length !== 1 ? 's' : ''}</div>
-                        ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
+                        ${matchChar ? `<div class="orphaned-folder-char"><img src="${getCharacterAvatarStThumbUrl(matchChar.avatar)}" class="orphaned-char-avatar" onerror="this.style.display='none'"><span class="orphaned-char-link" data-avatar="${escapeHtml(matchChar.avatar)}" title="View character details">${escapeHtml(matchChar.name)}</span></div>` : ''}
                         ${isDuplicateMode && folder.correctFolder ? `<div class="orphaned-folder-correct" title="Correct folder: ${escapeHtml(folder.correctFolder)}"><i class="fa-solid fa-arrow-right"></i> ${escapeHtml(folder.correctFolder.length > 40 ? folder.correctFolder.slice(0, 37) + '...' : folder.correctFolder)}</div>` : ''}
                     </div>`;
                 }).join('');
@@ -5234,8 +5971,7 @@ async function assignGalleryIdToCharacter(char) {
     };
     
     try {
-        // Save to character via merge-attributes API
-        // IMPORTANT: Spread existing data to avoid wiping other fields
+        // Save via merge-attributes; spread existing data so other fields survive.
         const existingData = char.data || {};
         const payload = {
             avatar: char.avatar,
@@ -5692,8 +6428,7 @@ async function relocateSharedFolderImages(characters, options = {}) {
         if (uniqueFolder === sharedFolderName) {
             continue;
         }
-        
-        // Check if file with same content already exists in destination
+
         const destHashes = destFolderHashes.get(uniqueFolder);
         if (destHashes && destHashes.has(hash)) {
             // File already exists in destination - just delete from source
@@ -5973,7 +6708,9 @@ function setupEmbeddedUI() {
 
 // Init
 document.addEventListener('DOMContentLoaded', async () => {
-    // Inject embedded mode UI adjustments
+    // Lock view-toggle / bottom-nav until fetchCharacters finishes (eg. user cant tap into Chats mid-load)
+    document.documentElement.classList.add('cl-initial-loading');
+
     if (isEmbedded) {
         setupEmbeddedUI();
     }
@@ -5998,10 +6735,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!window.matchMedia('(max-width: 768px)').matches) {
         applyUiScale(getSetting('uiScale'));
         applyModalSize(getSetting('modalSize'));
+        // Self-correct XL if saved alongside a non-80% ui scale.
+        syncXlModalSizeAvailability();
     }
     
     // Apply button style
     applyButtonStyle(getSetting('buttonStyle'));
+
+    applyMobileHideBackArrows(getSetting('mobileHideBackArrows'));
+    applyMobileBrowseQuickImport(getSetting('mobileBrowseQuickImport') !== false);
+    applyMobileProviderQuickSwitch(getSetting('mobileProviderQuickSwitch') !== false);
+
+    // Apply collapse-all browse sections preference
+    applyCollapseAllBrowseSections(getSetting('collapseAllBrowseSections'));
 
     // Apply animated tag pills setting
     applyAnimateTagPills(getSetting('animateTagPills'), getSetting('animateKeepName'));
@@ -6011,6 +6757,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Apply any saved token overrides before first render
     loadCustomTokens();
+    applyCustomCSS();
     updateThemeCustomizerVisibility();
     
     initAllCustomSelects();
@@ -6021,8 +6768,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Always use API for initial load to get authoritative data from disk.
     // The opener's in-memory character list may be stale if another client
     // (e.g. mobile) imported characters since the opener last refreshed.
-    await fetchCharacters(true);
+    try {
+        await fetchCharacters(true);
+    } finally {
+        // Unlock even on fetch failure so the user isnt stranded
+        document.documentElement.classList.remove('cl-initial-loading');
+    }
     setupEventListeners();
+
+    // Apply default filter preset (if any) after the initial render is done.
+    const defaultPresetUid = getSetting('defaultFilterPreset');
+    if (defaultPresetUid && currentView !== 'chats') {
+        try { await applyFilterPreset(defaultPresetUid, { silent: true }); }
+        catch (e) { console.warn('[DefaultFilterPreset] Failed to apply:', e); }
+    }
 });
 
 function resetFiltersAndSearch() {
@@ -6059,6 +6818,7 @@ function resetFiltersAndSearch() {
 const TOAST_ICONS = {
     success: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M22 4L12 14.01l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     error: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    warning: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 9v4M12 17h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     info: '<svg viewBox="0 0 24 24" fill="none" class="w-6 h-6"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 
@@ -6091,6 +6851,85 @@ function showToast(message, type = 'info', duration = 3000) {
             toast.remove();
         });
     }, duration);
+}
+
+// @canonical cl-confirm-overlay
+// Singleton confirmation dialog. Returns a Promise<boolean> resolving to
+// true when confirmed, false when cancelled (Keep button, backdrop click,
+// Escape, or back button via overlay registry).
+function showConfirm({
+    title = 'Confirm',
+    message = '',
+    messageHtml = null,
+    icon = '',
+    iconColor = '',
+    confirmLabel = 'Confirm',
+    cancelLabel = 'Cancel',
+    danger = false,
+} = {}) {
+    let overlay = document.getElementById('clConfirmOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'clConfirmOverlay';
+        overlay.className = 'cl-confirm-overlay hidden';
+        overlay.innerHTML = `
+            <div class="confirm-modal-content">
+                <div class="confirm-modal-header">
+                    <h3 id="clConfirmTitle"></h3>
+                </div>
+                <div class="confirm-modal-body">
+                    <p id="clConfirmMessage"></p>
+                </div>
+                <div class="confirm-modal-footer">
+                    <button type="button" class="action-btn secondary" id="clConfirmCancelBtn"></button>
+                    <button type="button" class="action-btn" id="clConfirmConfirmBtn"></button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+
+        const cancelFn = () => { overlay.classList.add('hidden'); overlay._resolve?.(false); };
+        const confirmFn = () => { overlay.classList.add('hidden'); overlay._resolve?.(true); };
+
+        document.getElementById('clConfirmCancelBtn').addEventListener('click', cancelFn);
+        document.getElementById('clConfirmConfirmBtn').addEventListener('click', confirmFn);
+        overlay.addEventListener('click', e => { if (e.target === overlay) cancelFn(); });
+
+        // Register with overlay registry so Escape and Android back resolve as cancel
+        window.registerOverlay?.({
+            id: 'clConfirmOverlay',
+            tier: 0,
+            close: cancelFn,
+        });
+    }
+
+    const titleEl = document.getElementById('clConfirmTitle');
+    const msgEl = document.getElementById('clConfirmMessage');
+    const cancelBtn = document.getElementById('clConfirmCancelBtn');
+    const confirmBtn = document.getElementById('clConfirmConfirmBtn');
+    if (titleEl) {
+        if (icon) {
+            const colorAttr = iconColor ? ` style="color:${iconColor}"` : '';
+            titleEl.innerHTML = `<i class="${icon}"${colorAttr}></i> ${escapeHtml(title)}`;
+        } else {
+            titleEl.textContent = title;
+        }
+    }
+    if (msgEl) {
+        if (messageHtml != null) msgEl.innerHTML = messageHtml;
+        else msgEl.textContent = message;
+    }
+    if (cancelBtn) cancelBtn.textContent = cancelLabel;
+    if (confirmBtn) {
+        confirmBtn.textContent = confirmLabel;
+        confirmBtn.classList.toggle('danger', !!danger);
+        confirmBtn.classList.toggle('primary', !danger);
+    }
+
+    return new Promise(resolve => {
+        overlay._resolve = resolve;
+        overlay.classList.remove('hidden');
+        cancelBtn?.focus();
+    });
 }
 
 // Sync with Main Window
@@ -6126,8 +6965,8 @@ async function loadCharInMain(charOrAvatar) {
         charObj = allCharacters.find(c => c.avatar === avatar);
     }
 
-    // IMPORTANT: Register the gallery folder override BEFORE loading the character
-    // This ensures index.js can find the correct folder for media localization
+    // Register the gallery folder override before loading the character so index.js
+    // resolves the right folder during media localization.
     if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
         registerGalleryFolderOverride(charObj);
     }
@@ -6145,8 +6984,8 @@ async function loadCharInMain(charOrAvatar) {
             mainCharacters = host.characters;
         }
 
-        // 1. Find character INDEX in main list (Strict Filename Match)
-        // IMPORTANT: selectCharacterById takes a NUMERIC INDEX, not the avatar filename!
+        // 1. Find character INDEX in main list (Strict Filename Match);
+        //    selectCharacterById takes a numeric index, not the avatar filename.
         const characterIndex = mainCharacters.findIndex(c => c.avatar === avatar);
         const targetChar = characterIndex !== -1 ? mainCharacters[characterIndex] : null;
         
@@ -6179,8 +7018,7 @@ async function loadCharInMain(charOrAvatar) {
             });
         };
 
-        // Method 1: context.selectCharacterById (Best API) - PASS THE NUMERIC INDEX!
-        // Note: This function may not return a promise, so we call it and return immediately
+        // Method 1: context.selectCharacterById — may not return a promise.
         if (context && typeof context.selectCharacterById === 'function') {
              debugLog(`Trying context.selectCharacterById with index ${characterIndex}`);
              try {
@@ -6302,7 +7140,7 @@ async function fetchCharacters(forceRefresh = false) {
             debugLog('Force refresh: fetching directly from API (bypassing opener)...');
         }
 
-        // Method 2: API Fetch — use the known correct endpoint first
+        // Method 2: API Fetch - use the known correct endpoint first
         let url = ENDPOINTS.CHARACTERS_ALL;
         debugLog(`Fetching characters from: ${API_BASE}${url}`);
 
@@ -6323,7 +7161,7 @@ async function fetchCharacters(forceRefresh = false) {
         let data = await response.json();
         debugLog('Gallery Data: loaded', Array.isArray(data) ? data.length : 'object');
         processAndRender(data);
-        data = null; // Release reference — processAndRender has consumed it into allCharacters
+        data = null; // Release reference - processAndRender has consumed it into allCharacters
 
     } catch (error) {
         console.error("Failed to fetch characters:", error);
@@ -6331,7 +7169,7 @@ async function fetchCharacters(forceRefresh = false) {
     }
 }
 
-// Deferred refresh flag — set when a lightweight incremental add was used instead of
+// Deferred refresh flag - set when a lightweight incremental add was used instead of
 // a full fetchCharacters(true).  Cleared after next full refresh.
 let _needsCharacterRefresh = false;
 
@@ -6344,7 +7182,12 @@ let _needsCharacterRefresh = false;
  * @param {string} avatarFileName - The avatar filename returned by the import API
  * @returns {Promise<boolean>} true if the character was added successfully
  */
-async function fetchAndAddCharacter(avatarFileName) {
+async function fetchAndAddCharacter(avatarFileName, options = {}) {
+    // ST refresh runs in parallel to CL's slim add and doesn't depend on it succeeding.
+    // Batch importers pass skipNotify and fire one trailing ctx.getCharacters() themselves.
+    if (!options.skipNotify) {
+        notifySTCharacterAdded(avatarFileName);
+    }
     try {
         const response = await apiRequest(ENDPOINTS.CHARACTERS_GET, 'POST', { avatar_url: avatarFileName });
         if (!response.ok) {
@@ -6607,7 +7450,7 @@ function processAndRender(data) {
     // Filter valid
     allCharacters = allCharacters.filter(c => c && c.avatar);
     
-    // Detect ST lazy loading — toShallow() sets { shallow: true } and strips
+    // Detect ST lazy loading - toShallow() sets { shallow: true } and strips
     // data.extensions.* (except fav), which breaks provider links, gallery IDs, etc.
     const isSTShallow = allCharacters.length > 0 && allCharacters[0].shallow === true;
     
@@ -6673,7 +7516,7 @@ function processAndRender(data) {
     // Apply current sort/filter settings and render the grid.
     // If the characters view isn't active (e.g. we're on the online view after a download),
     // the grid is hidden and rendering now would use stale dimensions. In that case just
-    // sort/update currentCharacters without rendering — switchView('characters') will call
+    // sort/update currentCharacters without rendering - switchView('characters') will call
     // performSearch() again with correct dimensions when the user navigates back.
     if ((getCurrentView() || 'characters') === 'characters') {
         performSearch();
@@ -6682,20 +7525,26 @@ function processAndRender(data) {
         // but don't render to a hidden grid (avoids wrong dimensions / stale virtual scroll).
         const sortSelect = document.getElementById('sortSelect');
         const sortType = sortSelect ? sortSelect.value : 'name_asc';
+        const groupFavs = getSetting('groupFavoritesFirst') || false;
         currentCharacters.sort((a, b) => {
+            if (groupFavs) {
+                const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
+                if (favA !== favB) return favA ? -1 : 1;
+            }
             if (sortType === 'name_asc') return a.name.localeCompare(b.name);
             if (sortType === 'name_desc') return b.name.localeCompare(a.name);
             if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
             if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
             if (sortType === 'created_new') return b._createDate - a._createDate;
             if (sortType === 'created_old') return a._createDate - b._createDate;
+            if (sortType === 'random') return getRandomSortKey(a) - getRandomSortKey(b);
             return 0;
         });
     }
     
     document.getElementById('loading').style.display = 'none';
     
-    // ST lazy loading: skip gallery sync here — gallery_ids are stripped.
+    // ST lazy loading: skip gallery sync here - gallery_ids are stripped.
     // recoverShallowExtensions() re-runs sync+audit after patching extensions.
     if (isSTShallow) return;
 
@@ -6762,7 +7611,6 @@ let tagExcludeMode = 'all';
 
 // Playlist filter state
 let activePlaylistFilter = null;
-let activePlaylistAvatarSet = null;
 
 function initTagLogicToggles() {
     const includeBtn = document.getElementById('includeLogicBtn');
@@ -6969,14 +7817,22 @@ function getTags(char) {
 // ========================================
 
 function setPlaylistFilter(uid) {
+    // avatar set is rebuilt fresh inside performSearch so picker/manage/bulk
+    // mutations land in the grid right away. no caching here.
     activePlaylistFilter = uid || null;
-    if (uid) {
-        activePlaylistAvatarSet = window.playlistsGetAvatarSet?.(uid) || new Set();
-    } else {
-        activePlaylistAvatarSet = null;
-    }
     updatePlaylistFilterLabel();
     performSearch();
+}
+
+// called from playlists.js after add/remove/delete; drops the filter if the playlist got deleted out from under us
+function refreshPlaylistFilterIfActive(uid) {
+    if (!activePlaylistFilter || activePlaylistFilter !== uid) return;
+    const stillExists = !!window.playlistsGetPlaylist?.(uid);
+    if (stillExists) {
+        performSearch();
+    } else {
+        setPlaylistFilter(null);
+    }
 }
 
 function clearPlaylistFilter() {
@@ -7044,13 +7900,23 @@ function renderSidebarPlaylists(avatar) {
         const icon = pl.icon
             ? `<i class="pl-chip-icon ${escapeHtml(pl.icon)}"${iconColor}></i>`
             : '';
-        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}</span>`;
+        const removeBtn = `<button class="pl-chip-remove" title="Remove from playlist" aria-label="Remove from playlist"><i class="fa-solid fa-xmark"></i></button>`;
+        return `<span class="pl-chip" data-uid="${escapeHtml(pl.uid)}">${icon}${escapeHtml(pl.name)}${removeBtn}</span>`;
     }).join('') + '<button class="pl-chip pl-chip-add" title="Add to playlist"><i class="fa-solid fa-plus"></i></button>';
 
     container.onclick = (e) => {
         const addBtn = e.target.closest('.pl-chip-add');
         if (addBtn) {
             window.openPlaylistPicker?.([avatar]);
+            return;
+        }
+        // x button has to be checked before the chip itself, otherwise the
+        // filter-set click would fire before the remove
+        const removeBtn = e.target.closest('.pl-chip-remove');
+        if (removeBtn) {
+            e.stopPropagation();
+            const chip = removeBtn.closest('.pl-chip[data-uid]');
+            if (chip) window.playlistsRemoveFromPlaylist?.(chip.dataset.uid, [avatar]);
             return;
         }
         const chip = e.target.closest('.pl-chip[data-uid]');
@@ -7076,9 +7942,9 @@ let isScrolling = false;
 let scrollTimeout = null;
 let cachedCardHeight = 0;
 let cachedCardWidth = 0;
-let cachedGridWidth = 0;       // cached grid.clientWidth — invalidated on resize
-let cachedClientHeight = 0;    // cached scrollContainer.clientHeight — invalidated on resize
-let cachedGridCols = 0;        // actual CSS column count — invalidated on resize
+let cachedGridWidth = 0;       // cached grid.clientWidth - invalidated on resize
+let cachedClientHeight = 0;    // cached scrollContainer.clientHeight - invalidated on resize
+let cachedGridCols = 0;        // actual CSS column count - invalidated on resize
 let characterGridDelegatesInitialized = false;
 let currentCharByAvatar = new Map();
 
@@ -7086,8 +7952,9 @@ let currentCharByAvatar = new Map();
 const CARD_MIN_WIDTH = 200; // Matches CSS minmax(200px, 1fr)
 const CARD_ASPECT_RATIO = 2 / 3; // width/height for portrait cards
 const GRID_GAP_FALLBACK = 20;
-let cachedGridGap = 0; // Read from CSS computed styles — invalidated on resize
+let cachedGridGap = 0; // Read from CSS computed styles - invalidated on resize
 let _gridMetricsCorrection = false; // recursion guard for fallback self-correction
+const _seenAvatarUrls = new Set(); // populatd as avatars load so rerenders can skip the fade
 
 function getGridGap() {
     if (cachedGridGap > 0) return cachedGridGap;
@@ -7126,7 +7993,32 @@ function renderGrid(chars) {
     if (existingSentinel) existingSentinel.remove();
     
     if (chars.length === 0) {
-        renderSimpleEmpty(grid, 'No characters found');
+        const libraryEmpty = !Array.isArray(allCharacters) || allCharacters.length === 0;
+        if (libraryEmpty) {
+            renderEmptyState(grid, {
+                icon: 'fa-solid fa-user-plus',
+                title: 'Your library is empty',
+                hint: 'Import a character card to get started. Drop a PNG anywhere on this page, paste a URL, or use the Import button.',
+                actionLabel: 'Import a character',
+                actionIcon: 'fa-solid fa-plus',
+                onAction: () => document.getElementById('importBtn')?.click(),
+                desktopText: 'No characters found',
+            });
+        } else {
+            renderEmptyState(grid, {
+                icon: 'fa-solid fa-ghost',
+                title: 'No characters match',
+                hint: 'Try clearing your filters or adjusting the search. Tag and creator filters may be too narrow.',
+                actionLabel: 'Clear filters',
+                actionIcon: 'fa-solid fa-xmark',
+                onAction: () => {
+                    const searchInput = document.getElementById('searchInput');
+                    if (searchInput) { searchInput.value = ''; searchInput.dispatchEvent(new Event('input', { bubbles: true })); }
+                    if (typeof clearAllAdvFilters === 'function') clearAllAdvFilters();
+                },
+                desktopText: 'No characters found',
+            });
+        }
         grid.style.minHeight = '';
         grid.style.paddingTop = '';
         return;
@@ -7156,7 +8048,7 @@ function updateGridHeight(grid) {
 }
 
 /**
- * Get grid layout metrics — reads actual CSS column count to stay in sync with auto-fill.
+ * Get grid layout metrics - reads actual CSS column count to stay in sync with auto-fill.
  */
 function getGridMetrics(gridWidth) {
     const gap = getGridGap();
@@ -7210,31 +8102,29 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     
     const { cols, cardHeight, gap } = getGridMetrics(gridWidth);
     
+    const _isMobileMetrics = window.matchMedia?.('(max-width: 768px)').matches;
     const RENDER_BUFFER_PX = clientHeight * 2.5;
-    
-    // Preload buffer: 4 screens ahead for images
-    const PRELOAD_BUFFER_PX = clientHeight * 4;
+    const PRELOAD_BUFFER_PX = clientHeight * 6;
     
     // Calculate visible row range
     const startRow = Math.floor(Math.max(0, scrollTop - RENDER_BUFFER_PX) / (cardHeight + gap));
     const endRow = Math.ceil((scrollTop + clientHeight + RENDER_BUFFER_PX) / (cardHeight + gap));
-    
+
     const startIndex = startRow * cols;
     const endIndex = Math.min(currentCharsList.length, (endRow + 1) * cols);
-    
-    // Skip if nothing changed
-    if (!force && startIndex === lastRenderedStartIndex && endIndex === lastRenderedEndIndex) {
-        return;
+
+    const rangeChanged = force || startIndex !== lastRenderedStartIndex || endIndex !== lastRenderedEndIndex;
+    if (rangeChanged) {
+        lastRenderedStartIndex = startIndex;
+        lastRenderedEndIndex = endIndex;
     }
     
-    lastRenderedStartIndex = startIndex;
-    lastRenderedEndIndex = endIndex;
-    
+    let cardsChanged = false;
+    if (rangeChanged) {
     const paddingTop = startRow * (cardHeight + gap);
     grid.style.paddingTop = `${paddingTop}px`;
-    
+
     // Remove cards outside the visible range
-    let cardsChanged = false;
     for (const [index, card] of activeCards) {
         if (index < startIndex || index >= endIndex) {
             card.remove();
@@ -7243,17 +8133,38 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
         }
     }
     
-    // Create missing cards and track which indices are new (already ascending order)
+    // Create missing cards and track which indices are new (already ascending order).
+    // Mobile: batch via innerHTML so 50+ cards in one fast-flick rAF fit in the frame budget (~10-20ms vs ~50-150ms with per-card createElement). Desktop keeps the existing per-card path.
     const newCardIndices = [];
-    for (let i = startIndex; i < endIndex; i++) {
-        if (!activeCards.has(i)) {
-            const char = currentCharsList[i];
-            if (char) {
-                const card = createCharacterCard(char);
-                card.dataset.virtualIndex = i;
-                activeCards.set(i, card);
-                newCardIndices.push(i);
-                cardsChanged = true;
+    if (_isMobileMetrics) {
+        const toCreate = [];
+        for (let i = startIndex; i < endIndex; i++) {
+            if (!activeCards.has(i)) {
+                const char = currentCharsList[i];
+                if (char) {
+                    toCreate.push({ char, index: i });
+                    newCardIndices.push(i);
+                    cardsChanged = true;
+                }
+            }
+        }
+        if (toCreate.length > 0) {
+            const cards = createCardsBatchHTML(toCreate);
+            for (let j = 0; j < toCreate.length; j++) {
+                activeCards.set(toCreate[j].index, cards[j]);
+            }
+        }
+    } else {
+        for (let i = startIndex; i < endIndex; i++) {
+            if (!activeCards.has(i)) {
+                const char = currentCharsList[i];
+                if (char) {
+                    const card = createCharacterCard(char);
+                    card.dataset.virtualIndex = i;
+                    activeCards.set(i, card);
+                    newCardIndices.push(i);
+                    cardsChanged = true;
+                }
             }
         }
     }
@@ -7264,7 +8175,7 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     // Full ordered rebuild via DocumentFragment is the rare fallback for jump/resize.
     if (cardsChanged && newCardIndices.length > 0) {
         if (grid.children.length === 0) {
-            // Grid is empty (first render or complete range change) — batch append all
+            // Grid is empty (first render or complete range change) - batch append all
             const fragment = document.createDocumentFragment();
             for (let i = startIndex; i < endIndex; i++) {
                 const card = activeCards.get(i);
@@ -7302,21 +8213,21 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
             const allBefore = newCardIndices[newCardIndices.length - 1] < firstDomIndex;
             
             if (allAfter) {
-                // Scrolling down — append new cards at end
+                // Scrolling down - append new cards at end
                 const fragment = document.createDocumentFragment();
                 for (const idx of newCardIndices) {
                     fragment.appendChild(activeCards.get(idx));
                 }
                 grid.appendChild(fragment);
             } else if (allBefore) {
-                // Scrolling up — prepend new cards at start
+                // Scrolling up - prepend new cards at start
                 const fragment = document.createDocumentFragment();
                 for (const idx of newCardIndices) {
                     fragment.appendChild(activeCards.get(idx));
                 }
                 grid.insertBefore(fragment, grid.firstChild);
             } else {
-                // Jump/resize: new cards span both sides — full ordered rebuild
+                // Jump/resize: new cards span both sides - full ordered rebuild
                 const fragment = document.createDocumentFragment();
                 for (let i = startIndex; i < endIndex; i++) {
                     const card = activeCards.get(i);
@@ -7326,51 +8237,54 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
             }
         }
     }
-    
-    // Preload images only on scroll-end (force=true), not during active scrolling.
-    // During fast scroll, every preload batch gets immediately aborted by the next
-    // RAF frame — wasting CPU on AbortController + 12 fetch() calls per frame.
-    if (force) {
-        const preloadStartRow = Math.floor((scrollTop + clientHeight) / (cardHeight + gap));
-        const preloadEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + gap));
-        const preloadStartIndex = preloadStartRow * cols;
-        const preloadEndIndex = Math.min(currentCharsList.length, preloadEndRow * cols);
 
-        preloadImages(preloadStartIndex, preloadEndIndex);
+    // Preload only fires when the range changed, so scroll-frame work stays bounded.
+    const visibleStartRow = Math.floor(scrollTop / (cardHeight + gap));
+    const visibleEndRow = Math.ceil((scrollTop + clientHeight) / (cardHeight + gap));
+    const aboveStartRow = Math.floor(Math.max(0, scrollTop - PRELOAD_BUFFER_PX) / (cardHeight + gap));
+    const belowEndRow = Math.ceil((scrollTop + clientHeight + PRELOAD_BUFFER_PX) / (cardHeight + gap));
+    const visibleStartIndex = visibleStartRow * cols;
+    const visibleEndIndex = visibleEndRow * cols;
+    const aboveStartIndex = aboveStartRow * cols;
+    const preloadBelowEndIndex = Math.min(currentCharsList.length, belowEndRow * cols);
+    // Below-visible first (typical scroll direction), then above; interleave so the cap covers both sides.
+    const indices = [];
+    const below = [];
+    const above = [];
+    for (let i = visibleEndIndex; i < preloadBelowEndIndex; i++) below.push(i);
+    for (let i = visibleStartIndex - 1; i >= aboveStartIndex; i--) above.push(i);
+    const maxLen = Math.max(below.length, above.length);
+    for (let i = 0; i < maxLen; i++) {
+        if (i < below.length) indices.push(below[i]);
+        if (i < above.length) indices.push(above[i]);
     }
+    preloadImages(indices);
+    } // end rangeChanged guard
+
 }
 
-// Abort controller for preload fetches — cancels previous batch when a new one starts
-let preloadAbortController = null;
-
-/**
- * Preload avatar images for a range of characters.
- * Uses fetch() to warm the HTTP cache without creating orphaned Image objects
- * that hold decoded bitmaps in memory indefinitely (critical for mobile).
- * Limited to a small batch to avoid memory pressure.
- * Each call aborts any pending preloads from the previous call.
- */
-function preloadImages(startIndex, endIndex) {
-    // Cancel any pending preloads from previous scroll to avoid accumulating
-    // unconsumed response bodies in memory
-    if (preloadAbortController) {
-        preloadAbortController.abort();
-    }
-    preloadAbortController = new AbortController();
-    const signal = preloadAbortController.signal;
-    
-    const MAX_PRELOAD = 12; // Limit concurrent preloads for mobile
-    let count = 0;
-    for (let i = startIndex; i < endIndex && count < MAX_PRELOAD; i++) {
+// Pre-decode via Image().decode() so the browser's decoded-image cache holds
+// the bitmap when the real <img> lands in DOM. URL must match the shape the
+// card path picks (gated on the same setting) so the cache key lines up.
+const inFlightPreloads = new Set();
+function preloadImages(indices) {
+    const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+    const cap = isMobile ? 10 : 12;
+    if (inFlightPreloads.size >= cap) return;
+    // Match the card path's URL choice exactly so the browser cache hits.
+    const masterOn = getSetting('useGridThumbnails') === true;
+    const useThumbs = masterOn && (isMobile || getSetting('gridThumbnailsDesktop') === true);
+    for (const i of indices) {
+        if (inFlightPreloads.size >= cap) break;
+        if (inFlightPreloads.has(i)) continue;
         const char = currentCharsList[i];
-        if (char && char.avatar) {
-            // Cache-only fetch — warms browser HTTP cache without decoding image pixels.
-            // Cancel the response body immediately to prevent memory accumulation.
-            fetch(getCharacterAvatarUrl(char.avatar), { mode: 'no-cors', priority: 'low', signal })
-                .then(r => { r.body?.cancel(); })
-                .catch(() => {});
-            count++;
-        }
+        if (!char || !char.avatar) continue;
+        inFlightPreloads.add(i);
+        const img = new Image();
+        img.src = useThumbs ? getCharacterAvatarThumbUrl(char.avatar) : getCharacterAvatarUrl(char.avatar);
+        img.decode()
+            .catch(() => {})
+            .finally(() => inFlightPreloads.delete(i));
     }
 }
 
@@ -7401,7 +8315,7 @@ function setupVirtualScrollListener(grid, scrollContainer) {
             });
         }
         
-        // Debounce for scroll end — uses a single persistent timeout that
+        // Debounce for scroll end - uses a single persistent timeout that
         // re-checks elapsed time instead of clear+reset on every event.
         // Avoids 300+ clearTimeout/setTimeout pairs during fast scrolling.
         lastScrollEventTime = performance.now();
@@ -7411,7 +8325,7 @@ function setupVirtualScrollListener(grid, scrollContainer) {
                     scrollTimeout = null;
                     updateVisibleCards(grid, scrollContainer, true);
                 } else {
-                    // Scroll still active — re-check after remaining time
+                    // Scroll still active - re-check after remaining time
                     scrollTimeout = setTimeout(checkScrollEnd,
                         SCROLL_END_DELAY - (performance.now() - lastScrollEventTime));
                 }
@@ -7443,6 +8357,16 @@ function setupCharacterGridDelegates() {
         openModal(char);
     });
 
+    // Preload the full avatar on mousedown so the modal-open path finds it cached. Only matters when grid uses thumbs; otherwise the browser dedupes.
+    grid.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (document.body.classList.contains('multi-select-mode')) return;
+        const card = e.target.closest('.char-card');
+        if (!card || !grid.contains(card)) return;
+        const avatar = card.dataset.avatar;
+        if (avatar) new Image().src = getCharacterAvatarUrl(avatar);
+    });
+
     grid.addEventListener('load', (e) => {
         if (e.target.classList.contains('card-image')) {
             e.target.closest('.char-card')?.classList.add('loaded');
@@ -7462,6 +8386,8 @@ function setupCharacterGridDelegates() {
 // Update grid height on window resize (throttled to avoid jank during drag-resize)
 let resizeRAF = null;
 window.addEventListener('resize', () => {
+    // Soft keyboard up on mobile fires this with the shrunk layout viewport on Android; reflowing the grid then visibly shifts cards under the search-overlay scrim.
+    if (document.documentElement.classList.contains('cl-keyboard-open')) return;
     if (resizeRAF) return; // Already scheduled
     resizeRAF = requestAnimationFrame(() => {
         resizeRAF = null;
@@ -7480,6 +8406,60 @@ window.addEventListener('resize', () => {
     });
 });
 
+// Mobile innerHTML batch path. 50 cards in one parse runs ~10-20ms vs ~50-150ms for per-card createElement, so a fast-flick rAF stays under frame budget. Tooltip omitted on mobile (no hover anyway, extractPlainText was the expensive part). Output DOM matches createCharacterCard.
+function buildCharacterCardHTML(char, virtualIndex) {
+    const isFav = isCharacterFavorite(char);
+    const name = getCharacterName(char);
+    // buildCharacterCardHTML is only invoked from the mobile branch of updateVisibleCards, so the master toggle alone is enough here.
+    const imgPath = getSetting('useGridThumbnails') === true
+        ? getCharacterAvatarThumbUrl(char.avatar)
+        : getCharacterAvatarUrl(char.avatar);
+    const tagsAll = getTags(char);
+    const tags = tagsAll.length > 3 ? tagsAll.slice(0, 3) : tagsAll;
+
+    const initiallyLoaded = _seenAvatarUrls.has(imgPath);
+    const isSelected = !!(window.MultiSelect?.isSelected?.(char.avatar));
+    const playlists = window.playlistsGetForChar?.(char.avatar) || [];
+
+    const classes = ['char-card'];
+    if (isFav) classes.push('is-favorite');
+    if (initiallyLoaded) classes.push('loaded');
+    if (isSelected) classes.push('selected');
+
+    const parts = ['<div class="', classes.join(' '), '" data-avatar="', escapeHtml(char.avatar), '" data-virtual-index="', virtualIndex, '">'];
+    if (isFav) parts.push('<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
+    if (playlists.length > 0) {
+        const firstIcon = playlists.length === 1 && playlists[0].icon ? playlists[0].icon : 'fa-solid fa-list';
+        const plTitle = playlists.map(p => p.name).join(', ');
+        parts.push('<div class="playlist-indicator" title="', escapeHtml(plTitle), '"><i class="', escapeHtml(firstIcon), '"></i></div>');
+    }
+    parts.push('<div class="char-card-checkbox" aria-hidden="true"><i class="fa-solid fa-check"></i></div>');
+    parts.push('<img class="card-image" src="', escapeHtml(imgPath), '" alt="" decoding="async">');
+    parts.push('<div class="card-overlay"><div class="card-name">', escapeHtml(name), '</div><div class="card-tags">');
+    for (const tag of tags) parts.push('<span class="card-tag">', escapeHtml(tag), '</span>');
+    parts.push('</div></div></div>');
+
+    return parts.join('');
+}
+
+function createCardsBatchHTML(charsWithIndices) {
+    if (charsWithIndices.length === 0) return [];
+    const html = charsWithIndices.map(({ char, index }) => buildCharacterCardHTML(char, index)).join('');
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const cards = Array.from(tmp.children);
+    // Sync cache-hit promotion: buildCharacterCardHTML only consults the Set, so urls cached by the browser but not yet in the Set (eg. first view-switch) still flash. img.complete catches those.
+    for (const card of cards) {
+        if (card.classList.contains('loaded')) continue;
+        const img = card.querySelector('.card-image');
+        if (img && img.complete && img.naturalWidth > 0) {
+            _seenAvatarUrls.add(img.src);
+            card.classList.add('loaded');
+        }
+    }
+    return cards;
+}
+
 /**
  * Create a single character card element
  */
@@ -7493,7 +8473,10 @@ function createCharacterCard(char) {
     }
     
     const name = getCharacterName(char);
-    const imgPath = getCharacterAvatarUrl(char.avatar);
+    // createCharacterCard is desktop-only; thumbs require both master AND the explicit desktop opt-in.
+    const imgPath = (getSetting('useGridThumbnails') === true && getSetting('gridThumbnailsDesktop') === true)
+        ? getCharacterAvatarThumbUrl(char.avatar)
+        : getCharacterAvatarUrl(char.avatar);
     const tags = getTags(char);
     
     // Use creator_notes as hover tooltip - extract plain text only
@@ -7509,7 +8492,7 @@ function createCharacterCard(char) {
         card.title = tooltipText;
     }
     
-    // Build card DOM directly instead of innerHTML — avoids HTML parser overhead
+    // Build card DOM directly instead of innerHTML - avoids HTML parser overhead
     // and escapeHtml regex chains. textContent auto-escapes safely.
     
     // Favorite indicator
@@ -7534,11 +8517,32 @@ function createCharacterCard(char) {
         plDiv.appendChild(plIcon);
         card.appendChild(plDiv);
     }
+
+    // always in dom, body.multi-select-mode reveals; real div not pseudo so themers can target it like .favorite-indicator
+    const checkbox = document.createElement('div');
+    checkbox.className = 'char-card-checkbox';
+    checkbox.setAttribute('aria-hidden', 'true');
+    const checkIcon = document.createElement('i');
+    checkIcon.className = 'fa-solid fa-check';
+    checkbox.appendChild(checkIcon);
+    card.appendChild(checkbox);
     
     // Avatar image
     const img = document.createElement('img');
-    img.src = imgPath;
     img.className = 'card-image';
+    img.decoding = 'async';
+    img.src = imgPath;
+    // Mobile sometimes reports img.complete=false right after src= even on cached avatars, so the Set lets rerenders skip the fade anyway
+    const looksCached = _seenAvatarUrls.has(imgPath) || (img.complete && img.naturalWidth > 0);
+    if (looksCached) {
+        _seenAvatarUrls.add(imgPath);
+        card.classList.add('loaded');
+    } else {
+        img.addEventListener('load', () => {
+            _seenAvatarUrls.add(imgPath);
+            card.classList.add('loaded');
+        }, { once: true });
+    }
     card.appendChild(img);
     
     // Overlay
@@ -7576,6 +8580,11 @@ function createCharacterCard(char) {
 }
 
 function refreshPlaylistBadges() {
+    // detail-modal sidebar chips reflect membership too, refresh together
+    const charModal = document.getElementById('charModal');
+    if (activeChar && charModal && !charModal.classList.contains('hidden')) {
+        renderSidebarPlaylists(activeChar.avatar);
+    }
     for (const [, card] of activeCards) {
         const avatar = card.dataset.avatar;
         const existing = card.querySelector('.playlist-indicator');
@@ -7608,7 +8617,7 @@ const modal = document.getElementById('charModal');
 let activeChar = null;
 let _modalOpenGen = 0;
 
-// Cached tab element references — these are static DOM nodes, queried once
+// Cached tab element references - these are static DOM nodes, queried once
 let _cachedTabButtons = null;
 let _cachedTabPanes = null;
 
@@ -7638,7 +8647,7 @@ function resetTabScrollPositions() {
 // If unique gallery folders are enabled, we use the unique folder name
 async function fetchCharacterImages(charOrName) {
     const grid = document.getElementById('spritesGrid');
-    renderLoadingState(grid, 'Loading Media...');
+    grid.innerHTML = '<div class="cl-spinner-inline"><i class="fa-solid fa-spinner fa-spin"></i> Loading media...</div>';
     
     // Determine the folder name to use
     let folderName;
@@ -7672,15 +8681,7 @@ async function fetchCharacterImages(charOrName) {
     }
     
     debugLog(`[Gallery] Fetching images from folder: ${folderName} (display: ${displayName})`);
-    
-    // The user's images are stored in /user/images/CharacterName/...
-    // We can list files in that directory using the /api/files/list endpoint or similar if it exists.
-    // However, SillyTavern usually exposes content listing via directory APIs.
-    // Let's try to infer if we can look up the folder directly.
-    
-    // Path conventions in SillyTavern:
-    // data/default-user/user/images/<Name> mapped to /user/images/<Name> in URL
-    
+
     try {
         const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folderName, type: 7 });
 
@@ -8343,35 +9344,35 @@ async function showLegacyFolderModal(char) {
     
     // Create modal
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal';
+    modal.className = 'confirm-modal cl-modal-drawer';
     modal.id = 'legacyFolderModal';
     
     const safeLegacyFolder = sanitizeFolderName(legacyInfo.legacyFolder);
     
     modal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(800px * var(--modal-scale, 1)); max-height: calc(90vh * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(74, 158, 255, 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
-                <h3 style="border: none; padding: 0; margin: 0;">
-                    <i class="fa-solid fa-folder-tree" style="color: var(--accent-color);"></i>
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.2) 0%, rgba(52, 120, 200, 0.2) 100%);">
+                <h3>
+                    <i class="fa-solid fa-folder-tree" style="color: var(--accent);"></i>
                     Legacy Folder Migration
                 </h3>
                 <button class="close-confirm-btn" id="closeLegacyModal">&times;</button>
             </div>
             <div class="confirm-modal-body" style="padding: 15px;">
-                <div style="margin-bottom: 15px; padding: 12px; background: rgba(74, 158, 255, 0.1); border-radius: 8px; border: 1px solid rgba(74, 158, 255, 0.3);">
+                <div style="margin-bottom: 15px; padding: 12px; background: rgba(var(--accent-rgb), 0.1); border-radius: var(--radius-lg); border: 1px solid rgba(var(--accent-rgb), 0.3);">
                     <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                        <i class="fa-solid fa-info-circle" style="color: var(--accent-color);"></i>
+                        <i class="fa-solid fa-info-circle" style="color: var(--accent);"></i>
                         <strong style="color: var(--text-primary);">Images in Old Folder Format</strong>
                     </div>
                     <p style="margin: 0; color: var(--text-secondary); font-size: 13px;">
-                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
-                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px;">${escapeHtml(legacyInfo.currentFolder)}</code>.
+                        These images are stored in the legacy folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.legacyFolder)}</code>. 
+                        Select images to move to the new unique folder <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm);">${escapeHtml(legacyInfo.currentFolder)}</code>.
                     </p>
                 </div>
                 
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                     <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; color: var(--text-primary);">
-                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent-color);">
+                        <input type="checkbox" id="legacySelectAll" style="accent-color: var(--accent);">
                         <span>Select All (<span id="legacySelectedCount">0</span>/${legacyInfo.files.length})</span>
                     </label>
                     <div style="display: flex; gap: 8px;">
@@ -8383,13 +9384,13 @@ async function showLegacyFolderModal(char) {
                 
                 <div id="legacyImagesGrid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; max-height: 400px; overflow-y: auto; padding: 5px;">
                     ${legacyInfo.files.map(fileName => `
-                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
+                        <div class="legacy-image-item" data-filename="${escapeHtml(fileName)}" style="position: relative; aspect-ratio: 1; border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; border: 2px solid transparent; transition: all 0.2s;">
                             <img src="/user/images/${encodeURIComponent(safeLegacyFolder)}/${encodeURIComponent(fileName)}" 
                                  style="width: 100%; height: 100%; object-fit: cover;"
                                  loading="lazy"
                                  onerror="this.src='/img/No-Image-Placeholder.svg'">
-                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: 4px; display: flex; align-items: center; justify-content: center;">
-                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent-color); width: 16px; height: 16px; cursor: pointer;">
+                            <div class="legacy-checkbox" style="position: absolute; top: 5px; left: 5px; width: 22px; height: 22px; background: rgba(0,0,0,0.6); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;">
+                                <input type="checkbox" class="legacy-file-checkbox" data-filename="${escapeHtml(fileName)}" style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
                             </div>
                             <div style="position: absolute; bottom: 0; left: 0; right: 0; padding: 4px; background: linear-gradient(transparent, rgba(0,0,0,0.8)); font-size: 10px; color: white; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">
                                 ${escapeHtml(fileName)}
@@ -8447,8 +9448,8 @@ async function showLegacyFolderModal(char) {
         modal.querySelectorAll('.legacy-image-item').forEach(item => {
             const checkbox = item.querySelector('.legacy-file-checkbox');
             if (checkbox?.checked) {
-                item.style.borderColor = 'var(--accent-color)';
-                item.style.boxShadow = '0 0 10px rgba(74, 158, 255, 0.3)';
+                item.style.borderColor = 'var(--accent)';
+                item.style.boxShadow = '0 0 10px rgba(var(--accent-rgb), 0.3)';
             } else {
                 item.style.borderColor = 'transparent';
                 item.style.boxShadow = 'none';
@@ -8540,12 +9541,13 @@ async function showLegacyFolderModal(char) {
     });
 }
 
-function openCharModalElevated(char, pinnedModal) {
+function openCharModalElevated(char) {
     const charModal = document.getElementById('charModal');
     if (!charModal) return;
-    // Pin ALL currently-visible confirm-modals at their default z-index so the
-    // body.char-modal-above CSS rule only elevates modals opened AFTER this point
-    const pinnedModals = [...document.querySelectorAll('.confirm-modal:not(.hidden)')];
+    // Pin existing visible modals so char-modal-above only elevates new ones
+    const pinnedModals = [
+        ...document.querySelectorAll('.confirm-modal:not(.hidden), .cl-modal.visible'),
+    ];
     pinnedModals.forEach(m => m.style.setProperty('z-index', '2000', 'important'));
     document.body.classList.add('char-modal-above');
     const restore = () => {
@@ -8560,7 +9562,74 @@ function openCharModalElevated(char, pinnedModal) {
     openModal(char);
 }
 
+// Walks currentCharsList (the live filtered+sorted view) so nav order tracks the user's current sort/filter state. Dirty-edit gate + teardown live inside openModal so this stays thin.
+function navigateModal(direction) {
+    if (!activeChar) return;
+    if (getSetting('enableCharDetailNav') === false) return;
+    const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+    if (idx === -1) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= currentCharsList.length) return;
+    openModal(currentCharsList[targetIdx]);
+}
+
+function isCharModalDirty() {
+    if (!activeChar || isEditLocked) return false;
+    if (pendingAvatarFile) return true;
+    try {
+        const current = collectEditValues();
+        return generateChangesDiff(originalValues, current).length > 0;
+    } catch (_) {
+        return false;
+    }
+}
+
+function confirmDiscardCharModalEdits() {
+    return showConfirm({
+        title: 'Discard unsaved edits?',
+        message: `You have unsaved changes to ${getCharacterName(activeChar) || 'this character'}. Discard them?`,
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
+    });
+}
+
+// User-initiated close. Programmatic closers (post-delete cleanup, save success) keep calling closeModal directly.
+async function maybeCloseModal() {
+    if (isCharModalDirty()) {
+        const ok = await confirmDiscardCharModalEdits();
+        if (!ok) return;
+    }
+    closeModal();
+}
+
+function updateCharModalNavState() {
+    const prevBtn = document.getElementById('charModalNavPrev');
+    const nextBtn = document.getElementById('charModalNavNext');
+    if (!prevBtn || !nextBtn) return;
+    const enabled = getSetting('enableCharDetailNav') !== false && !!activeChar;
+    const idx = enabled ? currentCharsList.findIndex(c => c.avatar === activeChar.avatar) : -1;
+    const show = idx !== -1;
+    prevBtn.style.display = show ? '' : 'none';
+    nextBtn.style.display = show ? '' : 'none';
+    if (!show) return;
+    prevBtn.disabled = idx === 0;
+    nextBtn.disabled = idx >= currentCharsList.length - 1;
+}
+
 async function openModal(char) {
+    // Swap-while-open gate: dirty-edit prompt + per-character teardown live here so every modal-to-modal entry point (navigateModal, openRelatedCharacter, anywhere else) inherits the same protection.
+    const charModalEl = document.getElementById('charModal');
+    const isSwap = charModalEl && !charModalEl.classList.contains('hidden') && activeChar && activeChar.avatar !== char.avatar;
+    if (isSwap && isCharModalDirty()) {
+        const ok = await confirmDiscardCharModalEdits();
+        if (!ok) return;
+    }
+    if (isSwap) {
+        setEditLock(true);
+        clearPendingAvatar();
+    }
+
     if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
         const modal = document.getElementById('charModal');
         if (modal) {
@@ -8579,10 +9648,18 @@ async function openModal(char) {
 
     const gen = ++_modalOpenGen;
     activeChar = char;
+    updateCharModalNavState();
 
     // Show loading state for avatar while new image loads
     const modalImg = document.getElementById('modalImage');
     modalImg.classList.add('loading');
+
+    // Race the full-avatar fetch with hydrate so when grid uses thumbs we dont serialize the two network waits.
+    new Image().src = getCharacterAvatarUrl(char.avatar);
+
+    // Update the mobile header thumbnail src as early as possible so by the time the modal becomes visible the new char's thumb is already decoded; otherwise the previous char's thumb stays painted until the lazy observer-driven update fires.
+    const _mobileHeader = document.querySelector('#charModal .mobile-header-avatar');
+    if (_mobileHeader) _mobileHeader.src = getCharacterAvatarStThumbUrl(char.avatar);
 
     // Fetch heavy fields on demand (slim index keeps only grid/search data in memory)
     await hydrateCharacter(char);
@@ -8680,7 +9757,7 @@ async function openModal(char) {
         authContainer.style.display = 'none';
     }
 
-    // Provider Link Indicator (generic — any provider)
+    // Provider Link Indicator (generic - any provider)
     updateProviderLinkIndicator(char);
 
     // Provider Tagline (from whichever provider owns this card)
@@ -8721,7 +9798,6 @@ async function openModal(char) {
         window.currentCreatorNotesContent = creatorNotes;
         // Use the shared secure rendering function
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        // Initialize handlers for this modal instance
         initCreatorNotesHandlers();
         // Show/hide expand button based on content length
         const expandBtn = document.getElementById('creatorNotesExpandBtn');
@@ -8769,7 +9845,6 @@ async function openModal(char) {
         }
     }
     
-    // Initialize content expand handlers
     initContentExpandHandlers();
     
     // Apply media localization asynchronously (if enabled)
@@ -8974,9 +10049,8 @@ function populateEditPane() {
         characterBook: characterBook ? JSON.parse(JSON.stringify(characterBook)) : null
     };
 
-    // Store original values for diff comparison
-    // IMPORTANT: Read values back from the form elements to capture any browser normalization
-    // (e.g., line ending changes from \r\n to \n)
+    // Read original values back from the form elements (not the model) so the diff
+    // sees the same browser normalization (\r\n -> \n) the eventual save will see.
     originalValues = {
         name: document.getElementById('editName').value,
         description: document.getElementById('editDescription').value,
@@ -8998,6 +10072,65 @@ function populateEditPane() {
     setEditLock(true);
 }
 
+// =====================================================
+// Card Image (avatar) replacement state — Edit tab
+// =====================================================
+
+function populateEditAvatarPreview() {
+    const img = document.getElementById('modalImage');
+    if (!img || !activeChar) return;
+    const url = getCharacterAvatarUrl(activeChar.avatar);
+    img.src = url;
+    // Mobile mirrors the hero on the small header thumbnail (sidebar is hidden). 32x32 target, so ST's built-in /thumbnail is plenty and avoids re-fetching the full PNG just to shrink it.
+    const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
+    if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
+}
+
+function clearPendingAvatar() {
+    if (pendingAvatarPreviewUrl) {
+        try { URL.revokeObjectURL(pendingAvatarPreviewUrl); } catch (_) {}
+    }
+    pendingAvatarFile = null;
+    pendingAvatarPreviewUrl = null;
+    const badge = document.getElementById('portraitPendingBadge');
+    if (badge) badge.classList.add('hidden');
+    const fileInput = document.getElementById('editAvatarFileInput');
+    if (fileInput) fileInput.value = '';
+    populateEditAvatarPreview();
+}
+
+function refreshSaveButtonState() {
+    const saveBtn = document.getElementById('saveEditBtn');
+    if (!saveBtn || isEditLocked) return;
+    saveBtn.disabled = false;
+}
+
+function handlePendingAvatarSelected(file) {
+    if (!file || !activeChar) return;
+    if (!/^image\/(png|jpe?g|webp)$/i.test(file.type)) {
+        showToast('Unsupported image type. Use PNG, JPEG, or WebP.', 'error');
+        return;
+    }
+    const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+    if (file.size > MAX_BYTES) {
+        showToast('Image too large (max 10 MB).', 'error');
+        return;
+    }
+    if (pendingAvatarPreviewUrl) {
+        try { URL.revokeObjectURL(pendingAvatarPreviewUrl); } catch (_) {}
+    }
+    pendingAvatarFile = file;
+    pendingAvatarPreviewUrl = URL.createObjectURL(file);
+    const img = document.getElementById('modalImage');
+    if (img) img.src = pendingAvatarPreviewUrl;
+    // Mirror the preview onto the mobile header thumbnail.
+    const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
+    if (headerAvatar) headerAvatar.src = pendingAvatarPreviewUrl;
+    const badge = document.getElementById('portraitPendingBadge');
+    if (badge) badge.classList.remove('hidden');
+    refreshSaveButtonState();
+}
+
 function closeModal() {
     modal.classList.add('hidden');
     _modalOpenGen++;
@@ -9013,6 +10146,9 @@ function closeModal() {
     originalValues = {};
     originalRawData = {};
     _editTagsArray = [];
+
+    // Discard any pending avatar replacement
+    clearPendingAvatar();
     
     // Release window globals holding rich text content (can be large)
     window.currentCreatorNotesContent = null;
@@ -9024,7 +10160,7 @@ function closeModal() {
     const altGreetingsEl = document.getElementById('modalAltGreetings');
     if (altGreetingsEl) altGreetingsEl.innerHTML = '';
     
-    // Clear creator notes iframe — disconnect ResizeObserver and release its document
+    // Clear creator notes iframe - disconnect ResizeObserver and release its document
     const creatorNotesEl = document.getElementById('modalCreatorNotes');
     cleanupCreatorNotesContainer(creatorNotesEl);
     
@@ -9093,7 +10229,7 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Listing Name</span>
-            <span class="info-value">${listingName ? escapeHtml(listingName) : '<span style="color: #888;">(none)</span>'}</span>
+            <span class="info-value">${listingName ? escapeHtml(listingName) : '<span style="color: var(--text-faint);">(none)</span>'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Creator</span>
@@ -9131,24 +10267,24 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-fingerprint"></i> Unique Gallery</div>
         <div class="info-row">
             <span class="info-label">Feature Enabled</span>
-            <span class="info-value">${uniqueFoldersEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+            <span class="info-value">${uniqueFoldersEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Yes' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> No'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Gallery ID</span>
-            <span class="info-value info-code">${galleryId ? escapeHtml(galleryId) : '<span style="color: #888;">(not assigned)</span>'}</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(galleryId) : '<span style="color: var(--text-faint);">(not assigned)</span>'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Unique Folder Name</span>
-            <span class="info-value info-code">${galleryId ? escapeHtml(buildUniqueGalleryFolderName(char)) : '<span style="color: #888;">(using standard name)</span>'}</span>
+            <span class="info-value info-code">${galleryId ? escapeHtml(buildUniqueGalleryFolderName(char)) : '<span style="color: var(--text-faint);">(using standard name)</span>'}</span>
         </div>
     </div>`;
     
-    // Section: Provider Link (generic — shows whichever provider owns this card)
+    // Section: Provider Link (generic - shows whichever provider owns this card)
     html += `<div class="info-section">
         <div class="info-section-title"><i class="fa-solid fa-link"></i> Provider Link</div>
         <div class="info-row">
             <span class="info-label">Linked</span>
-            <span class="info-value">${providerResult ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Yes' : '<i class="fa-solid fa-times" style="color: #888;"></i> No'}</span>
+            <span class="info-value">${providerResult ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Yes' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> No'}</span>
         </div>`;
     if (providerResult) {
         const { provider: linkedProvider, linkInfo } = providerResult;
@@ -9178,7 +10314,7 @@ function populateInfoTab(char) {
         <div class="info-section-title"><i class="fa-solid fa-images"></i> Media Localization</div>
         <div class="info-row">
             <span class="info-label">Global Setting</span>
-            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Enabled' : '<i class="fa-solid fa-times" style="color: #888;"></i> Disabled'}</span>
+            <span class="info-value">${mediaLocStatus?.globalEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Enabled' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Disabled'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Per-Character Override</span>
@@ -9186,7 +10322,7 @@ function populateInfoTab(char) {
         </div>
         <div class="info-row">
             <span class="info-label">Effective State</span>
-            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: #2ecc71;"></i> Active' : '<i class="fa-solid fa-times" style="color: #888;"></i> Inactive'}</span>
+            <span class="info-value">${mediaLocStatus?.isEnabled ? '<i class="fa-solid fa-check" style="color: var(--cl-success-bright);"></i> Active' : '<i class="fa-solid fa-times" style="color: var(--text-faint);"></i> Inactive'}</span>
         </div>
         <div class="info-row">
             <span class="info-label">Embedded Media URLs</span>
@@ -9919,7 +11055,7 @@ function renderRelatedCards(related) {
         const char = r.char;
         const name = getCharField(char, 'name') || 'Unknown';
         const creator = getCharField(char, 'creator') || '';
-        const avatarPath = getCharacterAvatarUrl(char.avatar);
+        const avatarPath = getCharacterAvatarStThumbUrl(char.avatar);
         
         // Build score breakdown pills - show tag count and rarity info
         const pills = [];
@@ -9985,13 +11121,13 @@ async function showDeleteConfirmation(char) {
     
     // Show modal immediately with a loading placeholder for gallery info
     const deleteModal = document.createElement('div');
-    deleteModal.className = 'confirm-modal';
+    deleteModal.className = 'confirm-modal cl-modal-drawer';
     deleteModal.id = 'deleteConfirmModal';
     deleteModal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(450px * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
-                <h3 style="border: none; padding: 0; margin: 0;">
-                    <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2) 0%, rgba(var(--cl-error-bright-rgb), 0.3) 100%);">
+                <h3>
+                    <i class="fa-solid fa-triangle-exclamation" style="color: var(--cl-error-bright);"></i>
                     Delete Character
                 </h3>
                 <button class="close-confirm-btn" id="closeDeleteModal">&times;</button>
@@ -10000,7 +11136,7 @@ async function showDeleteConfirmation(char) {
                 <div style="margin-bottom: 20px;">
                     <img src="${getCharacterAvatarUrl(avatar)}" 
                          alt="${escapeHtml(charName)}" 
-                         style="width: 100px; height: 100px; object-fit: cover; border-radius: 12px; border: 3px solid rgba(231, 76, 60, 0.5); margin-bottom: 15px;"
+                         style="width: 100px; height: 100px; object-fit: cover; border-radius: var(--radius-2xl); border: 3px solid rgba(var(--cl-error-bright-rgb), 0.5); margin-bottom: 15px;"
                          onerror="this.src='/img/ai4.png'">
                     <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
                 </div>
@@ -10012,9 +11148,9 @@ async function showDeleteConfirmation(char) {
                 <p style="color: var(--text-secondary); margin-bottom: 15px;">
                     Are you sure you want to delete this character? This action cannot be undone.
                 </p>
-                <div style="background: rgba(231, 76, 60, 0.1); border: 1px solid rgba(231, 76, 60, 0.3); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
+                <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary);">
-                        <input type="checkbox" id="deleteChatsCheckbox" style="accent-color: #e74c3c;">
+                        <input type="checkbox" id="deleteChatsCheckbox" style="accent-color: var(--cl-error-bright);">
                         <span>Also delete all chat history with this character</span>
                     </label>
                 </div>
@@ -10061,18 +11197,18 @@ async function showDeleteConfirmation(char) {
         
         if (canDeleteGallery) {
             section.innerHTML = `
-                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                <div style="background: rgba(var(--cl-warning-bright-rgb), 0.15); border: 1px solid rgba(var(--cl-warning-bright-rgb), 0.4); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--cl-warning-bright); margin-bottom: 10px;">
                         <i class="fa-solid fa-images"></i>
                         <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
                     </div>
                     <div style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                            <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="keep" checked style="accent-color: var(--cl-warning-bright);">
                             <span><strong>Keep gallery files</strong> - Leave in folder</span>
                         </label>
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                            <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                            <input type="radio" name="galleryAction" value="delete" style="accent-color: var(--cl-error-bright);">
                             <span><strong>Delete gallery files</strong> - Remove all images</span>
                         </label>
                     </div>
@@ -10080,8 +11216,8 @@ async function showDeleteConfirmation(char) {
             `;
         } else if (hasImages) {
             section.innerHTML = `
-                <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #f1c40f;">
+                <div style="background: rgba(var(--cl-warning-bright-rgb), 0.15); border: 1px solid rgba(var(--cl-warning-bright-rgb), 0.4); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--cl-warning-bright);">
                         <i class="fa-solid fa-images"></i>
                         <strong>Gallery Contains ${info.count} File${info.count !== 1 ? 's' : ''}</strong>
                     </div>
@@ -10156,8 +11292,10 @@ async function deleteCharacter(char, deleteChats = false) {
     try {
         const avatar = char.avatar || '';
         const charName = getCharField(char, 'name') || avatar;
-        
+
         debugLog('[Delete] Starting deletion for:', charName, 'avatar:', avatar);
+
+        hapticFeedback([20, 30, 20]);
         
         // Delete character via SillyTavern API
         const response = await apiRequest(ENDPOINTS.CHARACTERS_DELETE, 'POST', {
@@ -10197,10 +11335,8 @@ async function deleteCharacter(char, deleteChats = false) {
         // Evict from extensions cache (ST lazy loading)
         if (avatar) _extensionsCache.delete(avatar);
         
-        // CRITICAL: Trigger character refresh in main SillyTavern window
-        // This updates ST's in-memory character array and cleans up related data.
-        // Best-effort with a timeout — on mobile the opener tab may be suspended,
-        // which would hang cross-window await calls indefinitely.
+        // Trigger character refresh in the ST window. Best-effort with a timeout:
+        // on mobile the opener tab may be suspended and cross-window awaits hang.
         const refreshOpener = async () => {
             try {
                 const host = getHostWindow();
@@ -10543,23 +11679,19 @@ function showSaveConfirmation() {
     
     const currentValues = collectEditValues();
     const changes = generateChangesDiff(originalValues, currentValues);
+    const hasAvatarChange = !!pendingAvatarFile;
     
-    if (changes.length === 0) {
+    if (changes.length === 0 && !hasAvatarChange) {
         showToast("No changes detected", "info");
         return;
     }
     
-    // Store pending payload for actual save
-    // SillyTavern's merge-attributes API expects data in the character card v2/v3 format
-    // with fields both at root level (for backwards compat) and under 'data' object
-    // IMPORTANT: Preserve existing extensions (like gallery_id, favorites, chub link) to avoid wiping them
+    // merge-attributes wants V2/V3 shape (fields at root for back-compat plus under data).
+    // Pull existing values up so the payload doesn't wipe anything the form doesn't touch.
     const existingExtensions = activeChar.data?.extensions || activeChar.extensions || {};
-    // IMPORTANT: Preserve create_date to maintain original import timestamp
     const existingCreateDate = activeChar.create_date;
-    // IMPORTANT: Preserve spec and spec_version to avoid unwanted version upgrades
     const existingSpec = activeChar.spec || activeChar.data?.spec;
     const existingSpecVersion = activeChar.spec_version || activeChar.data?.spec_version;
-    // IMPORTANT: Preserve the entire original data object to keep V3 fields (assets, nickname, depth_prompt, group_only_greetings, etc.)
     const existingData = activeChar.data || {};
     
     pendingPayload = {
@@ -10583,12 +11715,8 @@ function showSaveConfirmation() {
         character_book: currentValues.character_book,
         // Preserve original create_date
         create_date: existingCreateDate,
-        // Include under 'data' for proper v2/v3 card format
-        // CRITICAL: Spread existing data FIRST, then override with edited fields
-        // This preserves V3 fields like assets, nickname, depth_prompt, group_only_greetings, etc.
         data: {
             ...existingData,
-            // Override with edited fields
             name: currentValues.name,
             description: currentValues.description,
             first_mes: currentValues.first_mes,
@@ -10603,16 +11731,22 @@ function showSaveConfirmation() {
             tags: currentValues.tagsArray,
             alternate_greetings: currentValues.alternate_greetings,
             character_book: currentValues.character_book,
-            // Preserve original create_date
             create_date: existingCreateDate,
-            // CRITICAL: Include existing extensions to preserve gallery_id, favorites, chub link, etc.
             extensions: existingExtensions
         }
     };
     
     // Build diff HTML
     const diffContainer = document.getElementById('changesDiff');
-    diffContainer.innerHTML = changes.map(change => `
+    const diffEntries = [...changes];
+    if (hasAvatarChange) {
+        diffEntries.unshift({
+            field: 'Card Image',
+            oldHtml: `<img src="${escapeHtml(getCharacterAvatarUrl(activeChar.avatar))}" alt="Current image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
+            newHtml: `<img src="${escapeHtml(pendingAvatarPreviewUrl || '')}" alt="New image" style="max-width: 100px; max-height: 150px; border-radius: var(--radius-md);">`,
+        });
+    }
+    diffContainer.innerHTML = diffEntries.map(change => `
         <div class="diff-item">
             <div class="diff-item-label">${escapeHtml(change.field)}</div>
             <div class="diff-old">${change.oldHtml || escapeHtml(change.old)}</div>
@@ -10629,9 +11763,13 @@ function showSaveConfirmation() {
 async function performSave() {
     if (!activeChar || !pendingPayload) return;
     
-    // Auto-snapshot before edit (non-blocking — don't let snapshot failure block the save)
+    const hasAvatarChange = !!pendingAvatarFile;
+
+    // Auto-snapshot before edit (non-blocking - don't let snapshot failure block the save).
+    // When the avatar is also being replaced, embed the OLD image bytes in the snapshot
+    // so the version history can show/restore the original card image even after overwrite.
     if (window.autoSnapshotBeforeChange) {
-        try { await window.autoSnapshotBeforeChange(activeChar, 'edit'); } catch (_) {}
+        try { await window.autoSnapshotBeforeChange(activeChar, 'edit', { embedAvatar: hasAvatarChange }); } catch (_) {}
     }
     
     // Capture old name BEFORE updating for gallery folder rename
@@ -10644,6 +11782,33 @@ async function performSave() {
         const response = await apiRequest('/characters/merge-attributes', 'POST', pendingPayload);
         
         if (response.ok) {
+            // Upload replacement avatar (after fields succeeded). edit-avatar reads existing
+            // card JSON from the PNG and re-embeds it into the new image, so all fields,
+            // extensions, gallery_id, version_uid, chats, and the filename are preserved.
+            if (hasAvatarChange) {
+                try {
+                    const formData = new FormData();
+                    // ST's edit-avatar re-encodes as PNG and re-embeds existing card JSON,
+                    // so we always send with .png filename regardless of source format.
+                    formData.append('avatar', new File([pendingAvatarFile], 'avatar.png', { type: pendingAvatarFile.type || 'image/png' }));
+                    formData.append('avatar_url', activeChar.avatar);
+                    const csrfToken = getCSRFToken();
+                    const avatarResp = await fetch('/api/characters/edit-avatar', {
+                        method: 'POST',
+                        headers: { 'X-CSRF-Token': csrfToken },
+                        body: formData,
+                    });
+                    if (!avatarResp.ok) {
+                        const err = await avatarResp.text().catch(() => '');
+                        throw new Error(`Avatar upload failed (${avatarResp.status}): ${err}`);
+                    }
+                } catch (avatarErr) {
+                    console.error('[Edit] Avatar upload failed:', avatarErr);
+                    showToast(`Card saved, but image update failed: ${avatarErr.message}`, 'warning');
+                    // Don't bail; the field-level save already succeeded.
+                }
+            }
+
             showToast("Character saved successfully!", "success");
             
             // Close confirmation immediately so it doesn't wait on folder rename / grid refresh
@@ -10725,6 +11890,18 @@ async function performSave() {
             
             // Refresh the modal display to show saved changes
             refreshModalDisplay();
+
+            // Cache-bust avatar URLs after image swap so the modal hero and grid cards
+            // all fetch the new PNG without needing F5.
+            if (hasAvatarChange) {
+                bumpAvatarCacheBust(activeChar.avatar);
+                const newUrl = getCharacterAvatarUrl(activeChar.avatar);
+                const heroImg = document.getElementById('modalImage');
+                if (heroImg) heroImg.src = newUrl;
+                const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
+                if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
+                clearPendingAvatar();
+            }
             
             // Force re-render the grid to show updated data immediately
             performSearch();
@@ -10733,6 +11910,10 @@ async function performSave() {
             setEditLock(true);
             pendingPayload = null;
             
+            // Tell ST to re-read the character so open chats pick up the edits
+            // without requiring a tab refresh. Best-effort, non-blocking.
+            notifySTCharacterEdited(activeChar.avatar);
+
             // Fetch from server for full sync (in background)
             // forceRefresh avoids stale opener data overwriting recent changes
             fetchCharacters(true);
@@ -10779,7 +11960,6 @@ function refreshModalDisplay() {
         // Store raw content for fullscreen expand feature
         window.currentCreatorNotesContent = creatorNotes;
         renderCreatorNotesSecure(creatorNotes, char.name, notesContainer);
-        // Initialize handlers for this modal instance
         initCreatorNotesHandlers();
         // Show/hide expand button based on content length
         const expandBtn = document.getElementById('creatorNotesExpandBtn');
@@ -10851,7 +12031,6 @@ function refreshModalDisplay() {
         }
     }
     
-    // Initialize content expand handlers
     initContentExpandHandlers();
     
     // Update Embedded Lorebook
@@ -10912,6 +12091,8 @@ function setEditLock(locked) {
     const addAltGreetingBtn = document.getElementById('addAltGreetingBtn');
     const tagInputWrapper = document.getElementById('tagInputWrapper');
     const tagsContainer = document.getElementById('modalTags');
+    const portraitContainer = document.querySelector('.char-portrait-container');
+    const portraitOverlay = document.getElementById('portraitEditOverlay');
     
     // All editable inputs in the edit pane
     const editInputs = document.querySelectorAll('#pane-edit .glass-input');
@@ -10942,6 +12123,11 @@ function setEditLock(locked) {
         // Hide expand buttons when locked
         expandFieldBtns.forEach(btn => btn.classList.add('hidden'));
         sectionExpandBtns.forEach(btn => btn.classList.add('hidden'));
+
+        // Hide portrait click-to-change overlay
+        if (portraitContainer) portraitContainer.classList.remove('editing-unlocked');
+        if (portraitOverlay) portraitOverlay.classList.add('hidden');
+        modal?.classList.remove('editing-unlocked');
         
         // Reset field expand toggle
         const fieldsToggle = document.getElementById('editFieldsToggleBtn');
@@ -10993,6 +12179,11 @@ function setEditLock(locked) {
         // Show expand buttons when unlocked
         expandFieldBtns.forEach(btn => btn.classList.remove('hidden'));
         sectionExpandBtns.forEach(btn => btn.classList.remove('hidden'));
+
+        // Show portrait click-to-change overlay
+        if (portraitContainer) portraitContainer.classList.add('editing-unlocked');
+        if (portraitOverlay) portraitOverlay.classList.remove('hidden');
+        modal?.classList.add('editing-unlocked');
         
         // Lorebook editor
         const addLorebookEntryBtn = document.getElementById('addLorebookEntryBtn');
@@ -11038,6 +12229,9 @@ function cancelEditing() {
     
     // Restore lorebook from raw data
     populateLorebookEditor(originalRawData.characterBook);
+
+    // Discard any pending avatar replacement
+    clearPendingAvatar();
     
     // Re-lock (this also re-renders sidebar tags via setEditLock)
     setEditLock(true);
@@ -11211,13 +12405,14 @@ async function toggleCharacterFavorite(char) {
         showToast('No character selected', 'error');
         return;
     }
-    
+
     const currentFavStatus = isCharacterFavorite(char);
     const newFavStatus = !currentFavStatus;
-    
+
+    hapticFeedback(12);
+
     try {
-        // IMPORTANT: SillyTavern reads fav from data.extensions.fav
-        // Must include data object while preserving existing data fields
+        // fav lives in data.extensions.fav; full data must be passed through.
         const existingData = char.data || {};
         const existingExtensions = existingData.extensions || {};
         
@@ -11550,13 +12745,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
-    // Initialize expand field buttons
     initExpandFieldButtons();
-    
-    // Initialize section expand buttons (Greetings and Lorebook)
     initSectionExpandButtons();
-    
-    // Initialize browse expand buttons
     initBrowseExpandButtons();
 
 });
@@ -12356,14 +13546,13 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         return;
     }
     
-    // Check if we have full content stored (for truncated sections like First Message)
+    // Truncated sections (First Message, etc.) stash full content on the element.
     let content;
     if (sectionEl.dataset.fullContent) {
-        // Use stored full content and format it
         const charName = document.getElementById('chubCharName')?.textContent || 'Character';
         content = formatRichText(sectionEl.dataset.fullContent, charName, true);
     } else {
-        // Check if section contains an iframe (Creator's Notes uses secure iframe rendering)
+        // Creator's Notes renders through a secure iframe; pull content out if present.
         const existingIframe = sectionEl.querySelector('iframe');
         if (existingIframe && existingIframe.contentDocument?.body) {
             // Extract content from existing iframe
@@ -12380,7 +13569,7 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
         * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: var(--radius-sm); }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
         ::-webkit-scrollbar-corner { background: transparent; }
         body {
@@ -12393,12 +13582,12 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
             padding: 20px;
         }
         a { color: #4a9eff; }
-        img, video { max-width: 100%; height: auto; border-radius: 8px; }
-        pre, code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; }
+        img, video { max-width: 100%; height: auto; border-radius: var(--radius-lg); }
+        pre, code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: var(--radius-sm); }
         blockquote { border-left: 3px solid #4a9eff; margin-left: 0; padding-left: 15px; opacity: 0.9; }
         .char-placeholder { color: #4a9eff; font-weight: 500; }
         .user-placeholder { color: #9b59b6; font-weight: 500; }
-        iframe { max-width: 100%; border-radius: 8px; }
+        iframe { max-width: 100%; border-radius: var(--radius-lg); }
         @media (max-width: 768px) {
             body { font-size: 0.88rem; padding: 12px; }
         }
@@ -12498,28 +13687,64 @@ function openBrowseExpandedView(sectionId, label, iconClass) {
 }
 
 /**
+ * Reset per-section uncollapsed state on a browse char modal so each new
+ * character preview starts fresh in collapse-all mode.
+ */
+function resetBrowseSectionCollapseState(modal) {
+    if (!modal) return;
+    modal.querySelectorAll('.browse-char-section.browse-section-uncollapsed')
+        .forEach(section => section.classList.remove('browse-section-uncollapsed'));
+}
+window.resetBrowseSectionCollapseState = resetBrowseSectionCollapseState;
+
+/**
  * Delegated click handler for browse section titles (expand modal).
  * Uses event delegation since sections are injected dynamically by provider browse views.
  */
 function initBrowseExpandButtons() {
     document.addEventListener('click', (e) => {
-        // Inline toggle chevron — expand/collapse section content in place
+        // Inline toggle chevron - expand/collapse section content in place
         const toggle = e.target.closest('.browse-section-inline-toggle');
         if (toggle) {
             e.preventDefault();
             e.stopPropagation();
             const section = toggle.closest('.browse-char-section');
-            if (section) section.classList.toggle('browse-section-collapsed');
+            if (section) {
+                if (document.body.classList.contains('collapse-all-browse-sections')) {
+                    section.classList.remove('browse-section-collapsed');
+                    section.classList.toggle('browse-section-uncollapsed');
+                } else {
+                    section.classList.toggle('browse-section-collapsed');
+                }
+            }
             return;
         }
 
         const title = e.target.closest('.browse-section-title');
         if (!title) return;
-        e.preventDefault();
-        e.stopPropagation();
         const sectionId = title.dataset.section;
         const label = title.dataset.label;
         const iconClass = title.dataset.icon;
+
+        // Collapse-all mode: optional sections (everything except creator's notes
+        // and alt greetings) become inline toggles instead of opening the expand modal.
+        const isCollapseAll = document.body.classList.contains('collapse-all-browse-sections');
+        const isOptionalSection = sectionId
+            && !sectionId.endsWith('CreatorNotes')
+            && sectionId !== 'browseAltGreetings';
+        if (isCollapseAll && isOptionalSection) {
+            e.preventDefault();
+            e.stopPropagation();
+            const section = title.closest('.browse-char-section');
+            if (section) {
+                section.classList.remove('browse-section-collapsed');
+                section.classList.toggle('browse-section-uncollapsed');
+            }
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
         if (sectionId === 'browseAltGreetings') {
             const greetings = window.currentBrowseAltGreetings || [];
             const modal = title.closest('.browse-char-modal');
@@ -12700,16 +13925,43 @@ async function saveCurrentAsFilterPreset(name) {
     showToast(`Preset "${name}" saved`, 'success', 2000);
 }
 
-async function applyFilterPreset(uid) {
+async function applyFilterPreset(uid, opts = {}) {
     await loadFilterPresets();
     const preset = getFilterPresets().find(p => p.uid === uid);
-    if (!preset) return;
+    if (!preset) return null;
     setAdvFilterRules(preset.rules.map(r => ({ ...r, id: advFilterNextId++ })));
     rerenderAdvFilterRows();
     updateAdvFilterIndicator();
     triggerAdvFilterSearch();
-    closeAdvFilterPresetsPanel();
-    showToast(`Loaded "${preset.name}"`, 'success', 2000);
+    if (!opts.silent) {
+        closeAdvFilterPresetsPanel();
+        showToast(`Loaded "${preset.name}"`, 'success', 2000);
+    }
+    return preset;
+}
+
+/**
+ * Populate the Default Filter Preset <select> in Settings with current character-view presets.
+ * Reuses the styled custom-select if one was already initialized for this element.
+ */
+function populateDefaultFilterPresetSelect(selectEl, currentValue) {
+    if (!selectEl) return;
+    loadFilterPresets().then(() => {
+        const presets = (_filterPresetsData && _filterPresetsData.char) || [];
+        const opts = ['<option value="" data-icon="fa-solid fa-ban">(None)</option>'];
+        for (const p of presets) {
+            const safeName = (p.name || '').replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+            opts.push(`<option value="${p.uid}" data-icon="fa-solid fa-filter">${safeName}</option>`);
+        }
+        selectEl.innerHTML = opts.join('');
+        const validUids = new Set(presets.map(p => p.uid));
+        selectEl.value = validUids.has(currentValue) ? currentValue : '';
+        if (selectEl._customSelect) {
+            selectEl._customSelect.refresh();
+        } else {
+            initCustomSelect(selectEl);
+        }
+    });
 }
 
 async function deleteFilterPreset(uid) {
@@ -12817,9 +14069,26 @@ function addAdvFilterRule() {
         operator: fields[firstField].operators[0],
         value: '',
     };
+    rule.value = getAdvFilterDefaultValue(rule);
     getAdvFilterRules().push(rule);
     rerenderAdvFilterRows();
     updateAdvFilterIndicator();
+}
+
+// Operators with a UI-displayed default (date "7", first provider, first playlist) need
+// the rule's stored value seeded to match, or evaluateAdvancedFilters skips the rule
+// for being empty while the user sees a configured filter that silently does nothing.
+function getAdvFilterDefaultValue(rule) {
+    if (rule.operator === 'in_the_last') return '7';
+    const fieldDef = getActiveAdvFilterFields()[rule.field];
+    if (!fieldDef) return '';
+    if (fieldDef.type === 'provider' && (rule.operator === 'linked_to' || rule.operator === 'not_linked_to')) {
+        return ADV_FILTER_PROVIDERS[0]?.value || '';
+    }
+    if (fieldDef.type === 'playlist' && (rule.operator === 'in' || rule.operator === 'not_in')) {
+        return (window.playlistsGetAll?.() || [])[0]?.uid || '';
+    }
+    return '';
 }
 
 function removeAdvFilterRule(id) {
@@ -13103,6 +14372,7 @@ function getAdvFilterRulesForChats() {
 
 // Search and Filter Functionality (Global so it can be called from view switching)
 function performSearch() {
+    updateMobileFilterIndicator();
     const rawQuery = document.getElementById('searchInput').value;
     
     const useName = document.getElementById('searchName').checked;
@@ -13163,6 +14433,12 @@ function performSearch() {
     }
     
     query = query.trim().toLowerCase();
+
+    // built once outside the per-char loop, picks up whatever the playlist
+    // actually contains right now (no stale cache between mutations).
+    const playlistAvatarSet = activePlaylistFilter
+        ? (window.playlistsGetAvatarSet?.(activePlaylistFilter) || null)
+        : null;
 
     const filtered = allCharacters.filter(c => {
         
@@ -13237,8 +14513,8 @@ function performSearch() {
         }
 
         // Playlist filter (outermost constraint)
-        if (activePlaylistFilter && activePlaylistAvatarSet) {
-            if (!activePlaylistAvatarSet.has(c.avatar)) return false;
+        if (playlistAvatarSet) {
+            if (!playlistAvatarSet.has(c.avatar)) return false;
         }
 
         // Favorites-only filter (from toolbar button)
@@ -13297,17 +14573,23 @@ function performSearch() {
         return matchesSearch;
     });
     
-    // Also apply current sort — pre-computed _dateAdded / _createDate avoid
+    // Also apply current sort - pre-computed _dateAdded / _createDate avoid
     // parseDateValue() (regex + Date constructor) inside the comparator
     const sortSelect = document.getElementById('sortSelect');
     const sortType = sortSelect ? sortSelect.value : 'name_asc';
+    const groupFavs = getSetting('groupFavoritesFirst') || false;
     const sorted = [...filtered].sort((a, b) => {
+        if (groupFavs) {
+            const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
+            if (favA !== favB) return favA ? -1 : 1;
+        }
         if (sortType === 'name_asc') return a.name.localeCompare(b.name);
         if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-        if (sortType === 'date_new') return b._dateAdded - a._dateAdded; 
+        if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
         if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
         if (sortType === 'created_new') return b._createDate - a._createDate;
         if (sortType === 'created_old') return a._createDate - b._createDate;
+        if (sortType === 'random') return getRandomSortKey(a) - getRandomSortKey(b);
         return 0;
     });
     
@@ -13561,13 +14843,13 @@ function setupEventListeners() {
                     rule.field = e.target.value;
                     const newField = getActiveAdvFilterFields()[rule.field];
                     rule.operator = newField.operators[0];
-                    rule.value = '';
+                    rule.value = getAdvFilterDefaultValue(rule);
                     rerenderAdvFilterRows();
                     updateAdvFilterIndicator();
                     triggerAdvFilterSearch();
                 } else if (e.target.classList.contains('adv-filter-operator')) {
                     rule.operator = e.target.value;
-                    rule.value = '';
+                    rule.value = getAdvFilterDefaultValue(rule);
                     rerenderAdvFilterRows();
                     updateAdvFilterIndicator();
                     triggerAdvFilterSearch();
@@ -13640,7 +14922,7 @@ function setupEventListeners() {
             });
         });
 
-        // Overflow proxy items — relay clicks to the real topbar buttons
+        // Overflow proxy items - relay clicks to the real topbar buttons
         const menuGallerySyncBtn = document.getElementById('menuGallerySyncBtn');
         if (menuGallerySyncBtn) {
             if (!getSetting('uniqueGalleryFolders')) menuGallerySyncBtn.style.display = 'none';
@@ -13701,10 +14983,11 @@ function setupEventListeners() {
         });
     }
 
-    // Sort — delegate to performSearch so there is ONE sort+render codepath.
+    // Sort - delegate to performSearch so there is ONE sort+render codepath.
     // This eliminates the dual-sort bug where the sort handler and performSearch
     // could produce different results from stale/divergent data.
-    on('sortSelect', 'change', () => {
+    on('sortSelect', 'change', (e) => {
+        if (e?.target?.value === 'random') reshuffleRandomSort();
         performSearch();
     });
     
@@ -13727,7 +15010,7 @@ function setupEventListeners() {
     // Refresh - preserves current filters and search
     on('menuRefreshBtn', 'click', async () => {
         document.getElementById('characterGrid').innerHTML = '';
-        document.getElementById('loading').style.display = 'block';
+        document.getElementById('loading').style.display = '';
         
         try {
             const ctx = getSTContext();
@@ -13751,9 +15034,40 @@ function setupEventListeners() {
     }
 
     // Close Modal
-    on('modalClose', 'click', closeModal);
+    on('modalClose', 'click', maybeCloseModal);
     modal.addEventListener('click', (e) => {
-        if (e.target === modal) closeModal();
+        if (e.target === modal) maybeCloseModal();
+    });
+
+    // Char detail prev/next nav (desktop chevrons + keyboard; mobile swipe wired in library-mobile.js).
+    on('charModalNavPrev', 'click', () => navigateModal(-1));
+    on('charModalNavNext', 'click', () => navigateModal(1));
+    // Hover preload: same shape as the grid mousedown preload so the avatar is cache-warm by the time openModal sets src.
+    const navPrevBtn = document.getElementById('charModalNavPrev');
+    const navNextBtn = document.getElementById('charModalNavNext');
+    const previewSiblingAt = (offset) => {
+        if (!activeChar) return null;
+        const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+        if (idx === -1) return null;
+        return currentCharsList[idx + offset] || null;
+    };
+    navPrevBtn?.addEventListener('mouseenter', () => {
+        const s = previewSiblingAt(-1);
+        if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
+    });
+    navNextBtn?.addEventListener('mouseenter', () => {
+        const s = previewSiblingAt(1);
+        if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        if (modal.classList.contains('hidden')) return;
+        if (getSetting('enableCharDetailNav') === false) return;
+        const t = e.target;
+        const tag = t?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t?.isContentEditable) return;
+        e.preventDefault();
+        navigateModal(e.key === 'ArrowLeft' ? -1 : 1);
     });
 
     // Tabs
@@ -13800,6 +15114,27 @@ function setupEventListeners() {
     const toggleEditLockBtn = document.getElementById('toggleEditLockBtn');
     if (toggleEditLockBtn) {
         toggleEditLockBtn.onclick = () => setEditLock(!isEditLocked);
+    }
+
+    // Card Image change controls (in-place hero overlay)
+    const portraitEditOverlay = document.getElementById('portraitEditOverlay');
+    const portraitPendingRevertBtn = document.getElementById('portraitPendingRevertBtn');
+    const editAvatarFileInput = document.getElementById('editAvatarFileInput');
+    if (portraitEditOverlay && editAvatarFileInput) {
+        portraitEditOverlay.onclick = () => {
+            if (isEditLocked) return;
+            editAvatarFileInput.click();
+        };
+        editAvatarFileInput.addEventListener('change', (e) => {
+            const file = e.target.files?.[0];
+            if (file) handlePendingAvatarSelected(file);
+        });
+    }
+    if (portraitPendingRevertBtn) {
+        portraitPendingRevertBtn.onclick = (e) => {
+            e.stopPropagation();
+            clearPendingAvatar();
+        };
     }
     
     // Edit Fields Expand/Collapse Toggle
@@ -13881,7 +15216,7 @@ function setupEventListeners() {
         uploadZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             uploadZone.style.borderColor = 'var(--accent)';
-            uploadZone.style.backgroundColor = 'rgba(74, 158, 255, 0.1)';
+            uploadZone.style.backgroundColor = 'rgba(var(--accent-rgb), 0.1)';
         });
         
         uploadZone.addEventListener('dragleave', (e) => {
@@ -14247,7 +15582,42 @@ function getCharacterName(char, fallback = 'Unknown') {
 
 function getCharacterAvatarUrl(avatar) {
     if (!avatar) return '';
-    return `/characters/${encodeURIComponent(avatar)}`;
+    const bust = _avatarCacheBust.get(avatar);
+    return bust
+        ? `/characters/${encodeURIComponent(avatar)}?v=${bust}`
+        : `/characters/${encodeURIComponent(avatar)}`;
+}
+
+// ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the cl-helper thumb is overkill. Soft above ~64px target on retina; use the cl-helper helper instead for hero-sized previews.
+function getCharacterAvatarStThumbUrl(avatar) {
+    if (!avatar) return '';
+    const bust = _avatarCacheBust.get(avatar);
+    return bust
+        ? `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}&v=${bust}`
+        : `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}`;
+}
+
+// Returns the URL the grid should request, picking based on the three-tier
+// thumbnail setting. Callers should gate on getSetting('useGridThumbnails')
+// first; this helper assumes the user wants a thumb.
+function getCharacterAvatarThumbUrl(avatar) {
+    if (!avatar) return '';
+    const bust = _avatarCacheBust.get(avatar);
+    const tail = bust ? `&v=${bust}` : '';
+    if (getSetting('gridThumbnailsClHelper') !== false) {
+        const size = getSetting('gridThumbnailSize') || 512;
+        return `/api/plugins/cl-helper/avatar-thumb/${encodeURIComponent(avatar)}?s=${size}${tail}`;
+    }
+    // ST built-in fallback: tiny 96x144 default but works without cl-helper.
+    return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}${tail}`;
+}
+
+// Per-avatar cache-bust tokens, set after an in-place image swap so freshly rendered
+// <img> tags request the new bytes instead of the browser cache.
+const _avatarCacheBust = new Map();
+function bumpAvatarCacheBust(avatar) {
+    if (!avatar) return;
+    _avatarCacheBust.set(avatar, Date.now());
 }
 
 /**
@@ -14296,12 +15666,12 @@ function renderLorebookEntriesHtml(entries) {
     return entries.map((entry, i) => renderLorebookEntryHtml(entry, i)).join('');
 }
 
-/**
- * Hide a modal by ID
- * @param {string} modalId - Modal element ID
- */
+// Handles both class systems (cl-modal uses .visible, confirm-modal uses .hidden).
 function hideModal(modalId) {
-    document.getElementById(modalId)?.classList.add('hidden');
+    const el = document.getElementById(modalId);
+    if (!el) return;
+    if (el.classList.contains('cl-modal')) el.classList.remove('visible');
+    else el.classList.add('hidden');
 }
 
 // Escape HTML characters
@@ -14313,6 +15683,32 @@ function escapeHtml(text) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+}
+
+/**
+ * Sanitize HTML safely. Fails closed (escapes) when DOMPurify is unavailable.
+ * Also forces rel="noopener noreferrer" on any <a> with a target attribute
+ * to prevent tab-nabbing from card-supplied links.
+ * @param {string} html - Pre-formatted HTML to sanitize
+ * @param {object} [config] - DOMPurify config
+ * @returns {string} Sanitized HTML, or escaped text if DOMPurify is missing
+ */
+function safePurify(html, config) {
+    if (html == null || html === '') return '';
+    if (typeof DOMPurify === 'undefined' || !DOMPurify || typeof DOMPurify.sanitize !== 'function') {
+        return escapeHtml(String(html));
+    }
+    let sanitized = DOMPurify.sanitize(html, config || {});
+    // Tab-nabbing post-pass: every <a target="..."> must have rel="noopener noreferrer"
+    if (typeof sanitized === 'string' && sanitized.indexOf('<a') !== -1 && sanitized.indexOf('target') !== -1) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = sanitized;
+        tmp.querySelectorAll('a[target]').forEach(a => {
+            a.setAttribute('rel', 'noopener noreferrer');
+        });
+        sanitized = tmp.innerHTML;
+    }
+    return sanitized;
 }
 
 function formatNumber(num) {
@@ -14617,11 +16013,8 @@ function sanitizeTaglineHtml(content, charName) {
     }
 
     const formatted = formatRichText(content, charName, true);
-    if (typeof DOMPurify === 'undefined') {
-        return formatted;
-    }
 
-    const sanitized = DOMPurify.sanitize(formatted, {
+    const sanitized = safePurify(formatted, {
         ALLOWED_TAGS: [
             'p', 'br', 'hr', 'div', 'span',
             'strong', 'b', 'em', 'i', 'u', 's', 'del',
@@ -14697,8 +16090,8 @@ async function uploadImages(files) {
     
     let uploadedCount = 0;
     let errorCount = 0;
-    
-    // Get the folder name (unique or standard)
+
+    // Folder name (unique or standard)
     const folderName = getGalleryFolderName(activeChar);
     
     for (let file of files) {
@@ -14793,7 +16186,7 @@ function cancelActiveImport() {
 
 // Open/close import modal
 importBtn?.addEventListener('click', () => {
-    importModal.classList.remove('hidden');
+    importModal.classList.add('visible');
     importUrlsInput.value = '';
     importProgress.classList.add('hidden');
     importLog.innerHTML = '';
@@ -14825,23 +16218,39 @@ function syncImportAutoDownloadMedia() {
     importAutoDownloadMedia.checked = mediaLocalizationEnabled !== false;
 }
 
-closeImportModal?.addEventListener('click', () => {
+closeImportModal?.addEventListener('click', async () => {
     if (isImporting) {
-        const confirmClose = confirm('Import is still running. Cancel and close?');
+        const confirmClose = await showConfirm({
+            title: 'Cancel import?',
+            message: 'Import is still running. Cancel and close?',
+            icon: 'fa-solid fa-triangle-exclamation',
+            iconColor: 'var(--cl-warning-bright)',
+            confirmLabel: 'Cancel Import',
+            cancelLabel: 'Keep Importing',
+            danger: true,
+        });
         if (!confirmClose) return;
         cancelActiveImport();
     }
-    importModal.classList.add('hidden');
+    importModal.classList.remove('visible');
 });
 
-importModal?.addEventListener('click', (e) => {
+importModal?.addEventListener('click', async (e) => {
     if (e.target !== importModal) return;
     if (isImporting) {
-        const confirmClose = confirm('Import is still running. Cancel and close?');
+        const confirmClose = await showConfirm({
+            title: 'Cancel import?',
+            message: 'Import is still running. Cancel and close?',
+            icon: 'fa-solid fa-triangle-exclamation',
+            iconColor: 'var(--cl-warning-bright)',
+            confirmLabel: 'Cancel Import',
+            cancelLabel: 'Keep Importing',
+            danger: true,
+        });
         if (!confirmClose) return;
         cancelActiveImport();
     }
-    importModal.classList.add('hidden');
+    importModal.classList.remove('visible');
 });
 
 // ==================== IMPORT SOURCE TOGGLE ====================
@@ -15479,7 +16888,7 @@ function updateLogEntry(entry, message, status) {
 startImportBtn?.addEventListener('click', async () => {
     // If in "Done" / "Cancelled" state, just close the modal
     if (startImportBtn.classList.contains('success') || startImportBtn.classList.contains('cancelled')) {
-        importModal.classList.add('hidden');
+        importModal.classList.remove('visible');
         return;
     }
     
@@ -15764,11 +17173,11 @@ startImportBtn?.addEventListener('click', async () => {
             if (autoDownloadMedia) {
                 if (result.embeddedMediaUrls?.length > 0) importPhases.push('embedded');
                 if (result.lorebookMediaUrls?.length > 0) importPhases.push('lorebook');
+                if (getSetting('includeExternalGalleries') !== false && result.galleryPageUrls?.length > 0) importPhases.push('extGallery');
             }
             if (autoDownloadGallery && result.hasGallery && galleryProvider?.supportsGallery && galleryLinkInfo) {
                 importPhases.push('providerGallery');
             }
-            if (getSetting('includeExternalGalleries') !== false && result.galleryPageUrls?.length > 0) importPhases.push('extGallery');
 
             if (importPhases.length > 0) {
                 if (shouldStop()) { wasCancelled = true; break; }
@@ -15898,14 +17307,14 @@ startImportBtn?.addEventListener('click', async () => {
         // Only refresh if we actually imported something
         if (successCount > 0) {
             // Try lightweight incremental adds for small batches (avoids OOM on mobile).
-            // For large batches fall back to full reload — many individual fetches would be slower.
+            // For large batches fall back to full reload - many individual fetches would be slower.
             const INCREMENTAL_THRESHOLD = 10;
             let incrementalDone = false;
 
             if (importedFileNames.length > 0 && importedFileNames.length <= INCREMENTAL_THRESHOLD) {
                 let allAdded = true;
                 for (const fn of importedFileNames) {
-                    const ok = await fetchAndAddCharacter(fn);
+                    const ok = await fetchAndAddCharacter(fn, { skipNotify: true });
                     if (!ok) { allAdded = false; break; }
                 }
                 incrementalDone = allAdded;
@@ -15955,10 +17364,8 @@ let importSummaryDownloadState = {
 };
 
 function getImportSummaryFolderName(charInfo) {
-    // When galleryId is present, build the unique folder name directly
-    // (matching buildUniqueGalleryFolderName's sanitization exactly).
-    // We can't rely on resolveGalleryFolderName here because allCharacters
-    // may not have been refreshed yet with this import's gallery_id.
+    // resolveGalleryFolderName is unsafe here — allCharacters may not be refreshed yet
+    // with this import's gallery_id, so build the name directly matching buildUniqueGalleryFolderName.
     if (charInfo?.galleryId) {
         const safeName = (charInfo.name || 'Unknown').replace(/[<>:"/\\|?*]/g, '_').trim();
         return `${safeName}_${charInfo.galleryId}`;
@@ -15974,9 +17381,17 @@ function resetImportSummaryDownloads() {
     pendingGalleryCharacters = [];
 }
 
-function handleImportSummaryCloseRequest() {
+async function handleImportSummaryCloseRequest() {
     if (importSummaryDownloadState.active) {
-        const confirmClose = confirm('Downloads are still running. Stop and close?');
+        const confirmClose = await showConfirm({
+            title: 'Stop downloads?',
+            message: 'Downloads are still running. Stop and close?',
+            icon: 'fa-solid fa-triangle-exclamation',
+            iconColor: 'var(--cl-warning-bright)',
+            confirmLabel: 'Stop Downloads',
+            cancelLabel: 'Keep Downloading',
+            danger: true,
+        });
         if (!confirmClose) return;
         importSummaryDownloadState.abort = true;
         importSummaryDownloadState.controller?.abort();
@@ -16095,8 +17510,8 @@ function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }
         progressLabel.textContent = 'Preparing downloads...';
         progressCount.textContent = '0/0';
     }
-    
-    modal.classList.remove('hidden');
+
+    modal.classList.add('visible');
 }
 
 // Import Summary Modal Event Listeners
@@ -16468,8 +17883,8 @@ function openProviderLinkModal(char) {
         if (urlInput) urlInput.value = '';
         if (searchResults) searchResults.innerHTML = '';
     }
-    
-    modal.classList.remove('hidden');
+
+    modal.classList.add('visible');
 }
 
 /**
@@ -16944,7 +18359,7 @@ on('providerLinkVersionsBtn', 'click', () => {
     if (activeChar) {
         // Close the link modal, then switch to the Versions tab
         const linkModal = document.getElementById('providerLinkModal');
-        if (linkModal) linkModal.classList.add('hidden');
+        if (linkModal) linkModal.classList.remove('visible');
         const editVBtn = document.getElementById('editPaneVersionsBtn');
         if (editVBtn) editVBtn.click();
     }
@@ -17007,7 +18422,7 @@ function openBulkAutoLinkModal() {
     
     if (hasResults) {
         // We have existing results - show them
-        modal.classList.remove('hidden');
+        modal.classList.add('visible');
         
         if (bulkAutoLinkScanState.scanComplete || bulkAutoLinkAborted) {
             // Scan was finished or stopped - show results directly
@@ -17061,8 +18476,8 @@ function openBulkAutoLinkModal() {
         document.getElementById('bulkAutoLinkConfidentCount').textContent = '0';
         document.getElementById('bulkAutoLinkUncertainCount').textContent = '0';
         document.getElementById('bulkAutoLinkNoMatchCount').textContent = '0';
-        
-        modal.classList.remove('hidden');
+
+        modal.classList.add('visible');
         
         // Start scanning
         runBulkAutoLinkScan();
@@ -17120,7 +18535,7 @@ async function runBulkAutoLinkScan() {
         const currentProgress = alreadyScanned + i + 1;
         
         // Update UI
-        document.getElementById('bulkAutoLinkScanAvatar').src = getCharacterAvatarUrl(char.avatar);
+        document.getElementById('bulkAutoLinkScanAvatar').src = getCharacterAvatarStThumbUrl(char.avatar);
         document.getElementById('bulkAutoLinkScanName').textContent = charName;
         document.getElementById('bulkAutoLinkScanStatus').textContent = `Searching ${providers.length} providers for "${charName}"...`;
         document.getElementById('bulkAutoLinkScanProgress').textContent = `${currentProgress}/${total}`;
@@ -17244,7 +18659,7 @@ function sortResultsByContentSimilarity(results, localChar) {
         let score = 0;
         let matchReasons = [];
         
-        // === NAME MATCHING (important for finding the right character) ===
+        // === NAME MATCHING ===
         
         // Exact name match gets biggest boost
         if (remoteName === charName) {
@@ -17278,7 +18693,7 @@ function sortResultsByContentSimilarity(results, localChar) {
             matchReasons.push('creator');
         }
         
-        // === CONTENT SIMILARITY (heavily weighted - this is the best signal!) ===
+        // === CONTENT SIMILARITY ===
         if (hasLocalContent && remoteContent.length > 50) {
             // Compare description to description
             const descToDescSim = calculateTextSimilarity(charDescription, remoteDescription);
@@ -17514,7 +18929,7 @@ function renderBulkAutoLinkConfidentList() {
                 <div class="bulk-auto-link-item-confident-header">
                     <input type="checkbox" class="bulk-auto-link-item-checkbox" ${item.selected ? 'checked' : ''}>
                     <div class="bulk-auto-link-item-local">
-                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                         <div class="bulk-auto-link-item-local-info">
                             <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                             <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -17580,7 +18995,7 @@ function renderBulkAutoLinkUncertainList() {
                 <div class="bulk-auto-link-item-uncertain-header">
                     <input type="checkbox" class="bulk-auto-link-item-checkbox" ${hasSelection ? 'checked' : ''}>
                     <div class="bulk-auto-link-item-local">
-                        <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                        <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                         <div class="bulk-auto-link-item-local-info">
                             <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                             <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -17622,7 +19037,7 @@ function renderBulkAutoLinkNoMatchList() {
         return `
             <div class="bulk-auto-link-item bulk-auto-link-item-nomatch">
                 <div class="bulk-auto-link-item-local">
-                    <img src="${getCharacterAvatarUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <img src="${getCharacterAvatarStThumbUrl(item.char.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/></svg>'">
                     <div class="bulk-auto-link-item-local-info">
                         <span class="bulk-auto-link-item-local-name" title="${escapeHtml(charName)}">${escapeHtml(charName)}</span>
                         <span class="bulk-auto-link-item-local-creator">${charCreator ? 'by ' + escapeHtml(charCreator) : 'No creator'}</span>
@@ -17890,7 +19305,7 @@ async function applyBulkAutoLinks() {
     }
     
     // Close modal
-    document.getElementById('bulkAutoLinkModal').classList.add('hidden');
+    document.getElementById('bulkAutoLinkModal').classList.remove('visible');
     
     // Reset state since we linked characters - they're no longer in the unlinked pool
     bulkAutoLinkResults = { confident: [], uncertain: [], nomatch: [] };
@@ -17912,7 +19327,7 @@ document.getElementById('creatorBtn')?.addEventListener('click', () => window.op
 document.getElementById('closeBulkAutoLinkModal')?.addEventListener('click', () => {
     // Just set abort flag and close - state is preserved for resuming
     bulkAutoLinkAborted = true;
-    document.getElementById('bulkAutoLinkModal').classList.add('hidden');
+    document.getElementById('bulkAutoLinkModal').classList.remove('visible');
 });
 document.getElementById('bulkAutoLinkCancelBtn')?.addEventListener('click', () => {
     // If we're in scanning phase, just stop (let the scan loop show results)
@@ -17920,7 +19335,7 @@ document.getElementById('bulkAutoLinkCancelBtn')?.addEventListener('click', () =
     const resultsPhase = document.getElementById('bulkAutoLinkResults');
     if (resultsPhase && !resultsPhase.classList.contains('hidden')) {
         // Results phase - close modal
-        document.getElementById('bulkAutoLinkModal').classList.add('hidden');
+        document.getElementById('bulkAutoLinkModal').classList.remove('visible');
     } else {
         // Scanning phase - just set abort flag, scan loop will handle showing results
         bulkAutoLinkAborted = true;
@@ -18023,14 +19438,14 @@ function clearHighlights(container) {
 // ==============================================
 
 function openGalleryInfoModal() {
-    document.getElementById('galleryInfoModal').classList.remove('hidden');
+    document.getElementById('galleryInfoModal').classList.add('visible');
 }
 
 document.getElementById('galleryInfoBtn')?.addEventListener('click', openGalleryInfoModal);
 
 function closeGalleryInfoModal() {
     const modal = document.getElementById('galleryInfoModal');
-    modal.classList.add('hidden');
+    modal.classList.remove('visible');
     const searchInput = document.getElementById('helpSearchInput');
     if (searchInput && searchInput.value) {
         searchInput.value = '';
@@ -18090,7 +19505,8 @@ const FAST_SKIP_MIN_NAME_LENGTH = 4;
 
 // Duplicated in index.js (extractSanitizedUrlNameForChat). keep in sync
 const CDN_VARIANT_NAMES = new Set(['public', 'original', 'raw', 'full', 'thumbnail', 'thumb',
-    'medium', 'small', 'large', 'xl', 'default', 'image', 'photo', 'download', 'view']);
+    'medium', 'small', 'large', 'xl', 'default', 'image', 'photo', 'download', 'view',
+    'highres', 'hires', 'high', 'lowres', 'lores', 'low', 'preview', 'avatar']);
 
 function extractSanitizedUrlName(url) {
     try {
@@ -18858,10 +20274,142 @@ function arrayBufferToBase64(buffer) {
     return parts.join('');
 }
 
+// ============ Media Download Safety (SSRF + DoS defense) ============
+
+const MAX_MEDIA_BYTES = 50 * 1024 * 1024; // 50 MB hard cap per file
+
+const BLOCKED_HOSTNAME_SUFFIXES = [
+    '.local', '.localhost', '.internal'
+];
+const BLOCKED_HOSTNAMES = new Set([
+    'localhost',
+    'localhost.localdomain',
+    'metadata.google.internal',
+    'metadata.goog',
+    'kubernetes.default',
+    'kubernetes.default.svc'
+]);
+
+function isPrivateIPv4(host) {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+    if (!m) return false;
+    const o = m.slice(1).map(n => parseInt(n, 10));
+    if (o.some(n => n > 255)) return true; // malformed → treat as unsafe
+    const [a, b] = o;
+    if (a === 0) return true;                      // 0.0.0.0/8 - "this network"
+    if (a === 10) return true;                     // 10.0.0.0/8 - private
+    if (a === 127) return true;                    // 127.0.0.0/8 - loopback
+    if (a === 169 && b === 254) return true;       // 169.254.0.0/16 - link-local + AWS metadata
+    if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12 - private
+    if (a === 192 && b === 168) return true;       // 192.168.0.0/16 - private
+    if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 - CGNAT
+    if (a >= 224) return true;                     // 224.0.0.0/4 multicast + 240.0.0.0/4 reserved
+    return false;
+}
+
+function isPrivateIPv6(host) {
+    // Strip brackets if URL parser left them in (it shouldn't for .hostname, but be safe)
+    let h = host.toLowerCase().replace(/^\[|\]$/g, '');
+    if (!h.includes(':')) return false;
+    if (h === '::' || h === '::1') return true;       // unspecified + loopback
+    // IPv4-mapped: ::ffff:a.b.c.d → recurse
+    const v4Mapped = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
+    if (v4Mapped) return isPrivateIPv4(v4Mapped[1]);
+    // Expand leading shorthand to inspect first hextet
+    const firstHextet = h.startsWith('::') ? '0' : h.split(':')[0];
+    const head = parseInt(firstHextet || '0', 16);
+    if ((head & 0xfe00) === 0xfc00) return true;      // fc00::/7 unique-local
+    if ((head & 0xffc0) === 0xfe80) return true;      // fe80::/10 link-local
+    return false;
+}
+
+/**
+ * Decide if a URL is safe to download from.
+ * Blocks non-http(s) schemes, private/loopback/link-local/CGNAT/metadata IPs (v4+v6),
+ * and well-known internal hostnames. Returns { ok, reason }.
+ */
+function isUrlSafeForDownload(url) {
+    let parsed;
+    try { parsed = new URL(url); }
+    catch { return { ok: false, reason: 'invalid URL' }; }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { ok: false, reason: `blocked scheme: ${parsed.protocol}` };
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    if (!host) return { ok: false, reason: 'empty hostname' };
+
+    if (BLOCKED_HOSTNAMES.has(host)) return { ok: false, reason: `blocked hostname: ${host}` };
+    for (const suffix of BLOCKED_HOSTNAME_SUFFIXES) {
+        if (host === suffix.slice(1) || host.endsWith(suffix)) {
+            return { ok: false, reason: `blocked hostname suffix: ${host}` };
+        }
+    }
+    if (isPrivateIPv4(host)) return { ok: false, reason: `blocked private IPv4: ${host}` };
+    if (isPrivateIPv6(host)) return { ok: false, reason: `blocked private IPv6: ${host}` };
+
+    return { ok: true };
+}
+
+/**
+ * Read a fetch Response body into an ArrayBuffer with a hard size cap.
+ * Pre-checks Content-Length when present, then streams the body via the reader,
+ * aborting + throwing if accumulated bytes exceed maxBytes.
+ * Falls back to response.arrayBuffer() if streaming isn't available.
+ */
+async function readBodyWithCap(response, maxBytes) {
+    const declared = parseInt(response.headers.get('content-length') || '0', 10);
+    if (declared > maxBytes) {
+        throw new Error(`response too large: ${declared} > ${maxBytes} bytes`);
+    }
+
+    if (!response.body || typeof response.body.getReader !== 'function') {
+        const buf = await response.arrayBuffer();
+        if (buf.byteLength > maxBytes) {
+            throw new Error(`response too large: ${buf.byteLength} > ${maxBytes} bytes`);
+        }
+        return buf;
+    }
+
+    const reader = response.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        total += value.byteLength;
+        if (total > maxBytes) {
+            try { await reader.cancel(); } catch {}
+            throw new Error(`response exceeded size cap: > ${maxBytes} bytes`);
+        }
+        chunks.push(value);
+    }
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return merged.buffer;
+}
+
 async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null) {
     try {
+        const safety = isUrlSafeForDownload(url);
+        if (!safety.ok) {
+            debugLog(`[EmbeddedMedia] URL rejected: ${safety.reason} (${url})`);
+            return { success: false, error: safety.reason, blocked: true };
+        }
+
         let response;
         let usedProxy = false;
+
+        // Slow CDNs get a longer timeout window (extend to at least 60s)
+        const SLOW_HOSTS = /(?:^|\.)image\.civitai\.com$/i;
+        try {
+            if (SLOW_HOSTS.test(new URL(url).hostname)) timeoutMs = Math.max(timeoutMs, 60000);
+        } catch {}
 
         // Create abort controller for timeout and external abort
         const controller = new AbortController();
@@ -18904,7 +20452,7 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
             }
         }
         
-        const arrayBuffer = await response.arrayBuffer();
+        const arrayBuffer = await readBodyWithCap(response, MAX_MEDIA_BYTES);
         const contentType = response.headers.get('content-type') || '';
         
         // Validate that the downloaded content is actually valid media
@@ -19446,7 +20994,7 @@ charLocalizeToggle?.addEventListener('change', async () => {
 function closeLocalizeModalHandler() {
     localizeAbortController?.abort();
     localizeAbortController = null;
-    localizeModal.classList.add('hidden');
+    localizeModal.classList.remove('visible');
 }
 closeLocalizeModal?.addEventListener('click', closeLocalizeModalHandler);
 closeLocalizeBtn?.addEventListener('click', closeLocalizeModalHandler);
@@ -19459,7 +21007,7 @@ localizeMediaBtn?.addEventListener('click', async () => {
     }
     
     // Show modal
-    localizeModal.classList.remove('hidden');
+    localizeModal.classList.add('visible');
     localizeStatus.textContent = 'Scanning character...';
     localizeLog.innerHTML = '';
     localizeProgressFill.style.width = '0%';
@@ -19650,7 +21198,7 @@ const BULK_SUMMARY_PAGE_SIZE = 50;
 closeBulkLocalizeModal?.addEventListener('click', () => {
     bulkLocalizeAborted = true;
     bulkLocalizeAbortController?.abort();
-    bulkLocalizeModal.classList.add('hidden');
+    bulkLocalizeModal.classList.remove('visible');
 });
 
 cancelBulkLocalizeBtn?.addEventListener('click', () => {
@@ -19662,11 +21210,11 @@ cancelBulkLocalizeBtn?.addEventListener('click', () => {
 
 // Close summary modal
 closeBulkSummaryModal?.addEventListener('click', () => {
-    bulkSummaryModal.classList.add('hidden');
+    bulkSummaryModal.classList.remove('visible');
 });
 
 closeBulkSummaryBtn?.addEventListener('click', () => {
-    bulkSummaryModal.classList.add('hidden');
+    bulkSummaryModal.classList.remove('visible');
 });
 
 // Summary filter and search handlers
@@ -19733,7 +21281,7 @@ function getFilteredBulkResults() {
  */
 function saveBulkSummaryModalState() {
     const modal = bulkSummaryModal;
-    bulkSummaryModalState.wasOpen = modal && !modal.classList.contains('hidden');
+    bulkSummaryModalState.wasOpen = modal && modal.classList.contains('visible');
     bulkSummaryModalState.scrollPosition = bulkSummaryList ? bulkSummaryList.scrollTop : 0;
     bulkSummaryModalState.currentPage = bulkSummaryCurrentPage;
     bulkSummaryModalState.filterValue = bulkSummaryFilterSelect?.value || 'all';
@@ -19751,7 +21299,7 @@ function restoreBulkSummaryModalState() {
     if (bulkSummarySearch) bulkSummarySearch.value = bulkSummaryModalState.searchValue;
     bulkSummaryCurrentPage = bulkSummaryModalState.currentPage;
     
-    bulkSummaryModal.classList.remove('hidden');
+    bulkSummaryModal.classList.add('visible');
     
     // Re-render and restore scroll position
     renderBulkSummaryList();
@@ -19776,7 +21324,7 @@ function openCharFromBulkSummary(avatar) {
     saveBulkSummaryModalState();
     
     // Hide bulk summary modal
-    bulkSummaryModal.classList.add('hidden');
+    bulkSummaryModal.classList.remove('visible');
     
     // Open character modal
     openModal(char);
@@ -19837,7 +21385,7 @@ function renderBulkSummaryList() {
             
             return `
             <div class="bulk-summary-item${r.incomplete ? ' incomplete' : ''}">
-                <img src="${getCharacterAvatarUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
+                <img src="${getCharacterAvatarStThumbUrl(r.avatar)}" alt="" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23333%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23666%22 font-size=%2240%22>?</text></svg>'">
                 <a class="char-name-link" href="#" data-avatar="${escapeHtml(r.avatar)}" title="Click to view ${escapeHtml(r.name)}">${escapeHtml(r.name)}</a>
                 <div class="char-stats">
                     ${r.incomplete ? '<span class="incomplete-badge" title="Has errors or was interrupted"><i class="fa-solid fa-exclamation-triangle"></i></span>' : ''}
@@ -20040,7 +21588,7 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     renderBulkSummaryList();
     
     // Show modal
-    bulkSummaryModal.classList.remove('hidden');
+    bulkSummaryModal.classList.add('visible');
 }
 
 /**
@@ -20082,7 +21630,7 @@ async function runBulkLocalization() {
     const completedAvatars = getCompletedMediaLocalizations();
     
     // Reset UI
-    bulkLocalizeModal.classList.remove('hidden');
+    bulkLocalizeModal.classList.add('visible');
     bulkLocalizeCharAvatar.src = '';
     bulkLocalizeCharName.textContent = 'Preparing...';
     bulkLocalizeStatus.textContent = 'Scanning library...';
@@ -20127,7 +21675,7 @@ async function runBulkLocalization() {
             continue;
         }
         
-        bulkLocalizeCharAvatar.src = getCharacterAvatarUrl(char.avatar);
+        bulkLocalizeCharAvatar.src = getCharacterAvatarStThumbUrl(char.avatar);
         bulkLocalizeCharName.textContent = charName;
         bulkLocalizeProgressCount.textContent = `${i + 1}/${totalChars} characters`;
         bulkLocalizeProgressFill.style.width = `${((i + 1) / totalChars) * 100}%`;
@@ -20236,7 +21784,7 @@ async function runBulkLocalization() {
     }
     
     // Hide progress modal and show summary
-    bulkLocalizeModal.classList.add('hidden');
+    bulkLocalizeModal.classList.remove('visible');
     showBulkSummary(bulkLocalizeAborted, skippedCompleted);
     
     // Show toast
@@ -20251,7 +21799,7 @@ async function runBulkLocalization() {
 // Bulk Localize button in settings
 document.getElementById('bulkLocalizeBtn')?.addEventListener('click', () => {
     // Close settings modal
-    document.getElementById('gallerySettingsModal')?.classList.add('hidden');
+    document.getElementById('gallerySettingsModal')?.classList.remove('visible');
     
     // Confirm with user
     if (allCharacters.length === 0) {
@@ -20777,14 +22325,16 @@ function buildNormalizedCharacterData(fullDataMap) {
         const personality = getCharField(src, 'personality') || '';
         const scenario = getCharField(src, 'scenario') || '';
         const creatorNotes = getCharField(char, 'creator_notes') || '';
-        
+        const mesExample = getCharField(src, 'mes_example') || '';
+        const systemPrompt = getCharField(src, 'system_prompt') || '';
+
         // Pre-extract words for content similarity (expensive operation)
         const getWords = (text) => {
             if (!text || text.length < 50) return null;
             const words = text.toLowerCase().match(/\b\w{3,}\b/g) || [];
             return new Set(words);
         };
-        
+
         return {
             avatar: char.avatar,
             char: char,
@@ -20799,11 +22349,15 @@ function buildNormalizedCharacterData(fullDataMap) {
             personality: personality,
             scenario: scenario,
             creatorNotes: creatorNotes,
+            mesExample: mesExample,
+            systemPrompt: systemPrompt,
             descWords: getWords(description),
             firstMesWords: getWords(firstMes),
             persWords: getWords(personality),
             scenWords: getWords(scenario),
-            creatorNotesWords: getWords(creatorNotes)
+            creatorNotesWords: getWords(creatorNotes),
+            mesExWords: getWords(mesExample),
+            sysPromptWords: getWords(systemPrompt)
         };
     }).filter(Boolean);
 }
@@ -20832,7 +22386,7 @@ function calculateFastSimilarity(normA, normB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON (variant-aware, aligned with full scorer) ===
+    // === NAME COMPARISON ===
     let bestNameScore = 0;
     let bestNameReason = '';
 
@@ -20866,7 +22420,7 @@ function calculateFastSimilarity(normA, normB) {
     // Early exit if names don't match at all (no point comparing content)
     if (!breakdown.name) return { score: 0, breakdown: {}, confidence: null, matchReason: '', matchReasons: [] };
     
-    // === CREATOR COMPARISON (fuzzy, aligned with full scorer) ===
+    // === CREATOR COMPARISON ===
     if (normA.creator && normB.creator) {
         if (normA.creatorCompact && normA.creatorCompact === normB.creatorCompact) {
             score += 15;
@@ -20901,7 +22455,7 @@ function calculateFastSimilarity(normA, normB) {
         }
     }
     
-    // === CONTENT COMPARISONS (using pre-computed word sets) ===
+    // === CONTENT COMPARISONS ===
     if (normA.descWords && normB.descWords) {
         const descSim = wordSetSimilarity(normA.descWords, normB.descWords);
         if (descSim >= 0.3) {
@@ -20976,20 +22530,31 @@ function calculateFastSimilarity(normA, normB) {
     let contentIdentical = false;
     let strictIdentical = false;
     if (breakdown.name && breakdown.creator && substantialPairs >= 1) {
+        // asymmetric catches "A has field, B doesnt" which threshold-gated checks used to miss.
+        const has = (t) => !!(t && t.length > 0);
+        const asymmetric = (a, b) => has(a) !== has(b);
+        const wordsMismatch = (wA, wB, tA, tB) => has(tA) && has(tB) && wA && wB && wordSetSimilarity(wA, wB) < 1.0;
+
         contentIdentical = true;
-        if (normA.descWords && normB.descWords && normA.description.length > 50 && normB.description.length > 50 && wordSetSimilarity(normA.descWords, normB.descWords) < 1.0) contentIdentical = false;
-        if (normA.firstMesWords && normB.firstMesWords && normA.firstMes.length > 30 && normB.firstMes.length > 30 && wordSetSimilarity(normA.firstMesWords, normB.firstMesWords) < 1.0) contentIdentical = false;
-        if (normA.persWords && normB.persWords && normA.personality.length > 20 && normB.personality.length > 20 && wordSetSimilarity(normA.persWords, normB.persWords) < 1.0) contentIdentical = false;
-        if (normA.scenWords && normB.scenWords && normA.scenario.length > 20 && normB.scenario.length > 20 && wordSetSimilarity(normA.scenWords, normB.scenWords) < 1.0) contentIdentical = false;
-        if (normA.creatorNotesWords && normB.creatorNotesWords && normA.creatorNotes.length > 50 && normB.creatorNotes.length > 50 && wordSetSimilarity(normA.creatorNotesWords, normB.creatorNotesWords) < 1.0) contentIdentical = false;
+        if (asymmetric(normA.description, normB.description) || wordsMismatch(normA.descWords, normB.descWords, normA.description, normB.description)) contentIdentical = false;
+        if (asymmetric(normA.firstMes, normB.firstMes) || wordsMismatch(normA.firstMesWords, normB.firstMesWords, normA.firstMes, normB.firstMes)) contentIdentical = false;
+        if (asymmetric(normA.personality, normB.personality) || wordsMismatch(normA.persWords, normB.persWords, normA.personality, normB.personality)) contentIdentical = false;
+        if (asymmetric(normA.scenario, normB.scenario) || wordsMismatch(normA.scenWords, normB.scenWords, normA.scenario, normB.scenario)) contentIdentical = false;
+        if (asymmetric(normA.creatorNotes, normB.creatorNotes) || wordsMismatch(normA.creatorNotesWords, normB.creatorNotesWords, normA.creatorNotes, normB.creatorNotes)) contentIdentical = false;
+        if (asymmetric(normA.mesExample, normB.mesExample) || wordsMismatch(normA.mesExWords, normB.mesExWords, normA.mesExample, normB.mesExample)) contentIdentical = false;
+        if (asymmetric(normA.systemPrompt, normB.systemPrompt) || wordsMismatch(normA.sysPromptWords, normB.sysPromptWords, normA.systemPrompt, normB.systemPrompt)) contentIdentical = false;
+
         if (contentIdentical) {
-            const eq = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+            // Exact-mode gate: byte equality only. Any drift bumps token count.
+            const eq = (a, b) => (a || '') === (b || '');
             strictIdentical = true;
-            if (normA.description && normB.description && normA.description.length > 50 && normB.description.length > 50 && !eq(normA.description, normB.description)) strictIdentical = false;
-            if (normA.firstMes && normB.firstMes && normA.firstMes.length > 30 && normB.firstMes.length > 30 && !eq(normA.firstMes, normB.firstMes)) strictIdentical = false;
-            if (normA.personality && normB.personality && normA.personality.length > 20 && normB.personality.length > 20 && !eq(normA.personality, normB.personality)) strictIdentical = false;
-            if (normA.scenario && normB.scenario && normA.scenario.length > 20 && normB.scenario.length > 20 && !eq(normA.scenario, normB.scenario)) strictIdentical = false;
-            if (normA.creatorNotes && normB.creatorNotes && normA.creatorNotes.length > 50 && normB.creatorNotes.length > 50 && !eq(normA.creatorNotes, normB.creatorNotes)) strictIdentical = false;
+            if (!eq(normA.description, normB.description)) strictIdentical = false;
+            if (!eq(normA.firstMes, normB.firstMes)) strictIdentical = false;
+            if (!eq(normA.personality, normB.personality)) strictIdentical = false;
+            if (!eq(normA.scenario, normB.scenario)) strictIdentical = false;
+            if (!eq(normA.creatorNotes, normB.creatorNotes)) strictIdentical = false;
+            if (!eq(normA.mesExample, normB.mesExample)) strictIdentical = false;
+            if (!eq(normA.systemPrompt, normB.systemPrompt)) strictIdentical = false;
         }
     }
     
@@ -21189,7 +22754,7 @@ function calculateCharacterSimilarity(charA, charB) {
     const breakdown = {};
     const matchReasons = [];
     
-    // === NAME COMPARISON (reduced weight - some creators use taglines) ===
+    // === NAME COMPARISON ===
     const nameA = getCharField(charA, 'name') || '';
     const nameB = getCharField(charB, 'name') || '';
 
@@ -21226,7 +22791,7 @@ function calculateCharacterSimilarity(charA, charB) {
         if (bestNameReason) matchReasons.push(bestNameReason);
     }
     
-    // === CREATOR COMPARISON (fuzzy — handles cross-provider name variations) ===
+    // === CREATOR COMPARISON ===
     const creatorA = getCharField(charA, 'creator') || '';
     const creatorB = getCharField(charB, 'creator') || '';
     
@@ -21250,7 +22815,7 @@ function calculateCharacterSimilarity(charA, charB) {
         }
     }
     
-    // === CREATOR NOTES COMPARISON (weighted heavily - often unique identifier) ===
+    // === CREATOR NOTES COMPARISON ===
     const notesA = getCharField(charA, 'creator_notes') || '';
     const notesB = getCharField(charB, 'creator_notes') || '';
     
@@ -21266,7 +22831,7 @@ function calculateCharacterSimilarity(charA, charB) {
         }
     }
     
-    // === DESCRIPTION COMPARISON (increased weight) ===
+    // === DESCRIPTION COMPARISON ===
     const descA = getCharField(charA, 'description') || '';
     const descB = getCharField(charB, 'description') || '';
     
@@ -21348,18 +22913,34 @@ function calculateCharacterSimilarity(charA, charB) {
     let contentIdentical = false;
     let strictIdentical = false;
     if (breakdown.name && breakdown.creator && substantialPairs >= 1) {
+        const has = (t) => !!(t && t.length > 0);
+        const asymmetric = (a, b) => has(a) !== has(b);
+        const textMismatch = (a, b) => has(a) && has(b) && contentSimilarity(a, b) < 1.0;
+
+        const mesExA = getCharField(charA, 'mes_example') || '';
+        const mesExB = getCharField(charB, 'mes_example') || '';
+        const sysPromptA = getCharField(charA, 'system_prompt') || '';
+        const sysPromptB = getCharField(charB, 'system_prompt') || '';
+
         contentIdentical = true;
-        if (descA && descB && descA.length > 50 && descB.length > 50 && contentSimilarity(descA, descB) < 1.0) contentIdentical = false;
-        if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30 && contentSimilarity(firstMesA, firstMesB) < 1.0) contentIdentical = false;
-        if (persA && persB && persA.length > 20 && persB.length > 20 && contentSimilarity(persA, persB) < 1.0) contentIdentical = false;
-        if (notesA && notesB && notesA.length > 50 && notesB.length > 50 && contentSimilarity(notesA, notesB) < 1.0) contentIdentical = false;
+        if (asymmetric(descA, descB) || textMismatch(descA, descB)) contentIdentical = false;
+        if (asymmetric(firstMesA, firstMesB) || textMismatch(firstMesA, firstMesB)) contentIdentical = false;
+        if (asymmetric(persA, persB) || textMismatch(persA, persB)) contentIdentical = false;
+        if (asymmetric(scenA, scenB) || textMismatch(scenA, scenB)) contentIdentical = false;
+        if (asymmetric(notesA, notesB) || textMismatch(notesA, notesB)) contentIdentical = false;
+        if (asymmetric(mesExA, mesExB) || textMismatch(mesExA, mesExB)) contentIdentical = false;
+        if (asymmetric(sysPromptA, sysPromptB) || textMismatch(sysPromptA, sysPromptB)) contentIdentical = false;
+
         if (contentIdentical) {
-            const eq = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+            const eq = (a, b) => (a || '') === (b || '');
             strictIdentical = true;
-            if (descA && descB && descA.length > 50 && descB.length > 50 && !eq(descA, descB)) strictIdentical = false;
-            if (firstMesA && firstMesB && firstMesA.length > 30 && firstMesB.length > 30 && !eq(firstMesA, firstMesB)) strictIdentical = false;
-            if (persA && persB && persA.length > 20 && persB.length > 20 && !eq(persA, persB)) strictIdentical = false;
-            if (notesA && notesB && notesA.length > 50 && notesB.length > 50 && !eq(notesA, notesB)) strictIdentical = false;
+            if (!eq(descA, descB)) strictIdentical = false;
+            if (!eq(firstMesA, firstMesB)) strictIdentical = false;
+            if (!eq(persA, persB)) strictIdentical = false;
+            if (!eq(scenA, scenB)) strictIdentical = false;
+            if (!eq(notesA, notesB)) strictIdentical = false;
+            if (!eq(mesExA, mesExB)) strictIdentical = false;
+            if (!eq(sysPromptA, sysPromptB)) strictIdentical = false;
         }
     }
     
@@ -21446,7 +23027,7 @@ async function findCharacterDuplicates(forceRefresh = false) {
     
     const normalizedData = buildNormalizedCharacterData(fullDataMap);
     const hadFullData = fullDataMap !== null;
-    fullDataMap = null; // Release full data — normalizedData has extracted what it needs
+    fullDataMap = null; // Release full data - normalizedData has extracted what it needs
     
     if (statusEl) {
         statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Comparing characters (0%)...';
@@ -22113,8 +23694,8 @@ function compareCharacterDifferences(refChar, dupChar) {
     };
 }
 
-function getDuplicateScoreLabel(score, isContentIdentical = false) {
-    if (isContentIdentical) return 'Identical';
+function getDuplicateScoreLabel(score, isStrictIdentical = false) {
+    if (isStrictIdentical) return 'Identical';
     if (score >= 80) return 'Near-Identical';
     if (score >= 60) return 'Very Similar';
     if (score >= 40) return 'Similar';
@@ -22124,7 +23705,7 @@ function getDuplicateScoreLabel(score, isContentIdentical = false) {
 function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
     const name = getCharField(char, 'name') || 'Unknown';
     const creator = getCharField(char, 'creator') || 'Unknown creator';
-    const avatarPath = getCharacterAvatarUrl(char.avatar);
+    const avatarPath = getCharacterAvatarStThumbUrl(char.avatar);
     const tokens = estimateTokens(char);
     
     // Date
@@ -22304,12 +23885,13 @@ async function renderDuplicateGroups(groups) {
     groups.forEach((group, idx) => {
         const ref = group.reference;
         const refName = getCharField(ref, 'name') || 'Unknown';
-        const refAvatar = getCharacterAvatarUrl(ref.avatar);
+        const refAvatar = getCharacterAvatarStThumbUrl(ref.avatar);
         const maxScore = Math.max(...group.duplicates.map(d => d.score || 0));
         
         // Pre-compute content identity for each duplicate to inform the header
         const dupResults = [];
         let allContentIdentical = true;
+        let allStrictIdentical = group.duplicates.every(d => d.strictIdentical === true);
 
         group.duplicates.forEach((dup, dupIdx) => {
             const dupChar = dup.char;
@@ -22350,7 +23932,7 @@ async function renderDuplicateGroups(groups) {
             dupResults.push({ dup, dupIdx, dupChar, diffs, allDiffs, identicalCount, differentCount, isContentIdentical });
         });
 
-        const headerLabel = getDuplicateScoreLabel(maxScore, allContentIdentical);
+        const headerLabel = getDuplicateScoreLabel(maxScore, allStrictIdentical);
         
         html += `
             <div class="char-dup-group" id="dup-group-${idx}">
@@ -22391,7 +23973,7 @@ async function renderDuplicateGroups(groups) {
                 }
             }
 
-            const scoreLabel = getDuplicateScoreLabel(dup.score || 0, isContentIdentical);
+            const scoreLabel = getDuplicateScoreLabel(dup.score || 0, dup.strictIdentical === true);
             
             const wsNormalizedCount = allDiffs.filter(d => d.normalizedAway).length;
             
@@ -22654,8 +24236,8 @@ function toggleDupGroup(idx) {
 function saveDuplicateModalState() {
     const modal = document.getElementById('charDuplicatesModal');
     const resultsEl = document.getElementById('charDuplicatesResults');
-    
-    duplicateModalState.wasOpen = modal && !modal.classList.contains('hidden');
+
+    duplicateModalState.wasOpen = modal && modal.classList.contains('visible');
     duplicateModalState.scrollPosition = resultsEl ? resultsEl.scrollTop : 0;
     
     // Track which groups are expanded
@@ -22674,8 +24256,8 @@ function restoreDuplicateModalState() {
     
     const modal = document.getElementById('charDuplicatesModal');
     const resultsEl = document.getElementById('charDuplicatesResults');
-    
-    modal.classList.remove('hidden');
+
+    modal.classList.add('visible');
     
     // Restore expanded groups
     duplicateModalState.expandedGroups.forEach(idx => {
@@ -22702,7 +24284,7 @@ function viewCharFromDuplicates(avatar) {
     saveDuplicateModalState();
     
     // Hide duplicates modal
-    document.getElementById('charDuplicatesModal').classList.add('hidden');
+    document.getElementById('charDuplicatesModal').classList.remove('visible');
     
     // Open character modal
     openModal(char);
@@ -22745,7 +24327,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
     
     // Create enhanced delete confirmation modal
     const deleteModal = document.createElement('div');
-    deleteModal.className = 'confirm-modal';
+    deleteModal.className = 'confirm-modal cl-modal-drawer';
     deleteModal.id = 'deleteDuplicateModal';
     
     // Only allow gallery modification when:
@@ -22801,7 +24383,7 @@ async function deleteDuplicateChar(avatar, groupIdx) {
                     <div class="dup-delete-transfer-select-wrapper">
                         ${transferTargets.map((t, idx) => {
                             const tName = getCharField(t, 'name') || t.avatar;
-                            const tAvatar = getCharacterAvatarUrl(t.avatar);
+                            const tAvatar = getCharacterAvatarStThumbUrl(t.avatar);
                             return `
                                 <label class="dup-delete-transfer-radio ${idx === 0 ? 'selected' : ''}" data-avatar="${escapeHtml(t.avatar)}">
                                     <input type="radio" name="transferTarget" value="${escapeHtml(t.avatar)}" ${idx === 0 ? 'checked' : ''}>
@@ -22944,9 +24526,8 @@ async function deleteDuplicateChar(avatar, groupIdx) {
         });
     });
     
-    // Initialize button text
     updateButtonText();
-    
+
     // Radio button selection styling for transfer targets
     deleteModal.querySelectorAll('.dup-delete-transfer-radio').forEach(radio => {
         radio.addEventListener('click', () => {
@@ -23070,8 +24651,8 @@ async function openCharDuplicatesModal(useCache = true) {
     statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Scanning library for duplicates...';
     statusEl.className = 'char-duplicates-status';
     resultsEl.innerHTML = '';
-    
-    modal.classList.remove('hidden');
+
+    modal.classList.add('visible');
     
     // Run scan (async)
     await new Promise(r => setTimeout(r, 50)); // Let modal render
@@ -23166,7 +24747,7 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
             const existingChar = match.char;
             const existingName = getCharField(existingChar, 'name');
             const existingCreator = getCharField(existingChar, 'creator');
-            const existingAvatar = getCharacterAvatarUrl(existingChar.avatar);
+            const existingAvatar = getCharacterAvatarStThumbUrl(existingChar.avatar);
             const tokens = estimateTokens(existingChar);
             const provInfo = window.ProviderRegistry?.getCharacterProvider(existingChar);
             const sourceName = provInfo?.provider?.name || 'Local';
@@ -23190,9 +24771,9 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
         });
         
         matchesEl.innerHTML = matchesHtml;
-        
+
         // Show modal
-        modal.classList.remove('hidden');
+        modal.classList.add('visible');
     });
 }
 
@@ -23200,7 +24781,7 @@ async function showPreImportDuplicateWarning(newCharInfo, matches) {
  * Hide the pre-import modal and resolve with user choice
  */
 function resolvePreImportChoice(choice) {
-    document.getElementById('preImportDuplicateModal').classList.add('hidden');
+    document.getElementById('preImportDuplicateModal').classList.remove('visible');
     
     if (preImportResolveCallback) {
         preImportResolveCallback({
@@ -23250,24 +24831,22 @@ function renderCreatorNotesSimple(content, charName, container) {
     // Use formatRichText without preserveHtml to get basic markdown formatting
     const formattedNotes = formatRichText(content, charName, false);
     
-    // Strict DOMPurify sanitization - no style tags, minimal allowed elements
-    const sanitizedNotes = typeof DOMPurify !== 'undefined' 
-        ? DOMPurify.sanitize(formattedNotes, {
-            ALLOWED_TAGS: [
-                'p', 'br', 'hr', 'div', 'span',
-                'strong', 'b', 'em', 'i', 'u', 's', 'del',
-                'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
-                'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-                'table', 'tr', 'td', 'th', 'thead', 'tbody'
-            ],
-            ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'target', 'class'],
-            ADD_ATTR: ['target'],
-            FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'style', 'link'],
-            FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover', 'style'],
-            ALLOW_UNKNOWN_PROTOCOLS: false,
-            KEEP_CONTENT: true
-        })
-        : escapeHtml(formattedNotes);
+    // Strict sanitization - no style tags, minimal allowed elements
+    const sanitizedNotes = safePurify(formattedNotes, {
+        ALLOWED_TAGS: [
+            'p', 'br', 'hr', 'div', 'span',
+            'strong', 'b', 'em', 'i', 'u', 's', 'del',
+            'a', 'img', 'ul', 'ol', 'li', 'blockquote', 'pre', 'code',
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'table', 'tr', 'td', 'th', 'thead', 'tbody'
+        ],
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'target', 'class'],
+        ADD_ATTR: ['target'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'select', 'textarea', 'style', 'link'],
+        FORBID_ATTR: ['onerror', 'onclick', 'onload', 'onmouseover', 'style'],
+        ALLOW_UNKNOWN_PROTOCOLS: false,
+        KEEP_CONTENT: true
+    });
     
     container.innerHTML = sanitizedNotes;
 }
@@ -23318,11 +24897,7 @@ function sanitizeCreatorNotesCSS(content) {
  * @returns {string} - Sanitized HTML
  */
 function sanitizeCreatorNotesHTML(content) {
-    if (typeof DOMPurify === 'undefined') {
-        return escapeHtml(content);
-    }
-    
-    return DOMPurify.sanitize(content, {
+    return safePurify(content, {
         ALLOWED_TAGS: [
             'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr', 'div', 'span',
             'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 'ins', 'mark',
@@ -23377,7 +24952,7 @@ function getCreatorNotesBaseStyles() {
             }
             ::-webkit-scrollbar { width: 8px; height: 8px; }
             ::-webkit-scrollbar-track { background: transparent; }
-            ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+            ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: var(--radius-sm); }
             ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); }
             ::-webkit-scrollbar-corner { background: transparent; }
             html {
@@ -23407,7 +24982,7 @@ function getCreatorNotesBaseStyles() {
                 height: auto !important;
                 display: block;
                 margin: 10px auto;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
             }
             
             a { color: #4a9eff; text-decoration: none; }
@@ -23427,14 +25002,14 @@ function getCreatorNotesBaseStyles() {
                 margin: 10px 0;
                 padding: 10px 15px;
                 border-left: 3px solid #4a9eff;
-                background: rgba(74, 158, 255, 0.1);
+                background: rgba(var(--accent-rgb), 0.1);
                 border-radius: 0 8px 8px 0;
             }
             
             pre {
                 background: rgba(0,0,0,0.3);
                 padding: 10px;
-                border-radius: 6px;
+                border-radius: var(--radius-md);
                 overflow-x: auto;
                 white-space: pre-wrap;
                 word-wrap: break-word;
@@ -23443,7 +25018,7 @@ function getCreatorNotesBaseStyles() {
             code {
                 background: rgba(0,0,0,0.3);
                 padding: 2px 6px;
-                border-radius: 4px;
+                border-radius: var(--radius-sm);
                 font-family: 'Consolas', 'Monaco', monospace;
             }
             
@@ -23452,7 +25027,7 @@ function getCreatorNotesBaseStyles() {
                 border-collapse: collapse;
                 margin: 10px 0;
                 background: rgba(0,0,0,0.2);
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 overflow: hidden;
             }
             td, th {
@@ -23460,7 +25035,7 @@ function getCreatorNotesBaseStyles() {
                 border: 1px solid rgba(255,255,255,0.1);
             }
             th {
-                background: rgba(74, 158, 255, 0.2);
+                background: rgba(var(--accent-rgb), 0.2);
                 color: #4a9eff;
             }
             
@@ -23476,7 +25051,7 @@ function getCreatorNotesBaseStyles() {
             .embedded-image {
                 max-width: 100% !important;
                 height: auto !important;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 margin: 10px auto;
                 display: block;
             }
@@ -23490,7 +25065,7 @@ function getCreatorNotesBaseStyles() {
                 height: 40px;
                 margin: 10px 0;
                 display: block;
-                border-radius: 8px;
+                border-radius: var(--radius-lg);
                 background: rgba(0, 0, 0, 0.3);
             }
             .audio-player::-webkit-media-controls-panel {
@@ -23565,7 +25140,7 @@ function createCreatorNotesIframe(srcdoc, initialHeight) {
         max-height: none;
         border: none;
         background: transparent;
-        border-radius: 8px;
+        border-radius: var(--radius-lg);
         display: block;
     `;
     iframe.srcdoc = srcdoc;
@@ -23652,7 +25227,7 @@ function setupCreatorNotesResize(iframe) {
  * @param {HTMLElement} container - Container element to render into
  */
 /**
- * Clean up an existing creator notes iframe — disconnect observer, blank src, remove DOM
+ * Clean up an existing creator notes iframe - disconnect observer, blank src, remove DOM
  * @param {HTMLElement} container - The container holding the iframe
  */
 function cleanupCreatorNotesContainer(container) {
@@ -23881,11 +25456,9 @@ function initCreatorNotesHandlers() {
         expandBtn._creatorNotesHandler = async (e) => {
             e.preventDefault();
             e.stopPropagation(); // Prevent toggling the details
-            
-            // Get the current creator notes content from the stored data
+
             const charName = document.getElementById('modalCharName')?.textContent || 'Character';
-            
-            // We need to get the raw content - check if it's stored
+
             if (window.currentCreatorNotesContent) {
                 // Build localization map if enabled for this character
                 let urlMap = null;
@@ -23925,7 +25498,7 @@ function openContentFullscreen(content, title, icon, charName, urlMap) {
     
     // Format and sanitize content
     const formatted = formatRichText(localizedContent, charName);
-    const sanitized = DOMPurify.sanitize(formatted, {
+    const sanitized = safePurify(formatted, {
         ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 
                        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
                        'ul', 'ol', 'li', 'a', 'img', 'span', 'div', 'hr', 'table', 
@@ -24017,7 +25590,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
             content = replaceMediaUrlsInText(content, urlMap);
         }
         const formatted = formatRichText(content, charName);
-        return DOMPurify.sanitize(formatted, {
+        return safePurify(formatted, {
             ALLOWED_TAGS: ['p', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 
                            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
                            'ul', 'ol', 'li', 'a', 'img', 'span', 'div', 'hr', 'table', 
@@ -24032,7 +25605,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
         `<button type="button" class="greeting-nav-btn${i === 0 ? ' active' : ''}" data-index="${i}" title="Greeting #${i + 1}">${i + 1}</button>`
     ).join('');
     
-    // Build greeting cards — only the first card has content, others render lazily
+    // Build greeting cards - only the first card has content, others render lazily
     const cardsHtml = greetings.map((g, i) => `
         <div class="greeting-card" data-greeting-index="${i}" style="${i !== 0 ? 'display: none;' : ''}">
             <div class="greeting-header">
@@ -24047,7 +25620,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
         <div id="altGreetingsFullscreenModal" class="modal-overlay">
             <div class="modal-glass content-fullscreen-modal" id="altGreetingsFullscreenInner" data-size="normal">
                 <div class="modal-header">
-                    <h2><i class="fa-solid fa-comments"></i> Alternate Greetings <span style="color: #888; font-weight: 400; font-size: 0.9rem;">(${greetings.length})</span></h2>
+                    <h2><i class="fa-solid fa-comments"></i> Alternate Greetings <span style="color: var(--text-faint); font-weight: 400; font-size: 0.9rem;">(${greetings.length})</span></h2>
                     <div class="creator-notes-display-controls">
                         <div class="display-control-btns" id="altGreetingsSizeControlBtns">
                             <button type="button" class="display-control-btn" data-size="compact" title="Compact">
@@ -24095,7 +25668,7 @@ function openAltGreetingsFullscreen(greetings, charName, urlMap) {
             greetingNav.querySelectorAll('.greeting-nav-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             
-            // Show selected greeting, hide others — lazy-render on first view
+            // Show selected greeting, hide others - lazy-render on first view
             modal.querySelectorAll('.greeting-card').forEach((card, i) => {
                 if (i === index) {
                     card.style.display = '';
@@ -24285,7 +25858,7 @@ const CUSTOMIZER_LS_KEY = 'cl-custom-tokens';
 let customizerInjected = false;
 
 function applyTokenValue(name, value, unit) {
-    document.documentElement.style.setProperty(name, value + unit);
+    setRuntimeToken(name, value + unit);
 }
 
 function loadCustomTokens() {
@@ -24294,15 +25867,45 @@ function loadCustomTokens() {
         if (!stored) return;
         const vals = JSON.parse(stored);
         for (const [name, value] of Object.entries(vals)) {
-            document.documentElement.style.setProperty(name, value);
+            setRuntimeToken(name, value);
         }
     } catch (e) { /* ignore malformed data */ }
+}
+
+const CUSTOM_CSS_MAX_BYTES = 65536;
+
+function sanitizeCustomCSS(raw) {
+    let s = typeof raw === 'string' ? raw : '';
+    s = s.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, '');
+    s = s.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '');
+    // Escape orphan </style so a malformed paste can't break out of the wrapper.
+    s = s.replace(/<\/style/gi, '<\\/style');
+    return s.slice(0, CUSTOM_CSS_MAX_BYTES);
+}
+
+function applyCustomCSS() {
+    const tag = document.getElementById('cl-custom-css');
+    if (!tag) return;
+    tag.textContent = sanitizeCustomCSS(getSetting('customCSS') || '');
+    updateAccentOverrideWarning();
+}
+
+// True if any --accent* declaration is in the active customCSS blob.
+function isAccentOverriddenByCustomCSS() {
+    const css = getSetting('customCSS') || '';
+    return /--accent[\w-]*\s*:/i.test(css);
+}
+
+function updateAccentOverrideWarning() {
+    const warning = document.getElementById('accentOverrideWarning');
+    if (!warning) return;
+    warning.classList.toggle('hidden', !isAccentOverriddenByCustomCSS());
 }
 
 function saveCustomTokens() {
     const vals = {};
     for (const def of TOKEN_DEFS) {
-        const current = document.documentElement.style.getPropertyValue(def.name).trim();
+        const current = getRuntimeToken(def.name);
         if (current) vals[def.name] = current;
     }
     localStorage.setItem(CUSTOMIZER_LS_KEY, JSON.stringify(vals));
@@ -24312,15 +25915,15 @@ function saveCustomTokens() {
 function resetCustomTokens() {
     localStorage.removeItem(CUSTOMIZER_LS_KEY);
     for (const def of TOKEN_DEFS) {
-        document.documentElement.style.removeProperty(def.name);
+        removeRuntimeToken(def.name);
     }
     syncCustomizerSliders();
     showToast('Tokens reset to defaults', 'info', 2000);
 }
 
 function getTokenCurrentValue(def) {
-    const inline = document.documentElement.style.getPropertyValue(def.name).trim();
-    if (inline) return parseFloat(inline);
+    const override = getRuntimeToken(def.name);
+    if (override) return parseFloat(override);
     const computed = getComputedStyle(document.documentElement).getPropertyValue(def.name).trim();
     if (computed) return parseFloat(computed);
     return def.default;
@@ -24462,7 +26065,7 @@ function initThemeCustomizer() {
 }
 
 // Overlay registrations for library.js modals
-window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => closeModal() });
+window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => maybeCloseModal() });
 window.registerOverlay?.({ id: 'disableGalleryFoldersModal', tier: 6, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'greetingsExpandModal', tier: 5, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'lorebookExpandModal', tier: 5, static: false, close: (el) => el.remove() });
@@ -24471,6 +26074,30 @@ window.registerOverlay?.({ id: 'chubExpandModal', tier: 5, static: false, close:
 window.registerOverlay?.({ id: 'creatorNotesFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'contentFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'altGreetingsFullscreenModal', tier: 3, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'importSummaryModal', tier: 4, close: () => handleImportSummaryCloseRequest() });
+
+// Tier 7 so they close before charModal (tier 8) on back/Escape.
+const _hideClModalVisible = id => () => document.getElementById(id)?.classList.remove('visible');
+window.registerOverlay?.({ id: 'gallerySettingsModal',      tier: 7, close: _hideClModalVisible('gallerySettingsModal') });
+window.registerOverlay?.({ id: 'galleryInfoModal',          tier: 7, close: _hideClModalVisible('galleryInfoModal') });
+window.registerOverlay?.({ id: 'importModal',               tier: 7, close: _hideClModalVisible('importModal') });
+window.registerOverlay?.({ id: 'localizeModal',             tier: 7, close: _hideClModalVisible('localizeModal') });
+window.registerOverlay?.({ id: 'bulkLocalizeModal',         tier: 7, close: _hideClModalVisible('bulkLocalizeModal') });
+window.registerOverlay?.({ id: 'bulkLocalizeSummaryModal',  tier: 7, close: _hideClModalVisible('bulkLocalizeSummaryModal') });
+window.registerOverlay?.({ id: 'bulkAutoLinkModal',         tier: 7, close: _hideClModalVisible('bulkAutoLinkModal') });
+window.registerOverlay?.({ id: 'charDuplicatesModal',       tier: 7, close: _hideClModalVisible('charDuplicatesModal') });
+window.registerOverlay?.({ id: 'preImportDuplicateModal',   tier: 7, close: _hideClModalVisible('preImportDuplicateModal') });
+window.registerOverlay?.({ id: 'providerLinkModal',         tier: 7, close: _hideClModalVisible('providerLinkModal') });
+
+// Static .confirm-modal in HTML (uses .hidden toggle, not .visible).
+window.registerOverlay?.({ id: 'confirmSaveModal', tier: 7, close: (el) => el?.classList.add('hidden') });
+
+// Dynamic confirm-modals (created/removed each invocation; registry entry persists).
+window.registerOverlay?.({ id: 'deleteConfirmModal',  tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'deleteDuplicateModal', tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'legacyFolderModal',    tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'folderMappingModal',   tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'orphanedFoldersModal', tier: 7, static: false, close: (el) => el?.remove() });
 
 function openThemeCustomizer() {
     initThemeCustomizer();
@@ -24482,6 +26109,25 @@ function closeThemeCustomizer() {
     const el = document.getElementById('themeCustomizerOverlay');
     if (el) el.classList.add('hidden');
 }
+
+// Emergency console escape hatches when custom CSS has broken the UI.
+window.clDisableCSS = function () {
+    const tag = document.getElementById('cl-custom-css');
+    if (tag) tag.textContent = '';
+    console.info('[CL] Custom CSS disabled for this session. Reload to revert, or run clResetCSS() to clear it permanently.');
+    return 'Custom CSS disabled (session-only)';
+};
+window.clResetCSS = function () {
+    try {
+        setSetting('customCSS', '');
+        applyCustomCSS();
+        console.info('[CL] Custom CSS cleared. Snippets in the editor are preserved; re-Apply them after fixing.');
+        return 'Custom CSS cleared permanently';
+    } catch (e) {
+        console.error('[CL] clResetCSS failed:', e);
+        return 'Failed, see error above';
+    }
+};
 
 // ========================================
 // CORE API BRIDGE - DO NOT USE DIRECTLY FROM MODULES
@@ -24513,7 +26159,7 @@ function closeThemeCustomizer() {
 // making future refactoring possible without breaking all modules.
 // ========================================
 
-// Global Escape handler — walks the overlay registry (populated via window.registerOverlay)
+// Global Escape handler - walks the overlay registry (populated via window.registerOverlay)
 // so overlays don't need their own individual keydown listeners for Escape.
 document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
@@ -24533,7 +26179,11 @@ document.addEventListener('keydown', (e) => {
         if (reg.escape === false) continue;
         const el = document.getElementById(reg.id);
         if (!el) continue;
-        const visible = reg.visible ? reg.visible(el) : !el.classList.contains('hidden');
+        const visible = reg.visible
+            ? reg.visible(el)
+            : el.classList.contains('cl-modal')
+                ? el.classList.contains('visible')
+                : !el.classList.contains('hidden');
         if (visible) {
             e.stopPropagation();
             reg.close(el);
@@ -24545,7 +26195,9 @@ document.addEventListener('keydown', (e) => {
 // API & Utilities
 window.apiRequest = apiRequest;
 window.showToast = showToast;
+window.showConfirm = showConfirm;
 window.escapeHtml = escapeHtml;
+window.safePurify = safePurify;
 window.isExtensionsRecoveryInProgress = function() { return !!window.extensionsRecoveryInProgress; };
 window.getCSRFToken = getCSRFToken;
 window.sanitizeFolderName = sanitizeFolderName;
@@ -24562,6 +26214,8 @@ window.getActiveChar = function() { return activeChar; };
 window.setActiveChar = function(c) { activeChar = c; };
 window.fetchCharacters = fetchCharacters;
 window.fetchAndAddCharacter = fetchAndAddCharacter;
+window.notifySTCharacterAdded = notifySTCharacterAdded;
+window.notifySTCharacterEdited = notifySTCharacterEdited;
 window.removeCharacterFromList = removeCharacterFromList;
 window.hydrateCharacter = hydrateCharacter;
 window.getTags = getTags;
@@ -24581,6 +26235,8 @@ window.setGallerySyncAuditDone = function(v) { gallerySyncAuditDone = v; };
 window.openModal = openModal;
 window.openCharModalElevated = openCharModalElevated;
 window.closeModal = closeModal;
+window.maybeCloseModal = maybeCloseModal;
+window.navigateModal = navigateModal;
 window.openProviderLinkModal = openProviderLinkModal;
 window.hideModal = hideModal;
 window.checkCharacterForDuplicates = checkCharacterForDuplicates;
@@ -24596,7 +26252,13 @@ window.onViewExit = onViewExit;
 
 // DOM / Rendering helpers
 window.renderLoadingState = renderLoadingState;
+window.renderSkeletonGrid = renderSkeletonGrid;
+window.renderSkeletonList = renderSkeletonList;
+window.renderEmptyState = renderEmptyState;
+window.updateMobileFilterIndicator = updateMobileFilterIndicator;
+window.getActiveFilterState = getActiveFilterState;
 window.getCharacterAvatarUrl = getCharacterAvatarUrl;
+window.getCharacterAvatarStThumbUrl = getCharacterAvatarStThumbUrl;
 window.getListingNameFromExtensions = getListingNameFromExtensions;
 window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;
@@ -24605,6 +26267,7 @@ window.registerGalleryFolderOverride = registerGalleryFolderOverride;
 window.debugLog = debugLog;
 window.performSearch = performSearch;
 window.toggleFavoritesFilter = toggleFavoritesFilter;
+window.toggleCharacterFavorite = toggleCharacterFavorite;
 window.toggleAdvFilterPanel = toggleAdvFilterPanel;
 window.closeAdvFilterPanel = closeAdvFilterPanel;
 window.evaluateChatAdvancedFilters = evaluateChatAdvancedFilters;
@@ -24612,6 +26275,7 @@ window.resetChatFilterCaches = resetChatFilterCaches;
 window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
 window.setPlaylistFilter = setPlaylistFilter;
 window.clearPlaylistFilter = clearPlaylistFilter;
+window.refreshPlaylistFilterIfActive = refreshPlaylistFilterIfActive;
 window.populatePlaylistDropdown = populatePlaylistDropdown;
 window.renderSidebarPlaylists = renderSidebarPlaylists;
 window.refreshPlaylistBadges = refreshPlaylistBadges;
@@ -24624,7 +26288,10 @@ window.isMultiSelectEnabled = isMultiSelectEnabled;
 // Host window / ST context access
 window.getHostWindow = getHostWindow;
 window.getSTContext = getSTContext;
+window.resolveProxyForProfile = resolveProxyForProfile;
+window.flattenContentBlocks = flattenContentBlocks;
 window.isEmbedded = isEmbedded;
+window.embeddedShowTopBar = embeddedShowTopBar;
 window.closeEmbeddedPanel = closeEmbeddedPanel;
 
 // Settings
@@ -24634,15 +26301,18 @@ window.setSettings = setSettings;
 window.getProviderExcludeTags = getProviderExcludeTags;
 window.setProviderExcludeTags = setProviderExcludeTags;
 window.openThemeCustomizer = openThemeCustomizer;
+window.applyCustomCSS = applyCustomCSS;
+window.CUSTOM_CSS_MAX_BYTES = CUSTOM_CSS_MAX_BYTES;
 
-// Import pipeline utilities — PNG manipulation, media download, etc.
+// Import pipeline utilities - PNG manipulation, media download, etc.
 window.extractCharacterDataFromPng = extractCharacterDataFromPng;
 window.convertImageToPng = convertImageToPng;
 window.embedCharacterDataInPng = embedCharacterDataInPng;
 window.findCharacterMediaUrls = findCharacterMediaUrls;
 
-// Generic import pipeline utilities — used by provider importCharacter() implementations
+// Generic import pipeline utilities - used by provider importCharacter() implementations
 window.downloadMediaToMemory = downloadMediaToMemory;
+window.isUrlSafeForDownload = isUrlSafeForDownload;
 window.calculateHash = calculateHash;
 window.getExistingFileHashes = getExistingFileHashes;
 window.getExistingFileIndex = getExistingFileIndex;
@@ -24652,13 +26322,13 @@ window.downloadCharacterMedia = downloadCharacterMedia;
 window.arrayBufferToBase64 = arrayBufferToBase64;
 window.ENDPOINTS = ENDPOINTS;
 
-// Creator Notes — shared between local modal and browse preview
+// Creator Notes - shared between local modal and browse preview
 window.renderCreatorNotesSecure = renderCreatorNotesSecure;
 window.cleanupCreatorNotesContainer = cleanupCreatorNotesContainer;
 window.initCreatorNotesHandlers = initCreatorNotesHandlers;
 window.initContentExpandHandlers = initContentExpandHandlers;
 
-// Provider System — hooks set by provider modules at load time
+// Provider System - hooks set by provider modules at load time
 // (openChubTokenModal, etc. are set by provider modules)
 window.isUpdateLocked = isUpdateLocked;
 window.setUpdateLocked = setUpdateLocked;
@@ -24750,7 +26420,7 @@ window.listWorldInfoFiles = async function() {
  * Matched entries get their V2-spec fields updated; new entries are added;
  * user-only entries are preserved untouched.
  *
- * /worlds entries with no Chub match are left alone — they may be user-created
+ * /worlds entries with no Chub match are left alone - they may be user-created
  * or creator-removed, but the safe choice for both cases is to keep them.
  * Only V2-spec fields (keys, content, enabled, etc.) are written on matched
  * entries; ST-internal fields (probability, depth, group, vectorized…) are
@@ -24919,7 +26589,7 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
     }
     
     try {
-        // Must hydrate before building the merge payload — slim chars lack heavy fields
+        // Must hydrate before building the merge payload - slim chars lack heavy fields
         // and sending undefined would erase existing content on the server.
         await hydrateCharacter(char);
         
@@ -25000,7 +26670,9 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
             if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
                 await handleGalleryFolderRename(char, oldName, newName, galleryId);
             }
-            
+
+            notifySTCharacterEdited(avatar);
+
             debugLog('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
             return true;
         } else {

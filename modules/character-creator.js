@@ -356,44 +356,12 @@ function isDirty() {
 }
 
 function showUnsavedConfirm() {
-    return new Promise(resolve => {
-        let overlay = document.getElementById('creatorDiscardConfirmOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'creatorDiscardConfirmOverlay';
-            overlay.className = 'creator-saveas-diff-overlay';
-            overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
-                <div class="confirm-modal-header">
-                    <h3>Discard unsaved character?</h3>
-                </div>
-                <div class="confirm-modal-body" style="padding:12px 16px">
-                    <p style="margin:0;color:var(--text-secondary)">Your character draft has unsaved changes. Discard them and close?</p>
-                </div>
-                <div class="confirm-modal-footer">
-                    <button type="button" class="action-btn secondary" id="creatorDiscardKeepBtn">Keep Editing</button>
-                    <button type="button" class="action-btn danger" id="creatorDiscardConfirmBtn">Discard</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            document.getElementById('creatorDiscardKeepBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(false);
-            });
-            document.getElementById('creatorDiscardConfirmBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(true);
-            });
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) {
-                    overlay.classList.add('hidden');
-                    overlay._resolve?.(false);
-                }
-            });
-        }
-        overlay._resolve = resolve;
-        overlay.classList.remove('hidden');
-        document.getElementById('creatorDiscardKeepBtn')?.focus();
+    return CoreAPI.showConfirm({
+        title: 'Discard unsaved character?',
+        message: 'Your character draft has unsaved changes. Discard them and close?',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
     });
 }
 
@@ -1017,6 +985,12 @@ function updateProfileStatus() {
 // LLM API CALLS
 // ========================================
 
+function isAuthError(message) {
+    const m = String(message || '').toLowerCase();
+    return m.includes('unauthorized') || m.includes('401')
+        || m.includes('invalid api key') || m.includes('authentication');
+}
+
 async function callLLM(messages, signal) {
     const profile = getSelectedProfile();
     const source = profile?.api || activeSource;
@@ -1039,16 +1013,30 @@ async function callLLM(messages, signal) {
     if (model) body.model = model;
 
     if (profile) {
+        if (profile['secret-id']) body.secret_id = profile['secret-id'];
         if (profile['api-url']) {
             body.custom_url = profile['api-url'];
             body.vertexai_region = profile['api-url'];
             body.zai_endpoint = profile['api-url'];
+            body.siliconflow_endpoint = profile['api-url'];
+            body.minimax_endpoint = profile['api-url'];
         }
-    } else if (activePreset) {
-        if (activePreset.custom_url) body.custom_url = activePreset.custom_url;
-        if (activePreset.reverse_proxy) body.reverse_proxy = activePreset.reverse_proxy;
-        if (activePreset.proxy_password) body.proxy_password = activePreset.proxy_password;
+        if (profile['prompt-post-processing']) body.custom_prompt_post_processing = profile['prompt-post-processing'];
+    } else if (activePreset && activePreset.custom_url) {
+        body.custom_url = activePreset.custom_url;
     }
+
+    const proxy = await CoreAPI.resolveProxyForProfile(profile);
+    if (proxy?.url) body.reverse_proxy = proxy.url;
+    if (proxy?.password) body.proxy_password = proxy.password;
+
+    CoreAPI.debugLog('[CharCreator] Sending request:', {
+        source: body.chat_completion_source, model: body.model,
+        customUrl: body.custom_url || null,
+        reverseProxy: body.reverse_proxy || null,
+        hasProxyPassword: !!body.proxy_password,
+        hasSecretId: !!body.secret_id, profileName: profile?.name,
+    });
 
     for (const endpoint of GENERATE_ENDPOINTS) {
         let response;
@@ -1058,21 +1046,30 @@ async function callLLM(messages, signal) {
             if (err.name === 'AbortError') throw new Error('Generation cancelled.');
             continue;
         }
-
         if (response.status === 404) continue;
-
         if (!response.ok) {
             const errText = await response.text().catch(() => '');
             throw new Error(`API returned ${response.status}: ${errText.slice(0, 300)}`);
         }
 
         const responseText = await response.text();
+        let data;
         try {
-            const data = JSON.parse(responseText);
-            return extractContent(data);
+            data = JSON.parse(responseText);
         } catch {
             return responseText;
         }
+
+        if (isAuthError(data?.error?.message)) {
+            throw new Error(
+                'Authentication failed. Open SillyTavern → Connection Manager and click the "Update" ' +
+                'button on the selected connection profile to refresh its credentials, then retry.'
+            );
+        }
+        if (data?.error) {
+            console.warn('[CharCreator] ST returned error envelope:', data);
+        }
+        return extractContent(data);
     }
     throw new Error(
         'Could not reach SillyTavern\'s Chat Completion API. ' +
@@ -1281,16 +1278,16 @@ function promptForName(label) {
         if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = 'creatorNamePromptOverlay';
-            overlay.className = 'creator-saveas-diff-overlay';
+            overlay.className = 'cl-modal creator-saveas-diff-overlay';
             overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:calc(360px * var(--modal-scale, 1))">
-                <div class="confirm-modal-header">
+            <div class="cl-modal-content" style="max-width:calc(360px * var(--modal-scale, 1))">
+                <div class="cl-modal-header">
                     <h3 id="creatorNamePromptLabel"></h3>
                 </div>
-                <div class="confirm-modal-body" style="padding:12px 16px">
+                <div class="cl-modal-body" style="padding:12px 16px">
                     <input id="creatorNamePromptInput" class="glass-input" type="text" style="width:100%" />
                 </div>
-                <div class="confirm-modal-footer">
+                <div class="cl-modal-footer">
                     <button type="button" class="action-btn secondary" id="creatorNamePromptCancel">Cancel</button>
                     <button type="button" class="action-btn primary" id="creatorNamePromptOk">Save</button>
                 </div>
@@ -1298,14 +1295,14 @@ function promptForName(label) {
             document.body.appendChild(overlay);
             const submit = () => {
                 const val = document.getElementById('creatorNamePromptInput').value.trim();
-                overlay.classList.add('hidden');
+                overlay.classList.remove('visible');
                 const res = _namePromptResolve;
                 _namePromptResolve = null;
                 res?.(val || null);
             };
             document.getElementById('creatorNamePromptOk').addEventListener('click', submit);
             document.getElementById('creatorNamePromptCancel').addEventListener('click', () => {
-                overlay.classList.add('hidden');
+                overlay.classList.remove('visible');
                 const res = _namePromptResolve;
                 _namePromptResolve = null;
                 res?.(null);
@@ -1317,7 +1314,7 @@ function promptForName(label) {
         document.getElementById('creatorNamePromptLabel').textContent = label;
         const input = document.getElementById('creatorNamePromptInput');
         input.value = '';
-        overlay.classList.remove('hidden');
+        overlay.classList.add('visible');
         input.focus();
     });
 }
@@ -1480,7 +1477,7 @@ function renderImportList(query, isSaveAs = false) {
     list.innerHTML = display.map(c => {
         const name = CoreAPI.escapeHtml(c.name || 'Unknown');
         const creator = c.data?.creator ? CoreAPI.escapeHtml(c.data.creator) : '';
-        const avatarPath = c.avatar ? `/characters/${encodeURIComponent(c.avatar)}` : '';
+        const avatarPath = c.avatar ? CoreAPI.getCharacterAvatarStThumbUrl(c.avatar) : '';
         return `
             <div class="creator-import-item" data-avatar="${CoreAPI.escapeHtml(c.avatar || '')}">
                 <div class="creator-import-avatar" ${avatarPath ? `style="background-image: url('${avatarPath}')"` : ''}></div>
@@ -1681,7 +1678,7 @@ function openNotesPreview() {
 
     const iframe = container.querySelector('iframe');
     if (iframe) {
-        // Kill the auto-resize machinery — this container has a fixed flex height.
+        // Kill the auto-resize machinery - this container has a fixed flex height.
         // setupCreatorNotesResize sets iframe.onload which would re-impose a pixel
         // height, overriding height:100% and causing the iframe to visually cut off.
         iframe._resizeObserver?.disconnect();
@@ -1931,7 +1928,7 @@ function autoResizeStudioInput() {
     const input = document.getElementById('studioInput');
     if (!input) return;
     input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+    input.style.height = Math.min(input.scrollHeight, 90) + 'px';
 }
 
 function openStudio(fieldKey) {
@@ -2168,44 +2165,12 @@ function studioHasUnsavedWork() {
 }
 
 function showStudioDiscardConfirm() {
-    return new Promise(resolve => {
-        let overlay = document.getElementById('studioDiscardConfirmOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'studioDiscardConfirmOverlay';
-            overlay.className = 'creator-saveas-diff-overlay';
-            overlay.innerHTML = `
-            <div class="confirm-modal-content" style="max-width:calc(380px * var(--modal-scale, 1))">
-                <div class="confirm-modal-header">
-                    <h3>Discard AI Studio progress?</h3>
-                </div>
-                <div class="confirm-modal-body" style="padding:12px 16px">
-                    <p style="margin:0;color:var(--text-secondary)">You have unsaved work in the AI Studio. Discard and close?</p>
-                </div>
-                <div class="confirm-modal-footer">
-                    <button type="button" class="action-btn secondary" id="studioDiscardKeepBtn">Keep Editing</button>
-                    <button type="button" class="action-btn danger" id="studioDiscardConfirmBtn">Discard</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            document.getElementById('studioDiscardKeepBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(false);
-            });
-            document.getElementById('studioDiscardConfirmBtn').addEventListener('click', () => {
-                overlay.classList.add('hidden');
-                overlay._resolve?.(true);
-            });
-            overlay.addEventListener('click', e => {
-                if (e.target === overlay) {
-                    overlay.classList.add('hidden');
-                    overlay._resolve?.(false);
-                }
-            });
-        }
-        overlay._resolve = resolve;
-        overlay.classList.remove('hidden');
-        document.getElementById('studioDiscardKeepBtn')?.focus();
+    return CoreAPI.showConfirm({
+        title: 'Discard AI Studio progress?',
+        message: 'You have unsaved work in the AI Studio. Discard and close?',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep Editing',
+        danger: true,
     });
 }
 
@@ -2389,11 +2354,18 @@ function renderConversationEntry(entry) {
 
     const div = document.createElement('div');
     div.className = `ai-studio-msg ai-studio-msg-${entry.role}`;
+    entry._el = div;
 
     if (entry.role === 'user') {
         div.innerHTML = `
             <div class="ai-studio-msg-icon"><i class="fa-solid fa-user"></i></div>
-            <div class="ai-studio-msg-body">${CoreAPI.escapeHtml(entry.text)}</div>`;
+            <div class="ai-studio-msg-body">${CoreAPI.escapeHtml(entry.text)}</div>
+            <button type="button" class="ai-studio-retry-btn hidden" title="Resend this message"><i class="fa-solid fa-rotate-right"></i> Retry</button>`;
+        div.querySelector('.ai-studio-retry-btn').addEventListener('click', () => retryStudioMessage(entry));
+        if (entry.failed) {
+            div.classList.add('failed');
+            div.querySelector('.ai-studio-retry-btn').classList.remove('hidden');
+        }
     } else if (entry.role === 'assistant') {
         div.innerHTML = `
             <div class="ai-studio-msg-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
@@ -2411,6 +2383,32 @@ function renderConversationEntry(entry) {
 
     conv.appendChild(div);
     conv.scrollTop = conv.scrollHeight;
+}
+
+function markLastUserEntryFailed() {
+    for (let i = studioConversation.length - 1; i >= 0; i--) {
+        const entry = studioConversation[i];
+        if (entry.role !== 'user') continue;
+        entry.failed = true;
+        if (entry._el) {
+            entry._el.classList.add('failed');
+            entry._el.querySelector('.ai-studio-retry-btn')?.classList.remove('hidden');
+        }
+        return;
+    }
+}
+
+function retryStudioMessage(entry) {
+    if (studioGenerating) return;
+    const input = document.getElementById('studioInput');
+    if (!input) return;
+    input.value = entry.text;
+    autoResizeStudioInput();
+    entry.failed = false;
+    entry._el?.classList.remove('failed');
+    entry._el?.querySelector('.ai-studio-retry-btn')?.classList.add('hidden');
+    if (studioBrainstormMode) studioBrainstormGenerate();
+    else studioGenerate();
 }
 
 async function studioBrainstormGenerate() {
@@ -2463,8 +2461,9 @@ async function studioBrainstormGenerate() {
         const content = result?.trim();
 
         if (!content) {
-            addConversationEntry('error', 'AI returned an empty response. Try rephrasing.');
             studioBrainstormMessages.pop();
+            markLastUserEntryFailed();
+            addConversationEntry('error', 'AI returned an empty response. Try rephrasing.');
             return;
         }
 
@@ -2472,6 +2471,7 @@ async function studioBrainstormGenerate() {
         addConversationEntry('assistant', content);
     } catch (err) {
         studioBrainstormMessages.pop();
+        markLastUserEntryFailed();
         if (err.message === 'Generation cancelled.') {
             addConversationEntry('error', 'Generation stopped.');
         } else {
@@ -2578,8 +2578,9 @@ async function studioGenerate() {
         const content = result?.trim();
 
         if (!content) {
-            addConversationEntry('error', 'AI returned an empty response. Try rephrasing your instruction.');
             studioLlmMessages.pop();
+            markLastUserEntryFailed();
+            addConversationEntry('error', 'AI returned an empty response. Try rephrasing your instruction.');
             return;
         }
 
@@ -2605,6 +2606,7 @@ async function studioGenerate() {
         }
     } catch (err) {
         studioLlmMessages.pop();
+        markLastUserEntryFailed();
         if (err.message === 'Generation cancelled.') {
             addConversationEntry('error', 'Generation stopped.');
         } else {
@@ -2753,10 +2755,30 @@ function studioStopGeneration() {
 }
 
 function extractContent(data) {
-    if (typeof data === 'string') return data.trim();
-    if (data?.choices?.[0]?.message?.content) return data.choices[0].message.content.trim();
-    if (data?.content) return data.content.trim();
-    return JSON.stringify(data);
+    if (data?.error) {
+        const msg = typeof data.error === 'string' ? data.error : (data.error.message || JSON.stringify(data.error));
+        throw new Error(`API error: ${msg.slice(0, 300)}`);
+    }
+
+    const msg = data?.choices?.[0]?.message;
+    if (msg && typeof msg.content === 'string') return msg.content;
+    if (msg && 'content' in msg && msg.content == null) return '';
+    const msgBlocks = CoreAPI.flattenContentBlocks(msg?.content);
+    if (msgBlocks) return msgBlocks;
+    if (typeof data?.choices?.[0]?.text === 'string') return data.choices[0].text;
+    const delta = data?.choices?.[0]?.delta;
+    if (delta && typeof delta.content === 'string') return delta.content;
+    if (typeof data?.message?.content === 'string') return data.message.content;
+    if (typeof data?.content === 'string') return data.content;
+    const rootBlocks = CoreAPI.flattenContentBlocks(data?.content);
+    if (rootBlocks) return rootBlocks;
+    if (typeof data?.response === 'string') return data.response;
+    if (typeof data?.output?.text === 'string') return data.output.text;
+    if (typeof data?.result === 'string') return data.result;
+    if (typeof data === 'string') return data;
+
+    CoreAPI.debugLog?.('[CharCreator] Unrecognized response shape:', JSON.stringify(data).slice(0, 500));
+    throw new Error('Unexpected API response format');
 }
 
 
@@ -2816,10 +2838,11 @@ async function handleCreate() {
 
         await CoreAPI.fetchCharacters(true);
 
+        const newAvatar = result.file_name;
+        if (newAvatar) CoreAPI.notifySTCharacterAdded(newAvatar);
+
         closeModal();
 
-        // Try to open the newly created character
-        const newAvatar = result.file_name;
         if (newAvatar) {
             const chars = CoreAPI.getAllCharacters();
             const newChar = chars.find(c => c.avatar === newAvatar);
@@ -2847,17 +2870,17 @@ function createSaveAsDiffModal() {
     saveAsDiffInjected = true;
 
     const html = `
-    <div id="creatorSaveAsDiff" class="creator-saveas-diff-overlay hidden">
-        <div class="confirm-modal-content creator-saveas-diff-content">
-            <div class="confirm-modal-header">
+    <div id="creatorSaveAsDiff" class="cl-modal creator-saveas-diff-overlay">
+        <div class="cl-modal-content creator-saveas-diff-content">
+            <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-code-compare"></i> Review Changes</h3>
-                <button type="button" class="close-confirm-btn" id="saveAsDiffClose">&times;</button>
+                <button type="button" class="cl-modal-close" id="saveAsDiffClose"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="confirm-modal-body">
+            <div class="cl-modal-body">
                 <p class="creator-saveas-diff-subtitle" id="saveAsDiffSubtitle">Changes to be applied:</p>
                 <div class="changes-diff" id="saveAsDiffContainer"></div>
             </div>
-            <div class="confirm-modal-footer">
+            <div class="cl-modal-footer">
                 <button type="button" class="action-btn secondary" id="saveAsDiffCancel">Cancel</button>
                 <button type="button" class="action-btn primary" id="saveAsDiffConfirm">
                     <i class="fa-solid fa-floppy-disk"></i> Save Changes
@@ -2876,7 +2899,7 @@ function createSaveAsDiffModal() {
 }
 
 function closeSaveAsDiff() {
-    document.getElementById('creatorSaveAsDiff')?.classList.add('hidden');
+    document.getElementById('creatorSaveAsDiff')?.classList.remove('visible');
 }
 
 function openSaveAsPicker() {
@@ -2956,7 +2979,7 @@ async function handleSaveAsSelection(avatar) {
         </div>
     `).join('');
     document.getElementById('saveAsDiffContainer').innerHTML = diffHtml;
-    document.getElementById('creatorSaveAsDiff').classList.remove('hidden');
+    document.getElementById('creatorSaveAsDiff').classList.add('visible');
 }
 
 function collectCreatorValues() {
@@ -3174,6 +3197,7 @@ async function confirmSaveAs() {
 
         CoreAPI.showToast(`Saved over "${saveAsTarget.name}"`, 'success');
         await CoreAPI.fetchCharacters(true);
+        CoreAPI.notifySTCharacterEdited(saveAsTarget.avatar);
         closeSaveAsDiff();
         closeModal();
     } catch (err) {
@@ -3253,16 +3277,14 @@ function buildCharacterCard() {
 function init() {
     // Register all creator overlays with the overlay registry.
     // The global Escape handler (library.js) and mobile back-button stack
-    // (library-mobile.js) both read from this registry — no per-overlay
+    // (library-mobile.js) both read from this registry - no per-overlay
     // Escape listeners or manual mobile stack entries needed.
     const reg = window.registerOverlay?.bind(window);
     if (!reg) return;
 
-    reg({ id: 'studioDiscardConfirmOverlay', tier: 0, close: (el) => { el.classList.add('hidden'); document.getElementById('studioDiscardKeepBtn')?.click(); } });
     reg({ id: 'aiStudioOverlay',             tier: 1, close: () => window.closeAiStudio?.() });
     reg({ id: 'creatorNotesPreview',          tier: 2, close: () => window.closeNotesPreview?.() });
-    reg({ id: 'creatorDiscardConfirmOverlay', tier: 3, close: (el) => { el.classList.add('hidden'); document.getElementById('creatorDiscardKeepBtn')?.click(); } });
-    reg({ id: 'creatorSaveAsDiff',            tier: 4, close: (el) => el.classList.add('hidden') });
+    reg({ id: 'creatorSaveAsDiff',            tier: 4, close: () => closeSaveAsDiff(), visible: (el) => el.classList.contains('visible') });
     reg({ id: 'creatorImportPicker',          tier: 5, close: () => closeImportPicker?.() });
     reg({ id: 'creatorNamePromptOverlay',     tier: 6, close: () => document.getElementById('creatorNamePromptCancel')?.click() });
     reg({ id: 'creatorModal',                 tier: 7, close: () => maybeClose?.() });

@@ -1,8 +1,8 @@
-// WyvernBrowseView — Wyvern browse/search UI for the Online tab
+// WyvernBrowseView - Wyvern browse/search UI for the Online tab
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy, BROWSE_PURIFY_CONFIG } from '../provider-utils.js';
 import {
     WYVERN_API_BASE,
     WYVERN_SITE_BASE,
@@ -27,9 +27,11 @@ const {
     debugLog,
     showToast,
     escapeHtml,
+    safePurify,
     formatRichText,
     sanitizeTaglineHtml,
     renderLoadingState,
+    renderSkeletonGrid,
     getSetting,
     setSetting,
     setSettings,
@@ -47,20 +49,6 @@ const {
     getProviderExcludeTags,
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
-
-const BROWSE_PURIFY_CONFIG = {
-    ALLOWED_TAGS: [
-        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
-        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
-        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
-        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
-    ],
-    ALLOWED_ATTR: [
-        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
-        'width', 'height', 'loading', 'color', 'size', 'align'
-    ],
-    ALLOW_DATA_ATTR: false
-};
 
 // ========================================
 // STATE & HELPERS
@@ -247,9 +235,7 @@ class WyvernBrowseView extends BrowseView {
     }
 
     closePreview() {
-        abortWyvernDetailFetch();
-        cleanupWyvernCharModal();
-        hideModal('wyvernCharModal');
+        closeWyvernCharPreview();
     }
 
     get mobileFilterIds() {
@@ -463,7 +449,7 @@ class WyvernBrowseView extends BrowseView {
             </div>
             <div class="chub-login-body">
                 <p class="chub-login-info">
-                    <i class="fa-solid fa-check-circle" style="color: #2ecc71;"></i>
+                    <i class="fa-solid fa-check-circle" style="color: var(--cl-success-bright);"></i>
                     <strong>Browsing, search, and NSFW Popular sort work without an account!</strong>
                 </p>
                 <p class="chub-login-info">
@@ -644,6 +630,11 @@ class WyvernBrowseView extends BrowseView {
         ]);
     }
 
+    getSearchModes() { return ['character', 'creator']; }
+    getSearchInputId(mode) {
+        return mode === 'creator' ? 'wyvernCreatorSearchInput' : 'wyvernSearchInput';
+    }
+
     applyDefaults(defaults) {
         if (defaults.view === 'following') {
             wyvernViewMode = 'following';
@@ -816,6 +807,10 @@ class WyvernBrowseView extends BrowseView {
     deactivate() {
         super.deactivate();
         wyvernDelegatesInitialized = false;
+        // Reset in-flight flags so a stuck flag from a hung fetch can't block
+        // the next view re-entry from kicking off a fresh load.
+        wyvernIsLoading = false;
+        wyvernFollowingLoading = false;
         this.disconnectImageObserver();
         if (wyvernDetailFetchController) {
             try { wyvernDetailFetchController.abort(); } catch (e) { /* ignore */ }
@@ -956,7 +951,7 @@ function initWyvernView() {
     });
     on('wyvernCreatorSearchBtn', 'click', () => performWyvernCreatorSearch());
 
-    // Modal + document-level listeners — attach once (persist across provider switches)
+    // Modal + document-level listeners - attach once (persist across provider switches)
     if (!wyvernModalEventsAttached) {
         wyvernModalEventsAttached = true;
         const isDesktop = !window.matchMedia('(max-width: 768px)').matches;
@@ -976,11 +971,7 @@ function initWyvernView() {
             });
         }
 
-        on('wyvernCharClose', 'click', () => {
-            abortWyvernDetailFetch();
-            cleanupWyvernCharModal();
-            hideModal('wyvernCharModal');
-        });
+        on('wyvernCharClose', 'click', closeWyvernCharPreview);
         on('wyvernDownloadBtn', 'click', () => downloadWyvernCharacter());
 
         const wyvernGalleryGrid = document.getElementById('wyvernCharGalleryGrid');
@@ -996,11 +987,7 @@ function initWyvernView() {
         }
 
         on('wyvernCharModal', 'click', (e) => {
-            if (e.target.id === 'wyvernCharModal') {
-                abortWyvernDetailFetch();
-                cleanupWyvernCharModal();
-                hideModal('wyvernCharModal');
-            }
+            if (e.target.id === 'wyvernCharModal') closeWyvernCharPreview();
         });
 
         on('wyvernLoginClose', 'click', () => hideModal('wyvernLoginModal'));
@@ -1025,7 +1012,7 @@ function initWyvernView() {
             loadWyvernCharacters();
         });
 
-        window.registerOverlay?.({ id: 'wyvernCharModal', tier: 7, close: () => hideModal('wyvernCharModal') });
+        window.registerOverlay?.({ id: 'wyvernCharModal', tier: 7, close: closeWyvernCharPreview });
         window.registerOverlay?.({ id: 'wyvernLoginModal', tier: 6, close: () => hideModal('wyvernLoginModal') });
         window.registerOverlay?.({ id: 'wyvernCreatorBanner', tier: 9, close: () => clearWyvernCreatorFilter() });
     }
@@ -1109,7 +1096,7 @@ async function wyvernLoginWithCredentials() {
         console.error('[WyvernAuth] Login failed:', e);
         if (statusEl) {
             statusEl.style.display = 'block';
-            statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle" style="color:#e74c3c;"></i> ${escapeHtml(e.message)}`;
+            statusEl.innerHTML = `<i class="fa-solid fa-exclamation-circle" style="color:var(--cl-error-bright);"></i> ${escapeHtml(e.message)}`;
         }
         showToast('Login failed: ' + e.message, 'error');
     } finally {
@@ -1145,6 +1132,14 @@ function wyvernLogout() {
     updateWyvernNsfwToggle();
     updateWyvernLoginUI();
     showToast('Logged out of Wyvern', 'info');
+
+    // Drop following state so logged-out users dont see stale data.
+    wyvernFollowingCharacters = [];
+    wyvernFollowingLoading = false;
+    if (wyvernViewMode === 'following') {
+        switchWyvernViewMode('browse');
+        return;
+    }
 
     wyvernCharacters = [];
     wyvernCurrentPage = 1;
@@ -1235,13 +1230,13 @@ async function attemptWyvernTokenRecovery() {
 
 async function tryWyvernAutoLogin() {
     if (wyvernToken && getTokenTTL(wyvernToken) > 60) {
-        // Token is valid — schedule refresh
+        // Token is valid - schedule refresh
         const refreshToken = getSetting('wyvernRefreshToken');
         if (refreshToken) scheduleWyvernTokenRefresh(wyvernToken, refreshToken);
         return;
     }
 
-    // Token expired or missing — try recovery silently
+    // Token expired or missing - try recovery silently
     const recovered = await attemptWyvernTokenRecovery();
     if (recovered) {
         updateWyvernNsfwToggle();
@@ -1290,7 +1285,7 @@ function updateWyvernLoginUI() {
         const mins = Math.floor(ttl / 60);
         if (tokenStatus) {
             tokenStatus.style.display = 'block';
-            tokenStatus.innerHTML = `<i class="fa-solid fa-check-circle" style="color:#2ecc71;"></i> Authenticated (token expires in ${mins}m)`;
+            tokenStatus.innerHTML = `<i class="fa-solid fa-check-circle" style="color:var(--cl-success-bright);"></i> Authenticated (token expires in ${mins}m)`;
         }
 
         // Populate email if stored
@@ -1614,7 +1609,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
     const loadMoreBtn = document.getElementById('wyvernLoadMoreBtn');
 
     if (wyvernCurrentPage === 1) {
-        renderLoadingState(grid, 'Loading Wyvern characters...', 'browse-loading');
+        renderSkeletonGrid(grid);
     }
 
     wyvernIsLoading = true;
@@ -1666,7 +1661,7 @@ async function loadWyvernCharacters(forceRefresh = false) {
             params.set('tags', includeTags.join(','));
         }
 
-        // Search — omit sort so results are global, not restricted to a trending/votes pool
+        // Search - omit sort so results are global, not restricted to a trending/votes pool
         if (wyvernCurrentSearch) {
             params.set('q', wyvernCurrentSearch);
         } else {
@@ -1861,7 +1856,7 @@ async function loadWyvernFollowing(forceRefresh = false) {
     }
 
     if (grid) {
-        renderLoadingState(grid, 'Loading timeline...', 'browse-loading');
+        renderSkeletonGrid(grid);
     }
 
     try {
@@ -2061,7 +2056,7 @@ async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     const grid = document.getElementById('wyvernGrid');
     wyvernBrowseView.updateLoadMoreVisibility('wyvernLoadMore', false, true);
 
-    renderLoadingState(grid, `Loading characters by ${escapeHtml(displayName)}...`, 'browse-loading');
+    renderSkeletonGrid(grid);
 
     try {
         const headers = getWyvernHeaders(wyvernNsfwEnabled && !!wyvernToken);
@@ -2228,7 +2223,7 @@ function renderWyvernGrid(appendOnly = false) {
     if (wyvernFilterHidePossible) {
         displayCharacters = displayCharacters.filter(c => !isCharPossibleMatchObj(c));
     }
-    // Exclude tags — client-side filter (Wyvern API has no server-side exclude)
+    // Exclude tags - client-side filter (Wyvern API has no server-side exclude)
     const excludeTags = [];
     for (const [tag, state] of wyvernTagFilters) {
         if (state === 'exclude') excludeTags.push(tag);
@@ -2292,7 +2287,7 @@ function setupWyvernGridDelegates() {
             return;
         }
 
-        // Creator link click — load creator's characters
+        // Creator link click - load creator's characters
         const creatorLink = e.target.closest('.browse-card-creator-link');
         if (creatorLink) {
             e.stopPropagation();
@@ -2384,6 +2379,13 @@ function createWyvernCard(char) {
 // WYVERN CHARACTER PREVIEW
 // ========================================
 
+// Canonical close path; matches sibling-provider closePreviewModal so back-button / Escape gets the same cleanup.
+function closeWyvernCharPreview() {
+    abortWyvernDetailFetch();
+    cleanupWyvernCharModal();
+    hideModal('wyvernCharModal');
+}
+
 function abortWyvernDetailFetch() {
     if (wyvernDetailFetchController) {
         try { wyvernDetailFetchController.abort(); } catch (e) { /* ignore */ }
@@ -2396,6 +2398,7 @@ async function openWyvernCharPreview(char) {
     wyvernSelectedChar = char;
 
     const modal = document.getElementById('wyvernCharModal');
+    window.resetBrowseSectionCollapseState?.(modal);
     const avatarImg = document.getElementById('wyvernCharAvatar');
     const nameEl = document.getElementById('wyvernCharName');
     const creatorEl = document.getElementById('wyvernCharCreator');
@@ -2445,9 +2448,7 @@ async function openWyvernCharPreview(char) {
         creatorEl.title = `Click to see all characters by ${creatorName}`;
         creatorEl.onclick = (e) => {
             e.preventDefault();
-            abortWyvernDetailFetch();
-            cleanupWyvernCharModal();
-            hideModal('wyvernCharModal');
+            closeWyvernCharPreview();
             loadWyvernCreatorCharacters(char.creator.uid, creatorName, char.creator?.vanityUrl || '');
         };
     } else {
@@ -2490,7 +2491,7 @@ async function openWyvernCharPreview(char) {
         greetingsStat.style.display = 'none';
     }
 
-    // Reset definition sections — show loading indicator until detail fetch completes
+    // Reset definition sections - show loading indicator until detail fetch completes
     const defLoading = document.getElementById('wyvernCharDefinitionLoading');
     descSection.style.display = 'none';
     personalitySection.style.display = 'none';
@@ -2563,7 +2564,7 @@ async function openWyvernCharPreview(char) {
                 if (body && !body.dataset.rendered) {
                     const idx = parseInt(details.dataset.greetingIdx, 10);
                     if (greetings[idx] != null) {
-                        body.innerHTML = DOMPurify.sanitize(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
+                        body.innerHTML = safePurify(formatRichText(greetings[idx], char.name, true), BROWSE_PURIFY_CONFIG);
                     }
                     body.dataset.rendered = '1';
                 }
@@ -2586,40 +2587,48 @@ async function openWyvernCharPreview(char) {
             renderCreatorNotesSecure(node.creator_notes, char.name, creatorNotesEl);
         }
 
-        // Description
-        if (node.description) {
-            descSection.style.display = 'block';
-            descEl.innerHTML = DOMPurify.sanitize(formatRichText(node.description, char.name, true), BROWSE_PURIFY_CONFIG);
-            descEl.dataset.fullContent = node.description;
-        }
+        // RAF defer so safePurify doesnt block the modal-open paint frame.
+        requestAnimationFrame(() => {
+            if (node.description) {
+                descSection.style.display = 'block';
+                descEl.innerHTML = safePurify(formatRichText(node.description, char.name, true), BROWSE_PURIFY_CONFIG);
+                descEl.dataset.fullContent = node.description;
+            } else if (descSection) {
+                descSection.style.display = 'none';
+            }
 
-        // Personality
-        if (node.personality) {
-            personalitySection.style.display = 'block';
-            personalityEl.innerHTML = DOMPurify.sanitize(formatRichText(node.personality, char.name, true), BROWSE_PURIFY_CONFIG);
-            personalityEl.dataset.fullContent = node.personality;
-        }
+            if (node.personality) {
+                personalitySection.style.display = 'block';
+                personalityEl.innerHTML = safePurify(formatRichText(node.personality, char.name, true), BROWSE_PURIFY_CONFIG);
+                personalityEl.dataset.fullContent = node.personality;
+            } else if (personalitySection) {
+                personalitySection.style.display = 'none';
+            }
 
-        // Scenario
-        if (node.scenario) {
-            scenarioSection.style.display = 'block';
-            scenarioEl.innerHTML = DOMPurify.sanitize(formatRichText(node.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
-            scenarioEl.dataset.fullContent = node.scenario;
-        }
+            if (node.scenario) {
+                scenarioSection.style.display = 'block';
+                scenarioEl.innerHTML = safePurify(formatRichText(node.scenario, char.name, true), BROWSE_PURIFY_CONFIG);
+                scenarioEl.dataset.fullContent = node.scenario;
+            } else if (scenarioSection) {
+                scenarioSection.style.display = 'none';
+            }
 
-        // Example Dialogs
-        if (node.mes_example) {
-            examplesSection.style.display = 'block';
-            examplesEl.innerHTML = DOMPurify.sanitize(formatRichText(node.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
-            examplesEl.dataset.fullContent = node.mes_example;
-        }
+            if (node.mes_example) {
+                examplesSection.style.display = 'block';
+                examplesEl.innerHTML = safePurify(formatRichText(node.mes_example, char.name, true), BROWSE_PURIFY_CONFIG);
+                examplesEl.dataset.fullContent = node.mes_example;
+            } else if (examplesSection) {
+                examplesSection.style.display = 'none';
+            }
 
-        // First message
-        if (node.first_mes) {
-            firstMsgSection.style.display = 'block';
-            firstMsgEl.innerHTML = DOMPurify.sanitize(formatRichText(node.first_mes, char.name, true), BROWSE_PURIFY_CONFIG);
-            firstMsgEl.dataset.fullContent = node.first_mes;
-        }
+            if (node.first_mes) {
+                firstMsgSection.style.display = 'block';
+                firstMsgEl.innerHTML = safePurify(formatRichText(node.first_mes, char.name, true), BROWSE_PURIFY_CONFIG);
+                firstMsgEl.dataset.fullContent = node.first_mes;
+            } else if (firstMsgSection) {
+                firstMsgSection.style.display = 'none';
+            }
+        });
 
         // Alt greetings
         if (node.alternate_greetings?.length > 0) {
@@ -2669,7 +2678,7 @@ async function openWyvernCharPreview(char) {
         applyDetailData(inlineDetail);
     }
 
-    // Check detail cache — if cached, apply immediately (replaces spinner)
+    // Check detail cache - if cached, apply immediately (replaces spinner)
     const cachedDetail = charId ? wyvernDetailCache.get(charId) : null;
     if (cachedDetail) {
         wyvernDetailCache.delete(charId);
@@ -2829,40 +2838,52 @@ async function downloadWyvernCharacter() {
         const result = await provider.importCharacter(charId, wyvernSelectedChar, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
-        cleanupWyvernCharModal();
-        document.getElementById('wyvernCharModal').classList.add('hidden');
-
-        await new Promise(r => requestAnimationFrame(r));
-
-        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
-
         const localAvatarFileName = result.fileName;
         const hasGallery = result.hasGallery;
         const mediaUrls = result.embeddedMediaUrls || [];
         const galleryPageUrls = result.galleryPageUrls || [];
+        const showSummary = (hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0)
+            && getSetting('notifyAdditionalContent') !== false;
 
-        if ((hasGallery || mediaUrls.length > 0 || galleryPageUrls.length > 0) && getSetting('notifyAdditionalContent') !== false) {
-            showImportSummaryModal({
-                galleryCharacters: hasGallery ? [{
-                    name: result.characterName,
-                    fullPath: result.fullPath,
-                    provider: provider,
-                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
-                    url: `${WYVERN_SITE_BASE}/characters/${result.providerCharId}`,
-                    avatar: localAvatarFileName,
-                    galleryId: result.galleryId
-                }] : [],
-                mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
-                    name: result.characterName,
-                    avatar: localAvatarFileName,
-                    avatarUrl: result.avatarUrl,
-                    mediaUrls: mediaUrls,
-                    galleryPageUrls: galleryPageUrls,
-                    galleryId: result.galleryId,
-                    cardData: result.cardData
-                }] : []
-            });
+        const summaryArgs = {
+            galleryCharacters: hasGallery ? [{
+                name: result.characterName,
+                fullPath: result.fullPath,
+                provider: provider,
+                linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                url: `${WYVERN_SITE_BASE}/characters/${result.providerCharId}`,
+                avatar: localAvatarFileName,
+                galleryId: result.galleryId
+            }] : [],
+            mediaCharacters: (mediaUrls.length > 0 || galleryPageUrls.length > 0) ? [{
+                name: result.characterName,
+                avatar: localAvatarFileName,
+                avatarUrl: result.avatarUrl,
+                mediaUrls: mediaUrls,
+                galleryPageUrls: galleryPageUrls,
+                galleryId: result.galleryId,
+                cardData: result.cardData
+            }] : []
+        };
+
+        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
+        if (showSummary) {
+            if (window.matchMedia?.('(max-width: 768px)').matches) {
+                showImportSummaryModal(summaryArgs);
+                await new Promise(r => setTimeout(r, 220));
+                closeWyvernCharPreview();
+            } else {
+                closeWyvernCharPreview();
+                await new Promise(r => requestAnimationFrame(r));
+                showImportSummaryModal(summaryArgs);
+            }
+        } else {
+            downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
+            await new Promise(r => setTimeout(r, 350));
+            closeWyvernCharPreview();
         }
+
+        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
 
         await new Promise(r => setTimeout(r, 200));
 

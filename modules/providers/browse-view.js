@@ -1,4 +1,4 @@
-// BrowseView — base class for provider browse views in the Online tab
+// BrowseView - base class for provider browse views in the Online tab
 
 import CoreAPI from '../core-api.js';
 import { normalizeBrowseName } from './provider-utils.js';
@@ -74,9 +74,9 @@ export class BrowseView {
     /**
      * Called every time the Online tab shows this provider's view.
      * First call should trigger init() if not yet done.
-     * @param {HTMLElement} container — #onlineView element
+     * @param {HTMLElement} container - #onlineView element
      * @param {Object} [options]
-     * @param {boolean} [options.domRecreated] — true when the DOM was
+     * @param {boolean} [options.domRecreated] - true when the DOM was
      *   destroyed and rebuilt by the registry (provider switch).
      */
     activate(container, options = {}) {
@@ -109,7 +109,31 @@ export class BrowseView {
      * @param {Object} defaults - { view?: string, sort?: string }
      */
     applyDefaults(defaults) {
-        // Base implementation — no-op. Subclasses override.
+        // Base implementation - no-op. Subclasses override.
+    }
+
+    // ── Search contract (mobile FAB overlay) ──
+
+    /** @returns {Array<'character' | 'creator'>} */
+    getSearchModes() { return ['character']; }
+
+    /** @returns {string | null} DOM id of the inline input to proxy. */
+    getSearchInputId(mode) { return null; }
+
+    /** Default proxies through the inline input + submit button (or Enter). */
+    performSearch(mode, query) {
+        const inputId = this.getSearchInputId(mode);
+        if (!inputId) return;
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        input.value = query;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const submitBtn = input.parentElement?.querySelector('.browse-search-submit');
+        if (submitBtn) {
+            submitBtn.click();
+        } else {
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+        }
     }
 
     /**
@@ -310,16 +334,19 @@ export class BrowseView {
             const grid = document.getElementById(gridId);
             if (!grid) continue;
 
+            // Skip the top-left source-badge container (datacat reuses the base class).
+            const BOTTOM_BADGES_SEL = '.browse-feature-badges:not(.browse-feature-badges-tl)';
+
             for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
                 if (!checkCard(card)) continue;
                 card.classList.add('in-library');
                 card.classList.remove('possible-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
+                let badgesEl = card.querySelector(BOTTOM_BADGES_SEL);
                 if (!badgesEl) {
                     const imgWrap = card.querySelector('.browse-card-image');
                     if (imgWrap) {
                         imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                        badgesEl = imgWrap.querySelector(BOTTOM_BADGES_SEL);
                     }
                 }
                 if (badgesEl) {
@@ -336,12 +363,12 @@ export class BrowseView {
                 const creator = creatorEl?.dataset.author || creatorEl?.dataset.creatorName || '';
                 if (!this.isCharPossibleMatch(name, creator)) continue;
                 card.classList.add('possible-library');
-                let badgesEl = card.querySelector('.browse-feature-badges');
+                let badgesEl = card.querySelector(BOTTOM_BADGES_SEL);
                 if (!badgesEl) {
                     const imgWrap = card.querySelector('.browse-card-image');
                     if (imgWrap) {
                         imgWrap.insertAdjacentHTML('beforeend', '<div class="browse-feature-badges"></div>');
-                        badgesEl = imgWrap.querySelector('.browse-feature-badges');
+                        badgesEl = imgWrap.querySelector(BOTTOM_BADGES_SEL);
                     }
                 }
                 if (badgesEl && !badgesEl.querySelector('.possible-library')) {
@@ -362,7 +389,7 @@ export class BrowseView {
 
     /**
      * Create the shared IntersectionObserver (once). Subclasses normally
-     * don't need to call this directly — observeImages() auto-initializes.
+     * don't need to call this directly - observeImages() auto-initializes.
      */
     _initImageObserver() {
         if (this._imageObserver) return;
@@ -658,6 +685,25 @@ export class BrowseView {
             }
         };
         document.addEventListener('click', this._dropdownCloseHandler);
+
+        // Direct hook: on each dropdown's button click, push a back-button guard
+        // when the dropdown transitions from hidden to open. The mobile back-stack
+        // catches the body-relocated dropdown at Tier 6 once a guard is queued.
+        this._dropdownGuardCleanups = [];
+        for (const { dropdownId, buttonId } of pairs) {
+            const btn = document.getElementById(buttonId);
+            const dropdown = document.getElementById(dropdownId);
+            if (!btn || !dropdown) continue;
+            const onClick = () => {
+                requestAnimationFrame(() => {
+                    if (!dropdown.classList.contains('hidden')) {
+                        window.pushOverlayGuard?.();
+                    }
+                });
+            };
+            btn.addEventListener('click', onClick);
+            this._dropdownGuardCleanups.push(() => btn.removeEventListener('click', onClick));
+        }
     }
 
     /**
@@ -667,6 +713,10 @@ export class BrowseView {
         if (this._dropdownCloseHandler) {
             document.removeEventListener('click', this._dropdownCloseHandler);
             this._dropdownCloseHandler = null;
+        }
+        if (this._dropdownGuardCleanups) {
+            for (const cleanup of this._dropdownGuardCleanups) cleanup();
+            this._dropdownGuardCleanups = null;
         }
     }
 
@@ -928,7 +978,8 @@ export class BrowseView {
     }
 
     _renderManagerCreatorCard(creator, index) {
-        const avatarUrl = this.getCreatorAvatarUrl(creator);
+        const rawAvatarUrl = this.getCreatorAvatarUrl(creator);
+        const avatarUrl = rawAvatarUrl ? CoreAPI.escapeHtml?.(rawAvatarUrl) ?? rawAvatarUrl : '';
         const name = CoreAPI.escapeHtml?.(creator.name) || creator.name;
         const username = creator.username ? CoreAPI.escapeHtml?.(creator.username) || creator.username : '';
         const charCount = creator.characterCount != null ? creator.characterCount : -1;
@@ -1066,7 +1117,7 @@ export class BrowseView {
     }
 
     /**
-     * Full teardown — page unload.
+     * Full teardown - page unload.
      */
     destroy() {
         this.deactivate();

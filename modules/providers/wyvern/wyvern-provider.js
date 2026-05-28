@@ -1,4 +1,4 @@
-// Wyvern Provider — implementation for the Wyvern character source
+// Wyvern Provider - implementation for the Wyvern character source
 //
 // Handles browsing, linking, metadata fetching, and update checking
 // against Wyvern's REST API (api.wyvern.chat).
@@ -23,7 +23,7 @@ import {
 
 let api = null; // CoreAPI reference
 
-// Cached raw API result from fetchLinkStats — reused by "View on" button
+// Cached raw API result from fetchLinkStats - reused by "View on" button
 let _cachedLinkNode = null;
 
 class WyvernProvider extends ProviderBase {

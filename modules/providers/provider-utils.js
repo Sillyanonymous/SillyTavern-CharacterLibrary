@@ -1,4 +1,4 @@
-// Provider Utilities — shared helpers used across all providers
+// Provider Utilities - shared helpers used across all providers
 //
 // Contains network helpers, text utilities, image processing,
 // and the import pipeline shared by all provider implementations.
@@ -10,6 +10,35 @@
 export const IMG_PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
 
 export const CL_HELPER_PLUGIN_BASE = '/plugins/cl-helper';
+
+// XSS gate for any third-party browse content rendered via innerHTML.
+// Never bypass; never duplicate this config per-provider.
+export const BROWSE_PURIFY_CONFIG = {
+    ALLOWED_TAGS: [
+        'p', 'br', 'hr', 'div', 'span', 'strong', 'b', 'em', 'i', 'u', 's', 'del',
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'blockquote', 'code', 'pre',
+        'ul', 'ol', 'li', 'a', 'img', 'center', 'font', 'style',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td', 'details', 'summary'
+    ],
+    ALLOWED_ATTR: [
+        'href', 'src', 'alt', 'title', 'class', 'style', 'target', 'rel',
+        'width', 'height', 'loading', 'color', 'size', 'align'
+    ],
+    ALLOW_DATA_ATTR: false
+};
+
+// n shimmer rows, last two tapered so it reads as a paragraph not a bar block.
+export function skeletonLines(n = 3) {
+    if (n <= 0) return '';
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const cls = i === n - 1 ? 'cl-skeleton-line shorter'
+                  : i === n - 2 ? 'cl-skeleton-line short'
+                  : 'cl-skeleton-line';
+        out.push(`<div class="${cls}"></div>`);
+    }
+    return out.join('');
+}
 
 // ========================================
 // NETWORK
@@ -31,7 +60,7 @@ export async function fetchWithProxy(url, opts = {}) {
         try {
             directResponse = await fetch(url, opts);
         } catch (_) {
-            // fetch() rejects on CORS/network errors — fall through to proxy
+            // fetch() rejects on CORS/network errors - fall through to proxy
             _proxyOrigins.add(origin);
         }
         if (directResponse) {
@@ -261,6 +290,40 @@ export async function importFromPng({
     try { result = JSON.parse(responseText); }
     catch { throw new Error(`Invalid JSON response: ${responseText}`); }
     if (result.error) throw new Error('Import failed: Server returned error');
+
+    // ST's V2 import path runs data.name through sanitize-filename, replacing
+    // path-illegal chars like '|' (creators use them as separators) with '_'.
+    // merge-attributes does NOT re-sanitize, so we restore the raw name here.
+    // Without this, update-checks flag false diffs against the remote and
+    // gallery-folder lookups (using char.name) diverge from auto-localize's
+    // raw-cardData folder.
+    const ST_ILLEGAL_NAME_CHARS = /[<>:"/\\|?*]/;
+    const rawName = characterCard.data?.name;
+    if (result.file_name && rawName && ST_ILLEGAL_NAME_CHARS.test(rawName)) {
+        // ST returns file_name without the extension; merge-attributes needs it.
+        const avatarWithExt = String(result.file_name).toLowerCase().endsWith('.png')
+            ? result.file_name
+            : `${result.file_name}.png`;
+        let restoreOk = false;
+        try {
+            const resp = await api.apiRequest?.('/characters/merge-attributes', 'POST', {
+                avatar: avatarWithExt,
+                data: { name: rawName }
+            });
+            if (resp?.ok) {
+                restoreOk = true;
+            } else if (resp) {
+                let body = '';
+                try { body = await resp.clone().text(); } catch { /* ignore */ }
+                console.warn(`[Import] data.name restore failed (HTTP ${resp.status}):`, body.slice(0, 200));
+            }
+        } catch (e) {
+            console.warn('[Import] Failed to restore raw data.name:', e?.message || e);
+        }
+        if (!restoreOk) {
+            api.showToast?.(`Imported "${characterName}" but couldn't restore special characters in the name; update checks may show false differences.`, 'warning', 6000);
+        }
+    }
 
     const mediaUrls = api.findCharacterMediaUrls?.(characterCard) || [];
     await window.ensureExtractorsLoaded?.();

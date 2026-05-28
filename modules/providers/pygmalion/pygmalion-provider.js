@@ -1,4 +1,4 @@
-// Pygmalion Provider — implementation for pygmalion.chat character source
+// Pygmalion Provider - implementation for pygmalion.chat character source
 //
 // Uses Connect RPC API (public, no auth required for read operations).
 // Supports gallery (altAvatars + altImages + chatBackground).
@@ -335,7 +335,7 @@ class PygmalionProvider extends ProviderBase {
             };
         }
 
-        // No Pygmalion extensions — try to find this character on Pygmalion
+        // No Pygmalion extensions - try to find this character on Pygmalion
         const name = cardData.data?.name;
         if (!name) return null;
 
@@ -348,32 +348,28 @@ class PygmalionProvider extends ProviderBase {
             const match = results.find(r => (r.name || '').toLowerCase().trim() === normalizedName);
             if (!match) return null;
 
-            // Verify creator if both are available
-            if (creator && match.creator) {
-                if (creator.toLowerCase() !== match.creator.toLowerCase()) return null;
-            }
+            // Strict creator verification: require both sides to have a creator and
+            // an exact (case-insensitive) match. Names alone are too ambiguous.
+            const localCreator = creator.trim();
+            const remoteCreator = (match.creator || '').trim();
+            if (!localCreator || !remoteCreator) return null;
+            if (localCreator.toLowerCase() !== remoteCreator.toLowerCase()) return null;
 
-            // Fetch full detail for proper V2 field mapping
+            // Fetch full detail purely for listing-name + gallery flag.
+            // Do NOT replace descriptive fields on the user's local card.
             const detail = await fetchCharacterDetail(match.id, undefined, this.getToken());
             if (!detail?.character) return null;
 
-            const enrichedCard = buildV2FromDetail(detail.character);
-
-            if (!enrichedCard.data.extensions) enrichedCard.data.extensions = {};
-            enrichedCard.data.extensions.pygmalion = {
-                ...(enrichedCard.data.extensions.pygmalion || {}),
+            if (!cardData.data.extensions) cardData.data.extensions = {};
+            cardData.data.extensions.pygmalion = {
+                ...(cardData.data.extensions.pygmalion || {}),
                 linkedAt: new Date().toISOString(),
                 pageName: this.getListingName(detail.character),
             };
 
-            // Preserve gallery_id from original card
-            if (cardData.data?.extensions?.gallery_id) {
-                enrichedCard.data.extensions.gallery_id = cardData.data.extensions.gallery_id;
-            }
-
             const galleryImages = getGalleryImages(detail.character);
             return {
-                cardData: enrichedCard,
+                cardData,
                 providerInfo: {
                     providerId: 'pygmalion',
                     charId: match.id,

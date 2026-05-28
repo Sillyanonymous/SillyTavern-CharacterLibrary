@@ -40,6 +40,9 @@ export function init(deps) {
         visible: (el) => el.classList.contains('visible'),
     });
 
+    // Bulk delete confirm (dynamic). Tier 7 so it closes before charModal on back/Escape.
+    window.registerOverlay?.({ id: 'bulkDeleteConfirmModal', tier: 7, static: false, close: (el) => el?.remove() });
+
     // Bridge for legacy card creation paths
     window.attachCardContextMenu = function(cardElement, char) {
         if (!cardElement || !char) return;
@@ -281,14 +284,14 @@ function buildSingleMenuItems(char, cardElement) {
             }
         });
     } else if (CoreAPI.isExtensionsRecoveryInProgress()) {
-        // Extensions not yet recovered — provider link status unknown
+        // Extensions not yet recovered - provider link status unknown
         items.push({
             icon: 'fa-solid fa-spinner fa-spin',
             label: 'Loading provider data…',
             disabled: true
         });
     } else {
-        // Unlinked — single entry that opens the global link modal (searches all providers)
+        // Unlinked - single entry that opens the global link modal (searches all providers)
         items.push({
             icon: 'fa-solid fa-link',
             label: 'Link to Provider',
@@ -296,7 +299,7 @@ function buildSingleMenuItems(char, cardElement) {
         });
     }
     
-    // Version history (available for ALL characters — local snapshots + remote if provider-linked)
+    // Version history (available for ALL characters - local snapshots + remote if provider-linked)
     items.push({
         icon: 'fa-solid fa-clock-rotate-left',
         label: 'Version History',
@@ -483,8 +486,7 @@ async function bulkToggleFavorites(setFavorite) {
     
     for (const char of selected) {
         try {
-            // IMPORTANT: SillyTavern reads fav from data.extensions.fav
-            // Must include data object while preserving existing data fields
+            // fav lives in data.extensions.fav; full data must be passed through.
             const existingData = char.data || {};
             const existingExtensions = existingData.extensions || char.extensions || {};
             
@@ -630,13 +632,13 @@ async function bulkDelete() {
     const andMore = selected.length > 5 ? ` and ${selected.length - 5} more` : '';
     
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal';
+    modal.className = 'confirm-modal cl-modal-drawer';
     modal.id = 'bulkDeleteConfirmModal';
     modal.innerHTML = `
         <div class="confirm-modal-content" style="max-width: calc(480px * var(--modal-scale, 1));">
-            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(231, 76, 60, 0.2) 0%, rgba(192, 57, 43, 0.2) 100%);">
+            <div class="confirm-modal-header" style="background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2) 0%, rgba(var(--cl-error-bright-darker-rgb), 0.2) 100%);">
                 <h3 style="border: none; padding: 0; margin: 0;">
-                    <i class="fa-solid fa-triangle-exclamation" style="color: #e74c3c;"></i>
+                    <i class="fa-solid fa-triangle-exclamation" style="color: var(--cl-error-bright);"></i>
                     Delete ${selected.length} Characters
                 </h3>
                 <button class="close-confirm-btn" id="closeBulkDeleteModal">&times;</button>
@@ -647,18 +649,18 @@ async function bulkDelete() {
                 </p>
                 
                 ${totalUniqueGalleryFiles > 0 ? `
-                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: 8px; padding: 12px; margin-bottom: 15px;">
-                        <div style="display: flex; align-items: center; gap: 8px; color: #f1c40f; margin-bottom: 10px;">
+                    <div style="background: rgba(241, 196, 15, 0.15); border: 1px solid rgba(241, 196, 15, 0.4); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; gap: 8px; color: var(--cl-warning-bright); margin-bottom: 10px;">
                             <i class="fa-solid fa-images"></i>
                             <strong>${charsWithUniqueGallery.length} character${charsWithUniqueGallery.length !== 1 ? 's have' : ' has'} unique gallery files (${totalUniqueGalleryFiles} total)</strong>
                         </div>
                         <div style="display: flex; flex-direction: column; gap: 8px;">
-                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                                <input type="radio" name="galleryAction" value="keep" checked style="accent-color: #f1c40f;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="keep" checked>
                                 <span><strong>Keep gallery files</strong> - Leave in folders</span>
                             </label>
-                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: 6px; background: rgba(0,0,0,0.2);">
-                                <input type="radio" name="galleryAction" value="delete" style="accent-color: #e74c3c;">
+                            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary); padding: 8px; border-radius: var(--radius-md); background: rgba(0,0,0,0.2);">
+                                <input type="radio" name="galleryAction" value="delete">
                                 <span><strong>Delete gallery files</strong> - Remove all images</span>
                             </label>
                         </div>
@@ -666,14 +668,14 @@ async function bulkDelete() {
                 ` : ''}
                 
                 ${charsWithSharedGallery.length > 0 ? `
-                    <div style="background: rgba(150, 150, 150, 0.15); border: 1px solid rgba(150, 150, 150, 0.4); border-radius: 8px; padding: 10px; margin-bottom: 15px; font-size: 13px;">
-                        <i class="fa-solid fa-info-circle" style="color: #888;"></i>
+                    <div style="background: rgba(150, 150, 150, 0.15); border: 1px solid rgba(150, 150, 150, 0.4); border-radius: var(--radius-lg); padding: 10px; margin-bottom: 15px; font-size: 13px;">
+                        <i class="fa-solid fa-info-circle" style="color: var(--text-faint);"></i>
                         <span style="color: var(--text-secondary);">${charsWithSharedGallery.length} character${charsWithSharedGallery.length !== 1 ? 's have' : ' has'} shared galleries (files will be kept)</span>
                     </div>
                 ` : ''}
                 
                 <p style="color: var(--text-secondary);">
-                    <i class="fa-solid fa-exclamation-circle" style="color: #e74c3c;"></i>
+                    <i class="fa-solid fa-exclamation-circle" style="color: var(--cl-error-bright);"></i>
                     This action cannot be undone!
                 </p>
             </div>

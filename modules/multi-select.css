@@ -8,31 +8,45 @@ body.multi-select-mode .char-card {
     position: relative;
 }
 
-body.multi-select-mode .char-card::before {
-    content: '';
+/* always in dom (display:none), revealed in multi-select mode; real div + i for themer control */
+.char-card-checkbox {
+    display: none;
     position: absolute;
     top: 8px;
     left: 8px;
     width: 24px;
     height: 24px;
     border: 2px solid rgba(255, 255, 255, 0.5);
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     background: rgba(0, 0, 0, 0.3);
-    background-repeat: no-repeat;
-    background-position: center;
-    background-size: 14px;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: var(--font-md-lg);
     z-index: 10;
     transition: all 0.2s;
 }
 
-body.multi-select-mode .char-card.selected::before {
-    background-color: var(--SmartThemeQuoteColor, #4a9eff);
-    border-color: var(--SmartThemeQuoteColor, #4a9eff);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 12 10 18 20 6'/%3E%3C/svg%3E");
+.char-card-checkbox i {
+    opacity: 0;
+    transition: opacity 0.15s;
 }
 
-body.multi-select-mode .char-card:hover::before {
-    border-color: var(--SmartThemeQuoteColor, #4a9eff);
+body.multi-select-mode .char-card-checkbox {
+    display: flex;
+}
+
+body.multi-select-mode .char-card.selected .char-card-checkbox {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+body.multi-select-mode .char-card.selected .char-card-checkbox i {
+    opacity: 1;
+}
+
+body.multi-select-mode .char-card:hover .char-card-checkbox {
+    border-color: var(--accent);
 }
 
 /* Multi-select toolbar */
@@ -42,7 +56,7 @@ body.multi-select-mode .char-card:hover::before {
     justify-content: space-between;
     padding: 10px 16px;
     background: linear-gradient(135deg, rgba(26, 26, 46, 0.95) 0%, rgba(30, 30, 50, 0.95) 100%);
-    border-bottom: 1px solid rgba(74, 158, 255, 0.2);
+    border-bottom: 1px solid rgba(var(--accent-rgb), 0.2);
     gap: var(--space-lg);
     backdrop-filter: blur(10px);
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
@@ -66,7 +80,7 @@ body.multi-select-mode .char-card:hover::before {
     gap: var(--space-sm);
     background: linear-gradient(135deg, var(--accent) 0%, var(--accent-secondary) 100%);
     padding: 6px 12px;
-    border-radius: 20px;
+    border-radius: var(--radius-4xl);
     font-weight: 600;
     font-size: var(--font-base);
     color: var(--accent-text);
@@ -110,7 +124,7 @@ body.multi-select-mode .char-card:hover::before {
     align-items: center;
     gap: var(--space-xs-sm);
     padding: 8px 14px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     border: 1px solid transparent;
     background: rgba(255, 255, 255, 0.08);
     color: var(--SmartThemeBodyColor, #eee);
@@ -192,7 +206,10 @@ body.multi-select-mode .char-card:hover::before {
     }
 
     /* Kill per-card checkbox transition */
-    body.multi-select-mode .char-card::before {
+    body.multi-select-mode .char-card .char-card-checkbox {
+        transition: none !important;
+    }
+    body.multi-select-mode .char-card .char-card-checkbox i {
         transition: none !important;
     }
     .multi-select-left {
@@ -210,15 +227,22 @@ body.multi-select-mode .char-card:hover::before {
     .multi-select-actions {
         display: flex;
         flex-wrap: nowrap;
-        gap: var(--space-2xs);
-        justify-content: flex-start;
+        gap: var(--space-xs);
+        justify-content: center;
         min-width: 0;
     }
     .ms-btn {
-        padding: var(--space-xs) var(--space-xs-sm);
-        font-size: var(--font-xs);
-        gap: var(--space-2xs);
+        padding: 0;
+        gap: 0;
+        min-width: 32px;
         min-height: 32px;
+        width: 32px;
+        height: 32px;
+        flex-shrink: 0;
+        justify-content: center;
+    }
+    .ms-btn i {
+        font-size: var(--font-base);
     }
     .ms-btn span {
         display: none;
@@ -227,9 +251,9 @@ body.multi-select-mode .char-card:hover::before {
         display: none;
     }
     .multi-select-right {
-        gap: var(--space-2xs);
+        gap: var(--space-xs);
     }
     .ms-btn-exit {
-        padding: var(--space-xs) var(--space-xs-sm);
+        padding: 0;
     }
 }

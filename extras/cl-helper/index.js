@@ -1,4 +1,4 @@
-// cl-helper — SillyTavern server plugin for Character Library
+// cl-helper: SillyTavern server plugin for Character Library
 //
 // Provides server-side request proxying for providers that require
 // custom headers (like Origin) that browsers forbid setting.
@@ -7,8 +7,10 @@
 import { randomUUID } from 'node:crypto';
 import { join, resolve, sep, dirname } from 'node:path';
 import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { stat, readFile, writeFile } from 'node:fs/promises';
+import { stat, readFile, writeFile, open } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -18,21 +20,77 @@ export const info = {
     description: 'Auth and request proxying for the Character Library extension.',
 };
 
-const PYGMALION_AUTH_URL = 'https://auth.pygmalion.chat/session';
-const PYGMALION_ORIGIN = 'https://pygmalion.chat';
-
-// =========================================================
-// Gallery thumbnail generation
-// =========================================================
+// =============================================================================
+// Gallery thumbnails
+// =============================================================================
 
 const THUMB_QUALITY = 82;
 const THUMB_MAX_SIZE = 1024;
 const THUMB_EXTENSIONS = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
 const THUMB_CONCURRENCY = 2;
+const THUMB_MAX_FILE_BYTES = 50 * 1024 * 1024;   // 50 MB on-disk
+const THUMB_MAX_PIXELS = 150_000_000;            // ~150 MP (decoded RAM ~600 MB worst case)
+const THUMB_HEADER_PEEK_BYTES = 65536;           // 64 KB scan for JPEG SOF
+
+/**
+ * Peek image dimensions without decoding. Returns {w, h} when known, null otherwise.
+ * Handles PNG (IHDR at fixed offset), GIF (LSD), and JPEG (scan first 64KB for SOF).
+ * WebP/AVIF/TIFF/BMP fall through to the file-size cap.
+ */
+async function peekImageDimensions(filePath) {
+    let fh;
+    try {
+        fh = await open(filePath, 'r');
+        const buf = Buffer.alloc(THUMB_HEADER_PEEK_BYTES);
+        const { bytesRead } = await fh.read(buf, 0, THUMB_HEADER_PEEK_BYTES, 0);
+        if (bytesRead < 16) return null;
+
+        // PNG: 89 50 4E 47 0D 0A 1A 0A, IHDR width/height at bytes 16..23 (BE uint32)
+        if (bytesRead >= 24 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) {
+            return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
+        }
+
+        // GIF: "GIF87a"/"GIF89a", logical screen width/height at bytes 6..9 (LE uint16)
+        if (bytesRead >= 10 && buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) {
+            return { w: buf.readUInt16LE(6), h: buf.readUInt16LE(8) };
+        }
+
+        // JPEG: starts FF D8; scan markers for SOF0/1/2 (FF C0/C1/C2)
+        if (bytesRead >= 4 && buf[0] === 0xFF && buf[1] === 0xD8) {
+            let i = 2;
+            while (i + 9 < bytesRead) {
+                if (buf[i] !== 0xFF) { i++; continue; }
+                let marker = buf[i + 1];
+                // skip padding 0xFF bytes
+                while (marker === 0xFF && i + 2 < bytesRead) { i++; marker = buf[i + 1]; }
+                if (marker === 0xD8 || marker === 0xD9) { i += 2; continue; }
+                // SOF0/1/2/3/5/6/7/9..11/13..15 carry dimensions; SOF4/8/12 are not frame headers
+                if ((marker >= 0xC0 && marker <= 0xCF) && marker !== 0xC4 && marker !== 0xC8 && marker !== 0xCC) {
+                    if (i + 9 >= bytesRead) return null;
+                    const h = buf.readUInt16BE(i + 5);
+                    const w = buf.readUInt16BE(i + 7);
+                    return { w, h };
+                }
+                // Other markers carry length at next 2 bytes (BE)
+                const segLen = buf.readUInt16BE(i + 2);
+                if (segLen < 2) return null;
+                i += 2 + segLen;
+            }
+        }
+
+        return null;
+    } catch {
+        return null;
+    } finally {
+        if (fh) await fh.close().catch(() => {});
+    }
+}
 
 let _cacheDir = null;
 let _Jimp = null;
 let _imagesDir = null;
+let _charactersDir = null;
+let _avatarThumbDir = null;
 let _thumbsReady = false;
 let _thumbActive = 0;
 let _thumbQueue = [];
@@ -72,6 +130,27 @@ function resolveImagesDir() {
     return null;
 }
 
+function resolveCharactersDir() {
+    // ST's USER_DIRECTORY_TEMPLATE puts `characters` at the user root (data/<user>/characters),
+    // NOT under user/ like gallery images (data/<user>/user/images).
+    const stRoot = process.cwd();
+    const dataDir = join(stRoot, 'data');
+    if (!existsSync(dataDir)) return null;
+
+    const defaultPath = join(dataDir, 'default-user', 'characters');
+    if (existsSync(defaultPath)) return defaultPath;
+
+    try {
+        for (const entry of readdirSync(dataDir, { withFileTypes: true })) {
+            if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+            const candidate = join(dataDir, entry.name, 'characters');
+            if (existsSync(candidate)) return candidate;
+        }
+    } catch {}
+
+    return null;
+}
+
 async function initImageLib() {
     const stModules = join(process.cwd(), 'node_modules');
     const stImport = async (pkg) => {
@@ -103,20 +182,7 @@ async function initImageLib() {
     }
 }
 
-/**
- * @param {import('express').Router} router
- */
-export async function init(router) {
-    // ---- All routes registered synchronously (before any awaits) ----
-
-    router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.1.0', thumbnails: _thumbsReady });
-    });
-
-    // =================================================================
-    // Gallery thumbnail endpoint
-    // =================================================================
-
+function registerThumbnailRoutes(router) {
     router.get('/gallery-thumb/:folder/:file', async (req, res) => {
         if (!_Jimp || !_imagesDir) {
             return res.status(503).json({ error: 'Thumbnails not available' });
@@ -125,8 +191,9 @@ export async function init(router) {
         const { folder, file } = req.params;
         const size = Math.min(Math.max(parseInt(req.query.s) || 384, 64), THUMB_MAX_SIZE);
 
+        // Block path separators only; benign filenames can legitimately contain ".." (eg. ellipsis).
+        // The resolve + startsWith check below catches any traversal that survives this.
         if (!folder || !file
-            || folder.includes('..') || file.includes('..')
             || folder.includes('/') || folder.includes('\\')
             || file.includes('/') || file.includes('\\')) {
             return res.status(400).json({ error: 'Invalid path' });
@@ -147,6 +214,17 @@ export async function init(router) {
         } catch {
             console.log(`[cl-helper] 404: ${originalPath}`);
             return res.status(404).json({ error: 'Not found' });
+        }
+
+        if (origStat.size > THUMB_MAX_FILE_BYTES) {
+            console.log(`[cl-helper] thumb rejected (file too large ${origStat.size}): ${folder}/${file}`);
+            return res.status(413).json({ error: 'Image too large' });
+        }
+
+        const dims = await peekImageDimensions(originalPath);
+        if (dims && (dims.w * dims.h) > THUMB_MAX_PIXELS) {
+            console.log(`[cl-helper] thumb rejected (dimensions ${dims.w}x${dims.h}): ${folder}/${file}`);
+            return res.status(413).json({ error: 'Image dimensions too large' });
         }
 
         const cacheFolder = join(_cacheDir, folder);
@@ -181,17 +259,13 @@ export async function init(router) {
         }
     });
 
-    // =================================================================
-    // Thumbnail cache cleanup (per folder)
-    // =================================================================
-
     router.post('/gallery-thumb-cleanup/:folder', (req, res) => {
         if (!_cacheDir) {
             return res.status(503).json({ error: 'Thumbnails not available' });
         }
 
         const { folder } = req.params;
-        if (!folder || folder.includes('..') || folder.includes('/') || folder.includes('\\')) {
+        if (!folder || folder.includes('/') || folder.includes('\\')) {
             return res.status(400).json({ error: 'Invalid folder' });
         }
 
@@ -214,6 +288,213 @@ export async function init(router) {
         }
     });
 
+    // Avatar thumbnail: aspect-preserving JPEG resize of a character PNG.
+    // ST's built-in /thumbnail?type=avatar serves 96x144 which is too small
+    // for retina-DPR mobile grids; we serve a larger one (default 512w) with
+    // our own jimp pipeline + on-disk cache.
+    router.get('/avatar-thumb/:file', async (req, res) => {
+        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+
+        const { file } = req.params;
+        const size = Math.min(Math.max(parseInt(req.query.s) || 512, 64), THUMB_MAX_SIZE);
+
+        if (!file || file.includes('/') || file.includes('\\')) {
+            return res.status(400).json({ error: 'Invalid path' });
+        }
+        if (!/\.png$/i.test(file)) {
+            return res.status(400).json({ error: 'Unsupported file type' });
+        }
+
+        const originalPath = resolve(_charactersDir, file);
+        if (!originalPath.startsWith(_charactersDir + sep)) {
+            return res.status(403).json({ error: 'Access denied' });
+        }
+
+        let origStat;
+        try {
+            origStat = await stat(originalPath);
+        } catch {
+            return res.status(404).json({ error: 'Not found' });
+        }
+
+        if (origStat.size > THUMB_MAX_FILE_BYTES) {
+            return res.status(413).json({ error: 'Image too large' });
+        }
+
+        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+
+        try {
+            const cacheStat = await stat(cachePath);
+            if (cacheStat.mtimeMs > origStat.mtimeMs) {
+                res.set('Content-Type', 'image/jpeg');
+                res.set('Cache-Control', 'public, max-age=86400');
+                return res.send(await readFile(cachePath));
+            }
+        } catch { /* cache miss */ }
+
+        try {
+            await _thumbSemaphore();
+            const image = await _Jimp.read(originalPath);
+            // Match .char-card aspect (2:3) so browser object-fit: cover is a no-op and doesnt double-crop.
+            image.cover({ w: size, h: Math.round(size * 1.5) });
+            const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
+            _thumbRelease();
+
+            mkdirSync(_avatarThumbDir, { recursive: true });
+            writeFile(cachePath, buffer).catch(() => {});
+
+            res.set('Content-Type', 'image/jpeg');
+            res.set('Cache-Control', 'public, max-age=86400');
+            res.send(buffer);
+        } catch (err) {
+            _thumbRelease();
+            console.error(`[cl-helper] Avatar thumb error ${file}:`, err.message);
+            res.status(500).json({ error: 'Generation failed' });
+        }
+    });
+
+    router.get('/avatar-thumb-stats', async (req, res) => {
+        if (!_avatarThumbDir) {
+            return res.json({ count: 0, bytes: 0, available: false });
+        }
+        try {
+            if (!existsSync(_avatarThumbDir)) return res.json({ count: 0, bytes: 0, available: true });
+            const entries = readdirSync(_avatarThumbDir);
+            let bytes = 0;
+            for (const name of entries) {
+                try {
+                    const s = await stat(join(_avatarThumbDir, name));
+                    if (s.isFile()) bytes += s.size;
+                } catch { /* skip */ }
+            }
+            res.json({ count: entries.length, bytes, available: true });
+        } catch (err) {
+            console.error('[cl-helper] Avatar thumb stats error:', err.message);
+            res.status(500).json({ error: 'Stats failed' });
+        }
+    });
+
+    router.post('/avatar-thumb-cleanup', (req, res) => {
+        if (!_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+        try {
+            let deleted = 0;
+            if (existsSync(_avatarThumbDir)) {
+                deleted = readdirSync(_avatarThumbDir).length;
+                rmSync(_avatarThumbDir, { recursive: true, force: true });
+                console.log(`[cl-helper] Purged avatar thumb cache (${deleted} files)`);
+            }
+            res.json({ ok: true, deleted });
+        } catch (err) {
+            console.error('[cl-helper] Avatar thumb cleanup error:', err.message);
+            res.status(500).json({ error: 'Cleanup failed' });
+        }
+    });
+
+    // Populate runs as a background job: client kicks it off, polls /populate-status
+    // for progress. Sequential + setImmediate yield between each thumb keeps ST's
+    // event loop responsive (jimp's PNG decode is synchronous on the main thread).
+    router.post('/avatar-thumb-populate', async (req, res) => {
+        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+            return res.status(503).json({ error: 'Avatar thumbnails not available' });
+        }
+        if (_populateJob && _populateJob.running) {
+            return res.status(409).json({ error: 'Populate already running', job: _populateJob });
+        }
+        const size = Math.min(Math.max(parseInt(req.query.s) || 512, 64), THUMB_MAX_SIZE);
+
+        let files;
+        try {
+            files = readdirSync(_charactersDir).filter(f => /\.png$/i.test(f));
+        } catch (err) {
+            return res.status(500).json({ error: 'Failed to read characters directory' });
+        }
+
+        mkdirSync(_avatarThumbDir, { recursive: true });
+        runAvatarPopulateJob(size, files).catch(err => {
+            console.error('[cl-helper] populate job crashed:', err.message);
+            if (_populateJob) { _populateJob.running = false; _populateJob.finishedAt = Date.now(); }
+        });
+        res.json({ started: true, total: files.length, size });
+    });
+
+    router.get('/avatar-thumb-populate-status', (req, res) => {
+        res.json(_populateJob || { running: false, total: 0, processed: 0, generated: 0, skipped: 0, failed: 0 });
+    });
+}
+
+let _populateJob = null;
+
+async function runAvatarPopulateJob(size, files) {
+    _populateJob = {
+        running: true,
+        total: files.length,
+        processed: 0,
+        generated: 0,
+        skipped: 0,
+        failed: 0,
+        size,
+        startedAt: Date.now(),
+        finishedAt: null,
+    };
+
+    for (const file of files) {
+        const originalPath = resolve(_charactersDir, file);
+        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+
+        try {
+            const origStat = await stat(originalPath);
+            if (origStat.size > THUMB_MAX_FILE_BYTES) {
+                console.warn(`[cl-helper] Avatar thumb populate skipped (over ${Math.round(THUMB_MAX_FILE_BYTES / 1024 / 1024)} MB cap, ${(origStat.size / 1024 / 1024).toFixed(1)} MB): ${file}`);
+                _populateJob.failed++;
+            } else {
+                let needs = true;
+                try {
+                    const cacheStat = await stat(cachePath);
+                    if (cacheStat.mtimeMs > origStat.mtimeMs) { _populateJob.skipped++; needs = false; }
+                } catch { /* cache miss */ }
+                if (needs) {
+                    try {
+                        await _thumbSemaphore();
+                        const image = await _Jimp.read(originalPath);
+                        image.cover({ w: size, h: Math.round(size * 1.5) });
+                        const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
+                        _thumbRelease();
+                        await writeFile(cachePath, buffer);
+                        _populateJob.generated++;
+                    } catch (err) {
+                        _thumbRelease();
+                        console.warn(`[cl-helper] Avatar thumb populate failed for ${file}:`, err.message);
+                        _populateJob.failed++;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`[cl-helper] Avatar thumb populate failed for ${file} (stat):`, err.message);
+            _populateJob.failed++;
+        }
+
+        _populateJob.processed++;
+        // Yield back to the event loop between every thumb so other ST requests still get serviced during a long populate.
+        await new Promise(r => setImmediate(r));
+    }
+
+    _populateJob.running = false;
+    _populateJob.finishedAt = Date.now();
+    console.log(`[cl-helper] Avatar thumb populate done: ${_populateJob.generated} new, ${_populateJob.skipped} cached, ${_populateJob.failed} failed (size ${size})`);
+}
+
+// =============================================================================
+// Pygmalion: login proxy
+// =============================================================================
+
+const PYGMALION_AUTH_URL = 'https://auth.pygmalion.chat/session';
+const PYGMALION_ORIGIN = 'https://pygmalion.chat';
+
+function registerPygmalionRoutes(router) {
     router.post('/pyg-login', async (req, res) => {
         const { username, password } = req.body ?? {};
 
@@ -249,20 +530,29 @@ export async function init(router) {
             res.status(502).json({ error: 'Failed to reach Pygmalion auth server' });
         }
     });
+}
 
-    // =================================================================
-    // CharacterTavern — cookie-based session auth
-    // =================================================================
+// =============================================================================
+// CharacterTavern: cookie session + read-only API proxy
+// =============================================================================
 
-    // In-memory session store (cookies persist until logout or server restart)
-    let ctSessionCookies = null; // string — raw cookie header value
+// In-memory session store (cookies persist until logout or server restart).
+let ctSessionCookies = null; // raw cookie header value, e.g. "session=VALUE"
 
+// CT API paths the proxy is allowed to forward (read-only endpoints only).
+const CT_ALLOWED_PATHS = [
+    /^\/api\/search\/cards\b/,
+    /^\/api\/character\/[^/]+\/[^/]+$/,
+    /^\/api\/catalog\/top-tags$/,
+];
+
+function registerCharacterTavernRoutes(router) {
     /**
      * POST /ct-set-cookie
      * Body: { cookie: "session=VALUE" } or { cookie: "VALUE" }
      *
      * Stores the provided session cookie for use in proxied requests.
-     * Only the `session` cookie is accepted — rejects input containing
+     * Only the `session` cookie is accepted; rejects input containing
      * multiple cookies or unexpected keys to limit stored scope.
      */
     router.post('/ct-set-cookie', async (req, res) => {
@@ -362,12 +652,6 @@ export async function init(router) {
         res.json({ active: !!ctSessionCookies });
     });
 
-    // CT API paths the proxy is allowed to forward (read-only endpoints only)
-    const CT_ALLOWED_PATHS = [
-        /^\/api\/search\/cards\b/,
-        /^\/api\/character\/[^/]+\/[^/]+$/,
-        /^\/api\/catalog\/top-tags$/,
-    ];
 
     /**
      * GET /ct-proxy/*
@@ -377,7 +661,7 @@ export async function init(router) {
     router.get('/ct-proxy/*', async (req, res) => {
         const targetPath = '/' + req.params[0]; // everything after /ct-proxy/
 
-        // Normalize and allowlist check — only known read-only API paths
+        // Normalize and allowlist check: only known read-only API paths
         const normalizedPath = new URL(targetPath, 'https://character-tavern.com/').pathname;
         if (!CT_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
             console.warn(`[cl-helper] CT proxy blocked: ${normalizedPath}`);
@@ -424,33 +708,67 @@ export async function init(router) {
             res.status(502).json({ error: 'Failed to reach CharacterTavern' });
         }
     });
+}
 
-    // =================================================================
-    // DataCat — token-based session + read-only API proxy
-    // =================================================================
+// =============================================================================
+// DataCat: token session + extraction + read-only API proxy
+// =============================================================================
 
-    const DATACAT_BASE = 'https://datacat.run';
-    const DATACAT_ORIGIN = 'https://datacat.run';
+const DATACAT_BASE = 'https://datacat.run';
+const DATACAT_ORIGIN = 'https://datacat.run';
 
-    let dcSessionToken = null;
+let dcSessionToken = null;
 
-    function dcHeaders(token) {
-        return {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': 'application/json',
-            'Origin': DATACAT_ORIGIN,
-            'Referer': DATACAT_ORIGIN + '/',
-            'X-Session-Token': token,
-        };
-    }
+function dcHeaders(token) {
+    return {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+        'Origin': DATACAT_ORIGIN,
+        'Referer': DATACAT_ORIGIN + '/',
+        'X-Session-Token': token,
+    };
+}
 
-    async function testDcToken(token) {
-        const response = await fetch(`${DATACAT_BASE}/api/characters/recent-public?limit=1&offset=0&summary=1&minTotalTokens=889`, {
+async function testDcToken(token) {
+    const response = await fetch(`${DATACAT_BASE}/api/characters/recent-public?limit=1&offset=0&summary=1&minTotalTokens=889`, {
+        headers: dcHeaders(token),
+    });
+    return response;
+}
+
+// Read-only API paths forwarded by /dc-proxy.
+const DC_ALLOWED_PATHS = [
+    /^\/api\/characters\/fresh\b/,
+    /^\/api\/characters\/recent-public\b/,
+    /^\/api\/characters\/[a-f0-9-]+$/,
+    /^\/api\/characters\/[a-f0-9-]+\/download\b/,
+    /^\/api\/creators\/[a-f0-9-]+$/,
+    /^\/api\/creators\/[a-f0-9-]+\/characters\b/,
+    /^\/api\/tags\/faceted\b/,
+    /^\/api\/extraction\/status-projection$/,
+];
+
+// Resolve a usable public session ID for the extraction endpoint.
+async function getPublicSessionId(token) {
+    try {
+        const resp = await fetch(`${DATACAT_BASE}/api/users`, {
             headers: dcHeaders(token),
         });
-        return response;
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const publicUser = (data.users || []).find(u => u.isPublic);
+        if (!publicUser?.sessions) return null;
+        // Pick a non-background, logged_in session
+        const session = publicUser.sessions.find(
+            s => s.purpose !== 'BACKGROUND_SCRAPER' && s.status === 'logged_in'
+        );
+        return session?.id || null;
+    } catch {
+        return null;
     }
+}
 
+function registerDataCatRoutes(router) {
     router.post('/dc-init', async (req, res) => {
         const { force } = req.body ?? {};
 
@@ -551,37 +869,6 @@ export async function init(router) {
         }
     });
 
-    const DC_ALLOWED_PATHS = [
-        /^\/api\/characters\/fresh\b/,
-        /^\/api\/characters\/recent-public\b/,
-        /^\/api\/characters\/[a-f0-9-]+$/,
-        /^\/api\/characters\/[a-f0-9-]+\/download\b/,
-        /^\/api\/creators\/[a-f0-9-]+$/,
-        /^\/api\/creators\/[a-f0-9-]+\/characters\b/,
-        /^\/api\/tags\/faceted\b/,
-        /^\/api\/extraction\/status$/,
-    ];
-
-    // Fetch a usable public session ID for extraction
-    async function getPublicSessionId(token) {
-        try {
-            const resp = await fetch(`${DATACAT_BASE}/api/users`, {
-                headers: dcHeaders(token),
-            });
-            if (!resp.ok) return null;
-            const data = await resp.json();
-            const publicUser = (data.users || []).find(u => u.isPublic);
-            if (!publicUser?.sessions) return null;
-            // Pick a non-background, logged_in session
-            const session = publicUser.sessions.find(
-                s => s.purpose !== 'BACKGROUND_SCRAPER' && s.status === 'logged_in'
-            );
-            return session?.id || null;
-        } catch {
-            return null;
-        }
-    }
-
     // POST-only: submit extraction request to DataCat
     router.post('/dc-extract', async (req, res) => {
         if (!dcSessionToken) {
@@ -596,21 +883,29 @@ export async function init(router) {
             return res.status(400).json({ error: 'URL too long' });
         }
 
-        // Only allow JanitorAI character URLs
+        // Allow JanitorAI character URLs and Saucepan companion URLs
+        let extractionKind = null;
         try {
             const parsed = new URL(url);
-            if (!/^(www\.)?janitorai\.com$/i.test(parsed.hostname) && !/^(www\.)?jannyai\.com$/i.test(parsed.hostname)) {
-                return res.status(400).json({ error: 'Only JanitorAI character URLs are supported' });
+            const isJanitor = /^(www\.)?janitorai\.com$/i.test(parsed.hostname) || /^(www\.)?jannyai\.com$/i.test(parsed.hostname);
+            const isSaucepan = /^(www\.)?saucepan\.ai$/i.test(parsed.hostname);
+            if (!isJanitor && !isSaucepan) {
+                return res.status(400).json({ error: 'Only JanitorAI or Saucepan character URLs are supported' });
             }
-            if (!/^\/characters\/[a-f0-9-]+/i.test(parsed.pathname)) {
+            if (isJanitor && !/^\/characters\/[a-f0-9-]{8,64}(_[\w-]+)?\/?$/i.test(parsed.pathname)) {
                 return res.status(400).json({ error: 'Invalid character URL path' });
             }
+            if (isSaucepan && !/^\/companion\/[a-f0-9-]{8,64}\/?$/i.test(parsed.pathname)) {
+                return res.status(400).json({ error: 'Invalid character URL path' });
+            }
+            extractionKind = isSaucepan ? 'saucepan' : 'janitor';
         } catch {
             return res.status(400).json({ error: 'Invalid URL' });
         }
 
         const requestId = randomUUID();
         const wantPublicFeed = req.body.publicFeed !== false;
+        const alwaysReextract = req.body.alwaysReextract === true;
 
         // Resolve a public session ID when public feed is requested
         let sessionId = null;
@@ -619,21 +914,43 @@ export async function init(router) {
         }
 
         try {
-            const response = await fetch(`${DATACAT_BASE}/api/character/smart-extract-v2`, {
+            let endpoint, body;
+            if (extractionKind === 'saucepan') {
+                endpoint = `${DATACAT_BASE}/api/saucepan-extract/run`;
+                body = {
+                    companion: url,
+                    sourceKind: 'one_off',
+                    sourceRef: requestId,
+                    includeSearch: true,
+                    extractHidden: false,
+                    idempotencyKey: requestId,
+                    alwaysReextract,
+                    vpnNamespace: 'general_scraper',
+                    netnsRole: 'general_scraper',
+                };
+            } else {
+                endpoint = `${DATACAT_BASE}/api/character/smart-extract-v2`;
+                body = {
+                    url,
+                    openLoginIfNoSession: true,
+                    sessionId,
+                    appearOnPublicFeed: wantPublicFeed && !!sessionId,
+                    useSeparateWorkerServer: true,
+                    inlinePostExtractCreatorProfile: true,
+                    idempotencyKey: requestId,
+                    extractSourceMode: 'core_plus_janny',
+                    alwaysReextract,
+                };
+            }
+
+            const response = await fetch(endpoint, {
                 method: 'POST',
                 headers: {
                     ...dcHeaders(dcSessionToken),
                     'Content-Type': 'application/json',
                     'X-Request-Id': requestId,
                 },
-                body: JSON.stringify({
-                    url,
-                    sessionId,
-                    appearOnPublicFeed: wantPublicFeed && !!sessionId,
-                    useSeparateWorkerServer: true,
-                    inlinePostExtractCreatorProfile: true,
-                    idempotencyKey: requestId,
-                }),
+                body: JSON.stringify(body),
             });
 
             const data = await response.json();
@@ -686,57 +1003,59 @@ export async function init(router) {
             res.status(502).json({ error: 'Failed to reach DataCat' });
         }
     });
+}
 
-    // =================================================================
-    // Imgchest — password-protected gallery unlock
-    // =================================================================
+// =============================================================================
+// Imgchest: password-protected gallery unlock
+// =============================================================================
 
-    const IMGCHEST_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const IMGCHEST_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-    function extractImgchestCookies(headers) {
-        const result = { xsrfToken: null, session: null };
-        const setCookies = typeof headers.getSetCookie === 'function'
-            ? headers.getSetCookie()
-            : (headers.get('set-cookie') || '').split(/,\s*(?=[A-Z])/);
-        for (const sc of setCookies) {
-            const xsrf = sc.match(/XSRF-TOKEN=([^;]+)/);
-            if (xsrf) result.xsrfToken = xsrf[1];
-            const sess = sc.match(/image_chest_session=([^;]+)/);
-            if (sess) result.session = sess[1];
-        }
-        return result;
+function extractImgchestCookies(headers) {
+    const result = { xsrfToken: null, session: null };
+    const setCookies = typeof headers.getSetCookie === 'function'
+        ? headers.getSetCookie()
+        : (headers.get('set-cookie') || '').split(/,\s*(?=[A-Z])/);
+    for (const sc of setCookies) {
+        const xsrf = sc.match(/XSRF-TOKEN=([^;]+)/);
+        if (xsrf) result.xsrfToken = xsrf[1];
+        const sess = sc.match(/image_chest_session=([^;]+)/);
+        if (sess) result.session = sess[1];
     }
+    return result;
+}
 
-    function parseImgchestImages(html) {
-        const match = html.match(/data-page="([^"]+)"/);
-        if (!match) return [];
-        try {
-            const decoded = match[1]
-                .replace(/&quot;/g, '"')
-                .replace(/&amp;/g, '&')
-                .replace(/&lt;/g, '<')
-                .replace(/&gt;/g, '>')
-                .replace(/&#039;/g, "'");
-            const data = JSON.parse(decoded);
-            const files = data?.props?.post?.files;
-            if (!Array.isArray(files)) return [];
-            return files
-                .filter(f => f.link && typeof f.link === 'string')
-                .map(f => ({ url: f.link, filename: f.link.split('/').pop() }));
-        } catch {
-            return [];
-        }
+function parseImgchestImages(html) {
+    const match = html.match(/data-page="([^"]+)"/);
+    if (!match) return [];
+    try {
+        const decoded = match[1]
+            .replace(/&quot;/g, '"')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&#039;/g, "'");
+        const data = JSON.parse(decoded);
+        const files = data?.props?.post?.files;
+        if (!Array.isArray(files)) return [];
+        return files
+            .filter(f => f.link && typeof f.link === 'string')
+            .map(f => ({ url: f.link, filename: f.link.split('/').pop() }));
+    } catch {
+        return [];
     }
+}
 
+function registerImgchestRoutes(router) {
     /**
      * POST /imgchest-unlock
      * Body: { url: "https://imgchest.com/p/{id}", password: "..." }
      * Returns: { images: [{url, filename}] } or { error: "..." }
      *
      * Three-step flow:
-     * 1. GET /p/{id}/validate — obtain XSRF + session cookies
-     * 2. POST /p/{id}/validate — submit password, receive authenticated cookies
-     * 3. GET /p/{id} — fetch unlocked page, extract images from data-page JSON
+     * 1. GET /p/{id}/validate: obtain XSRF + session cookies
+     * 2. POST /p/{id}/validate: submit password, receive authenticated cookies
+     * 3. GET /p/{id}: fetch unlocked page, extract images from data-page JSON
      */
     router.post('/imgchest-unlock', async (req, res) => {
         const { url, password } = req.body ?? {};
@@ -763,7 +1082,6 @@ export async function init(router) {
         const postUrl = `https://imgchest.com/p/${postId}`;
 
         try {
-            // Step 1: GET validate page for cookies + XSRF token
             const step1 = await fetch(validateUrl, {
                 headers: { 'User-Agent': IMGCHEST_UA, 'Accept': 'text/html' },
             });
@@ -785,7 +1103,7 @@ export async function init(router) {
                 if (vm) inertiaVersion = vm[1];
             }
 
-            // Step 2: POST password
+            // POST the password, expecting a 302 redirect on success.
             const step2 = await fetch(validateUrl, {
                 method: 'POST',
                 headers: {
@@ -816,7 +1134,7 @@ export async function init(router) {
             const finalXsrf = cookies2.xsrfToken || cookies1.xsrfToken;
             const finalSession = cookies2.session || cookies1.session;
 
-            // Step 3: GET the unlocked post page
+            // Re-fetch the post page now that we hold authenticated cookies.
             const step3 = await fetch(postUrl, {
                 headers: {
                     'User-Agent': IMGCHEST_UA,
@@ -841,11 +1159,508 @@ export async function init(router) {
             res.status(502).json({ error: 'Failed to reach imgchest' });
         }
     });
+}
+
+// =============================================================================
+// Civitai: gallery extractor auth + read-only API proxy
+// =============================================================================
+
+const CIVITAI_HOSTS = new Set(['civitai.com', 'civitai.red']);
+const CIVITAI_ALLOWED_PATHS = [
+    /^\/api\/v1\/images\/?$/,
+    /^\/api\/v1\/images\/[a-zA-Z0-9_-]+\/?$/,
+    /^\/posts\/[0-9]+\/?$/,
+    /^\/images\/[0-9]+\/?$/,
+];
+const CIVITAI_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+
+let civitaiApiKey = null;
+
+function registerCivitaiRoutes(router) {
+    router.post('/civitai-set-key', (req, res) => {
+        const { key } = req.body ?? {};
+        if (!key || typeof key !== 'string') return res.status(400).json({ error: 'key is required' });
+        if (key.length > 256) return res.status(400).json({ error: 'key too long' });
+        civitaiApiKey = key.trim();
+        console.log('[cl-helper] Civitai API key stored');
+        res.json({ ok: true });
+    });
+
+    router.post('/civitai-clear-key', (_req, res) => {
+        civitaiApiKey = null;
+        res.json({ ok: true });
+    });
+
+    router.get('/civitai-session', (_req, res) => {
+        res.json({ active: !!civitaiApiKey });
+    });
+
+    router.get('/civitai-validate', async (_req, res) => {
+        if (!civitaiApiKey) return res.json({ valid: false, error: 'No API key configured' });
+        try {
+            const response = await fetch('https://civitai.com/api/v1/models?limit=1', {
+                headers: {
+                    'Authorization': `Bearer ${civitaiApiKey}`,
+                    'User-Agent': CIVITAI_UA,
+                    'Accept': 'application/json',
+                },
+            });
+            res.json({ valid: response.ok, status: response.status });
+        } catch (err) {
+            console.error('[cl-helper] Civitai validate error:', err.message);
+            res.status(502).json({ valid: false, error: 'Failed to reach Civitai' });
+        }
+    });
+
+    router.get('/civitai-proxy/:host/*', async (req, res) => {
+        const host = req.params.host;
+        if (!CIVITAI_HOSTS.has(host)) {
+            return res.status(400).json({ error: 'host must be civitai.com or civitai.red' });
+        }
+
+        const targetPath = '/' + req.params[0];
+        const base = `https://${host}`;
+        const normalizedPath = new URL(targetPath, base).pathname;
+        if (!CIVITAI_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            console.warn(`[cl-helper] Civitai proxy blocked: ${normalizedPath}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, base);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+
+        if (!CIVITAI_HOSTS.has(targetUrl.hostname)) {
+            return res.status(403).json({ error: 'Proxy target must be civitai.com or civitai.red' });
+        }
+
+        const headers = {
+            'User-Agent': CIVITAI_UA,
+            'Accept': targetPath.startsWith('/api/') ? 'application/json' : 'text/html',
+        };
+        if (civitaiApiKey) headers['Authorization'] = `Bearer ${civitaiApiKey}`;
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers,
+                redirect: 'follow',
+            });
+
+            const contentType = response.headers.get('content-type') || '';
+            res.status(response.status);
+            res.set('Content-Type', contentType);
+
+            if (contentType.includes('application/json')) {
+                res.send(await response.text());
+            } else if (contentType.includes('text/')) {
+                res.send(await response.text());
+            } else {
+                const buffer = Buffer.from(await response.arrayBuffer());
+                res.send(buffer);
+            }
+        } catch (err) {
+            console.error('[cl-helper] Civitai proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach Civitai' });
+        }
+    });
+}
+
+// =============================================================================
+// Saucepan: read-only API proxy. Handles zstd-encoded responses that ST's
+// /proxy/ forwards without Content-Encoding (browser can't decode them).
+// Negotiates gzip/deflate/br with Saucepan; Node native zstd is fallback.
+// =============================================================================
+
+const SAUCEPAN_HOSTNAME = 'saucepan.ai';
+const SAUCEPAN_BASE = 'https://saucepan.ai';
+const SAUCEPAN_ORIGIN = 'https://saucepan.ai';
+const SAUCEPAN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
+const SAUCEPAN_MAX_BYTES = 10 * 1024 * 1024;
+const SAUCEPAN_ALLOWED_PATHS = [
+    /^\/api\/v1\/search$/,
+    /^\/api\/v1\/companions-of-user$/,
+    /^\/api\/v1\/companion$/,
+];
+const SAUCEPAN_POST_PATH = '/api/v1/search';
+const SAUCEPAN_MAX_SEARCH_LEN = 500;
+const SAUCEPAN_MAX_TAG_LEN = 64;
+const SAUCEPAN_MAX_TAGS = 100;
+const SAUCEPAN_MAX_DATE_LEN = 30;
+const SAUCEPAN_MAX_ORDER_LEN = 32;
+
+function sanitizeSaucepanSearchBody(input) {
+    if (!input || typeof input !== 'object') return null;
+
+    const asString = (v, max) => (typeof v === 'string' && v.length <= max) ? v : null;
+    const asStringOrNull = (v, max) => v === null ? null : asString(v, max);
+    const asBool = (v) => typeof v === 'boolean' ? v : false;
+    const asBoolOrNull = (v) => v === null ? null : asBool(v);
+    const asTagArray = (v) => Array.isArray(v)
+        ? v.filter(t => typeof t === 'string' && t.length <= SAUCEPAN_MAX_TAG_LEN).slice(0, SAUCEPAN_MAX_TAGS)
+        : [];
+    const asInt = (v, min, max) => {
+        const n = Number(v);
+        return Number.isInteger(n) && n >= min && n <= max ? n : null;
+    };
+
+    const limit = asInt(input.limit, 1, 200);
+    const offset = asInt(input.offset, 0, 100000);
+    if (limit === null || offset === null) return null;
+
+    return {
+        text_search: asStringOrNull(input.text_search, SAUCEPAN_MAX_SEARCH_LEN),
+        tags: asTagArray(input.tags),
+        excluded_tags: asTagArray(input.excluded_tags),
+        fandom_tags: asTagArray(input.fandom_tags),
+        excluded_fandom_tags: asTagArray(input.excluded_fandom_tags),
+        match_all_fandom_tags: asBool(input.match_all_fandom_tags),
+        match_all_tags: asBool(input.match_all_tags),
+        limit,
+        offset,
+        sus: asBool(input.sus),
+        extra_spicy: asBoolOrNull(input.extra_spicy),
+        order_by: asString(input.order_by, SAUCEPAN_MAX_ORDER_LEN) || 'created',
+        asc: asBool(input.asc),
+        posted_at_from: asStringOrNull(input.posted_at_from, SAUCEPAN_MAX_DATE_LEN),
+        posted_at_to: asStringOrNull(input.posted_at_to, SAUCEPAN_MAX_DATE_LEN),
+        hide_hidden_content: asBool(input.hide_hidden_content),
+        open_definition_only: asBool(input.open_definition_only),
+    };
+}
+
+let _zstdDecompressAsync = null;
+function getZstdDecompressAsync() {
+    if (_zstdDecompressAsync) return _zstdDecompressAsync;
+    if (typeof zlib.zstdDecompress !== 'function') {
+        throw new Error('node:zlib zstdDecompress unavailable: requires Node >= 22.15. Upstream returned zstd; upgrade Node or ensure server respects Accept-Encoding: gzip, deflate, br.');
+    }
+    _zstdDecompressAsync = promisify(zlib.zstdDecompress);
+    return _zstdDecompressAsync;
+}
+
+async function readSaucepanBody(response) {
+    const ce = (response.headers.get('content-encoding') || '').toLowerCase();
+    if (ce.includes('zstd')) {
+        const compressed = Buffer.from(await response.arrayBuffer());
+        const decoded = await getZstdDecompressAsync()(compressed, { maxOutputLength: SAUCEPAN_MAX_BYTES });
+        return decoded.toString('utf8');
+    }
+    const text = await response.text();
+    if (text.length > SAUCEPAN_MAX_BYTES) {
+        throw new Error(`Saucepan response exceeded ${SAUCEPAN_MAX_BYTES} bytes`);
+    }
+    return text;
+}
+
+function registerSaucepanRoutes(router) {
+    const handleProxy = async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const normalizedPath = new URL(targetPath, SAUCEPAN_BASE).pathname;
+        if (!SAUCEPAN_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            console.warn(`[cl-helper] Saucepan proxy blocked: ${normalizedPath}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, SAUCEPAN_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== SAUCEPAN_HOSTNAME) {
+            return res.status(403).json({ error: `Proxy target must be ${SAUCEPAN_HOSTNAME}` });
+        }
+
+        const isPost = req.method === 'POST';
+        let bodyStr = null;
+        if (isPost) {
+            if (normalizedPath !== SAUCEPAN_POST_PATH) {
+                return res.status(400).json({ error: 'POST not allowed for this path' });
+            }
+            const sanitized = sanitizeSaucepanSearchBody(req.body);
+            if (!sanitized) {
+                return res.status(400).json({ error: 'Invalid search body' });
+            }
+            bodyStr = JSON.stringify(sanitized);
+        }
+
+        const headers = {
+            'User-Agent': SAUCEPAN_UA,
+            'Accept': '*/*',
+            // Deliberately omits zstd: undici auto-decompresses gzip/deflate/br,
+            // and Saucepan should respect the negotiated encoding. The zstd
+            // fallback in readSaucepanBody covers servers that ignore us.
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Origin': SAUCEPAN_ORIGIN,
+            'Referer': SAUCEPAN_ORIGIN + '/',
+        };
+        if (isPost) headers['Content-Type'] = 'application/json';
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: req.method,
+                headers,
+                body: bodyStr ?? undefined,
+                redirect: 'follow',
+            });
+
+            const text = await readSaucepanBody(response);
+            res.status(response.status);
+            res.set('Content-Type', response.headers.get('content-type') || 'application/json');
+            res.send(text);
+        } catch (err) {
+            console.error('[cl-helper] Saucepan proxy error:', err.message);
+            res.status(502).json({ error: `Failed to reach Saucepan: ${err.message}` });
+        }
+    };
+
+    router.get('/saucepan-proxy/*', handleProxy);
+    router.post('/saucepan-proxy/*', handleProxy);
+}
+
+// =============================================================================
+// Dropbox: GET-only proxy for public folder/file share page HTML
+// =============================================================================
+//
+// ST's built-in /proxy/ sends Dropbox a request shape (UA, accept) that
+// returns HTTP 400. The folder share page is needed to extract the embedded
+// file-list blob; image bytes themselves come from per-file URLs handled by
+// the regular media downloader. Browser-shaped headers fix the 400.
+
+const DROPBOX_HOSTNAME = 'www.dropbox.com';
+const DROPBOX_BASE = 'https://www.dropbox.com';
+const DROPBOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+const DROPBOX_MAX_BYTES = 5 * 1024 * 1024;
+const DROPBOX_ALLOWED_PATHS = [
+    /^\/scl\/fo\/[A-Za-z0-9_-]+\/[A-Za-z0-9_-]+\/?$/,
+    /^\/scl\/fi\/[A-Za-z0-9_-]+\/[^/]+$/,
+];
+
+function registerDropboxRoutes(router) {
+    router.get('/dropbox-proxy/*', async (req, res) => {
+        const targetPath = '/' + req.params[0];
+        const normalizedPath = new URL(targetPath, DROPBOX_BASE).pathname;
+        if (!DROPBOX_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+
+        const targetUrl = new URL(targetPath, DROPBOX_BASE);
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== DROPBOX_HOSTNAME) {
+            return res.status(403).json({ error: `Proxy target must be ${DROPBOX_HOSTNAME}` });
+        }
+
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                method: 'GET',
+                headers: {
+                    'User-Agent': DROPBOX_UA,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                },
+                redirect: 'follow',
+            });
+            const text = await response.text();
+            if (!response.ok) {
+                console.warn(`[cl-helper] Dropbox returned HTTP ${response.status} for ${targetUrl.toString()}`);
+                console.warn(`[cl-helper] Dropbox response body (first 500 chars): ${text.slice(0, 500)}`);
+            }
+            if (text.length > DROPBOX_MAX_BYTES) {
+                return res.status(502).json({ error: `Dropbox response exceeded ${DROPBOX_MAX_BYTES} bytes` });
+            }
+            res.status(response.status);
+            res.set('Content-Type', response.headers.get('content-type') || 'text/html; charset=utf-8');
+            res.send(text);
+        } catch (err) {
+            console.error('[cl-helper] Dropbox proxy error:', err.message);
+            res.status(502).json({ error: `Failed to reach Dropbox: ${err.message}` });
+        }
+    });
+}
+
+// =============================================================================
+// FlareSolverr: thin POST forwarder for Cloudflare-protected endpoints
+// =============================================================================
+//
+// FlareSolverr (https://github.com/FlareSolverr/FlareSolverr) is a user-run
+// service that uses a real Chromium instance to bypass Cloudflare bot
+// challenges. It does not emit CORS headers by default, so the browser
+// cannot call it directly - we forward the request through here.
+//
+// This route is a stateless thin POST forwarder. The caller supplies both
+// the FlareSolverr endpoint URL and the target URL. We do not store the
+// FlareSolverr URL server-side; it is always provided per-request.
+
+const FLARESOLVERR_MAX_TARGET_LENGTH = 1024;
+const FLARESOLVERR_TIMEOUT_MS = 90_000;
+
+// Allowlist of upstreams FlareSolverr is allowed to fetch on behalf of CL.
+// Matches the hostname-plus-path-regex pattern used by other cl-helper proxies.
+const FLARESOLVERR_TARGET_ALLOWLIST = [
+    { hostname: 'janitorai.com', pathPattern: /^\/hampter\/characters\/?$/ },
+];
+
+function validateFlareTargetUrl(url) {
+    let parsed;
+    try { parsed = new URL(url); } catch { return false; }
+    if (!/^https?:$/.test(parsed.protocol)) return false;
+    return FLARESOLVERR_TARGET_ALLOWLIST.some(({ hostname, pathPattern }) =>
+        parsed.hostname === hostname && pathPattern.test(parsed.pathname)
+    );
+}
+
+function validateFlareUrl(flareUrl) {
+    if (!flareUrl || typeof flareUrl !== 'string' || flareUrl.length > 256) {
+        return { error: 'flareUrl is required' };
+    }
+    let parsed;
+    try { parsed = new URL(flareUrl); } catch { return { error: 'Invalid flareUrl' }; }
+    if (!/^https?:$/.test(parsed.protocol)) {
+        return { error: 'flareUrl must be http or https' };
+    }
+    return { url: parsed.toString() };
+}
+
+async function postToFlareSolverr(flareUrl, body) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FLARESOLVERR_TIMEOUT_MS + 5000);
+    try {
+        const response = await fetch(flareUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        clearTimeout(timer);
+        const data = await response.json().catch(() => null);
+        return { response, data };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function registerFlareSolverrRoutes(router) {
+    router.post('/flaresolverr-fetch', async (req, res) => {
+        const { flareUrl, targetUrl, sessionId } = req.body ?? {};
+
+        const flareCheck = validateFlareUrl(flareUrl);
+        if (flareCheck.error) return res.status(400).json({ error: flareCheck.error });
+
+        if (!targetUrl || typeof targetUrl !== 'string') {
+            return res.status(400).json({ error: 'targetUrl is required' });
+        }
+        if (targetUrl.length > FLARESOLVERR_MAX_TARGET_LENGTH) {
+            return res.status(400).json({ error: 'targetUrl too long' });
+        }
+        if (!validateFlareTargetUrl(targetUrl)) {
+            return res.status(403).json({ error: 'targetUrl not in allowlist' });
+        }
+
+        const body = {
+            cmd: 'request.get',
+            url: targetUrl,
+            maxTimeout: FLARESOLVERR_TIMEOUT_MS,
+        };
+        if (sessionId && typeof sessionId === 'string' && sessionId.length <= 128) {
+            body.session = sessionId;
+        }
+
+        try {
+            const { response, data } = await postToFlareSolverr(flareCheck.url, body);
+            if (!data) {
+                return res.status(502).json({ error: 'FlareSolverr returned non-JSON response' });
+            }
+            res.status(response.ok ? 200 : 502).json(data);
+        } catch (err) {
+            console.error('[cl-helper] FlareSolverr forward error:', err.message);
+            const message = err.name === 'AbortError'
+                ? 'FlareSolverr timed out'
+                : `Failed to reach FlareSolverr: ${err.message}`;
+            res.status(502).json({ error: message });
+        }
+    });
+
+    router.post('/flaresolverr-session-create', async (req, res) => {
+        const { flareUrl, sessionId } = req.body ?? {};
+        const flareCheck = validateFlareUrl(flareUrl);
+        if (flareCheck.error) return res.status(400).json({ error: flareCheck.error });
+
+        const body = { cmd: 'sessions.create' };
+        if (sessionId && typeof sessionId === 'string' && sessionId.length <= 128) {
+            body.session = sessionId;
+        }
+
+        try {
+            const { response, data } = await postToFlareSolverr(flareCheck.url, body);
+            if (!data) {
+                return res.status(502).json({ error: 'FlareSolverr returned non-JSON response' });
+            }
+            res.status(response.ok ? 200 : 502).json(data);
+        } catch (err) {
+            console.error('[cl-helper] FlareSolverr session-create error:', err.message);
+            const message = err.name === 'AbortError'
+                ? 'FlareSolverr timed out'
+                : `Failed to reach FlareSolverr: ${err.message}`;
+            res.status(502).json({ error: message });
+        }
+    });
+
+    router.post('/flaresolverr-session-destroy', async (req, res) => {
+        const { flareUrl, sessionId } = req.body ?? {};
+        const flareCheck = validateFlareUrl(flareUrl);
+        if (flareCheck.error) return res.status(400).json({ error: flareCheck.error });
+
+        if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 128) {
+            return res.status(400).json({ error: 'sessionId is required' });
+        }
+
+        try {
+            const { response, data } = await postToFlareSolverr(flareCheck.url, {
+                cmd: 'sessions.destroy',
+                session: sessionId,
+            });
+            if (!data) {
+                return res.status(502).json({ error: 'FlareSolverr returned non-JSON response' });
+            }
+            res.status(response.ok ? 200 : 502).json(data);
+        } catch (err) {
+            console.error('[cl-helper] FlareSolverr session-destroy error:', err.message);
+            const message = err.name === 'AbortError'
+                ? 'FlareSolverr timed out'
+                : `Failed to reach FlareSolverr: ${err.message}`;
+            res.status(502).json({ error: message });
+        }
+    });
+}
+
+// =============================================================================
+// Plugin entry
+// =============================================================================
+
+/**
+ * @param {import('express').Router} router
+ */
+export async function init(router) {
+    router.get('/health', (_req, res) => {
+        res.json({ ok: true, version: '1.5.1', thumbnails: _thumbsReady });
+    });
+
+    registerThumbnailRoutes(router);
+    registerPygmalionRoutes(router);
+    registerCharacterTavernRoutes(router);
+    registerDataCatRoutes(router);
+    registerImgchestRoutes(router);
+    registerCivitaiRoutes(router);
+    registerSaucepanRoutes(router);
+    registerDropboxRoutes(router);
+    registerFlareSolverrRoutes(router);
 
     console.log('[cl-helper] Character Library helper plugin loaded');
 
-    // ---- Async: discover image processing library (after all routes registered) ----
+    // Image library load happens after route registration so a slow or
+    // failed jimp import never delays /health or other routes from being
+    // available. Thumbnail routes degrade gracefully when _thumbsReady is false.
     _imagesDir = resolveImagesDir();
+    _charactersDir = resolveCharactersDir();
     if (_imagesDir) {
         _cacheDir = join(_imagesDir, '..', 'cl_thumbs');
         const ok = await initImageLib();
@@ -857,5 +1672,11 @@ export async function init(router) {
         }
     } else {
         console.log('[cl-helper] Gallery thumbnails disabled (images directory not found)');
+    }
+    if (_charactersDir && _thumbsReady) {
+        _avatarThumbDir = join(_charactersDir, '..', 'cl_avatar_thumbs');
+        console.log(`[cl-helper] Avatar thumbnails enabled (characters: ${_charactersDir})`);
+    } else if (!_charactersDir) {
+        console.log('[cl-helper] Avatar thumbnails disabled (characters directory not found)');
     }
 }

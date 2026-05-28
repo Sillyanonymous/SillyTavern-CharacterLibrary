@@ -1,4 +1,4 @@
-// ChubAI Provider — full implementation for the Chub character source
+// ChubAI Provider - full implementation for the Chub character source
 //
 // Handles browsing, linking, metadata fetching, update checking, and
 // version history against ChubAI's APIs (REST metadata + V4 Git).
@@ -27,7 +27,7 @@ let _metadata = null;
 let _projectId = null;
 let _metadataPath = null;
 
-// Cached raw API node from fetchLinkStats — reused by "View on" button
+// Cached raw API node from fetchLinkStats - reused by "View on" button
 let _cachedLinkNode = null;
 
 /**
@@ -263,7 +263,7 @@ class ChubProvider extends ProviderBase {
 
             const _listingName = this.getListingName(metadata);
 
-            // V4 Git card.json — canonical exported state
+            // V4 Git card.json - canonical exported state
             if (useV4 && projectId) {
                 const cardJson = await this._fetchCardFromV4(projectId);
                 if (cardJson) {
@@ -607,7 +607,7 @@ class ChubProvider extends ProviderBase {
             const normalizedName = name.toLowerCase().trim();
             const nameWords = normalizedName.split(/\s+/).filter(w => w.length > 2);
 
-            // Pass 1: author filter — most reliable when creator is known
+            // Pass 1: author filter - most reliable when creator is known
             if (creator && creator.trim()) {
                 const creatorLower = creator.toLowerCase().trim();
                 const authorParams = new URLSearchParams({
@@ -719,7 +719,7 @@ class ChubProvider extends ProviderBase {
 
             assignGalleryId(characterCard, options, api);
 
-            // Avatar download — priority chain
+            // Avatar download - priority chain
             const imageUrls = [];
             if (metadataMaxResUrl) imageUrls.push(metadataMaxResUrl);
             if (hitData?.avatar_url) imageUrls.push(hitData.avatar_url);

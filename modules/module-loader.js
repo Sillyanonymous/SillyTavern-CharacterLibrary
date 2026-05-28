@@ -2,8 +2,8 @@
  * Module Loader for SillyTavern Character Library
  *
  * Two-tier initialization:
- *   Tier 1 — Loaded immediately (critical for Characters grid / detail modal)
- *   Tier 2 — Lazily loaded on first use via proxy stubs
+ *   Tier 1 - Loaded immediately (critical for Characters grid / detail modal)
+ *   Tier 2 - Lazily loaded on first use via proxy stubs
  */
 
 import ProviderRegistry from './providers/provider-registry.js';
@@ -14,7 +14,7 @@ import CoreAPI from './core-api.js';
 // CSS LOADER
 // ========================================
 
-const MODULE_CSS_VERSION = 5;
+const MODULE_CSS_VERSION = 63;
 
 function loadModuleCSS(path) {
     return new Promise((resolve) => {
@@ -59,8 +59,8 @@ function createLazyBridgeGroup(importFn, setupFn) {
 
     /**
      * Returns a stub that, on call, triggers the shared import then resolves
-     * getTarget() — which by that point has been replaced with the real
-     * function by setupFn — and forwards the original arguments.
+     * getTarget() - which by that point has been replaced with the real
+     * function by setupFn - and forwards the original arguments.
      */
     function createStub(getTarget) {
         return function (...args) {
@@ -90,7 +90,7 @@ const ModuleLoader = {
     register(name, module) {
         this.modules[name] = module;
         delete this._lazyLoaders[name];
-        console.log(`[ModuleLoader] Registered module: ${name}`);
+        window.debugLog?.(`[ModuleLoader] Registered module: ${name}`);
     },
 
     async initAll(dependencies) {
@@ -99,7 +99,7 @@ const ModuleLoader = {
                 if (module.init && !module._mlInitDone) {
                     await module.init(dependencies);
                     module._mlInitDone = true;
-                    console.log(`[ModuleLoader] Initialized module: ${name}`);
+                    window.debugLog?.(`[ModuleLoader] Initialized module: ${name}`);
                 }
             } catch (err) {
                 console.error(`[ModuleLoader] Failed to initialize module: ${name}`, err);
@@ -169,12 +169,12 @@ const ModuleLoader = {
 // ========================================
 
 async function initModuleSystem() {
-    console.log('[ModuleLoader] Initializing module system...');
+    window.debugLog?.('[ModuleLoader] Initializing module system...');
 
     const dependencies = {};
 
     // ============================
-    // TIER 1 — Immediate modules
+    // TIER 1 - Immediate modules
     // ============================
 
     try {
@@ -254,6 +254,29 @@ async function initModuleSystem() {
     }
 
     try {
+        loadModuleCSS('./custom-css.css');
+        const customCssModule = await import('./custom-css.js');
+        ModuleLoader.register('custom-css', customCssModule.default);
+
+        window.openCustomCssModal = customCssModule.openModal;
+        window.closeCustomCssModal = customCssModule.closeModal;
+        window.clearAllCustomCSSSnippets = customCssModule.clearAllSnippets;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load custom-css module:', err);
+    }
+
+    try {
+        loadModuleCSS('./css-assistant.css');
+        const cssAssistantModule = await import('./css-assistant.js');
+        ModuleLoader.register('css-assistant', cssAssistantModule.default);
+
+        window.openCssAssistant = cssAssistantModule.openModal;
+        window.closeCssAssistant = cssAssistantModule.closeModal;
+    } catch (err) {
+        console.warn('[ModuleLoader] Could not load css-assistant module:', err);
+    }
+
+    try {
         loadModuleCSS('./character-creator.css');
         const creatorModule = await import('./character-creator.js');
         ModuleLoader.register('character-creator', creatorModule.default);
@@ -295,7 +318,7 @@ async function initModuleSystem() {
         console.warn('[ModuleLoader] Could not load playlists module:', err);
     }
 
-    // Gallery Extractors — lazy-loaded on first use to save memory
+    // Gallery Extractors - lazy-loaded on first use to save memory
     // All call sites guard with typeof window.extractGalleryImages === 'function'
     let _extractorsLoaded = false;
     async function ensureExtractorsLoaded() {
@@ -309,13 +332,16 @@ async function initModuleSystem() {
                 import('./gallery-extractors/gdrive.js'),
                 import('./gallery-extractors/catbox.js'),
                 import('./gallery-extractors/mega.js'),
-                import('./gallery-extractors/postimg.js')
+                import('./gallery-extractors/postimg.js'),
+                import('./gallery-extractors/imgbox.js'),
+                import('./gallery-extractors/civitai.js'),
+                import('./gallery-extractors/dropbox.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;
             window.isGalleryUrl = isGalleryUrl;
             window.identifyGallerySources = identifyGallerySources;
-            console.log('[ModuleLoader] Gallery extractors loaded (on demand)');
+            window.debugLog?.('[ModuleLoader] Gallery extractors loaded (on demand)');
         } catch (err) {
             _extractorsLoaded = false;
             console.warn('[ModuleLoader] Could not load gallery extractors:', err);
@@ -323,7 +349,7 @@ async function initModuleSystem() {
     }
     window.ensureExtractorsLoaded = ensureExtractorsLoaded;
 
-    // Providers — must be Tier 1 because ProviderRegistry is queried
+    // Providers - must be Tier 1 because ProviderRegistry is queried
     // during character grid rendering (link indicators, taglines, etc.)
     loadModuleCSS('./providers/browse-shared.css');
     loadModuleCSS('./providers/chub/chub-browse.css');
@@ -355,11 +381,11 @@ async function initModuleSystem() {
         }
         window.ProviderRegistry = ProviderRegistry;
         window.closeActiveBrowseDropdowns = ProviderRegistry.closeActiveBrowseDropdowns;
-        console.log(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
+        window.debugLog?.(`[ModuleLoader] Providers registered and initialized (${ProviderRegistry.getAllProviders().length}/${providerImports.length})`);
     }
 
     // ============================
-    // TIER 2 — Lazy modules
+    // TIER 2 - Lazy modules
     // ============================
 
     setupLazyBatchTagging();
@@ -369,7 +395,7 @@ async function initModuleSystem() {
     // Initialize all Tier 1 modules
     await ModuleLoader.initAll(dependencies);
 
-    console.log('[ModuleLoader] Module system ready');
+    window.debugLog?.('[ModuleLoader] Module system ready');
 }
 
 
@@ -384,7 +410,7 @@ function setupLazyBatchTagging() {
         ModuleLoader.register('batch-tagging', mod.default);
         await mod.default.init({});
         mod.default._mlInitDone = true;
-        console.log('[ModuleLoader] Lazy-loaded batch-tagging');
+        window.debugLog?.('[ModuleLoader] Lazy-loaded batch-tagging');
     });
 }
 
@@ -418,7 +444,7 @@ function setupLazyChats() {
             window.openChat = chats.openChat;
             window.deleteChat = chats.deleteChat;
 
-            console.log('[ModuleLoader] Lazy-loaded chats');
+            window.debugLog?.('[ModuleLoader] Lazy-loaded chats');
         }
     );
 

@@ -1,8 +1,8 @@
-// Pygmalion API utilities — used by both pygmalion-provider.js and pygmalion-browse.js
+// Pygmalion API utilities - used by both pygmalion-provider.js and pygmalion-browse.js
 //
 // Connect RPC protocol over HTTPS to server.pygmalion.chat.
-// Public endpoints — no auth required for character search/detail.
-// Authenticated endpoints — require Bearer token for follow/user operations.
+// Public endpoints - no auth required for character search/detail.
+// Authenticated endpoints - require Bearer token for follow/user operations.
 
 // ========================================
 // CONSTANTS

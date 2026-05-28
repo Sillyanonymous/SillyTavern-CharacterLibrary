@@ -12,20 +12,20 @@
 
 
 #wyvernFollowCreatorBtn {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.2), rgba(192, 57, 43, 0.2));
-    border: 1px solid rgba(231, 76, 60, 0.4);
-    color: #e74c3c;
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.2), rgba(var(--cl-error-bright-darker-rgb), 0.2));
+    border: 1px solid rgba(var(--cl-error-bright-rgb), 0.4);
+    color: var(--cl-error-bright);
     padding: 6px 12px;
     font-size: var(--font-md);
 }
 
 #wyvernFollowCreatorBtn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.3), rgba(192, 57, 43, 0.3));
-    border-color: rgba(231, 76, 60, 0.6);
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.3), rgba(var(--cl-error-bright-darker-rgb), 0.3));
+    border-color: rgba(var(--cl-error-bright-rgb), 0.6);
 }
 
 #wyvernFollowCreatorBtn.following {
-    background: linear-gradient(135deg, rgba(231, 76, 60, 0.4), rgba(192, 57, 43, 0.4));
+    background: linear-gradient(135deg, rgba(var(--cl-error-bright-rgb), 0.4), rgba(var(--cl-error-bright-darker-rgb), 0.4));
     color: #fff;
 }
 

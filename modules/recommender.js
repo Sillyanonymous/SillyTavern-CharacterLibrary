@@ -95,6 +95,8 @@ let activePreset = null;
 let lastDebugContext = null;
 let _lastRawApiResponse = null;
 let _lastEvaluatedCount = 0;
+let _lastPrompt = '';
+let _excludedAvatars = new Set();
 
 
 // ========================================
@@ -117,14 +119,14 @@ function setOpt(key, value) {
 
 function createModal() {
     const html = `
-    <div id="recommenderModal" class="confirm-modal hidden">
-        <div class="confirm-modal-content recommender-modal-content">
-            <div class="recommender-header">
-                <div class="recommender-header-title">
+    <div id="recommenderModal" class="cl-modal">
+        <div class="cl-modal-content recommender-modal-content">
+            <div class="cl-modal-header">
+                <h3>
                     <i class="fa-solid fa-wand-magic-sparkles"></i>
                     <span>Card Recommender</span>
-                </div>
-                <button class="recommender-close-btn" id="recommenderCloseBtn">
+                </h3>
+                <button class="cl-modal-close" id="recommenderCloseBtn" title="Close">
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
@@ -296,9 +298,9 @@ function createModal() {
                     </div>
                 </div>
 
-                <div id="recommenderStatus" class="recommender-status hidden"></div>
-
                 <div id="recommenderResults" class="recommender-results hidden"></div>
+
+                <div id="recommenderStatus" class="recommender-status hidden"></div>
             </div>
         </div>
     </div>`;
@@ -322,14 +324,42 @@ function openModal() {
     }
     loadSettingsIntoUI();
     clearResults();
-    modal.classList.remove('hidden');
+    modal.classList.add('visible');
     if (!matchMedia('(pointer: coarse)').matches) document.getElementById('recommenderPrompt')?.focus();
     loadProfiles();
 }
 
 function closeModal() {
+    if (recommenderHasActiveWork()) {
+        const message = isGenerating
+            ? 'A recommendation is currently generating. Close and abort it?'
+            : 'Closing will discard the current results and reroll history.';
+        CoreAPI.showConfirm({
+            title: 'Close the Recommender?',
+            message,
+            confirmLabel: 'Close',
+            cancelLabel: 'Keep Open',
+            danger: true,
+        }).then(confirmed => {
+            if (confirmed) forceCloseModal();
+        });
+        return;
+    }
+    forceCloseModal();
+}
+
+function forceCloseModal() {
     abortController?.abort();
-    document.getElementById('recommenderModal')?.classList.add('hidden');
+    document.getElementById('recommenderModal')?.classList.remove('visible');
+    _lastPrompt = '';
+    _excludedAvatars = new Set();
+}
+
+function recommenderHasActiveWork() {
+    if (isGenerating) return true;
+    const resultsEl = document.getElementById('recommenderResults');
+    if (resultsEl && !resultsEl.classList.contains('hidden') && resultsEl.children.length) return true;
+    return false;
 }
 
 function loadSettingsIntoUI() {
@@ -619,6 +649,7 @@ function attachEvents() {
         id: 'recommenderModal',
         tier: 5,
         close: () => closeModal(),
+        visible: (el) => el.classList.contains('visible'),
     });
 
     // Enter key to submit
@@ -629,7 +660,7 @@ function attachEvents() {
         }
     });
 
-    // Result card clicks — name link opens modal, card click is passive
+    // Result card clicks - name link opens modal, card click is passive
     document.getElementById('recommenderResults')?.addEventListener('click', (e) => {
         const plBtn = e.target.closest('.recommender-playlist-btn');
         if (plBtn) {
@@ -648,6 +679,14 @@ function attachEvents() {
             const avatars = [...document.querySelectorAll('.recommender-result-card[data-avatar]')]
                 .map(c => c.dataset.avatar).filter(Boolean);
             if (avatars.length) CoreAPI.openPlaylistPicker(avatars);
+            return;
+        }
+
+        const rerollBtn = e.target.closest('#recommenderRerollBtn');
+        if (rerollBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleReroll();
             return;
         }
 
@@ -957,6 +996,14 @@ function cleanTextForLLM(raw) {
     return text.trim();
 }
 
+// orphan halves bonk Python-strict encoders downstream (LiteLLM, ai-horde, etc).
+function stripOrphanSurrogates(str) {
+    if (!str) return str;
+    return str
+        .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+        .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+}
+
 const PROVIDER_TAGLINE_KEYS = ['chub', 'chartavern', 'jannyai', 'pygmalion', 'wyvern'];
 
 function getProviderTagline(char) {
@@ -1119,17 +1166,16 @@ function updateCustomConnectionStatus() {
     text.textContent = model || 'Custom API';
 }
 
+function isAuthError(message) {
+    const m = String(message || '').toLowerCase();
+    return m.includes('unauthorized') || m.includes('401')
+        || m.includes('invalid api key') || m.includes('authentication');
+}
+
 async function callSillyTavernAPI(messages, temperature, signal) {
     const profile = getSelectedProfile();
     const source = profile?.api || activeSource;
     const model = profile?.model || activeModel;
-
-    CoreAPI.debugLog('[Recommender] Generate debug:', {
-        profileApi: profile?.api, profileModel: profile?.model,
-        activeSource, activeModel, resolvedSource: source, resolvedModel: model,
-        hasProfile: !!profile, hasPreset: !!activePreset,
-    });
-    CoreAPI.debugLog('[Recommender] ST API request:', { source, model, temperature, profileName: profile?.name, messageCount: messages.length, userMsgLength: messages[1]?.content?.length });
 
     if (!source) {
         throw new Error(
@@ -1142,18 +1188,31 @@ async function callSillyTavernAPI(messages, temperature, signal) {
     if (model) body.model = model;
 
     if (profile) {
-        // Connection Profile — pass its api-url for source-specific URL fields
+        if (profile['secret-id']) body.secret_id = profile['secret-id'];
         if (profile['api-url']) {
             body.custom_url = profile['api-url'];
             body.vertexai_region = profile['api-url'];
             body.zai_endpoint = profile['api-url'];
+            body.siliconflow_endpoint = profile['api-url'];
+            body.minimax_endpoint = profile['api-url'];
         }
-    } else if (activePreset) {
-        // No profile — use URL/auth fields from the active OAI preset
-        if (activePreset.custom_url) body.custom_url = activePreset.custom_url;
-        if (activePreset.reverse_proxy) body.reverse_proxy = activePreset.reverse_proxy;
-        if (activePreset.proxy_password) body.proxy_password = activePreset.proxy_password;
+        if (profile['prompt-post-processing']) body.custom_prompt_post_processing = profile['prompt-post-processing'];
+    } else if (activePreset && activePreset.custom_url) {
+        body.custom_url = activePreset.custom_url;
     }
+
+    const proxy = await CoreAPI.resolveProxyForProfile(profile);
+    if (proxy?.url) body.reverse_proxy = proxy.url;
+    if (proxy?.password) body.proxy_password = proxy.password;
+
+    CoreAPI.debugLog('[Recommender] ST request:', {
+        source, model, temperature,
+        profileName: profile?.name, hasSecretId: !!body.secret_id,
+        customUrl: body.custom_url || null,
+        reverseProxy: body.reverse_proxy || null,
+        hasProxyPassword: !!body.proxy_password,
+        messageCount: messages.length, userMsgLength: messages[1]?.content?.length,
+    });
 
     for (const endpoint of GENERATE_ENDPOINTS) {
         let response;
@@ -1163,16 +1222,14 @@ async function callSillyTavernAPI(messages, temperature, signal) {
             if (err.name === 'AbortError') throw new Error('Generation cancelled.');
             continue;
         }
-
         if (response.status === 404) continue;
-
         if (!response.ok) {
             const errText = await response.text().catch(() => '');
             throw new Error(`API returned ${response.status}: ${errText.slice(0, 300)}`);
         }
 
-        let data;
         const responseText = await response.text();
+        let data;
         try {
             data = JSON.parse(responseText);
         } catch {
@@ -1181,6 +1238,16 @@ async function callSillyTavernAPI(messages, temperature, signal) {
         }
         CoreAPI.debugLog('[Recommender] Raw API data:', JSON.stringify(data).slice(0, 500));
         _lastRawApiResponse = responseText;
+
+        if (isAuthError(data?.error?.message)) {
+            throw new Error(
+                'Authentication failed. Open SillyTavern → Connection Manager and click the "Update" ' +
+                'button on the selected connection profile to refresh its credentials, then retry.'
+            );
+        }
+        if (data?.error) {
+            console.warn('[Recommender] ST returned error envelope:', data);
+        }
         return extractContent(data);
     }
     throw new Error(
@@ -1237,29 +1304,34 @@ function extractContent(data) {
     }
 
     const msg = data?.choices?.[0]?.message;
-    if (msg && 'content' in msg) return msg.content ?? '';
-    if (data?.choices?.[0]?.text != null) return data.choices[0].text;
+    if (msg && typeof msg.content === 'string') return msg.content;
+    if (msg && 'content' in msg && msg.content == null) return '';
+    const msgBlocks = CoreAPI.flattenContentBlocks(msg?.content);
+    if (msgBlocks) return msgBlocks;
+    if (typeof data?.choices?.[0]?.text === 'string') return data.choices[0].text;
     const delta = data?.choices?.[0]?.delta;
-    if (delta && 'content' in delta) return delta.content ?? '';
-    if (data?.message && 'content' in data.message) return data.message.content ?? '';
+    if (delta && typeof delta.content === 'string') return delta.content;
+    if (typeof data?.message?.content === 'string') return data.message.content;
     if (typeof data?.content === 'string') return data.content;
+    const rootBlocks = CoreAPI.flattenContentBlocks(data?.content);
+    if (rootBlocks) return rootBlocks;
     if (typeof data?.response === 'string') return data.response;
     if (typeof data?.output?.text === 'string') return data.output.text;
     if (typeof data?.result === 'string') return data.result;
     if (typeof data === 'string') return data;
 
     CoreAPI.debugLog('[Recommender] Unrecognized response shape:', JSON.stringify(data).slice(0, 500));
-    throw new Error('Unexpected API response format — could not extract content');
+    throw new Error('Unexpected API response format: could not extract content');
 }
 
 async function generate(userPrompt, chars, opts, signal) {
     const charList = buildCharacterList(chars, opts);
+    const userMessage = stripOrphanSurrogates(
+        `CHARACTER LIBRARY (${chars.length} characters):\n${charList}\n\nUSER REQUEST: ${userPrompt}\n\nRecommend up to ${opts.maxResults} characters. Respond with a JSON array only.`
+    );
     const messages = [
         { role: 'system', content: SYSTEM_PROMPT },
-        {
-            role: 'user',
-            content: `CHARACTER LIBRARY (${chars.length} characters):\n${charList}\n\nUSER REQUEST: ${userPrompt}\n\nRecommend up to ${opts.maxResults} characters. Respond with a JSON array only.`
-        },
+        { role: 'user', content: userMessage },
     ];
 
     const mode = getOpt('apiMode');
@@ -1652,6 +1724,7 @@ function renderResults(recommendations) {
     }
 
     const cards = [];
+    const renderedAvatars = [];
     let rank = 0;
     for (const rec of recommendations) {
         const idx = rec.index - 1;
@@ -1659,8 +1732,9 @@ function renderResults(recommendations) {
         const char = sampledCharacters[idx];
         if (!char) continue;
         rank++;
+        if (char.avatar) renderedAvatars.push(char.avatar);
 
-        const avatarUrl = CoreAPI.getCharacterAvatarUrl(char.avatar);
+        const avatarUrl = CoreAPI.getCharacterAvatarStThumbUrl(char.avatar);
         const tags = CoreAPI.getCharacterTags(char);
         const tagsHtml = tags.slice(0, 5).map(t =>
             `<span class="recommender-tag">${CoreAPI.escapeHtml(t)}</span>`
@@ -1696,11 +1770,15 @@ function renderResults(recommendations) {
             <i class="fa-solid fa-sparkles"></i>
             <span>${cards.length} Recommendation${cards.length !== 1 ? 's' : ''}</span>
             <button class="recommender-playlist-all-btn" title="Add all to playlist"><i class="fa-solid fa-list-ul"></i></button>
+            <button id="recommenderRerollBtn" class="recommender-reroll-btn" title="Reroll: same prompt, exclude these picks"><i class="fa-solid fa-dice"></i><span class="recommender-reroll-label">Reroll</span></button>
             <span class="recommender-results-badge">${_lastEvaluatedCount} evaluated</span>
         </div>
         <div class="recommender-results-grid">${cards.join('')}</div>
     `;
     resultsEl.classList.remove('hidden');
+
+    // Track these picks so reroll excludes them next run
+    for (const av of renderedAvatars) _excludedAvatars.add(av);
 }
 
 function renderRawFallback(rawContent) {
@@ -1720,47 +1798,7 @@ function renderRawFallback(rawContent) {
 // SUBMIT HANDLER
 // ========================================
 
-async function handleSubmit() {
-    if (isGenerating) return;
-
-    const prompt = document.getElementById('recommenderPrompt')?.value?.trim();
-    if (!prompt) {
-        CoreAPI.showToast('Please enter a prompt describing what you\'re looking for.', 'warning');
-        return;
-    }
-
-    const allChars = CoreAPI.getAllCharacters();
-    if (!allChars.length) {
-        CoreAPI.showToast('No characters in your library.', 'warning');
-        return;
-    }
-
-    isGenerating = true;
-    const submitBtn = document.getElementById('recommenderSubmitBtn');
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.classList.add('generating');
-        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span class="recommender-submit-label">Generating…</span>';
-    }
-    clearResults();
-
-    // Yield so the browser paints the spinner before heavy sync work
-    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-
-    saveSettingsFromUI();
-
-    const pool = getFilteredPool();
-    if (!pool.length) {
-        CoreAPI.showToast('No characters match the current filters. Adjust the Sample Pool settings.', 'warning');
-        isGenerating = false;
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.classList.remove('generating');
-            submitBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span class="recommender-submit-label">Recommend</span>';
-        }
-        return;
-    }
-
+async function executeRecommendation(prompt, pool) {
     const opts = {
         sampleSize: getOpt('sampleSize'),
         temperature: getOpt('temperature'),
@@ -1777,7 +1815,7 @@ async function handleSubmit() {
     const timeoutId = setTimeout(() => abortController.abort(), batchMode ? GENERATE_TIMEOUT_MS * 2 : GENERATE_TIMEOUT_MS);
 
     try {
-        if (getOpt('batchMode')) {
+        if (batchMode) {
             await runBatchMode(prompt, pool, opts, abortController.signal);
         } else {
             sampledCharacters = sampleCharacters(pool, opts.sampleSize);
@@ -1811,11 +1849,107 @@ async function handleSubmit() {
     } finally {
         clearTimeout(timeoutId);
         abortController = null;
+    }
+}
+
+async function handleSubmit() {
+    if (isGenerating) return;
+
+    const prompt = document.getElementById('recommenderPrompt')?.value?.trim();
+    if (!prompt) {
+        CoreAPI.showToast('Please enter a prompt describing what you\'re looking for.', 'warning');
+        return;
+    }
+
+    const allChars = CoreAPI.getAllCharacters();
+    if (!allChars.length) {
+        CoreAPI.showToast('No characters in your library.', 'warning');
+        return;
+    }
+
+    isGenerating = true;
+    const submitBtn = document.getElementById('recommenderSubmitBtn');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('generating');
+        submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span class="recommender-submit-label">Generating…</span>';
+    }
+    clearResults();
+
+    // Reset reroll state for a fresh prompt run
+    _lastPrompt = prompt;
+    _excludedAvatars = new Set();
+
+    // Yield so the browser paints the spinner before heavy sync work
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    saveSettingsFromUI();
+
+    const pool = getFilteredPool();
+    if (!pool.length) {
+        CoreAPI.showToast('No characters match the current filters. Adjust the Sample Pool settings.', 'warning');
         isGenerating = false;
         if (submitBtn) {
             submitBtn.disabled = false;
             submitBtn.classList.remove('generating');
             submitBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span class="recommender-submit-label">Recommend</span>';
+        }
+        return;
+    }
+
+    try {
+        await executeRecommendation(prompt, pool);
+    } finally {
+        isGenerating = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('generating');
+            submitBtn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i><span class="recommender-submit-label">Recommend</span>';
+        }
+    }
+}
+
+async function handleReroll() {
+    if (isGenerating) return;
+    if (!_lastPrompt) {
+        CoreAPI.showToast('No previous run to reroll. Hit Recommend first.', 'warning');
+        return;
+    }
+
+    // Immediate feedback BEFORE any heavy work
+    isGenerating = true;
+    const rerollBtn = document.getElementById('recommenderRerollBtn');
+    if (rerollBtn) {
+        rerollBtn.disabled = true;
+        rerollBtn.classList.add('generating');
+    }
+    showStatus('<i class="fa-solid fa-spinner fa-spin"></i> Rerolling...', 'info');
+
+    // Yield so the browser paints the spinner before sync filter/sample work
+    await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+    const pool = getFilteredPool().filter(c => !_excludedAvatars.has(c.avatar));
+    if (!pool.length) {
+        hideStatus();
+        CoreAPI.showToast('No more characters left in the pool. Start a new prompt or adjust filters.', 'warning');
+        isGenerating = false;
+        if (rerollBtn) {
+            rerollBtn.disabled = false;
+            rerollBtn.classList.remove('generating');
+        }
+        return;
+    }
+
+    try {
+        await executeRecommendation(_lastPrompt, pool);
+    } finally {
+        isGenerating = false;
+        // Always reset reroll button - on success renderResults replaces it
+        // (no-op on a fresh button), on error the old one stays in DOM
+        const btn = document.getElementById('recommenderRerollBtn');
+        if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('generating');
         }
     }
 }

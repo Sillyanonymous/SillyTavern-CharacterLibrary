@@ -43,7 +43,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 7px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: background 0.15s;
 }
@@ -79,7 +79,7 @@
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     flex-shrink: 0;
 }
 
@@ -97,7 +97,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 7px 10px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     cursor: pointer;
     transition: background 0.15s;
     color: var(--cl-accent);
@@ -127,7 +127,7 @@
 /* --- Playlist Filter Dropdown --- */
 
 .playlist-filter-btn.active {
-    background: rgba(74, 158, 255, 0.15);
+    background: rgba(var(--accent-rgb), 0.15);
     border-color: var(--cl-accent);
     color: var(--cl-accent);
 }
@@ -183,7 +183,7 @@
     width: 100%;
     padding: 6px 10px;
     border: none;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     background: transparent;
     color: var(--cl-text-secondary);
     font-size: var(--font-md);
@@ -201,7 +201,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 6px 10px;
-    border-radius: 5px;
+    border-radius: var(--radius-sm-alt);
     cursor: pointer;
     transition: background 0.15s;
     color: var(--cl-text-primary);
@@ -212,7 +212,7 @@
 }
 
 .pl-filter-item.active {
-    background: rgba(74, 158, 255, 0.12);
+    background: rgba(var(--accent-rgb), 0.12);
     color: var(--cl-accent);
 }
 
@@ -253,11 +253,12 @@
 }
 
 .pl-chip {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
     padding: 4px 10px;
-    border-radius: 12px;
+    border-radius: var(--radius-2xl);
     font-size: var(--font-sm);
     background: rgba(255, 255, 255, 0.08);
     color: var(--cl-text-primary);
@@ -281,6 +282,44 @@
 .pl-chip-add:hover {
     border-color: var(--cl-accent);
     color: var(--cl-accent);
+}
+
+/* corner X that reveals on hover, lets you bail out of a playlist without
+   opening the picker. mobile keeps it hidden, the picker handles removes there */
+.pl-chip-remove {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border-radius: var(--radius-circle);
+    background: var(--cl-error);
+    color: white;
+    border: 1.5px solid var(--bg-primary);
+    font-size: var(--font-3xs);
+    line-height: 1;
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.pl-chip:hover .pl-chip-remove {
+    display: inline-flex;
+}
+
+.pl-chip-remove:hover {
+    background: var(--cl-error-bright);
+    transform: scale(1.1);
+}
+
+.pl-chip-add .pl-chip-remove { display: none !important; }
+
+@media (max-width: 768px) {
+    /* hover doesnt apply on touch, picker covers removes on mobile */
+    .pl-chip-remove { display: none !important; }
 }
 
 /* --- Playlist Management Modal --- */
@@ -320,7 +359,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: 5px 6px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     position: relative;
 }
 
@@ -331,7 +370,7 @@
 .pl-manage-icon-btn {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     border: 1px solid rgba(255, 255, 255, 0.15);
     background: rgba(255, 255, 255, 0.05);
     cursor: pointer;
@@ -352,7 +391,7 @@
 .pl-color-swatch {
     width: 22px;
     height: 22px;
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     border: none;
     cursor: pointer;
     transition: transform 0.1s;
@@ -372,7 +411,7 @@
     padding: 8px;
     background: var(--cl-glass-bg);
     border: 1px solid var(--cl-border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     box-shadow: var(--cl-shadow-xl);
     backdrop-filter: blur(12px);
     max-width: 260px;
@@ -408,7 +447,7 @@
 .pl-icon-option {
     width: 28px;
     height: 28px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     border: none;
     background: transparent;
     cursor: pointer;
@@ -454,7 +493,7 @@
     color: var(--cl-text-secondary);
     background: rgba(255, 255, 255, 0.08);
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-xl);
     flex-shrink: 0;
     white-space: nowrap;
 }
@@ -491,12 +530,12 @@
         max-width: 100% !important;
         height: auto !important;
         max-height: 75vh !important;
-        border-radius: 16px 16px 0 0 !important;
+        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
         transform: translateY(100%) !important;
         transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
-        padding-bottom: max(8px, env(safe-area-inset-bottom));
+        padding-bottom: max(8px, var(--safe-bottom));
     }
 
     #playlistPickerModal.visible .cl-modal-content {
@@ -508,7 +547,7 @@
     }
 
     .pl-picker-row {
-        min-height: 44px;
+        min-height: var(--touch-target-min);
         padding: 10px 14px;
     }
 
@@ -517,7 +556,7 @@
     }
 
     .pl-create-row {
-        min-height: 44px;
+        min-height: var(--touch-target-min);
         padding: 10px 14px;
     }
 
@@ -530,36 +569,37 @@
         bottom: 0 !important;
         width: 100% !important;
         max-height: 70vh !important;
-        border-radius: 16px 16px 0 0 !important;
+        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
         z-index: 1100 !important;
-        background: var(--bg-secondary) !important;
+        background: var(--cl-glass-bg) !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
         backdrop-filter: blur(12px) !important;
-        box-shadow: 0 -4px 30px rgba(0,0,0,0.5) !important;
+        -webkit-backdrop-filter: blur(12px) !important;
+        box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.5) !important;
         flex-direction: column !important;
         padding: 0 !important;
-        padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+        padding-bottom: var(--safe-bottom) !important;
     }
     #playlistFilterPopup .pl-filter-search-wrap {
         padding: 14px 14px 10px;
         border-bottom: 1px solid var(--glass-border);
         position: sticky;
         top: 0;
-        background: var(--bg-secondary);
+        background: var(--cl-glass-bg);
         z-index: 1;
     }
-    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: 8px; }
-    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: 44px; margin: 0 6px; }
-    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: 44px; font-size: var(--font-md); }
-    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+    #playlistFilterPopup .pl-filter-search { font-size: 16px; padding: 10px 12px; border-radius: var(--radius-lg); }
+    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: var(--touch-target-min); margin: 0 6px; }
+    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: var(--touch-target-min); font-size: var(--font-md); }
+    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, var(--safe-bottom)); }
     #playlistFilterContent { padding: 4px 0; }
 
     /* Scrim behind playlist popup */
     .mobile-playlist-scrim {
         position: fixed;
         inset: 0;
-        background: rgba(0,0,0,0.5);
+        background: var(--cl-modal-scrim);
         z-index: 1099;
     }
 

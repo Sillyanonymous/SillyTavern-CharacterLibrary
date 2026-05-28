@@ -1,4 +1,4 @@
-// Provider Registry — manages external source providers for the Online tab
+// Provider Registry - manages external source providers for the Online tab
 
 /** @type {Map<string, import('./provider-interface.js').ProviderBase>} */
 const providers = new Map();
@@ -32,7 +32,7 @@ export function registerProvider(provider) {
 /**
  * Initialize all registered providers with the CoreAPI reference.
  * Called once during app startup after CoreAPI is available.
- * @param {Object} api — CoreAPI object
+ * @param {Object} api - CoreAPI object
  */
 export async function initProviders(api) {
     coreAPI = api;
@@ -117,8 +117,8 @@ export function getActiveProviderId() {
  * Switch the Online tab to a specific provider. Deactivates the previous one.
  * Called by the Online tab's provider selector UI.
  * @param {string} providerId
- * @param {HTMLElement} container — the provider content area
- * @param {HTMLElement} [filterContainer] — the filter bar area
+ * @param {HTMLElement} container - the provider content area
+ * @param {HTMLElement} [filterContainer] - the filter bar area
  */
 export async function activateProvider(providerId, container, filterContainer) {
     const prev = getActiveProvider();
@@ -135,7 +135,7 @@ export async function activateProvider(providerId, container, filterContainer) {
 
     activeProviderId = providerId;
 
-    // Render filter bar — re-render when switching to a different provider
+    // Render filter bar - re-render when switching to a different provider
     if (filterContainer) {
         const renderedId = filterContainer.dataset.renderedProvider;
         if (renderedId !== providerId) {
@@ -145,7 +145,7 @@ export async function activateProvider(providerId, container, filterContainer) {
         }
     }
 
-    // Render view — re-render when switching to a different provider
+    // Render view - re-render when switching to a different provider
     const renderedId = container.dataset.renderedProvider;
     const domRecreated = renderedId !== providerId;
     if (domRecreated) {
@@ -181,13 +181,13 @@ export function deactivateCurrentProvider() {
 }
 
 // ========================================
-// GENERIC QUERIES — works across all providers
+// GENERIC QUERIES - works across all providers
 // ========================================
 
 /**
  * Find which provider owns a character by checking each provider's getLinkInfo.
  * Returns the first match.
- * @param {Object} char — character object
+ * @param {Object} char - character object
  * @returns {{ provider: import('./provider-interface.js').ProviderBase, linkInfo: import('./provider-interface.js').ProviderLinkInfo }|null}
  */
 export function getCharacterProvider(char) {
@@ -246,7 +246,7 @@ export function getProviderForUrl(url) {
  * have a browsable view. Renders a native `<select>` that library.js will
  * convert into a styled custom dropdown via `initCustomSelect()`.
  *
- * @param {string} activeId — currently active provider ID
+ * @param {string} activeId - currently active provider ID
  * @returns {string} HTML string (empty if ≤1 view provider)
  */
 export function renderProviderSelector(activeId) {
@@ -278,7 +278,7 @@ function updateProviderSelector(activeId) {
 /**
  * Attach change handler to the provider selector dropdown. Called once after
  * the selector HTML has been injected into the DOM and initCustomSelect() runs.
- * @param {Function} onSwitch — callback(providerId) when user picks a provider
+ * @param {Function} onSwitch - callback(providerId) when user picks a provider
  */
 export function initProviderSelector(onSwitch) {
     const select = document.getElementById('providerSelect');

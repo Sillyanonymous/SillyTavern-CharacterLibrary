@@ -36,6 +36,7 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--space-md);
     padding: 12px 20px;
     background: rgba(0, 0, 0, 0.5);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
@@ -47,19 +48,35 @@
     gap: var(--space-sm-md);
     color: #fff;
     font-size: var(--font-base);
+    min-width: 0;
 }
 
 .gv-header-left i {
-    color: var(--SmartThemeQuoteColor, #4a9eff);
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+#galleryViewerCharName {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
 }
 
 .gv-separator {
     opacity: 0.5;
+    flex-shrink: 0;
+}
+
+#galleryViewerCounter {
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
 .gv-header-right {
     display: flex;
     gap: var(--space-sm);
+    flex-shrink: 0;
 }
 
 .gv-btn {
@@ -68,7 +85,7 @@
     color: #fff;
     width: 36px;
     height: 36px;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -105,7 +122,7 @@
 
 .gv-loader i {
     font-size: 2em;
-    color: var(--SmartThemeQuoteColor, #4a9eff);
+    color: var(--accent);
 }
 
 /* Empty state */
@@ -186,7 +203,7 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
     transition: transform 0.1s ease-out, opacity 0.15s ease;
     will-change: transform, opacity;
@@ -202,7 +219,7 @@
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
     outline: none;
 }
@@ -244,12 +261,12 @@
 
 .gv-nav-prev {
     left: 0;
-    border-radius: 0 8px 8px 0;
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 
 .gv-nav-next {
     right: 0;
-    border-radius: 8px 0 0 8px;
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 
 /* Footer */
@@ -299,7 +316,7 @@
 
 .gv-thumbnails::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.3);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
 }
 
 .gv-thumb {
@@ -307,7 +324,7 @@
     flex-shrink: 0;
     width: 60px;
     height: 60px;
-    border-radius: 6px;
+    border-radius: var(--radius-md);
     overflow: hidden;
     cursor: pointer;
     border: 2px solid transparent;
@@ -323,8 +340,8 @@
 
 .gv-thumb.active {
     opacity: 1;
-    border-color: var(--SmartThemeQuoteColor, #4a9eff);
-    box-shadow: 0 0 10px rgba(74, 158, 255, 0.4);
+    border-color: var(--accent);
+    box-shadow: 0 0 10px rgba(var(--accent-rgb), 0.4);
 }
 
 .gv-thumb img {
@@ -347,7 +364,7 @@
     left: 50%;
     transform: translate(-50%, -50%);
     background: rgba(0, 0, 0, 0.5);
-    border-radius: 50%;
+    border-radius: var(--radius-circle);
     width: 24px;
     height: 24px;
     display: flex;
@@ -372,7 +389,7 @@
     letter-spacing: 0.02em;
     color: #fff;
     background: rgba(0, 0, 0, 0.55);
-    border-radius: 3px;
+    border-radius: var(--radius-xs);
     padding: 2px 4px;
     pointer-events: none;
 }
@@ -392,7 +409,7 @@
     background: rgba(0, 0, 0, 0.7);
     color: #fff;
     padding: 4px 12px;
-    border-radius: 4px;
+    border-radius: var(--radius-sm);
     font-size: var(--font-md);
     pointer-events: none;
     opacity: 0;
@@ -412,14 +429,23 @@ body.char-modal-above .gv-modal.visible {
    Mobile overrides (max-width: 768px)
    ========================================================= */
 @media (max-width: 768px) {
-    .gv-header { padding: 10px 12px; }
+    .gv-header { padding: 10px 12px; gap: var(--space-sm); }
     .gv-header-left { font-size: var(--font-md); gap: var(--space-xs-sm); }
-    .gv-btn { width: 40px; height: 40px; }
+    .gv-header-right { gap: var(--space-xs-sm); }
+    .gv-btn { width: 34px; height: 34px; }
     .gv-nav { display: none !important; }
     .gv-thumbnails { padding: 8px 12px; gap: var(--space-xs-sm); }
     .gv-thumb { width: 50px; height: 50px; }
     .gv-footer { padding: 8px 12px; }
-    .gv-filename { font-size: var(--font-xs); }
+    .gv-filename {
+        font-size: var(--font-xs);
+        display: inline-block;
+        max-width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: middle;
+    }
     .gv-image-container {
         padding: 0;
         touch-action: none;
