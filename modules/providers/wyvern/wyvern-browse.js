@@ -1032,7 +1032,7 @@ function loadWyvernToken() {
         wyvernToken = savedToken;
         debugLog('[WyvernAuth] Loaded token from settings');
     }
-    wyvernNsfwEnabled = !!getSetting('wyvernNsfw');
+    wyvernNsfwEnabled = getSetting('wyvernNsfw') === true;
     updateWyvernNsfwToggle();
     updateWyvernLoginUI();
 }
@@ -1079,10 +1079,7 @@ async function wyvernLoginWithCredentials() {
 
         scheduleWyvernTokenRefresh(idToken, refreshToken);
 
-        if (!wyvernNsfwEnabled) {
-            wyvernNsfwEnabled = true;
-            setSetting('wyvernNsfw', true);
-        }
+        wyvernNsfwEnabled = getSetting('wyvernNsfw') === true;
         updateWyvernNsfwToggle();
         updateWyvernLoginUI();
 
@@ -1177,7 +1174,6 @@ function scheduleWyvernTokenRefresh(idToken, refreshToken) {
             if (!recovered) {
                 wyvernToken = null;
                 wyvernNsfwEnabled = false;
-                setSetting('wyvernNsfw', false);
                 updateWyvernNsfwToggle();
                 updateWyvernLoginUI();
             }

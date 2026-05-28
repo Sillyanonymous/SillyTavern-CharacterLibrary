@@ -414,7 +414,6 @@ async function loadCharacters(append = false) {
                 setTimeout(() => loadCharacters(false), 0);
             } else {
                 pygNsfwEnabled = false;
-                setSetting('pygmalionNsfw', false);
                 updateNsfwToggle();
                 showToast('Pygmalion token expired — please re-authenticate.', 'warning', 5000);
                 openPygTokenModal();
@@ -1500,7 +1499,6 @@ function loadPygToken() {
 
     if (!pygToken && pygNsfwEnabled) {
         pygNsfwEnabled = false;
-        setSetting('pygmalionNsfw', false);
     }
     updateNsfwToggle();
     updateLoginUI();
@@ -1614,11 +1612,8 @@ async function loginWithCredentials(email, password) {
 
             scheduleTokenRefresh(token, email, password);
 
-            if (!pygNsfwEnabled) {
-                pygNsfwEnabled = true;
-                setSetting('pygmalionNsfw', true);
-                updateNsfwToggle();
-            }
+            pygNsfwEnabled = getSetting('pygmalionNsfw') === true;
+            updateNsfwToggle();
 
             showToast('Logged in to Pygmalion!', 'success');
             closePygTokenModal();
@@ -1784,11 +1779,10 @@ async function tryAutoLogin() {
                 savePygToken(token);
                 scheduleTokenRefresh(token, email, password);
 
-                if (!pygNsfwEnabled) {
+                if (!pygNsfwEnabled && getSetting('pygmalionNsfw') === true) {
                     pygNsfwEnabled = true;
-                    setSetting('pygmalionNsfw', true);
                     updateNsfwToggle();
-                    // Reload with NSFW if initial load was SFW-only
+                    // Reload with persisted NSFW preference if initial load was SFW-only
                     pygCurrentPage = 0;
                     loadCharacters(false);
                 }
@@ -2811,7 +2805,7 @@ class PygmalionBrowseView extends BrowseView {
         loadPygToken();
 
         // Restore persisted NSFW preference (only if token exists)
-        if (pygToken && getSetting('pygmalionNsfw')) {
+        if (pygToken && getSetting('pygmalionNsfw') === true) {
             pygNsfwEnabled = true;
         }
 

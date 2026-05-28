@@ -100,7 +100,7 @@ let datacatFreshLimitWeek = 20;
 const FRESH_PAGE_INCREMENT = 20;
 
 // NSFW filter (client-side)
-let datacatNsfwEnabled = true;
+let datacatNsfwEnabled = false;
 
 // Faceted tag filtering
 let datacatActiveTagIds = new Set();
@@ -3294,6 +3294,8 @@ let delegatesInitialized = false;
 let modalEventsAttached = false;
 
 function initDatacatView() {
+    datacatNsfwEnabled = getSetting('datacatNsfw') === true;
+
     if (delegatesInitialized) return;
     delegatesInitialized = true;
 
@@ -3416,6 +3418,7 @@ function initDatacatView() {
     // NSFW toggle
     on('datacatNsfwToggle', 'click', () => {
         datacatNsfwEnabled = !datacatNsfwEnabled;
+        setSetting('datacatNsfw', datacatNsfwEnabled);
         updateNsfwToggle();
         if (datacatViewMode === 'following') {
             renderFollowing();

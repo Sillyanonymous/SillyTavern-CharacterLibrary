@@ -467,9 +467,12 @@ const DEFAULT_SETTINGS = {
     civitaiApiKey: null,
 
     // ---- NSFW Toggles ----
+    chubNsfw: false,
+    jannyNsfw: false,
     pygmalionNsfw: false,
     wyvernNsfw: false,
     ctNsfw: false,
+    datacatNsfw: false,
 
     // ---- Search & Sort ----
     defaultSort: 'name_asc',
