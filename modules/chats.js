@@ -169,11 +169,6 @@ async function openChat(char, chatFile) {
         // Close any open modals
         CoreAPI.hideModal('chatPreviewModal');
 
-        // Register gallery folder override for media localization
-        if (CoreAPI.getSetting('uniqueGalleryFolders') && CoreAPI.getCharacterGalleryId(char)) {
-            CoreAPI.registerGalleryFolderOverride(char, true);
-        }
-
         // Embedded mode: single postMessage so ST handles it atomically (matches cl-open-character flow)
         if (CoreAPI.getIsEmbedded() && window.parent !== window) {
             window.parent.postMessage({
@@ -687,6 +682,16 @@ async function fetchFreshChats(isBackground = false) {
     }
 }
 
+// preview is a 150-char slice, so a marker closing past it gets cut and shows a literal *; re-close dangling ones since we dont have the full text
+function closePreviewMarkers(text) {
+    if (!text) return text;
+    let out = text;
+    for (const m of ['```', '~~', '**', '__', '`', '*', '_']) {
+        if ((out.split(m).length - 1) % 2 === 1) out += m;
+    }
+    return out;
+}
+
 function updateChatCardPreview(chat) {
     const secondarySelector = chat.isGroup
         ? `[data-group-id="${CSS.escape(chat.groupId)}"]`
@@ -697,7 +702,7 @@ function updateChatCardPreview(chat) {
         const previewEl = card.querySelector('.chat-card-preview');
         if (previewEl) {
             if (chat.preview) {
-                previewEl.textContent = chat.preview;
+                previewEl.innerHTML = CoreAPI.safePurify(CoreAPI.formatRichText(closePreviewMarkers(chat.preview), chat.charName || '', true));
             } else {
                 previewEl.innerHTML = '<span style="opacity: 0.5;">No messages</span>';
             }
@@ -714,7 +719,7 @@ function updateChatCardPreview(chat) {
         const previewEl = groupItem.querySelector('.chat-group-item-preview');
         if (previewEl) {
             if (chat.preview) {
-                previewEl.textContent = chat.preview;
+                previewEl.innerHTML = CoreAPI.safePurify(CoreAPI.formatRichText(closePreviewMarkers(chat.preview), chat.charName || '', true));
             } else {
                 previewEl.innerHTML = '<span class="no-preview">No messages</span>';
             }
@@ -1190,7 +1195,7 @@ function createChatCard(chat) {
     if (chat.preview === null) {
         previewHtml = '<span style="opacity: 0.5;">Loading preview...</span>';
     } else if (chat.preview) {
-        previewHtml = CoreAPI.escapeHtml(chat.preview);
+        previewHtml = CoreAPI.safePurify(CoreAPI.formatRichText(closePreviewMarkers(chat.preview), chat.charName || '', true));
     } else {
         previewHtml = '<span style="opacity: 0.5;">No messages</span>';
     }
@@ -1256,7 +1261,7 @@ function createGroupedChatItem(chat) {
     if (chat.preview === null) {
         previewText = '<span style="opacity: 0.5;">Loading...</span>';
     } else if (chat.preview) {
-        previewText = CoreAPI.escapeHtml(chat.preview);
+        previewText = CoreAPI.safePurify(CoreAPI.formatRichText(closePreviewMarkers(chat.preview), chat.charName || '', true));
     } else {
         previewText = '<span class="no-preview">No messages</span>';
     }

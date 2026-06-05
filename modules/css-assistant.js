@@ -76,6 +76,7 @@ RESTORE SIMPLE / FLAT CHROME (anti-funhouse, "make modals opaque" / "kill the bl
   Modal IDs the user is most likely to ask about by feature name:
     "Custom CSS" / "CSS editor"           -> #customCssModal
     "Recommender" / "AI recommender"      -> #recommenderModal
+    "Ask about character" / "card chat" / "recommender chat" -> #recommenderCharChatModal (settings panel .recommender-chat-settings; message cards .recommender-chat-msg.user / .assistant; user cards + gear-active follow the accent, neutral surfaces are theme-neutral by design)
     "CSS assistant" / "AI CSS assistant"  -> #cssAssistantModal
     "Add to playlist" / "playlist picker" -> #playlistPickerModal
     "Manage playlists"                    -> #playlistManageModal
@@ -219,8 +220,9 @@ Buttons (the buttonStyle setting toggles glass vs solid chrome; theming applies 
 Inputs / Modals / Dropdowns:
   .glass-input             Text inputs and textareas across the app (topbar search, settings, character detail editor, etc.).
   .cl-input                Text inputs inside module dialogs (batch-tagging, playlists). Peer to .glass-input but scoped to .cl-modal-content surfaces; uses --cl-text-primary and --cl-border.
-  .confirm-modal-content   Yes/No confirmation dialogs only (confirmSaveModal in HTML, plus delete confirms and similar Y/N flows built dynamically in JS). Toggled via the .hidden class on .confirm-modal parent (note: cl-modal uses .visible instead - dual class system, mind which you target).
-  .cl-modal-content        Every utility + feature dialog: Settings, Help & Tips, Provider Link, Import, Import Summary, Localize, Bulk Localize / Summary / Auto-Link, Character Duplicates, Pre-Import Duplicate, Save-As Diff, AI Recommender, CSS Assistant, Custom CSS, Card Update, Playlists, Batch Tagging. (Character creator uses .modal-glass instead.) Shared chrome (all cl-modal-content modals look identical by default):
+  .cl-confirm-overlay      The generic confirm dialog built by window.showConfirm({title, message, danger, icon}). Left intent-badge layout: .cl-confirm-main (badge + text row), .cl-confirm-badge (42px circle, accent-tinted by default; add-class .cl-confirm-danger on the overlay switches it to red via rgba(var(--cl-error-rgb)) bg + var(--cl-error-bright) icon), .cl-confirm-text (the column: an h3 title + #clConfirmMessage), and .confirm-modal-footer (Cancel + Confirm action-btns; the confirm button gets .danger when danger:true). Badge and title colors come from --accent / --cl-error / --text-primary tokens, so they auto-follow a retheme. Toggled via the .hidden class on #clConfirmOverlay.
+  .confirm-modal-content   The SHARED confirm-dialog shell, used by two surfaces, so a bare ".confirm-modal-content {}" rule hits BOTH. (1) Standalone legacy dialogs that keep the full chrome: .confirm-modal-header (accent-gradient strip + title + .close-confirm-btn X) over a custom .confirm-modal-body, toggled via .hidden on the .confirm-modal parent. These are confirmSaveModal (changes diff), the gallery folder migration / mapping / orphan / disable dialogs, and the delete / bulk-delete confirms. (2) The showConfirm dialog above (.cl-confirm-overlay wraps this same shell and overrides the chrome into the badge layout). To target only one: ".cl-confirm-overlay .confirm-modal-content" for showConfirm, or the legacy ids / .confirm-modal parent for the others. (cl-modal toggles .visible; confirm-modal toggles .hidden, dual class system.)
+  .cl-modal-content        Every utility + feature dialog: Settings, Help & Tips, Provider Link, Import, Import Summary, Localize, Bulk Localize / Summary / Auto-Link, Character Duplicates, Pre-Import Duplicate, Save-As Diff, AI Recommender, CSS Assistant, Custom CSS, Card Update, Playlists, Batch Tagging, Save-Preset Picker. (Character creator uses .modal-glass instead.) Shared chrome (all cl-modal-content modals look identical by default):
                              - Background: var(--cl-glass-bg) + backdrop-filter: blur(20px) on desktop; var(--bg-secondary) with no blur on mobile (full-viewport bottom-sheets).
                              - Border: 1px solid rgba(255, 255, 255, 0.08) (inner-light tint).
                              - Border-radius: var(--radius-3xl) (16px).
@@ -229,7 +231,7 @@ Inputs / Modals / Dropdowns:
                              - Header: 12px padding, accent gradient (10%/8% stops), hairline white border-bottom.
                              - Title h3: weight 700, letter-spacing -0.01em.
                            Toggled open/closed via the .visible class on the .cl-modal parent (dual class system - cl-modal uses .visible, confirm-modal uses .hidden).
-  .cl-modal-drawer         OPT-IN MARKER on a .cl-modal OR .confirm-modal element. Marks the modal as a tap-away bottom-sheet drawer on mobile: hides the back-arrow (.cl-modal-close / .close-btn / .close-confirm-btn) since the scrim + Android back already close it, and reduces header padding-left from --back-arrow-zone back to --space-md across all three header types (cl-modal-header, confirm-modal-header, modal-header). Add to drawer-shaped modals so the chrome doesn't carry redundant affordances. Current consumers: playlistPickerModal (cl-modal), and the dynamic confirm-modals deleteConfirmModal / deleteDuplicateModal / legacyFolderModal / folderMappingModal / orphanedFoldersModal / disableGalleryFoldersModal / bulkDeleteConfirmModal.
+  .cl-modal-drawer         OPT-IN MARKER on a .cl-modal OR .confirm-modal element. Marks the modal as a tap-away bottom-sheet drawer on mobile: hides the back-arrow (.cl-modal-close / .close-btn / .close-confirm-btn) since the scrim + Android back already close it, and reduces header padding-left from --back-arrow-zone back to --space-md across all three header types (cl-modal-header, confirm-modal-header, modal-header). Add to drawer-shaped modals so the chrome doesn't carry redundant affordances. Current consumers: playlistPickerModal and savePresetPickerOverlay (both cl-modal), and the dynamic confirm-modals deleteConfirmModal / deleteDuplicateModal / legacyFolderModal / folderMappingModal / orphanedFoldersModal / disableGalleryFoldersModal / bulkDeleteConfirmModal.
   .dropdown-menu / .dropdown-item   Popover menus (sort, view, more-options).
 
 Tag pill families (FOUR distinct classes for different contexts; pick by surface):
@@ -251,7 +253,6 @@ Loaders & progress (CL does NOT use native <progress> elements):
   Real progress bars (custom div pairs, NOT <progress> elements):
     .import-progress-bar > .import-progress-fill                       Single-character import / apply-snippets progress.
     .import-summary-progress-bar > .import-summary-progress-fill       Bulk import summary.
-    .gallery-sync-status-box .sync-progress-bar > .sync-progress-bar-fill   Gallery sync.
 
 Mobile chrome (defined in library-mobile.css and modules/chats.css; mobile viewport @media-gated). Rules using these selectors typically need !important to beat the mobile stylesheet's existing rules:
   .mobile-bottom-nav            Persistent bottom navigation bar (mobile only; replaces topbar). Frosted-glass surface.
@@ -330,8 +331,7 @@ EXAMPLE 3 (SCOPED, request: "make progress bars bright orange, plus some other e
 \`\`\`css
 /* Title: Orange Progress Accents */
 .import-progress-fill,
-.import-summary-progress-fill,
-.gallery-sync-status-box .sync-progress-bar-fill {
+.import-summary-progress-fill {
     background: linear-gradient(90deg, #ff6b00, #ffa726);
 }
 .cl-loading .cl-loading-icon i,

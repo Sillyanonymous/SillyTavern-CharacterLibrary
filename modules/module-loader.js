@@ -14,7 +14,7 @@ import CoreAPI from './core-api.js';
 // CSS LOADER
 // ========================================
 
-const MODULE_CSS_VERSION = 63;
+const MODULE_CSS_VERSION = 72;
 
 function loadModuleCSS(path) {
     return new Promise((resolve) => {
@@ -236,8 +236,7 @@ async function initModuleSystem() {
         ModuleLoader.register('gallery-sync', gallerySyncModule.default);
 
         window.auditGalleryIntegrity = gallerySyncModule.auditGalleryIntegrity;
-        window.fullGallerySync = gallerySyncModule.fullSync;
-        window.cleanupOrphanedMappings = gallerySyncModule.cleanupOrphanedMappings;
+        window.assignMissingGalleryIds = gallerySyncModule.assignMissingGalleryIds;
         window.updateGallerySyncWarning = gallerySyncModule.updateWarningIndicator;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load gallery-sync module:', err);

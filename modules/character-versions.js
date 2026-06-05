@@ -50,16 +50,9 @@ const CARD_FIELDS = [
 
 // --- Low-level File I/O ---
 
-function toBase64(str) {
-    const bytes = new TextEncoder().encode(str);
-    let binary = '';
-    for (const b of bytes) binary += String.fromCharCode(b);
-    return btoa(binary);
-}
-
 async function fileUpload(name, data) {
     const jsonStr = JSON.stringify(data);
-    const base64 = toBase64(jsonStr);
+    const base64 = CoreAPI.utf8ToBase64(jsonStr);
     const resp = await CoreAPI.apiRequest('/files/upload', 'POST', { name, data: base64 });
     if (!resp.ok) {
         const err = await resp.text().catch(() => resp.statusText);
@@ -939,7 +932,65 @@ function updateActionsVisibility() {
 // DIFF PREVIEW
 // ========================================
 
+// Namespace-level diff/restore allowlist: registered provider ids + 'cl'. Flat keys and orphan namespaces are out; they stay sticky via the spread merge in applyCardFieldUpdates.
+function getKnownProviderNamespaces() {
+    const ids = (window.ProviderRegistry?.getAllProviders?.() || []).map(p => p.id);
+    return new Set([...ids, 'cl']);
+}
+
+// Bring targetExt's allowlisted namespaces into the live card; sentinel-delete any leaf/namespace present locally but absent in target. Skips empty targetExt so legacy snapshots dont wipe live state.
+function buildNamespaceUpdates(targetExt, currentExt, deleteValue) {
+    const updates = {};
+    if (!targetExt || Object.keys(targetExt).length === 0) return updates;
+    const namespaces = getKnownProviderNamespaces();
+    for (const ns of namespaces) {
+        const tNs = targetExt[ns];
+        const cNs = currentExt?.[ns];
+        const tHas = tNs && typeof tNs === 'object';
+        const cHas = cNs && typeof cNs === 'object';
+        if (!tHas && !cHas) continue;
+        if (!tHas && cHas) {
+            // Target lacks this namespace; local has it. Delete the whole namespace.
+            updates[`extensions.${ns}`] = deleteValue;
+            continue;
+        }
+        if (tHas && !cHas) {
+            // Local lacks it; target has it. Write each leaf from target.
+            for (const [k, v] of Object.entries(tNs)) {
+                updates[`extensions.${ns}.${k}`] = v;
+            }
+            continue;
+        }
+        // Both have the namespace. Write target leaves; sentinel-delete local-only leaves.
+        for (const [k, v] of Object.entries(tNs)) {
+            updates[`extensions.${ns}.${k}`] = v;
+        }
+        for (const k of Object.keys(cNs)) {
+            if (!(k in tNs)) {
+                updates[`extensions.${ns}.${k}`] = deleteValue;
+            }
+        }
+    }
+    return updates;
+}
+
+// Derived Provider Link summary for the diff row; getCharacterProvider picks the first linked provider, so it's active-agnostic. fullPath is the user-meaningful slug.
+function summarizeProviderLink(data) {
+    const charLike = { data };
+    const match = window.ProviderRegistry?.getCharacterProvider?.(charLike);
+    if (!match?.linkInfo) return 'Unlinked';
+    const provider = match.provider;
+    const ref = match.linkInfo.fullPath || match.linkInfo.full_path || match.linkInfo.id || '';
+    return ref ? `${provider.name}: ${ref}` : provider.name;
+}
+
 function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
+    // During shallow recovery localData.extensions is transiently empty; skip the render so namespaces dont all look deleted.
+    if (CoreAPI.isExtensionsRecoveryInProgress?.()) {
+        previewEl.innerHTML = `<div class="vt-preview-header"><i class="fa-solid fa-spinner fa-spin"></i> Character data still loading. Open the version diff again in a moment.</div>`;
+        return;
+    }
+
     const fields = [
         { key: 'name', label: 'Name', icon: 'fa-signature' },
         { key: 'description', label: 'Description', long: true, icon: 'fa-align-left' },
@@ -956,13 +1007,34 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
         { key: 'character_book', label: 'Embedded Lorebook', icon: 'fa-book' },
     ];
 
-    // Append provider-specific fields (e.g. tagline)
-    // These are optional - only shown when the compare source carries them
-    // (e.g. Provider Page has tagline, but Git card.json does not)
+    // CL-owned display fallbacks (no provider); gate hides each when neither side carries one.
+    fields.push({ key: 'extensions.cl.tagline', label: 'Tagline', icon: 'fa-quote-left', optional: true });
+    fields.push({ key: 'extensions.cl.pageName', label: 'Listing Name', icon: 'fa-tag', optional: true });
+
+    // De-dup tracker so currentProvider.getComparableFields() and the all-providers loop dont push the same path twice.
+    const seenPaths = new Set();
+
+    // Active provider extras go first so currentProvider's labels win on collision.
     if (currentProvider?.getComparableFields) {
         for (const f of currentProvider.getComparableFields()) {
             const icon = f.icon ? f.icon.replace(/^fa-solid\s+/, '') : 'fa-file-alt';
             fields.push({ key: f.path, label: f.label, icon, optional: !!f.optional });
+            seenPaths.add(f.path);
+        }
+    }
+
+    // All known providers' tagline/pageName so stale orphan namespaces from prior links stay diffable; getAllProviders keeps provider.id correct (jannyai not janny).
+    const allProviders = window.ProviderRegistry?.getAllProviders?.() || [];
+    for (const p of allProviders) {
+        const taglinePath = `extensions.${p.id}.tagline`;
+        const pageNamePath = `extensions.${p.id}.pageName`;
+        if (!seenPaths.has(taglinePath)) {
+            fields.push({ key: taglinePath, label: `${p.name} Tagline`, icon: 'fa-quote-left', optional: true });
+            seenPaths.add(taglinePath);
+        }
+        if (!seenPaths.has(pageNamePath)) {
+            fields.push({ key: pageNamePath, label: `${p.name} Listing Name`, icon: 'fa-tag', optional: true });
+            seenPaths.add(pageNamePath);
         }
     }
 
@@ -979,12 +1051,20 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
         html += renderAvatarPreview(avatarUrl);
     }
 
+    // Provider Link summary row leads the diff; computed before the field loop.
+    const localLink = summarizeProviderLink(localData);
+    const remoteLink = summarizeProviderLink(compareData);
+    if (localLink !== remoteLink) {
+        const linkRendered = renderShortDiff({ label: 'Provider Link', icon: 'fa-link' }, localLink, remoteLink);
+        if (linkRendered) { diffCount++; html += linkRendered; }
+    }
+
     for (const f of fields) {
         const lv = nested(localData, f.key);
         const rv = nested(compareData, f.key);
 
-        // Optional fields (provider extensions): skip when compare side is empty
-        if (f.optional && (rv == null || rv === '')) continue;
+        // Skip only when BOTH sides are empty, else a cleared-from-snapshot deletion would never show.
+        if (f.optional && (rv == null || rv === '') && (lv == null || lv === '')) continue;
 
         // Lorebook needs semantic comparison (ST adds internal fields like uid, display_index)
         if (f.key === 'character_book') {
@@ -1250,15 +1330,10 @@ async function restoreVersion() {
             }
         }
 
-        // Apply provider-specific fields (e.g. tagline) if present in the source data
-        if (currentProvider?.getComparableFields) {
-            for (const f of currentProvider.getComparableFields()) {
-                const val = nested(cardData, f.path);
-                if (val != null && val !== '') {
-                    updates[f.path] = val;
-                }
-            }
-        }
+        // Namespace-level restore: bring the snapshot's namespace shape in, sentinel-delete leaves/namespaces absent from it. Flat keys + orphan namespaces stay sticky via the spread; no-ops on empty-extensions legacy snapshots.
+        const deleteValue = await CoreAPI.getExtensionDeleteValue();
+        const nsUpdates = buildNamespaceUpdates(cardData?.extensions, currentChar.data?.extensions, deleteValue);
+        Object.assign(updates, nsUpdates);
 
         const success = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, updates);
 
@@ -1314,7 +1389,15 @@ async function undoRestore() {
     status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Undoing...';
 
     try {
-        const s = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, backup.data);
+        // Cherry-pick CARD_FIELDS so we never write the synthetic _avatarUrl, then diff backup vs current namespaces so restore-introduced namespaces get sentinel-deleted.
+        const deleteValue = await CoreAPI.getExtensionDeleteValue();
+        const undoUpdates = {};
+        for (const f of CARD_FIELDS) {
+            if (backup.data?.[f] !== undefined) undoUpdates[f] = backup.data[f];
+        }
+        const undoNsUpdates = buildNamespaceUpdates(backup.data?.extensions, currentChar.data?.extensions, deleteValue);
+        Object.assign(undoUpdates, undoNsUpdates);
+        const s = await CoreAPI.applyCardFieldUpdates(currentChar.avatar, undoUpdates);
         if (s) {
             await storageClearBackup(uid);
             // Clear restore metadata for the active provider
@@ -1351,6 +1434,9 @@ async function handleApplyAvatar(avatarUrl) {
     status.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Applying avatar...';
 
     try {
+        // Back up the current avatar before it's overwritten so the outgoing image stays restorable via Apply Avatar.
+        await autoSnapshotBeforeChange(currentChar, 'edit', { embedAvatar: true });
+
         // Fetch image
         const imgResp = await fetch(avatarUrl);
         if (!imgResp.ok) throw new Error(`Failed to fetch image: ${imgResp.status}`);
@@ -1697,34 +1783,35 @@ async function resolveVersionWorldFileStatus(containerEl, avatar) {
 
 function matchLbEntries(localEntries, remoteEntries) {
     const matched = [];
-    const unmatchedRemote = [...remoteEntries];
-    const unmatchedLocal = [...localEntries];
+    const usedRemote = new Set();
+    const removed = [];
 
-    for (let i = unmatchedLocal.length - 1; i >= 0; i--) {
+    // Forward pass + positional tie-break: on tied Jaccard scores prefer the remote closest in position, so an unchanged lorebook doesnt diff as a wall of fake changes.
+    for (let i = 0; i < localEntries.length; i++) {
+        const local = localEntries[i];
         let bestIdx = -1;
         let bestScore = 0;
 
-        for (let j = 0; j < unmatchedRemote.length; j++) {
-            const score = lbMatchScore(unmatchedLocal[i], unmatchedRemote[j]);
-            if (score > bestScore) {
+        for (let j = 0; j < remoteEntries.length; j++) {
+            if (usedRemote.has(j)) continue;
+            const score = lbMatchScore(local, remoteEntries[j]);
+            if (score > bestScore || (score === bestScore && score > 0 && bestIdx >= 0 && Math.abs(j - i) < Math.abs(bestIdx - i))) {
                 bestScore = score;
                 bestIdx = j;
             }
         }
 
         if (bestIdx >= 0 && bestScore > 0.3) {
-            const changedFields = compareLbFields(unmatchedLocal[i], unmatchedRemote[bestIdx]);
-            matched.push({
-                local: unmatchedLocal[i],
-                remote: unmatchedRemote[bestIdx],
-                changedFields
-            });
-            unmatchedLocal.splice(i, 1);
-            unmatchedRemote.splice(bestIdx, 1);
+            usedRemote.add(bestIdx);
+            const changedFields = compareLbFields(local, remoteEntries[bestIdx]);
+            matched.push({ local, remote: remoteEntries[bestIdx], changedFields });
+        } else {
+            removed.push(local);
         }
     }
 
-    return { matched, added: unmatchedRemote, removed: unmatchedLocal };
+    const added = remoteEntries.filter((_, j) => !usedRemote.has(j));
+    return { matched, added, removed };
 }
 
 function lbMatchScore(a, b) {

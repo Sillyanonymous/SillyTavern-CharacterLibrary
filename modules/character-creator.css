@@ -1871,7 +1871,16 @@
         overflow-y: visible;
     }
 
-    .ai-studio-suggestions { display: none; }
+    /* Drop the empty-state hint (icon + "Tell the AI what to write"): the length
+       selector lives in .ai-studio-input-area and is untouched. */
+    .ai-studio-empty-state { display: none; }
+
+    /* Field-settings panel (sliders button) fills below the header on mobile;
+       the inline 40%-cap desktop panel is too cramped on a phone. */
+    .studio-settings-panel { max-height: none; animation: none; }
+    .studio-settings-panel:not(.hidden) { flex: 1 1 auto; }
+    .studio-settings-panel:not(.hidden) ~ .ai-studio-body,
+    .studio-settings-panel:not(.hidden) ~ .ai-studio-footer { display: none; }
 
     html.cl-keyboard-open .ai-studio-conversation { display: none; }
 

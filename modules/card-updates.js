@@ -1055,35 +1055,35 @@ function lorebookEntryName(entry) {
 
 function matchLorebookEntries(localEntries, remoteEntries) {
     const matched = [];
-    const unmatchedRemote = [...remoteEntries];
-    const unmatchedLocal = [...localEntries];
+    const usedRemote = new Set();
+    const removed = [];
 
-    // Match entries by key overlap (Jaccard similarity)
-    for (let i = unmatchedLocal.length - 1; i >= 0; i--) {
+    // Match by key overlap (Jaccard); forward pass + positional tie-break so an identical lorebook doesnt diff as a wall of fake changes.
+    for (let i = 0; i < localEntries.length; i++) {
+        const local = localEntries[i];
         let bestIdx = -1;
         let bestScore = 0;
 
-        for (let j = 0; j < unmatchedRemote.length; j++) {
-            const score = lorebookEntryMatchScore(unmatchedLocal[i], unmatchedRemote[j]);
-            if (score > bestScore) {
+        for (let j = 0; j < remoteEntries.length; j++) {
+            if (usedRemote.has(j)) continue;
+            const score = lorebookEntryMatchScore(local, remoteEntries[j]);
+            if (score > bestScore || (score === bestScore && score > 0 && bestIdx >= 0 && Math.abs(j - i) < Math.abs(bestIdx - i))) {
                 bestScore = score;
                 bestIdx = j;
             }
         }
 
         if (bestIdx >= 0 && bestScore > 0.3) {
-            const changedFields = compareLorebookEntryFields(unmatchedLocal[i], unmatchedRemote[bestIdx]);
-            matched.push({
-                local: unmatchedLocal[i],
-                remote: unmatchedRemote[bestIdx],
-                changedFields
-            });
-            unmatchedLocal.splice(i, 1);
-            unmatchedRemote.splice(bestIdx, 1);
+            usedRemote.add(bestIdx);
+            const changedFields = compareLorebookEntryFields(local, remoteEntries[bestIdx]);
+            matched.push({ local, remote: remoteEntries[bestIdx], changedFields });
+        } else {
+            removed.push(local);
         }
     }
 
-    return { matched, added: unmatchedRemote, removed: unmatchedLocal };
+    const added = remoteEntries.filter((_, j) => !usedRemote.has(j));
+    return { matched, added, removed };
 }
 
 function lorebookEntryMatchScore(a, b) {
@@ -1542,15 +1542,14 @@ async function applyListingName(char, remoteCard) {
     if (!match) return;
     const { provider } = match;
     const extKey = provider.id;
-    await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', {
-        avatar: char.avatar,
-        data: { extensions: { [extKey]: { pageName: listingName } } },
+    // Route through applyCardFieldUpdates so the preflight cleans null pollution before the leaf write, and in-memory state stays synced.
+    const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
+        [`extensions.${extKey}.pageName`]: listingName,
     });
-    if (!char.data) char.data = {};
-    if (!char.data.extensions) char.data.extensions = {};
-    if (!char.data.extensions[extKey]) char.data.extensions[extKey] = {};
-    char.data.extensions[extKey].pageName = listingName;
-    char._lowerListingName = listingName.toLowerCase();
+    if (success) {
+        // _lowerListingName is CL search-key state, not part of card data - recompute outside the helper.
+        char._lowerListingName = listingName.toLowerCase();
+    }
 }
 
 /**

@@ -500,6 +500,7 @@ function openPreviewModal(hit) {
         }
 
         // Skeletons sync, safePurify pipeline RAF-deferred so it doesnt block the modal-open paint.
+        const creatorNotesSection = document.getElementById('ctCharCreatorNotesSection');
         const creatorNotesEl = document.getElementById('ctCharCreatorNotes');
         const descSection = document.getElementById('ctCharDescriptionSection');
         const descEl = document.getElementById('ctCharDescription');
@@ -510,17 +511,16 @@ function openPreviewModal(hit) {
         charDef = hit.characterDefinition || '';
         const scenario = hit.characterScenario || '';
         const firstMsg = hit.characterFirstMessage || '';
-        if (creatorNotesEl) creatorNotesEl.innerHTML = skeletonLines(3);
+        if (creatorNotesSection && creatorNotesEl) {
+            if (creatorNotes && creatorNotes.trim()) { creatorNotesSection.style.display = 'block'; creatorNotesEl.innerHTML = skeletonLines(3); }
+            else { creatorNotesSection.style.display = 'none'; creatorNotesEl.innerHTML = ''; }
+        }
         if (descSection && descEl) { descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3); }
         if (scenarioSection && scenarioEl) { scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2); }
         if (firstMsgSection && firstMsgEl) { firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4); }
         requestAnimationFrame(() => {
-            if (creatorNotesEl) {
-                if (creatorNotes) {
-                    creatorNotesEl.innerHTML = safePurify(formatRichText(creatorNotes, name, true), BROWSE_PURIFY_CONFIG);
-                } else {
-                    creatorNotesEl.textContent = 'No description available.';
-                }
+            if (creatorNotesEl && creatorNotes && creatorNotes.trim()) {
+                creatorNotesEl.innerHTML = safePurify(formatRichText(creatorNotes, name, true), BROWSE_PURIFY_CONFIG);
             }
             if (descSection && descEl) {
                 if (charDef) {
@@ -665,6 +665,7 @@ async function fetchAndPopulateDetails(hit, token) {
         }
 
         // Detail-API populate (richer than the search hit). RAF defer in case the modal-open transition is still running.
+        const creatorNotesSection = document.getElementById('ctCharCreatorNotesSection');
         const creatorNotesEl = document.getElementById('ctCharCreatorNotes');
         const detailNotes = card.description || '';
         const descSection = document.getElementById('ctCharDescriptionSection');
@@ -680,7 +681,8 @@ async function fetchAndPopulateDetails(hit, token) {
         const examplesEl = document.getElementById('ctCharExamples');
         const examples = card.definition_example_messages || '';
         requestAnimationFrame(() => {
-            if (detailNotes && creatorNotesEl) {
+            if (detailNotes && detailNotes.trim() && creatorNotesEl) {
+                if (creatorNotesSection) creatorNotesSection.style.display = 'block';
                 creatorNotesEl.innerHTML = safePurify(formatRichText(detailNotes, name, true), BROWSE_PURIFY_CONFIG);
             }
             if (descSection) {
@@ -1840,13 +1842,11 @@ class ChartavernBrowseView extends BrowseView {
                 </div>
 
                 <!-- Creator's Notes -->
-                <div class="browse-char-section">
+                <div class="browse-char-section" id="ctCharCreatorNotesSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="ctCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
                     </h3>
-                    <div id="ctCharCreatorNotes" class="scrolling-text">
-                        No description available.
-                    </div>
+                    <div id="ctCharCreatorNotes" class="scrolling-text"></div>
                 </div>
 
                 <!-- Description -->
@@ -1945,7 +1945,7 @@ class ChartavernBrowseView extends BrowseView {
             ctExcludeTags = new Set();
             ctMinTokens = 0;
             ctMaxTokens = 0;
-            ctSortMode = 'rating';
+            ctSortMode = 'most_popular';
             ctNsfwEnabled = false;
             ctSelectedChar = null;
         }

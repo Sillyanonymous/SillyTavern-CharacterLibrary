@@ -209,6 +209,11 @@ export function getLinkInfo(char) {
     return getCharacterProvider(char)?.linkInfo ?? null;
 }
 
+// Which extensions namespace owns the tagline. Real provider id when linked, 'cl' when unlinked. cl is the pseudo-provider for the no-real-provider state.
+export function getActiveTaglineNamespace(char) {
+    return getCharacterProvider(char)?.provider?.id ?? 'cl';
+}
+
 /**
  * Get all characters linked to ANY provider.
  * @param {Array} allCharacters
@@ -403,6 +408,7 @@ export default {
     deactivateCurrentProvider,
     getCharacterProvider,
     getLinkInfo,
+    getActiveTaglineNamespace,
     getAllLinkedCharacters,
     getProviderForUrl,
     renderProviderSelector,

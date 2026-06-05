@@ -306,6 +306,7 @@ export async function importFromPng({
             : `${result.file_name}.png`;
         let restoreOk = false;
         try {
+            // CARVE-OUT from the "no direct merge-attributes" architectural rule: this fires during the import round-trip, before CL has the new char in its allCharacters list, so applyCardFieldUpdates' avatar lookup would fail. The write is a single scalar data.name field with no extension namespace involved, so no preflight or sentinel handling is needed.
             const resp = await api.apiRequest?.('/characters/merge-attributes', 'POST', {
                 avatar: avatarWithExt,
                 data: { name: rawName }

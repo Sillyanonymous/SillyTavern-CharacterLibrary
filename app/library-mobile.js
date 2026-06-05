@@ -1604,8 +1604,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         function syncSort() {
             const isFollowing = followChip.classList.contains('active');
+            // Wyvern has no Following-mode sort; gate the whole Sort By section so it doesnt show empty.
+            const hasFollowSort = !!getIds()?.timelineSort;
             mtBrowseSortSelect.style.display = isFollowing ? 'none' : '';
-            mtFollowSortSelect.style.display = isFollowing ? '' : 'none';
+            mtFollowSortSelect.style.display = (isFollowing && hasFollowSort) ? '' : 'none';
+            mtSortSection.style.display = (isFollowing && !hasFollowSort) ? 'none' : '';
         }
 
         browseChip.addEventListener('click', () => {

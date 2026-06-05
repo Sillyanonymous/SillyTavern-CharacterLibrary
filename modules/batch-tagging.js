@@ -252,26 +252,11 @@ async function applyBatchTags() {
                 }
             }
             
-            // Tags live at data.tags, not root. Full data must be passed through.
-            const existingData = char.data || {};
-            const existingExtensions = existingData.extensions || char.extensions || {};
-            
-            const payload = {
-                avatar: char.avatar,
+            // Route through applyCardFieldUpdates: hydrate + preflight + merge + in-memory sync (handles char.tags root mirror + char.data.tags + allCharacters entry).
+            const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
                 tags: currentTags,
-                create_date: char.create_date,
-                data: {
-                    ...existingData,
-                    tags: currentTags,
-                    extensions: existingExtensions
-                }
-            };
-            
-            const response = await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', payload);
-            
-            if (response.ok) {
-                char.tags = currentTags;
-                if (char.data) char.data.tags = currentTags;
+            });
+            if (success) {
                 successCount++;
             } else {
                 console.error('[BatchTagging] Failed to update', char.name);

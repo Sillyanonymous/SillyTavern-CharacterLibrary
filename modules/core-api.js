@@ -159,8 +159,8 @@ export function openCharacterModal(char) {
  * Open character detail modal elevated above other open modals (confirm or cl-modal).
  * @param {Object} char - Character object
  */
-export function openCharModalElevated(char) {
-    return window.openCharModalElevated?.(char);
+export function openCharModalElevated(char, navList) {
+    return window.openCharModalElevated?.(char, navList);
 }
 
 /**
@@ -227,6 +227,16 @@ export function showConfirm(opts) {
 }
 
 /**
+ * Shared "save preset" picker: type a name to create, or pick an existing preset to overwrite (confirmed).
+ * @param {string} title - Dialog title
+ * @param {Array<{name: string}>} presets - Existing presets (only `name` is read for the list)
+ * @returns {Promise<{name: string, overwriteIndex: number} | null>} overwriteIndex -1 = new, null = cancel
+ */
+export function savePresetPicker(title, presets) {
+    return window.savePresetPicker?.(title, presets) ?? Promise.resolve(null);
+}
+
+/**
  * Refresh the character list from server
  * @param {boolean} forceRefresh - Bypass cache
  * @returns {Promise<Array>} Updated characters
@@ -279,15 +289,6 @@ export function getCharacterGalleryInfo(char) {
  */
 export function getCharacterGalleryId(char) {
     return window.getCharacterGalleryId?.(char) ?? null;
-}
-
-/**
- * Remove a gallery folder override for a character
- * Cleans up the extensionSettings.gallery.folders mapping when a character is deleted
- * @param {string} avatar - Character avatar filename
- */
-export function removeGalleryFolderOverride(avatar) {
-    window.removeGalleryFolderOverride?.(avatar);
 }
 
 // ========================================
@@ -398,6 +399,15 @@ export function getModule(name) {
  */
 export function escapeHtml(text) {
     return window.escapeHtml?.(text) ?? '';
+}
+
+/**
+ * Encode a UTF-8 string to base64 for Files-API JSON uploads.
+ * @param {string} str
+ * @returns {string} base64
+ */
+export function utf8ToBase64(str) {
+    return window.utf8ToBase64?.(str) ?? '';
 }
 
 /**
@@ -597,15 +607,6 @@ export function loadCharInMain(charOrAvatar, newChat = false) {
 }
 
 /**
- * Register a gallery folder override for media localization
- * @param {Object} char - Character object
- * @param {boolean} immediate - Save immediately
- */
-export function registerGalleryFolderOverride(char, immediate = false) {
-    window.registerGalleryFolderOverride?.(char, immediate);
-}
-
-/**
  * Delete a character from the local library
  * @param {Object|string} charOrAvatar - Character object or avatar filename
  * @param {boolean} [deleteChats=false] - Also delete associated chats
@@ -613,6 +614,14 @@ export function registerGalleryFolderOverride(char, immediate = false) {
  */
 export function deleteCharacter(charOrAvatar, deleteChats) {
     return window.deleteCharacter?.(charOrAvatar, deleteChats) || Promise.resolve(false);
+}
+
+/**
+ * Open the single-character delete confirmation dialog (gallery + chat-delete options, ST sync).
+ * @param {Object} char
+ */
+export function showDeleteConfirmation(char) {
+    return window.showDeleteConfirmation?.(char);
 }
 
 /**
@@ -679,13 +688,6 @@ export function resetChatFilterCaches() {
 
 export function getAdvFilterRulesForChats() {
     return window.getAdvFilterRulesForChats?.() ?? [];
-}
-
-/**
- * Sync all gallery folder overrides with the server
- */
-export function syncAllGalleryFolderOverrides() {
-    window.syncAllGalleryFolderOverrides?.();
 }
 
 export function getGallerySyncAuditDone() {
@@ -951,13 +953,44 @@ export function extractCharacterDataFromPng(pngBuffer) {
 }
 
 /**
- * Apply field updates to a character card
+ * Apply field updates to a character card. Convenience wrapper around writeCardFields:
+ * looks up the char by avatar, runs the write, then triggers gallery folder rename
+ * (if name changed) + ST main window notify.
+ *
+ * If your caller already has the char ref AND wants to handle gallery rename / ST notify
+ * itself, use writeCardFields instead to avoid duplicate side effects.
+ *
  * @param {string} avatar - Character avatar filename
  * @param {Object} fieldUpdates - Object with field paths as keys and new values
  * @returns {Promise<boolean>} Success status
  */
 export function applyCardFieldUpdates(avatar, fieldUpdates) {
     return window.applyCardFieldUpdates?.(avatar, fieldUpdates) || Promise.resolve(false);
+}
+
+/**
+ * Primitive card-write operation: hydrate, preflight pollution cleanup, build payload,
+ * send merge-attributes, sync in-memory state on the passed char + the matching
+ * allCharacters entry. No convenience side effects (no gallery folder rename, no ST notify).
+ *
+ * Use this when you have the char ref and want to handle post-write orchestration yourself.
+ * Pass ST_UNSET_SENTINEL (via getExtensionDeleteValue) as a value to delete an extension key.
+ *
+ * @param {Object} char - the character object (live ref, mutated in place)
+ * @param {Object} fieldUpdates - Object with dot-path keys to values
+ * @returns {Promise<{ok: boolean, response?: Response}>}
+ */
+export function writeCardFields(char, fieldUpdates) {
+    return window.writeCardFields?.(char, fieldUpdates) || Promise.resolve({ ok: false });
+}
+
+/**
+ * Returns the value to write for "delete this extension key" intent in merge-attributes payloads.
+ * Sentinel string '__@@UNSET@@__' on ST >= 1.13.5 (which actually deletes), null fallback otherwise (broken on older ST but no regression vs the pre-fix behavior).
+ * @returns {Promise<string|null>}
+ */
+export function getExtensionDeleteValue() {
+    return window.getExtensionDeleteValue?.() ?? Promise.resolve(null);
 }
 
 /**
@@ -1141,6 +1174,7 @@ export default {
     showToast,
     hapticFeedback,
     showConfirm,
+    savePresetPicker,
     refreshCharacters,
     
     // API
@@ -1153,9 +1187,7 @@ export default {
     sanitizeFolderName,
     getCharacterGalleryInfo,
     getCharacterGalleryId,
-    removeGalleryFolderOverride,
     generateGalleryId,
-    syncAllGalleryFolderOverrides,
     getGallerySyncAuditDone,
     setGallerySyncAuditDone,
     
@@ -1173,6 +1205,7 @@ export default {
     
     // Utils
     escapeHtml,
+    utf8ToBase64,
     safePurify,
     sanitizeTaglineHtml,
     isExtensionsRecoveryInProgress,
@@ -1202,8 +1235,8 @@ export default {
     
     // Character actions
     loadCharInMain,
-    registerGalleryFolderOverride,
     deleteCharacter,
+    showDeleteConfirmation,
     fetchCharacters,
     fetchAndAddCharacter,
     notifySTCharacterAdded,
@@ -1254,6 +1287,8 @@ export default {
     // Card data
     extractCharacterDataFromPng,
     applyCardFieldUpdates,
+    writeCardFields,
+    getExtensionDeleteValue,
     getCharacterWorldName,
     getWorldInfoData,
     saveWorldInfoData,

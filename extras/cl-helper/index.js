@@ -6,8 +6,8 @@
 
 import { randomUUID } from 'node:crypto';
 import { join, resolve, sep, dirname } from 'node:path';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
-import { stat, readFile, writeFile, open } from 'node:fs/promises';
+import { existsSync, mkdirSync, readdirSync, rmSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
+import { stat, lstat, readFile, writeFile, rename, unlink, readdir, open } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as zlib from 'node:zlib';
 import { promisify } from 'node:util';
@@ -19,6 +19,37 @@ export const info = {
     name: 'Character Library Helper',
     description: 'Auth and request proxying for the Character Library extension.',
 };
+
+let _runningVersion = 'unknown';
+try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8'));
+    if (pkg?.version) _runningVersion = String(pkg.version);
+} catch {}
+
+// Detect symlink/junction; on Windows ESM resolves junctions at load so __dirname is the target, also check the canonical plugins path.
+let _isLinkedInstall = false;
+const _pathEq = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+try {
+    if (lstatSync(__dirname).isSymbolicLink()) _isLinkedInstall = true;
+} catch {}
+if (!_isLinkedInstall) {
+    try {
+        const real = realpathSync(__dirname);
+        if (real && !_pathEq(real, __dirname)) _isLinkedInstall = true;
+    } catch {}
+}
+if (!_isLinkedInstall) {
+    try {
+        const pluginPath = resolve(process.cwd(), 'plugins', 'cl-helper');
+        const st = lstatSync(pluginPath);
+        if (st.isSymbolicLink()) {
+            _isLinkedInstall = true;
+        } else {
+            const real = realpathSync(pluginPath);
+            if (real && !_pathEq(real, pluginPath)) _isLinkedInstall = true;
+        }
+    } catch {}
+}
 
 // =============================================================================
 // Gallery thumbnails
@@ -1639,9 +1670,133 @@ function registerFlareSolverrRoutes(router) {
 /**
  * @param {import('express').Router} router
  */
+// Files installed by /self-update. Add here if the bundle grows; nothing else lands on disk.
+const _SELF_UPDATE_FILES = ['package.json', 'index.js'];
+const _SELF_UPDATE_MAX_BYTES = 2 * 1024 * 1024;
+const _SELF_UPDATE_VERSION_RE = /^[\w.\-+]{1,32}$/;
+let _selfUpdateInFlight = false;
+
+// Find bundled cl-helper dirs under the requesting user's extensions folder; scoping to the active user disambiguates multi-user setups.
+async function findBundledClHelperDirs(userExtDir) {
+    if (!userExtDir) return [];
+    let extNames;
+    try { extNames = await readdir(userExtDir); }
+    catch { return []; }
+    const matches = [];
+    for (const ext of extNames) {
+        const candidate = join(userExtDir, ext, 'extras', 'cl-helper');
+        try {
+            const pkgContent = await readFile(join(candidate, 'package.json'), 'utf-8');
+            const pkg = JSON.parse(pkgContent);
+            if (pkg?.name === 'cl-helper' && typeof pkg?.version === 'string' && _SELF_UPDATE_VERSION_RE.test(pkg.version)) {
+                matches.push({ path: candidate, version: pkg.version });
+            }
+        } catch {}
+    }
+    return matches;
+}
+
 export async function init(router) {
-    router.get('/health', (_req, res) => {
-        res.json({ ok: true, version: '1.5.1', thumbnails: _thumbsReady });
+    router.get('/health', (req, res) => {
+        res.json({
+            ok: true,
+            version: _runningVersion,
+            thumbnails: _thumbsReady,
+            linked: _isLinkedInstall,
+            installPath: __dirname,
+            admin: !!req.user?.profile?.admin,
+        });
+    });
+
+    // Server-side fetch: request body ignored, source comes from the bundled folder on disk. Admin-only since it rewrites plugin code.
+    router.post('/self-update', async (req, res) => {
+        if (!req.user?.profile?.admin) {
+            return res.status(403).json({ ok: false, error: 'admin privilege required to update cl-helper' });
+        }
+        if (_isLinkedInstall) {
+            return res.status(400).json({ ok: false, error: 'plugin folder is symlinked; restart SillyTavern to load changes' });
+        }
+        if (_selfUpdateInFlight) {
+            return res.status(409).json({ ok: false, error: 'self-update already in progress' });
+        }
+        _selfUpdateInFlight = true;
+        try {
+            const userExtDir = req.user?.directories?.extensions;
+            if (!userExtDir) {
+                return res.status(500).json({ ok: false, error: 'no user extensions directory in request context' });
+            }
+            const matches = await findBundledClHelperDirs(userExtDir);
+            if (matches.length === 0) {
+                return res.status(404).json({ ok: false, error: `no cl-helper bundle found under ${userExtDir}; fall back to manual copy` });
+            }
+            if (matches.length > 1) {
+                return res.status(400).json({ ok: false, error: `multiple cl-helper bundles found (${matches.map(m => m.path).join(' | ')}); resolve before retrying` });
+            }
+            const source = matches[0];
+            const sourceFiles = {};
+            for (const name of _SELF_UPDATE_FILES) {
+                let content;
+                try { content = await readFile(join(source.path, name), 'utf-8'); }
+                catch (e) {
+                    return res.status(500).json({ ok: false, error: `failed to read source ${name}: ${e.message}` });
+                }
+                if (Buffer.byteLength(content, 'utf-8') > _SELF_UPDATE_MAX_BYTES) {
+                    return res.status(400).json({ ok: false, error: `source ${name}: exceeds size cap` });
+                }
+                if (content.indexOf('\0') !== -1) {
+                    return res.status(400).json({ ok: false, error: `source ${name}: contains null bytes` });
+                }
+                sourceFiles[name] = content;
+            }
+            // Sanity-check the bundled package.json (defense-in-depth: even if extras/ was tampered, refuse the obviously-wrong shapes).
+            let parsedPkg;
+            try { parsedPkg = JSON.parse(sourceFiles['package.json']); }
+            catch { return res.status(400).json({ ok: false, error: 'source package.json is not valid JSON' }); }
+            if (parsedPkg?.name !== 'cl-helper') {
+                return res.status(400).json({ ok: false, error: `source package.json name must be 'cl-helper'` });
+            }
+            if (typeof parsedPkg?.version !== 'string' || !_SELF_UPDATE_VERSION_RE.test(parsedPkg.version)) {
+                return res.status(400).json({ ok: false, error: 'source package.json version missing or malformed' });
+            }
+            // Refuse pre-planted symlinks: write to a random .tmp via wx (no symlink-follow on create), then atomic-rename; old contents go to .bak.
+            const tmpSuffix = `.cl-tmp-${randomUUID()}`;
+            const tmpPaths = [];
+            const cleanup = async () => {
+                for (const t of tmpPaths) { try { await unlink(t); } catch {} }
+            };
+            try {
+                for (const name of _SELF_UPDATE_FILES) {
+                    const finalPath = join(__dirname, name);
+                    try {
+                        if ((await lstat(finalPath)).isSymbolicLink()) {
+                            await cleanup();
+                            return res.status(400).json({ ok: false, error: `${name}: refusing to overwrite symlink` });
+                        }
+                    } catch (e) {
+                        if (e.code !== 'ENOENT') throw e;
+                    }
+                    const tmpPath = finalPath + tmpSuffix;
+                    await writeFile(tmpPath, sourceFiles[name], { encoding: 'utf-8', flag: 'wx' });
+                    tmpPaths.push(tmpPath);
+                }
+                for (let i = 0; i < _SELF_UPDATE_FILES.length; i++) {
+                    const finalPath = join(__dirname, _SELF_UPDATE_FILES[i]);
+                    try {
+                        const old = await readFile(finalPath, 'utf-8');
+                        try { await writeFile(finalPath + '.bak', old, 'utf-8'); } catch {}
+                    } catch {}
+                    await rename(tmpPaths[i], finalPath);
+                }
+                console.log(`[cl-helper] /self-update installed ${parsedPkg.version} from ${source.path} (was v${_runningVersion})`);
+                res.json({ ok: true, written: [..._SELF_UPDATE_FILES], source: source.path, version: parsedPkg.version });
+            } catch (e) {
+                await cleanup();
+                console.warn(`[cl-helper] /self-update failed: ${e.message}`);
+                res.status(500).json({ ok: false, error: e.message });
+            }
+        } finally {
+            _selfUpdateInFlight = false;
+        }
     });
 
     registerThumbnailRoutes(router);

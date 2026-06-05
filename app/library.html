@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=91">
-    <link rel="stylesheet" href="library-mobile.css?v=27" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=100">
+    <link rel="stylesheet" href="library-mobile.css?v=29" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -504,6 +504,10 @@
                                     <label>Character Version</label>
                                     <input type="search" id="editVersion" class="glass-input" placeholder="e.g., 1.0" autocomplete="one-time-code">
                                 </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Tagline</label>
+                                <input type="search" id="editTagline" class="glass-input" placeholder="Short hook shown under the name" autocomplete="one-time-code">
                             </div>
                         </div>
 
@@ -1580,12 +1584,11 @@ https://jannyai.com/characters/uuid_slug
                         </div>
                         <div class="info-section">
                             <h4><i class="fa-solid fa-folder-tree"></i> Gallery Sync</h4>
-                            <p>When <strong>Unique Gallery Folders</strong> is enabled (Settings → Gallery Folders), each character gets their own gallery folder even if they share names.</p>
+                            <p>When <strong>Unique Gallery Folders</strong> is enabled (Settings → Gallery Folders), each character gets their own gallery folder even if they share names. Folder names are computed live from <code>name + gallery_id</code>, so nothing is persisted to drift out of sync.</p>
                             <ul>
-                                <li>Gallery Sync audits the integrity of folder mappings on startup</li>
-                                <li>Identifies: missing gallery IDs, broken folder mappings, orphaned mappings for deleted characters</li>
+                                <li>The audit only flags characters missing a <code>gallery_id</code> (typically those imported outside CL)</li>
                                 <li>View the audit status from <strong>More Options (⋮) → Gallery Sync Status</strong></li>
-                                <li>Can auto-repair missing IDs and mappings</li>
+                                <li>One-click "Assign IDs" fixes characters without one</li>
                             </ul>
                         </div>
                         <div class="info-section">
@@ -1772,7 +1775,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>Find Duplicates</strong>: Scan your library for potential duplicate characters</li>
                                 <li><strong>Auto-Link Characters</strong>: Bulk-link unlinked characters to providers</li>
                                 <li><strong>Card Recommender</strong>: AI-powered character recommendations</li>
-                                <li><strong>Gallery Sync Status</strong>: Audit gallery folder mappings</li>
+                                <li><strong>Gallery Sync Status</strong>: Check whether all characters have a gallery_id assigned</li>
                                 <li><strong>Help & Tips</strong>: This modal</li>
                                 <li><strong>Settings</strong>: Configure gallery folders, media localization, and provider settings</li>
                             </ul>
@@ -1882,13 +1885,13 @@ https://jannyai.com/characters/uuid_slug
                             <i class="fa-solid fa-folder-tree"></i>
                             <span>Gallery Folders</span>
                         </li>
-                        <li class="settings-nav-item" data-section="info">
-                            <i class="fa-solid fa-circle-info"></i>
-                            <span>Info</span>
-                        </li>
                         <li class="settings-nav-item" data-section="developer">
                             <i class="fa-solid fa-code"></i>
                             <span>Developer</span>
+                        </li>
+                        <li class="settings-nav-item" data-section="info">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <span>Info</span>
                         </li>
                     </ul>
                 </nav>
@@ -2153,30 +2156,39 @@ https://jannyai.com/characters/uuid_slug
                                 </label>
                                 <span class="settings-hint">Off (default): thumbnails only on mobile-sized viewports. On: thumbnails on every viewport. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
                             </div>
-                            <div class="settings-row" id="settingsGridThumbClHelperRow" style="padding-left: 24px;">
-                                <label>
-                                    <input type="checkbox" id="settingsGridThumbClHelper" checked> Use cl-helper to generate thumbnails (recommended)
-                                </label>
-                                <span class="settings-hint">On: cl-helper resizes via jimp + caches on disk at the size you pick below. Requires the cl-helper plugin installed. Off: ST's built-in /thumbnail endpoint, fixed at 96x144 which looks blurry on retina-DPR phones.</span>
-                            </div>
-                            <div class="settings-row" id="settingsGridThumbSizeRow" style="padding-left: 24px;">
-                                <label for="settingsGridThumbSize">Thumbnail size:</label>
-                                <select id="settingsGridThumbSize" class="glass-select">
-                                    <option value="384" data-icon="fa-solid fa-image">Small (384px wide)</option>
-                                    <option value="512" data-icon="fa-solid fa-image" selected>Medium (512px wide)</option>
-                                    <option value="640" data-icon="fa-solid fa-image">Large (640px wide)</option>
-                                    <option value="768" data-icon="fa-solid fa-image">Extra Large (768px wide)</option>
-                                </select>
-                                <span class="settings-hint">Larger = sharper on high-DPR screens, more decode cost. 512 is a good baseline.</span>
-                            </div>
-                            <div class="settings-row" id="settingsGridThumbCacheRow" style="padding-left: 24px;">
-                                <label>Cache:</label>
-                                <div class="settings-input-group">
-                                    <button id="settingsGridThumbPopulate" class="settings-action-btn primary"><i class="fa-solid fa-download"></i> Populate at current size</button>
-                                    <button id="settingsGridThumbPurge" class="settings-action-btn danger"><i class="fa-solid fa-trash"></i> Purge cache</button>
+                            <div class="cl-helper-banner cl-hidden" id="gridThumbsClHelperBanner">
+                                <i class="fa-solid fa-puzzle-piece"></i>
+                                <div>
+                                    <strong>cl-helper required for custom sizes &amp; disk cache</strong>
+                                    <span>Thumbnails still work without it via ST's built-in <code>/thumbnail</code> (96x144 fixed). For larger / sharper sizes and on-disk caching, install cl-helper. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
                                 </div>
-                                <span id="settingsGridThumbCacheStats" class="settings-hint">Loading...</span>
-                                <span class="settings-hint">Populate pre-generates a thumbnail for every character at the size selected above (skips already-cached). Purge deletes all cached thumbnails (any size); next scroll regenerates on demand.</span>
+                            </div>
+                            <div id="settingsGridThumbClHelperFields">
+                                <div class="settings-row" id="settingsGridThumbClHelperRow" style="padding-left: 24px;">
+                                    <label>
+                                        <input type="checkbox" id="settingsGridThumbClHelper" checked> Use cl-helper to generate thumbnails (recommended)
+                                    </label>
+                                    <span class="settings-hint">On: cl-helper resizes via jimp + caches on disk at the size you pick below. Requires the cl-helper plugin installed. Off: ST's built-in /thumbnail endpoint, fixed at 96x144 which looks blurry on retina-DPR phones.</span>
+                                </div>
+                                <div class="settings-row" id="settingsGridThumbSizeRow" style="padding-left: 24px;">
+                                    <label for="settingsGridThumbSize">Thumbnail size:</label>
+                                    <select id="settingsGridThumbSize" class="glass-select">
+                                        <option value="384" data-icon="fa-solid fa-image">Small (384px wide)</option>
+                                        <option value="512" data-icon="fa-solid fa-image" selected>Medium (512px wide)</option>
+                                        <option value="640" data-icon="fa-solid fa-image">Large (640px wide)</option>
+                                        <option value="768" data-icon="fa-solid fa-image">Extra Large (768px wide)</option>
+                                    </select>
+                                    <span class="settings-hint">Larger = sharper on high-DPR screens, more decode cost. 512 is a good baseline.</span>
+                                </div>
+                                <div class="settings-row" id="settingsGridThumbCacheRow" style="padding-left: 24px;">
+                                    <label>Cache:</label>
+                                    <div class="settings-input-group">
+                                        <button id="settingsGridThumbPopulate" class="settings-action-btn primary"><i class="fa-solid fa-download"></i> Populate at current size</button>
+                                        <button id="settingsGridThumbPurge" class="settings-action-btn danger"><i class="fa-solid fa-trash"></i> Purge cache</button>
+                                    </div>
+                                    <span id="settingsGridThumbCacheStats" class="settings-hint">Loading...</span>
+                                    <span class="settings-hint">Populate pre-generates a thumbnail for every character at the size selected above (skips already-cached). Purge deletes all cached thumbnails (any size); next scroll regenerates on demand.</span>
+                                </div>
                             </div>
                         </div>
 
@@ -2295,7 +2307,7 @@ https://jannyai.com/characters/uuid_slug
                                     <i class="fa-solid fa-puzzle-piece"></i>
                                     <div>
                                         <strong>cl-helper plugin required</strong>
-                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
                                     </div>
                                 </div>
                                 <div class="settings-group" id="pygmalionSettingsFields">
@@ -2369,7 +2381,7 @@ https://jannyai.com/characters/uuid_slug
                                     <i class="fa-solid fa-puzzle-piece"></i>
                                     <div>
                                         <strong>cl-helper plugin required</strong>
-                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                        <span>Authentication requires the cl-helper server plugin to proxy login requests. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
                                     </div>
                                 </div>
                                 <div class="settings-group" id="ctSettingsFields">
@@ -2457,7 +2469,7 @@ https://jannyai.com/characters/uuid_slug
                                     <i class="fa-solid fa-puzzle-piece"></i>
                                     <div>
                                         <strong>cl-helper plugin required</strong>
-                                        <span>DataCat requires the cl-helper server plugin for API proxying. Install it in SillyTavern's <code>plugins/</code> folder and enable <code>enableServerPlugins</code> in config.yaml.</span>
+                                        <span>DataCat requires the cl-helper server plugin for API proxying. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
                                     </div>
                                 </div>
                                 <div class="settings-group" id="datacatSettingsFields">
@@ -2531,14 +2543,13 @@ https://jannyai.com/characters/uuid_slug
                                         <span id="datacatFlareSolverrStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not configured</span>
                                     </div>
                                 </div>
-                                <div class="settings-group" style="opacity: 0.45; pointer-events: none;">
-                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags</div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-ban"></i> Exclude Tags <i class="fa-solid fa-circle-info datacat-exclude-info" title="Client-side filter, case-insensitive on tag slugs (eg. female, nsfw).&#10;&#10;DataCat's default unsorted view returns no tag data, so excludes have no effect there; switch to any sort (Fresh, Saucepan, JanitorAI) to enable filtering.&#10;&#10;Saucepan mode additionally enforces excludes server-side."></i></div>
                                     <div class="settings-row">
                                         <div class="provider-exclude-tags-container">
                                             <div class="provider-exclude-tags-pills" id="datacatExcludeTagsPills"></div>
-                                            <input type="text" class="glass-input provider-exclude-tags-input" id="datacatExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off" disabled>
+                                            <input type="text" class="glass-input provider-exclude-tags-input" id="datacatExcludeTagsInput" placeholder="Type a tag and press Enter" autocomplete="off">
                                         </div>
-                                        <span class="settings-hint">Not available for DataCat.</span>
                                     </div>
                                 </div>
                             </div>
@@ -2634,17 +2645,26 @@ https://jannyai.com/characters/uuid_slug
 
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-image"></i> Thumbnails</div>
-                            <div class="settings-row">
-                                <label>
-                                    <input type="checkbox" id="settingsGalleryThumbnails" checked> Generate gallery thumbnails
-                                </label>
-                                <span class="settings-hint">Use cl-helper to generate smaller thumbnail images for gallery grids and the viewer strip. Requires the cl-helper plugin.</span>
+                            <div class="cl-helper-banner cl-hidden" id="galleryThumbsClHelperBanner">
+                                <i class="fa-solid fa-puzzle-piece"></i>
+                                <div>
+                                    <strong>cl-helper plugin required</strong>
+                                    <span>Gallery thumbnails are generated server-side by cl-helper. Install it to enable this. <a href="#" class="cl-goto-info">Open cl-helper status &rarr;</a></span>
+                                </div>
                             </div>
-                            <div class="settings-row" id="galleryThumbPrewarmRow" style="padding-left: 24px;">
-                                <label>
-                                    <input type="checkbox" id="settingsGalleryThumbPrewarm" checked> Pre-generate during download
-                                </label>
-                                <span class="settings-hint">Generate thumbnails immediately after downloading media, so galleries open instantly.</span>
+                            <div id="galleryThumbsClHelperFields">
+                                <div class="settings-row">
+                                    <label>
+                                        <input type="checkbox" id="settingsGalleryThumbnails" checked> Generate gallery thumbnails
+                                    </label>
+                                    <span class="settings-hint">Use cl-helper to generate smaller thumbnail images for gallery grids and the viewer strip. Requires the cl-helper plugin.</span>
+                                </div>
+                                <div class="settings-row" id="galleryThumbPrewarmRow" style="padding-left: 24px;">
+                                    <label>
+                                        <input type="checkbox" id="settingsGalleryThumbPrewarm" checked> Pre-generate during download
+                                    </label>
+                                    <span class="settings-hint">Generate thumbnails immediately after downloading media, so galleries open instantly.</span>
+                                </div>
                             </div>
                         </div>
 
@@ -2702,7 +2722,7 @@ https://jannyai.com/characters/uuid_slug
                         
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-wand-magic-sparkles"></i> Step 1: Assign IDs</div>
-                            <span class="settings-hint">Generate unique IDs for all characters and register folder mappings.</span>
+                            <span class="settings-hint">Generate unique gallery IDs for all characters. Folder names are computed live from name + ID (no settings mapping needed).</span>
                             <div class="settings-row" style="margin-top: 8px;">
                                 <button id="migrateGalleryFoldersBtn" class="settings-action-btn primary">
                                     <i class="fa-solid fa-wand-magic-sparkles"></i> Assign Gallery IDs
@@ -2710,9 +2730,6 @@ https://jannyai.com/characters/uuid_slug
                             </div>
                             <div class="settings-row" id="galleryMigrationStatus" style="display: none;">
                                 <span class="settings-hint" id="galleryMigrationStatusText" style="color: var(--accent);"></span>
-                            </div>
-                            <div class="settings-row settings-sub-note">
-                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Refresh SillyTavern page after migration.</span>
                             </div>
                         </div>
                         
@@ -2755,9 +2772,9 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-map"></i> Reference</div>
                             <div class="settings-row">
                                 <button id="viewFolderMappingBtn" class="settings-action-btn">
-                                    <i class="fa-solid fa-map"></i> View Folder Mapping
+                                    <i class="fa-solid fa-map"></i> View Folder Names
                                 </button>
-                                <span class="settings-hint">See which unique folder belongs to which character.</span>
+                                <span class="settings-hint">See the computed folder name for each character with a gallery_id.</span>
                             </div>
                             <div class="settings-row" style="margin-top: 8px;">
                                 <button id="browseOrphanedFoldersBtn" class="settings-action-btn">
@@ -2769,28 +2786,19 @@ https://jannyai.com/characters/uuid_slug
                         
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-stethoscope"></i> Integrity Check</div>
-                            <span class="settings-hint">Ensure gallery IDs and folder mappings are properly synchronized.</span>
-                            
+                            <span class="settings-hint">Detect characters missing a <code>gallery_id</code>. Folder names are computed live from the card, so there's nothing else to sync.</span>
+
                             <div id="gallerySyncStatus" class="gallery-sync-status-box" style="margin-top: 10px;">
                                 <div class="sync-status-placeholder">
                                     <i class="fa-solid fa-circle-question"></i>
                                     <span>Click "Run Audit" to check integrity</span>
                                 </div>
                             </div>
-                            
+
                             <div class="settings-row gallery-sync-buttons" style="margin-top: 10px;">
                                 <button id="gallerySyncAuditBtn" class="settings-action-btn">
                                     <i class="fa-solid fa-magnifying-glass"></i> Run Audit
                                 </button>
-                                <button id="gallerySyncFullBtn" class="settings-action-btn primary">
-                                    <i class="fa-solid fa-rotate"></i> Full Sync
-                                </button>
-                                <button id="gallerySyncCleanupBtn" class="settings-action-btn">
-                                    <i class="fa-solid fa-broom"></i> Cleanup Orphans
-                                </button>
-                            </div>
-                            <div class="settings-row settings-sub-note" style="margin-top: 8px;">
-                                <span class="settings-hint"><i class="fa-solid fa-info-circle"></i> Full Sync assigns missing IDs, creates missing mappings, and removes orphaned entries.</span>
                             </div>
                         </div>
                     </div>
@@ -2805,7 +2813,32 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.0.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.1.0</span>
+                            </div>
+                        </div>
+
+                        <div class="settings-group cl-hidden" id="clHelperStatusGroup">
+                            <div class="settings-group-title"><i class="fa-solid fa-puzzle-piece"></i> cl-helper Plugin</div>
+                            <div class="settings-row cl-hidden" id="clHelperStatusOk">
+                                <span class="settings-hint" style="font-family: monospace;">v<span id="clHelperStatusVersion">unknown</span> <i class="fa-solid fa-circle-check cl-helper-status-check"></i></span>
+                            </div>
+                            <div class="settings-row cl-hidden" id="clHelperStatusMissing">
+                                <span class="settings-hint">Not installed (optional, needed for some provider auth flows). <a href="https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary#cl-helper-plugin-not-detected" target="_blank" rel="noopener noreferrer">Setup guide &rarr;</a></span>
+                            </div>
+                        </div>
+
+                        <div class="cl-helper-banner cl-helper-update cl-hidden" id="clHelperUpdateBanner">
+                            <div class="cl-helper-banner-row">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                                <div>
+                                    <strong id="clHelperUpdateTitle">cl-helper update available</strong>
+                                    <span id="clHelperUpdateBody"></span>
+                                </div>
+                            </div>
+                            <div class="cl-helper-update-actions cl-hidden" id="clHelperUpdateActions">
+                                <button class="settings-action-btn primary" id="clHelperUpdateBtn">
+                                    <i class="fa-solid fa-arrows-rotate"></i> Update plugin files
+                                </button>
                             </div>
                         </div>
 
@@ -2936,8 +2969,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=148"></script>
-    <script type="module" src="../modules/module-loader.js?v=35"></script>
-    <script src="library-mobile.js?v=17"></script>
+    <script src="library.js?v=187"></script>
+    <script type="module" src="../modules/module-loader.js?v=40"></script>
+    <script src="library-mobile.js?v=18"></script>
 </body>
 </html>

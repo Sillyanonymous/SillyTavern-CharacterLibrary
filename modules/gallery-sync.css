@@ -106,30 +106,6 @@
     opacity: 0.6;
 }
 
-.gallery-sync-status-box .sync-progress {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs-sm);
-}
-
-.gallery-sync-status-box .sync-progress-text {
-    font-size: var(--font-md);
-    color: var(--accent);
-}
-
-.gallery-sync-status-box .sync-progress-bar {
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: var(--radius-2xs);
-    overflow: hidden;
-}
-
-.gallery-sync-status-box .sync-progress-bar-fill {
-    height: 100%;
-    background: var(--accent);
-    transition: width 0.2s ease;
-}
-
 /* Gallery Sync Buttons Row */
 .gallery-sync-buttons {
     display: flex;
@@ -263,26 +239,6 @@
     gap: var(--space-xs);
 }
 
-.sync-dropdown-issues {
-    margin-bottom: 10px;
-}
-
-.sync-dropdown-issue {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--font-sm);
-    color: var(--text-muted);
-    padding: 4px 0;
-}
-
-.sync-dropdown-issue i {
-    width: 16px;
-    text-align: center;
-    color: var(--cl-error);
-    opacity: 0.8;
-}
-
 .sync-dropdown-actions {
     display: flex;
     gap: var(--space-sm);
@@ -374,21 +330,6 @@
 
 .sync-detail-avatar {
     color: var(--text-muted);
-    font-family: monospace;
-    font-size: var(--font-xs);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.sync-detail-id {
-    color: var(--cl-info);
-    font-family: monospace;
-    font-size: var(--font-xs);
-}
-
-.sync-detail-folder {
-    color: var(--cl-success);
     font-family: monospace;
     font-size: var(--font-xs);
     overflow: hidden;

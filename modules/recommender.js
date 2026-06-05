@@ -2,6 +2,8 @@
 // Samples characters from the library, sends metadata to an LLM, displays recommendations
 
 import * as CoreAPI from './core-api.js';
+// Canonical XSS-safe rich-text config (shared, never redefined) for rendering the chat's LLM output.
+import { BROWSE_PURIFY_CONFIG } from './providers/provider-utils.js';
 
 // ========================================
 // CONSTANTS
@@ -41,6 +43,26 @@ Response format:
   {"index": 5, "reason": "Brief explanation"}
 ]`;
 
+const CHAR_CHAT_SYSTEM_BASE = `You are a sharp, enthusiastic guide helping a user explore a character card from their library. Speak ABOUT the character in the third person; never role-play as them. Make the user genuinely understand and feel this card's appeal, grounded entirely in the card data below.
+
+Voice: vivid and specific. Lead with the hook. Cite concrete details from the card instead of generic praise. You can flag genuine problems (incoherent or contradictory writing, one-note characterization, broken mechanics) when they're real, but do NOT treat sparse or open-ended elements as flaws: underspecified side characters, locations, or plot threads are usually deliberate room for the player to fill in and shape across replays, a strength rather than a deficiency. Read open-endedness as opportunity.
+
+`;
+
+const CHAR_CHAT_FORMAT_RICH = `Formatting: write rich, scannable HTML, not flat text. Reach for <h3>/<h4> section headings, <strong>/<em>, <ul>/<li>, <blockquote>, and <table> when they help. Don't be shy with presentation: set off a region, location, or lorebook entry in a styled <div> (inline style is fine), highlight a name or trait with a colored <span>, tuck optional depth into <details><summary>. Aim for something that looks designed. Short answers can stay plain.
+
+`;
+
+const CHAR_CHAT_FORMAT_PLAIN = `Formatting: keep it clean using plain markdown structure only. Headings, tables, bold, italics, bullet and numbered lists, and blockquotes are all welcome and encouraged. Do NOT use inline CSS, styled <div> blocks, background colors, or colored text; the styling stays simple. Short answers can stay plain.
+
+`;
+
+const CHAR_CHAT_TAIL = `Use only the card data provided. If it doesn't cover what the user asks, say so rather than inventing details.`;
+
+// The two built-in presets. The editable prompt is instructions only; the card JSON is appended at send time.
+const CHAR_CHAT_DEFAULT_RICH = CHAR_CHAT_SYSTEM_BASE + CHAR_CHAT_FORMAT_RICH + CHAR_CHAT_TAIL;
+const CHAR_CHAT_DEFAULT_PLAIN = CHAR_CHAT_SYSTEM_BASE + CHAR_CHAT_FORMAT_PLAIN + CHAR_CHAT_TAIL;
+
 const DEFAULT_SETTINGS = {
     sampleSize: 100,
     temperature: 0.7,
@@ -50,6 +72,7 @@ const DEFAULT_SETTINGS = {
     includeTagline: true,
     includeCreator: true,
     includeSource: false,
+    includeDescription: false,
     batchMode: false,
     batchCount: 3,
     filterHasChats: 'any',
@@ -98,6 +121,13 @@ let _lastEvaluatedCount = 0;
 let _lastPrompt = '';
 let _excludedAvatars = new Set();
 
+// Character chat ("ask about this character"): ephemeral per-open session state.
+let chatChar = null;
+let chatConversation = [];
+let chatAbortController = null;
+let chatLorebookInfo = null;
+let chatBusy = false;
+
 
 // ========================================
 // SETTINGS HELPERS
@@ -111,6 +141,27 @@ function getOpt(key) {
 function setOpt(key, value) {
     CoreAPI.setSetting(`recommender_${key}`, value);
 }
+
+// MessageChannel macrotask yield so progress ticks paint (queueMicrotask drains pre-paint; setTimeout(0) is clamped to 4ms).
+const _yieldChannel = typeof MessageChannel !== 'undefined' ? new MessageChannel() : null;
+const _yieldResolvers = [];
+if (_yieldChannel) {
+    _yieldChannel.port1.onmessage = () => {
+        const r = _yieldResolvers.shift();
+        if (r) r();
+    };
+}
+function yieldToBrowser() {
+    if (_yieldChannel) {
+        return new Promise(resolve => {
+            _yieldResolvers.push(resolve);
+            _yieldChannel.port2.postMessage(null);
+        });
+    }
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+const YIELD_BUDGET_MS = 16;
 
 
 // ========================================
@@ -170,7 +221,7 @@ function createModal() {
 
                 <div id="recommenderCustomApiFields" class="recommender-custom-api hidden">
                     <input type="text" id="recommenderApiUrl" class="recommender-field"
-                        placeholder="Endpoint URL" autocomplete="one-time-code">
+                        placeholder="OpenAI-compatible base URL (e.g. https://api.example.com/v1)" autocomplete="one-time-code">
                     <input type="password" id="recommenderApiKey" class="recommender-field"
                         placeholder="API Key (optional)" autocomplete="new-password">
                     <input type="text" id="recommenderModel" class="recommender-field"
@@ -255,6 +306,10 @@ function createModal() {
                                     <span><i class="fa-solid fa-message"></i> Tagline</span>
                                 </label>
                                 <label class="recommender-toggle-chip">
+                                    <input type="checkbox" id="recommenderIncludeDescription">
+                                    <span><i class="fa-solid fa-align-left"></i> Description</span>
+                                </label>
+                                <label class="recommender-toggle-chip">
                                     <input type="checkbox" id="recommenderIncludeCreator">
                                     <span><i class="fa-solid fa-user-pen"></i> Creator</span>
                                 </label>
@@ -306,6 +361,7 @@ function createModal() {
     </div>`;
 
     document.body.insertAdjacentHTML('beforeend', html);
+    document.body.insertAdjacentHTML('beforeend', charChatModalHtml());
 }
 
 
@@ -388,6 +444,7 @@ function loadSettingsIntoUI() {
     document.getElementById('recommenderIncludeTagline').checked = getOpt('includeTagline');
     document.getElementById('recommenderIncludeCreator').checked = getOpt('includeCreator');
     document.getElementById('recommenderIncludeSource').checked = getOpt('includeSource');
+    document.getElementById('recommenderIncludeDescription').checked = getOpt('includeDescription');
     document.getElementById('recommenderBatchMode').checked = getOpt('batchMode');
     const batchCountEl = document.getElementById('recommenderBatchCount');
     if (batchCountEl) {
@@ -445,6 +502,7 @@ function saveSettingsFromUI() {
     setOpt('includeTagline', document.getElementById('recommenderIncludeTagline')?.checked ?? true);
     setOpt('includeCreator', document.getElementById('recommenderIncludeCreator')?.checked ?? true);
     setOpt('includeSource', document.getElementById('recommenderIncludeSource')?.checked ?? false);
+    setOpt('includeDescription', document.getElementById('recommenderIncludeDescription')?.checked ?? false);
     setOpt('batchMode', document.getElementById('recommenderBatchMode')?.checked ?? false);
     setOpt('batchCount', parseInt(document.getElementById('recommenderBatchCount')?.value) || 3);
 
@@ -485,10 +543,11 @@ function updateSampleSizeLabel(value, total) {
 const TOKEN_ESTIMATES = {
     base: 8,
     includeTags: 15,
-    includeCreatorNotes: 40,
+    includeCreatorNotes: 100,
     includeTagline: 35,
     includeCreator: 5,
     includeSource: 3,
+    includeDescription: 100,
 };
 const TOKEN_OVERHEAD = 250;
 
@@ -566,7 +625,7 @@ function attachEvents() {
     });
 
     // LLM context checkboxes → update token estimate
-    for (const id of ['recommenderIncludeTags', 'recommenderIncludeCreatorNotes', 'recommenderIncludeTagline', 'recommenderIncludeCreator', 'recommenderIncludeSource']) {
+    for (const id of ['recommenderIncludeTags', 'recommenderIncludeCreatorNotes', 'recommenderIncludeTagline', 'recommenderIncludeCreator', 'recommenderIncludeSource', 'recommenderIncludeDescription']) {
         document.getElementById(id)?.addEventListener('change', updateTokenEstimate);
     }
 
@@ -652,6 +711,31 @@ function attachEvents() {
         visible: (el) => el.classList.contains('visible'),
     });
 
+    // Character chat ("ask about this character"): sits above the recommender, closes first
+    window.registerOverlay?.({
+        id: 'recommenderCharChatModal',
+        tier: 4,
+        close: () => closeCharChat(),
+        visible: (el) => el.classList.contains('visible'),
+    });
+    document.getElementById('recommenderChatCloseBtn')?.addEventListener('click', () => closeCharChat());
+    document.getElementById('recommenderCharChatModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'recommenderCharChatModal') closeCharChat();
+    });
+    document.getElementById('recommenderChatSendBtn')?.addEventListener('click', () => sendChatMessage());
+    document.getElementById('recommenderChatCancelBtn')?.addEventListener('click', () => { if (chatAbortController) chatAbortController.abort(); });
+    document.getElementById('recommenderChatInput')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage(); }
+    });
+    document.getElementById('recommenderChatSettingsToggle')?.addEventListener('click', () => toggleChatSettings());
+    document.getElementById('recommenderChatSystemPrompt')?.addEventListener('input', (e) => persistChatActive(e.target.value));
+    document.getElementById('recommenderChatPresetSelect')?.addEventListener('change', (e) => loadChatPreset(e.target.value));
+    document.getElementById('recommenderChatPresetSave')?.addEventListener('click', () => saveChatPreset());
+    document.getElementById('recommenderChatPresetDelete')?.addEventListener('click', () => deleteChatPreset());
+    document.getElementById('recommenderChatPresetReset')?.addEventListener('click', () => resetChatPrompt());
+    buildChatPresetSelect();
+    CoreAPI.initCustomSelect?.(document.getElementById('recommenderChatPresetSelect'));
+
     // Enter key to submit
     document.getElementById('recommenderPrompt')?.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
@@ -669,6 +753,15 @@ function attachEvents() {
             const card = plBtn.closest('.recommender-result-card');
             const avatar = card?.dataset.avatar;
             if (avatar) CoreAPI.openPlaylistPicker([avatar]);
+            return;
+        }
+
+        const chatBtn = e.target.closest('.recommender-chat-btn');
+        if (chatBtn) {
+            e.preventDefault();
+            e.stopPropagation();
+            const avatar = chatBtn.closest('.recommender-result-card')?.dataset.avatar;
+            if (avatar) openCharChat(avatar);
             return;
         }
 
@@ -704,7 +797,12 @@ function attachEvents() {
             const avatar = card?.dataset.avatar;
             if (!avatar) return;
             const char = CoreAPI.getCharacterByAvatar(avatar);
-            if (char) CoreAPI.openCharModalElevated(char);
+            if (!char) return;
+            // Page prev/next through the result set (DOM order = display order), not the grid behind us.
+            const navList = [...document.querySelectorAll('.recommender-result-card[data-avatar]')]
+                .map(c => CoreAPI.getCharacterByAvatar(c.dataset.avatar))
+                .filter(Boolean);
+            CoreAPI.openCharModalElevated(char, navList);
             return;
         }
     });
@@ -927,9 +1025,27 @@ function sampleCharacters(allChars, sampleSize) {
     return shuffled.slice(0, sampleSize);
 }
 
-function buildCharacterList(chars, opts) {
+// description is a slim-stripped heavy field, so it has to be hydrated before the prompt build.
+// Chunked to avoid a fetch stampede on large samples; only ever called when the Description toggle is on.
+async function hydrateForDescriptions(chars, signal) {
+    const slim = chars.filter(c => c?._slim);
+    if (!slim.length) return;
+    const CHUNK = 40;
+    for (let i = 0; i < slim.length; i += CHUNK) {
+        if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+        const upto = Math.min(i + CHUNK, slim.length);
+        showStatus(`<i class="fa-solid fa-spinner fa-spin"></i> Loading descriptions ${upto}/${slim.length}...`, 'info');
+        await Promise.all(slim.slice(i, upto).map(c => CoreAPI.hydrateCharacter(c)));
+    }
+}
+
+async function buildCharacterListAsync(chars, opts, signal, onProgress) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     const lines = [];
-    for (let i = 0; i < chars.length; i++) {
+    const total = chars.length;
+    let chunkStart = performance.now();
+
+    for (let i = 0; i < total; i++) {
         const c = chars[i];
         const parts = [`#${i + 1} "${(CoreAPI.getCharacterName(c) || 'Unknown')}"`];
 
@@ -941,19 +1057,35 @@ function buildCharacterList(chars, opts) {
             parts.push(`[creator: ${c.data.creator}]`);
         }
         if (opts.includeCreatorNotes && c.data?.creator_notes) {
-            const notes = cleanTextForLLM(c.data.creator_notes).slice(0, 150);
+            const notes = cleanTextForLLM(c.data.creator_notes).slice(0, 400);
             if (notes) parts.push(`[creator notes: ${notes}]`);
         }
         if (opts.includeTagline) {
             const tagline = getProviderTagline(c);
             if (tagline) parts.push(`[tagline: ${tagline}]`);
         }
+        if (opts.includeDescription && c.data?.description) {
+            const desc = cleanTextForLLM(c.data.description).slice(0, 400);
+            if (desc) parts.push(`[description: ${desc}]`);
+        }
         if (opts.includeSource) {
             const source = getProviderSource(c);
             if (source) parts.push(`[source: ${source}]`);
         }
         lines.push(parts.join(' '));
+
+        const done = i + 1;
+        // Time-budget over fixed-item chunks: per-char cost varies widely (heavy HTML notes hit 15-20ms each).
+        if (done < total && performance.now() - chunkStart >= YIELD_BUDGET_MS) {
+            if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+            if (onProgress) onProgress(done, total);
+            await yieldToBrowser();
+            if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+            chunkStart = performance.now();
+        }
     }
+
+    if (onProgress) onProgress(total, total);
     return lines.join('\n');
 }
 
@@ -1004,16 +1136,12 @@ function stripOrphanSurrogates(str) {
         .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 }
 
-const PROVIDER_TAGLINE_KEYS = ['chub', 'chartavern', 'jannyai', 'pygmalion', 'wyvern'];
-
+// Active-namespace read: real provider id when linked, 'cl' for unlinked cards. Ignores orphan provider namespaces left on re-linked cards.
 function getProviderTagline(char) {
-    const ext = char.data?.extensions;
-    if (!ext) return '';
-    for (const provider of PROVIDER_TAGLINE_KEYS) {
-        const tagline = ext[provider]?.tagline;
-        if (tagline) return cleanTextForLLM(tagline).slice(0, 150);
-    }
-    return '';
+    const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    const tagline = char.data?.extensions?.[ns]?.tagline;
+    if (!tagline) return '';
+    return cleanTextForLLM(tagline).slice(0, 400);
 }
 
 
@@ -1257,6 +1385,12 @@ async function callSillyTavernAPI(messages, temperature, signal) {
     );
 }
 
+// Custom endpoints are OpenAI-compatible: append /chat/completions to the base (matches ST), but accept a full URL too.
+function resolveCustomEndpoint(base) {
+    const u = (base || '').trim().replace(/\/+$/, '');
+    return /\/chat\/completions$/i.test(u) ? u : `${u}/chat/completions`;
+}
+
 async function callCustomAPI(messages, temperature, signal) {
     const url = getOpt('customApiUrl');
     const apiKey = getOpt('customApiKey');
@@ -1264,7 +1398,8 @@ async function callCustomAPI(messages, temperature, signal) {
 
     if (!url) throw new Error('Custom API endpoint URL is required. Configure it in Settings below.');
 
-    CoreAPI.debugLog('[Recommender] Custom API request:', { url, model: model || '(default)', temperature, messageCount: messages.length, userMsgLength: messages[1]?.content?.length });
+    const endpoint = resolveCustomEndpoint(url);
+    CoreAPI.debugLog('[Recommender] Custom API request:', { endpoint, model: model || '(default)', temperature, messageCount: messages.length, userMsgLength: messages[1]?.content?.length });
 
     const headers = { 'Content-Type': 'application/json' };
     if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -1272,7 +1407,7 @@ async function callCustomAPI(messages, temperature, signal) {
     const body = { messages, temperature, max_tokens: 2000 };
     if (model) body.model = model;
 
-    const response = await fetch(url, {
+    const response = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
@@ -1324,8 +1459,17 @@ function extractContent(data) {
     throw new Error('Unexpected API response format: could not extract content');
 }
 
-async function generate(userPrompt, chars, opts, signal) {
-    const charList = buildCharacterList(chars, opts);
+// Single dispatch for both API modes; reused by generate, the batch-reduce step, and the character chat.
+async function callForMode(messages, temperature, signal) {
+    const mode = getOpt('apiMode');
+    if (mode === 'custom') return await callCustomAPI(messages, temperature, signal);
+    return await callSillyTavernAPI(messages, temperature, signal);
+}
+
+async function generate(userPrompt, chars, opts, signal, onProgress) {
+    const charList = await buildCharacterListAsync(chars, opts, signal, onProgress);
+    // Yield once so the final progress tick paints before the surrogate scan and the fetch fire off.
+    await yieldToBrowser();
     const userMessage = stripOrphanSurrogates(
         `CHARACTER LIBRARY (${chars.length} characters):\n${charList}\n\nUSER REQUEST: ${userPrompt}\n\nRecommend up to ${opts.maxResults} characters. Respond with a JSON array only.`
     );
@@ -1340,7 +1484,7 @@ async function generate(userPrompt, chars, opts, signal) {
     CoreAPI.debugLog('[Recommender] Generate:', {
         mode, chars: chars.length, sampleSize: opts.sampleSize,
         temperature: opts.temperature, maxResults: opts.maxResults,
-        fields: { tags: opts.includeTags, creator: opts.includeCreator, creatorNotes: opts.includeCreatorNotes, tagline: opts.includeTagline, source: opts.includeSource },
+        fields: { tags: opts.includeTags, creator: opts.includeCreator, creatorNotes: opts.includeCreatorNotes, tagline: opts.includeTagline, description: opts.includeDescription, source: opts.includeSource },
         systemPromptLength: SYSTEM_PROMPT.length, userMsgLength: messages[1].content.length,
     });
     CoreAPI.debugLog('[Recommender] User message:', messages[1].content);
@@ -1352,11 +1496,11 @@ async function generate(userPrompt, chars, opts, signal) {
         profileName: profile?.name || null,
         sampleSize: opts.sampleSize,
         sampledCount: chars.length,
-        poolSize: getFilteredPool().length,
+        poolSize: opts.poolSize ?? chars.length,
         totalChars: CoreAPI.getAllCharacters().length,
         temperature: opts.temperature,
         maxResults: opts.maxResults,
-        contextFields: { tags: opts.includeTags, creator: opts.includeCreator, creatorNotes: opts.includeCreatorNotes, tagline: opts.includeTagline, source: opts.includeSource },
+        contextFields: { tags: opts.includeTags, creator: opts.includeCreator, creatorNotes: opts.includeCreatorNotes, tagline: opts.includeTagline, description: opts.includeDescription, source: opts.includeSource },
         filters: { hasChats: getOpt('filterHasChats'), favorite: getOpt('filterFavorite'), dateEnabled: getOpt('filterDateEnabled'), dateFrom: getOpt('filterDateFrom'), dateTo: getOpt('filterDateTo'), tagsInclude: getOpt('filterTagsInclude'), tagsExclude: getOpt('filterTagsExclude') },
         userPrompt,
         messages,
@@ -1365,12 +1509,7 @@ async function generate(userPrompt, chars, opts, signal) {
     };
 
     try {
-        let rawContent;
-        if (mode === 'custom') {
-            rawContent = await callCustomAPI(messages, opts.temperature, signal);
-        } else {
-            rawContent = await callSillyTavernAPI(messages, opts.temperature, signal);
-        }
+        const rawContent = await callForMode(messages, opts.temperature, signal);
         lastDebugContext.rawResponse = rawContent;
         CoreAPI.debugLog('[Recommender] Raw response:', rawContent);
         if (!rawContent?.trim()) {
@@ -1411,12 +1550,459 @@ async function generateReduce(userPrompt, finalists, opts, signal) {
         },
     ];
 
-    const mode = getOpt('apiMode');
-    if (mode === 'custom') {
-        return await callCustomAPI(messages, opts.temperature, signal);
-    } else {
-        return await callSillyTavernAPI(messages, opts.temperature, signal);
+    return await callForMode(messages, opts.temperature, signal);
+}
+
+// ========================================
+// CHARACTER CHAT ("ask about this character")
+// ========================================
+
+function charChatModalHtml() {
+    return `
+    <div class="cl-modal recommender-chat-modal" id="recommenderCharChatModal">
+        <div class="cl-modal-content">
+            <div class="cl-modal-header">
+                <h3><i class="fa-solid fa-comment-dots"></i> <span id="recommenderChatTitle">Ask about character</span></h3>
+                <div class="recommender-chat-header-actions">
+                    <button class="recommender-chat-gear" id="recommenderChatSettingsToggle" title="Chat settings"><i class="fa-solid fa-sliders"></i></button>
+                    <button class="cl-modal-close" id="recommenderChatCloseBtn" title="Close"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+            </div>
+            <div class="recommender-chat-settings hidden" id="recommenderChatSettings">
+                <div class="recommender-chat-settings-section">
+                    <div class="recommender-chat-settings-head">
+                        <label class="recommender-chat-settings-label">System prompt</label>
+                        <div class="recommender-chat-preset-row">
+                            <select id="recommenderChatPresetSelect" class="recommender-chat-preset-select cl-select-fluid"></select>
+                            <button class="recommender-chat-icon-btn" id="recommenderChatPresetSave" title="Save current as a preset"><i class="fa-solid fa-floppy-disk"></i></button>
+                            <button class="recommender-chat-icon-btn" id="recommenderChatPresetDelete" title="Delete the selected preset"><i class="fa-solid fa-trash-can"></i></button>
+                            <button class="recommender-chat-icon-btn" id="recommenderChatPresetReset" title="Reset to the default prompt"><i class="fa-solid fa-rotate-left"></i></button>
+                        </div>
+                    </div>
+                    <textarea id="recommenderChatSystemPrompt" class="glass-input recommender-chat-prompt-editor" rows="6" placeholder="System prompt the assistant follows. The card data is added automatically."></textarea>
+                </div>
+                <div class="recommender-chat-settings-section recommender-chat-lorebook-section hidden" id="recommenderChatLorebookSection">
+                    <label class="recommender-toggle-chip">
+                        <input type="checkbox" id="recommenderChatIncludeLorebook">
+                        <span><i class="fa-solid fa-book"></i> Include lorebook</span>
+                    </label>
+                    <span class="recommender-chat-lorebook-size" id="recommenderChatLorebookSize"></span>
+                </div>
+            </div>
+            <div class="cl-modal-body recommender-chat-body">
+                <div class="recommender-chat-messages" id="recommenderChatMessages"></div>
+                <div class="recommender-chat-empty" id="recommenderChatEmpty">
+                    <i class="fa-solid fa-comments"></i>
+                    <p id="recommenderChatEmptyTitle">Ask anything about this character</p>
+                    <ul>
+                        <li>What themes and tone does this card explore?</li>
+                        <li>Would they work for a slow-burn romance?</li>
+                        <li>Summarize their personality and backstory.</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="cl-modal-footer recommender-chat-footer">
+                <textarea id="recommenderChatInput" class="glass-input recommender-chat-input" placeholder="Ask about this character (Enter to send, Shift+Enter for newline)" rows="1"></textarea>
+                <div class="recommender-chat-footer-actions">
+                    <button class="cl-btn cl-btn-danger cl-hidden" id="recommenderChatCancelBtn"><i class="fa-solid fa-stop"></i> Stop</button>
+                    <button class="cl-btn cl-btn-primary" id="recommenderChatSendBtn"><i class="fa-solid fa-paper-plane"></i> Send</button>
+                </div>
+            </div>
+        </div>
+    </div>`;
+}
+
+// Prompt content lives in a Files-API JSON (never in settings), matching _cl_playlists.json etc.
+// Load/save mirror the canonical playlists pattern: cache + in-flight dedupe, write serialization, resp.ok check.
+const CHAT_PROMPTS_FILE = '_cl_chat_prompts.json';
+let _chatPrompts = null; // { active: string, presets: [{name, prompt}] }
+let _chatPromptsLoaded = false;
+let _chatPromptsLoadingPromise = null;
+let _chatPromptsSaving = false;
+let _chatPromptsSaveQueued = false;
+let _chatActiveSaveTimer = null;
+
+async function loadChatPrompts() {
+    if (_chatPromptsLoaded) return _chatPrompts;
+    if (_chatPromptsLoadingPromise) return _chatPromptsLoadingPromise;
+    _chatPromptsLoadingPromise = (async () => {
+        let data = null;
+        try {
+            const resp = await fetch(`/user/files/${CHAT_PROMPTS_FILE}`);
+            if (resp.ok) {
+                const text = await resp.text();
+                if (text && text.trim()) data = JSON.parse(text);
+            }
+        } catch { /* missing or invalid file is fine */ }
+        _chatPrompts = (data && typeof data === 'object' && !Array.isArray(data)) ? data : {};
+        if (!Array.isArray(_chatPrompts.presets)) _chatPrompts.presets = [];
+        if (typeof _chatPrompts.active !== 'string') _chatPrompts.active = '';
+        _chatPromptsLoaded = true;
+        _chatPromptsLoadingPromise = null;
+        return _chatPrompts;
+    })();
+    return _chatPromptsLoadingPromise;
+}
+
+async function saveChatPrompts() {
+    if (!_chatPrompts) return;
+    if (_chatPromptsSaving) { _chatPromptsSaveQueued = true; return; }
+    _chatPromptsSaving = true;
+    try {
+        const resp = await CoreAPI.apiRequest('/files/upload', 'POST', {
+            name: CHAT_PROMPTS_FILE,
+            data: CoreAPI.utf8ToBase64(JSON.stringify(_chatPrompts, null, 2)),
+        });
+        if (!resp.ok) throw new Error(`upload failed (${resp.status})`);
+    } catch (e) {
+        console.error('[Recommender] Failed to save chat prompts:', e.message);
+        CoreAPI.showToast('Failed to save chat prompt', 'error');
+    } finally {
+        _chatPromptsSaving = false;
+        if (_chatPromptsSaveQueued) { _chatPromptsSaveQueued = false; saveChatPrompts(); }
     }
+}
+
+// Debounced so typing in the editor doesn't spam file writes; discrete actions call saveChatPrompts directly.
+function persistChatActive(text) {
+    if (!_chatPrompts) return;
+    _chatPrompts.active = text;
+    clearTimeout(_chatActiveSaveTimer);
+    _chatActiveSaveTimer = setTimeout(saveChatPrompts, 1000);
+}
+
+function toggleChatSettings() {
+    const panel = document.getElementById('recommenderChatSettings');
+    if (!panel) return;
+    const open = panel.classList.toggle('hidden') === false;
+    document.getElementById('recommenderChatSettingsToggle')?.classList.toggle('active', open);
+}
+
+function buildChatPresetSelect() {
+    const select = document.getElementById('recommenderChatPresetSelect');
+    if (!select) return;
+    const presets = _chatPrompts?.presets || [];
+    let html = `<option value="" disabled selected>Load a prompt...</option>`
+        + `<option value="default:rich">Default (Rich styling)</option>`
+        + `<option value="default:plain">Default (Plain markdown)</option>`;
+    presets.forEach((p, i) => { html += `<option value="saved:${i}">${CoreAPI.escapeHtml(p.name)}</option>`; });
+    select.innerHTML = html;
+    select._customSelect?.refresh();
+}
+
+function loadChatPreset(value) {
+    const editor = document.getElementById('recommenderChatSystemPrompt');
+    if (!editor || !value) return;
+    let prompt = null;
+    if (value === 'default:rich') prompt = CHAR_CHAT_DEFAULT_RICH;
+    else if (value === 'default:plain') prompt = CHAR_CHAT_DEFAULT_PLAIN;
+    else if (value.startsWith('saved:')) prompt = (_chatPrompts?.presets || [])[parseInt(value.slice(6), 10)]?.prompt;
+    if (prompt != null) {
+        editor.value = prompt;
+        persistChatActive(prompt);
+    }
+}
+
+function resetChatPrompt() {
+    const editor = document.getElementById('recommenderChatSystemPrompt');
+    if (!editor) return;
+    editor.value = CHAR_CHAT_DEFAULT_RICH;
+    persistChatActive(CHAR_CHAT_DEFAULT_RICH);
+    CoreAPI.showToast('Reset to the default prompt', 'info', 1500);
+}
+
+async function saveChatPreset() {
+    const prompt = (document.getElementById('recommenderChatSystemPrompt')?.value || '').trim();
+    if (!prompt) { CoreAPI.showToast('Write a prompt first', 'warning', 2000); return; }
+    await loadChatPrompts();
+    const result = await CoreAPI.savePresetPicker('Save prompt preset', _chatPrompts.presets);
+    if (!result) return;
+    if (result.overwriteIndex >= 0) _chatPrompts.presets[result.overwriteIndex].prompt = prompt;
+    else _chatPrompts.presets.push({ name: result.name, prompt });
+    await saveChatPrompts();
+    buildChatPresetSelect();
+    CoreAPI.showToast('Prompt saved', 'success', 1500);
+}
+
+async function deleteChatPreset() {
+    const value = document.getElementById('recommenderChatPresetSelect')?.value || '';
+    if (!value.startsWith('saved:')) { CoreAPI.showToast('Pick a saved preset to delete (defaults cannot be removed)', 'warning', 2500); return; }
+    const idx = parseInt(value.slice(6), 10);
+    await loadChatPrompts();
+    if (idx < 0 || idx >= _chatPrompts.presets.length) return;
+    _chatPrompts.presets.splice(idx, 1);
+    await saveChatPrompts();
+    buildChatPresetSelect();
+    CoreAPI.showToast('Preset deleted', 'info', 1500);
+}
+
+function computeLorebookInfo(char) {
+    const book = char?.data?.character_book || char?.character_book;
+    if (!book || !Array.isArray(book.entries) || !book.entries.length) return null;
+    return { entries: book.entries.length, chars: JSON.stringify(book).length };
+}
+
+// Content fields only; operational extensions (gallery_id, version_uid, provider links, etc.) are deliberately omitted.
+function buildChatCardContext(char, includeLorebook) {
+    const d = char.data || {};
+    const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    const arr = v => (Array.isArray(v) && v.length) ? v : undefined;
+    const card = {
+        name: d.name || char.name,
+        creator: d.creator || undefined,
+        character_version: d.character_version || undefined,
+        tagline: d.extensions?.[ns]?.tagline || undefined,
+        tags: arr(d.tags),
+        description: d.description || undefined,
+        personality: d.personality || undefined,
+        scenario: d.scenario || undefined,
+        first_mes: d.first_mes || undefined,
+        alternate_greetings: arr(d.alternate_greetings),
+        mes_example: d.mes_example || undefined,
+        creator_notes: d.creator_notes || undefined,
+        nickname: d.nickname || undefined,
+        group_only_greetings: arr(d.group_only_greetings),
+    };
+    if (includeLorebook) {
+        const book = d.character_book || char.character_book;
+        if (book) card.character_book = book;
+    }
+    return JSON.stringify(card, null, 2);
+}
+
+function setChatBusy(busy) {
+    chatBusy = busy;
+    document.getElementById('recommenderChatSendBtn')?.classList.toggle('cl-hidden', busy);
+    document.getElementById('recommenderChatCancelBtn')?.classList.toggle('cl-hidden', !busy);
+    const input = document.getElementById('recommenderChatInput');
+    if (input) input.disabled = busy;
+}
+
+// Normalize the LLM's text into clean block HTML BEFORE formatRichText: wrap prose in <p>, convert markdown
+// headings/lists, pass HTML blocks through, and drop blank lines. Dropping the blanks is the load-bearing part,
+// it stops formatRichText turning blank lines into <br><br> (the cause of cavernous paragraph spacing); gaps are
+// then governed by CSS margins. Handles markdown OR HTML; safePurify still runs last, so it stays XSS-safe.
+function mdBlocksToHtml(text) {
+    const out = [];
+    let list = null, para = [];
+    const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
+    const flushPara = () => { if (para.length) { out.push(`<p>${para.join('<br>')}</p>`); para = []; } };
+    const BLOCK_HTML = /^\s*<\/?(h[1-6]|div|p|ul|ol|li|table|thead|tbody|tr|th|td|blockquote|pre|hr|details|summary|section|center|img|style)\b/i;
+    for (const line of String(text).replace(/\r\n?/g, '\n').split('\n')) {
+        const h = line.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+        const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+        const num = line.match(/^\s*\d+\.\s+(.+)$/);
+        if (h) {
+            flushPara(); closeList();
+            const lvl = Math.min(h[1].length, 6);
+            out.push(`<h${lvl}>${h[2]}</h${lvl}>`);
+        } else if (bullet) {
+            flushPara();
+            if (list !== 'ul') { closeList(); out.push('<ul>'); list = 'ul'; }
+            out.push(`<li>${bullet[1]}</li>`);
+        } else if (num) {
+            flushPara();
+            if (list !== 'ol') { closeList(); out.push('<ol>'); list = 'ol'; }
+            out.push(`<li>${num[1]}</li>`);
+        } else if (BLOCK_HTML.test(line)) {
+            flushPara(); closeList();
+            out.push(line);
+        } else if (!line.trim()) {
+            flushPara(); closeList();
+        } else {
+            closeList();
+            para.push(line);
+        }
+    }
+    flushPara(); closeList();
+    return out.join('\n');
+}
+
+// Post-render contrast guard: the LLM's inline styles often assume a light page, so they can set text or block
+// colors that are unreadable on the dark chat surface. Detect and repair the low-contrast cases without prompting.
+const CHAT_SURFACE_RGB = [30, 30, 30]; // --bg-secondary #1e1e1e
+const _colorCache = new Map();
+
+function parseColor(str) {
+    if (!str || /gradient|url\(|var\(/i.test(str)) return null;
+    if (_colorCache.has(str)) return _colorCache.get(str);
+    let rgb = null;
+    const probe = document.createElement('span');
+    probe.style.display = 'none';
+    probe.style.color = str;
+    if (probe.style.color) {
+        document.body.appendChild(probe);
+        const m = getComputedStyle(probe).color.match(/(\d+),\s*(\d+),\s*(\d+)/);
+        document.body.removeChild(probe);
+        if (m) rgb = [+m[1], +m[2], +m[3]];
+    }
+    _colorCache.set(str, rgb);
+    return rgb;
+}
+
+function _lum([r, g, b]) {
+    const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+}
+function _contrast(a, b) {
+    const la = _lum(a), lb = _lum(b);
+    return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+function _readableOn(bg) { return _lum(bg) > 0.45 ? '#15151f' : '#f2f2f5'; }
+function _effectiveBg(el) {
+    for (let cur = el; cur && cur.style; cur = cur.parentElement) {
+        const bg = parseColor(cur.style.backgroundColor || cur.style.background);
+        if (bg) return bg;
+    }
+    return CHAT_SURFACE_RGB;
+}
+
+function fixChatContrast(html) {
+    if (!html || html.indexOf('style=') === -1) return html;
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    tmp.querySelectorAll('[style]').forEach(el => {
+        const ownBg = parseColor(el.style.backgroundColor || el.style.background);
+        if (ownBg) {
+            const fg = parseColor(el.style.color);
+            if (!fg || _contrast(fg, ownBg) < 3.5) el.style.color = _readableOn(ownBg);
+        }
+        const fg = parseColor(el.style.color);
+        if (fg) {
+            const bg = _effectiveBg(el);
+            if (_contrast(fg, bg) < 3.5) el.style.color = _readableOn(bg);
+        }
+    });
+    return tmp.innerHTML;
+}
+
+function renderChatMessages() {
+    const el = document.getElementById('recommenderChatMessages');
+    const emptyEl = document.getElementById('recommenderChatEmpty');
+    if (!el) return;
+    if (emptyEl) emptyEl.hidden = chatConversation.length > 0 || chatBusy;
+    let html = chatConversation.map(m => {
+        if (m.role === 'user') {
+            return `<div class="recommender-chat-msg user">
+                <div class="recommender-chat-msg-role"><i class="fa-solid fa-user"></i> You</div>
+                <div class="recommender-chat-msg-text">${CoreAPI.escapeHtml(m.content).replace(/\n/g, '<br>')}</div>
+            </div>`;
+        }
+        // LLM output is untrusted (card content can prompt-inject), so it goes through the canonical safe rich-text pipeline.
+        const body = m._error
+            ? CoreAPI.escapeHtml(m.content)
+            : fixChatContrast(CoreAPI.safePurify(CoreAPI.formatRichText(mdBlocksToHtml(m.content), '', true), BROWSE_PURIFY_CONFIG));
+        return `<div class="recommender-chat-msg assistant${m._error ? ' error' : ''}">
+            <div class="recommender-chat-msg-role"><i class="fa-solid fa-comment-dots"></i> Assistant</div>
+            <div class="recommender-chat-msg-text">${body}</div>
+        </div>`;
+    }).join('');
+    if (chatBusy) {
+        html += `<div class="recommender-chat-msg assistant thinking">
+            <div class="recommender-chat-msg-role"><i class="fa-solid fa-comment-dots"></i> Assistant</div>
+            <div class="recommender-chat-thinking-dots"><span></span><span></span><span></span></div>
+        </div>`;
+    }
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+}
+
+async function openCharChat(avatar) {
+    const char = CoreAPI.getCharacterByAvatar(avatar);
+    if (!char) return;
+    const modal = document.getElementById('recommenderCharChatModal');
+    if (!modal) return;
+    chatChar = char;
+    chatConversation = [];
+    chatLorebookInfo = null;
+    setChatBusy(false);
+    const name = CoreAPI.getCharacterName(char) || 'this character';
+    const titleEl = document.getElementById('recommenderChatTitle');
+    if (titleEl) titleEl.textContent = `Ask about ${name}`;
+    const emptyTitle = document.getElementById('recommenderChatEmptyTitle');
+    if (emptyTitle) emptyTitle.innerHTML = `Ask anything about <strong>${CoreAPI.escapeHtml(name)}</strong>`;
+    await loadChatPrompts();
+    const editor = document.getElementById('recommenderChatSystemPrompt');
+    if (editor) editor.value = _chatPrompts.active || CHAR_CHAT_DEFAULT_RICH;
+    buildChatPresetSelect();
+    document.getElementById('recommenderChatSettings')?.classList.add('hidden');
+    document.getElementById('recommenderChatSettingsToggle')?.classList.remove('active');
+    const lbSection = document.getElementById('recommenderChatLorebookSection');
+    const lbSize = document.getElementById('recommenderChatLorebookSize');
+    if (lbSection) lbSection.classList.add('hidden');
+    renderChatMessages();
+    modal.classList.add('visible');
+    // Mobile: drop the keyboard-only Enter/Shift+Enter hint; desktop keeps the full template placeholder.
+    if (matchMedia('(max-width: 768px)').matches) {
+        const ci = document.getElementById('recommenderChatInput');
+        if (ci) ci.placeholder = 'Ask about this character';
+    }
+    await CoreAPI.hydrateCharacter(char);
+    if (chatChar !== char) return; // closed or reopened on a different char during hydrate
+    chatLorebookInfo = computeLorebookInfo(char);
+    if (chatLorebookInfo) {
+        const lbToggle = document.getElementById('recommenderChatIncludeLorebook');
+        if (lbToggle) lbToggle.checked = true;
+        if (lbSize) lbSize.innerHTML = `<i class="fa-solid fa-weight-hanging"></i> ${chatLorebookInfo.entries} ${chatLorebookInfo.entries === 1 ? 'entry' : 'entries'} · ~${(chatLorebookInfo.chars / 1024).toFixed(1)} KB · ~${Math.round(chatLorebookInfo.chars / 4).toLocaleString()} tokens`;
+        if (lbSection) lbSection.classList.remove('hidden');
+    }
+    if (!matchMedia('(pointer: coarse)').matches) document.getElementById('recommenderChatInput')?.focus();
+}
+
+async function sendChatMessage() {
+    if (chatBusy || !chatChar) return;
+    const input = document.getElementById('recommenderChatInput');
+    const text = input?.value?.trim();
+    if (!text) return;
+    chatConversation.push({ role: 'user', content: stripOrphanSurrogates(text) });
+    if (input) input.value = '';
+    setChatBusy(true);
+    renderChatMessages();
+    const includeLorebook = !!chatLorebookInfo && !!document.getElementById('recommenderChatIncludeLorebook')?.checked;
+    const instructions = (document.getElementById('recommenderChatSystemPrompt')?.value || '').trim() || CHAR_CHAT_DEFAULT_RICH;
+    const system = stripOrphanSurrogates(instructions + '\n\nCHARACTER CARD:\n' + buildChatCardContext(chatChar, includeLorebook));
+    const messages = [{ role: 'system', content: system }, ...chatConversation.map(m => ({ role: m.role, content: m.content }))];
+    chatAbortController = new AbortController();
+    try {
+        const reply = await callForMode(messages, 0.7, chatAbortController.signal);
+        chatConversation.push({ role: 'assistant', content: reply?.trim() || '(The model returned an empty response.)' });
+    } catch (err) {
+        if (err?.name !== 'AbortError' && !err?.isCancelled) {
+            chatConversation.push({ role: 'assistant', content: `Error: ${err?.message || 'request failed'}`, _error: true });
+        }
+    } finally {
+        chatAbortController = null;
+        setChatBusy(false);
+        renderChatMessages();
+        if (!matchMedia('(pointer: coarse)').matches) document.getElementById('recommenderChatInput')?.focus();
+    }
+}
+
+function closeCharChat() {
+    const input = document.getElementById('recommenderChatInput');
+    const hasDraft = !!(input?.value || '').trim();
+    if (hasDraft || chatConversation.length) {
+        CoreAPI.showConfirm({
+            title: 'Close the chat?',
+            message: 'Your conversation about this character will be discarded.',
+            confirmLabel: 'Close',
+            cancelLabel: 'Keep Open',
+            danger: true,
+        }).then(confirmed => { if (confirmed) forceCloseCharChat(); });
+        return;
+    }
+    forceCloseCharChat();
+}
+
+function forceCloseCharChat() {
+    if (chatAbortController) { chatAbortController.abort(); chatAbortController = null; }
+    document.getElementById('recommenderCharChatModal')?.classList.remove('visible');
+    const input = document.getElementById('recommenderChatInput');
+    if (input) input.value = '';
+    chatChar = null;
+    chatConversation = [];
+    chatLorebookInfo = null;
+    setChatBusy(false);
 }
 
 function collapseSettingsOnMobile() {
@@ -1434,6 +2020,7 @@ async function runBatchMode(prompt, pool, opts, signal) {
     const totalSample = Math.min(opts.sampleSize * batchCount, pool.length);
     const allSampled = sampleCharacters(pool, totalSample);
     _lastEvaluatedCount = allSampled.length;
+    if (opts.includeDescription) await hydrateForDescriptions(allSampled, signal);
 
     const batches = [];
     const batchSize = Math.ceil(allSampled.length / batchCount);
@@ -1751,10 +2338,13 @@ function renderResults(recommendations) {
                     <div class="recommender-result-header">
                         <a class="recommender-result-name-link" href="#" title="Open character details">${CoreAPI.escapeHtml(CoreAPI.getCharacterName(char) || 'Unknown')}</a>
                         ${creator ? `<span class="recommender-result-creator">by ${CoreAPI.escapeHtml(creator)}</span>` : ''}
-                        <button class="recommender-playlist-btn" title="Add to playlist"><i class="fa-solid fa-list-ul"></i></button>
                     </div>
                     ${rec.reason ? `<div class="recommender-result-reason">${CoreAPI.escapeHtml(rec.reason)}</div>` : ''}
                     ${tagsHtml ? `<div class="recommender-result-tags">${tagsHtml}</div>` : ''}
+                </div>
+                <div class="recommender-result-actions">
+                    <button class="recommender-playlist-btn" title="Add to playlist"><i class="fa-solid fa-list-ul"></i></button>
+                    <button class="recommender-chat-btn" title="Ask about this character"><i class="fa-solid fa-comment-dots"></i></button>
                 </div>
             </div>
         `);
@@ -1808,6 +2398,9 @@ async function executeRecommendation(prompt, pool) {
         includeTagline: getOpt('includeTagline'),
         includeCreator: getOpt('includeCreator'),
         includeSource: getOpt('includeSource'),
+        includeDescription: getOpt('includeDescription'),
+        // Cached for the debug-context dump in generate(); skips a redundant O(pool) re-filter.
+        poolSize: pool.length,
     };
 
     abortController = new AbortController();
@@ -1820,12 +2413,14 @@ async function executeRecommendation(prompt, pool) {
         } else {
             sampledCharacters = sampleCharacters(pool, opts.sampleSize);
             _lastEvaluatedCount = sampledCharacters.length;
-            showStatus(
-                `<i class="fa-solid fa-spinner fa-spin"></i> Sending ${sampledCharacters.length} characters to the model...`,
-                'info'
-            );
+            if (opts.includeDescription) await hydrateForDescriptions(sampledCharacters, abortController.signal);
 
-            const rawContent = await generate(prompt, sampledCharacters, opts, abortController.signal);
+            const rawContent = await generate(prompt, sampledCharacters, opts, abortController.signal, (done, total) => {
+                showStatus(
+                    `<i class="fa-solid fa-spinner fa-spin"></i> Building prompt ${done}/${total}...`,
+                    'info'
+                );
+            });
             hideStatus();
             collapseSettingsOnMobile();
 

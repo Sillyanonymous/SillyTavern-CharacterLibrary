@@ -742,7 +742,7 @@ function renderPygGalleryGrid(galleryImages) {
         section.style.display = 'block';
         if (label) label.textContent = `(${galleryImages.length})`;
         grid.innerHTML = galleryImages.map(img =>
-            `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
+            `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="Gallery image" title="Gallery image" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`
         ).join('');
     } else {
         section.style.display = 'none';
@@ -753,13 +753,16 @@ function renderPygGalleryGrid(galleryImages) {
 function populateDefinitionSections(name, p, altGreetings) {
     // RAF defer so safePurify doesnt block the modal-open paint frame.
     requestAnimationFrame(() => {
-        // Creator's Notes
+        // Creator's Notes - hide the section when empty, like every other section here.
+        const creatorNotesSection = document.getElementById('pygCharCreatorNotesSection');
         const creatorNotesEl = document.getElementById('pygCharCreatorNotes');
         if (creatorNotesEl) {
-            if (p.characterNotes) {
+            if (p.characterNotes && p.characterNotes.trim()) {
+                if (creatorNotesSection) creatorNotesSection.style.display = 'block';
                 creatorNotesEl.innerHTML = safePurify(formatRichText(p.characterNotes, name, true), BROWSE_PURIFY_CONFIG);
             } else {
-                creatorNotesEl.textContent = 'No creator notes available.';
+                if (creatorNotesSection) creatorNotesSection.style.display = 'none';
+                creatorNotesEl.innerHTML = '';
             }
         }
 
@@ -2738,13 +2741,11 @@ class PygmalionBrowseView extends BrowseView {
                 </div>
 
                 <!-- Creator's Notes -->
-                <div class="browse-char-section">
+                <div class="browse-char-section" id="pygCharCreatorNotesSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="pygCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
                     </h3>
-                    <div id="pygCharCreatorNotes" class="scrolling-text">
-                        No creator notes available.
-                    </div>
+                    <div id="pygCharCreatorNotes" class="scrolling-text"></div>
                 </div>
 
                 <!-- Description (Persona) -->

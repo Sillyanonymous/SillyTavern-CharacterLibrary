@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
@@ -710,13 +710,11 @@ class ChubBrowseView extends BrowseView {
                 </div>
 
                 <!-- Creator's Notes -->
-                <div class="browse-char-section">
+                <div class="browse-char-section" id="chubCharCreatorNotesSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="chubCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
                     </h3>
-                    <div id="chubCharCreatorNotes" class="scrolling-text">
-                        No description available.
-                    </div>
+                    <div id="chubCharCreatorNotes" class="scrolling-text"></div>
                 </div>
 
                 <!-- Definition loading indicator -->
@@ -989,7 +987,6 @@ function initChubView() {
             } else if (chubTimelineAuthorHasMore) {
                 // Timeline cursor exhausted, but authors have more characters
                 chubTimelineAuthorPage++;
-                const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
                 await supplementTimelineWithAuthorFetches(chubTimelineAuthorPage);
                 renderChubTimeline();
                 chubBrowseView.updateLoadMoreVisibility('chubTimelineLoadMore', chubTimelineAuthorHasMore, true);
@@ -1931,7 +1928,6 @@ async function loadChubTimeline(forceRefresh = false, _isAutoPage = false, _appe
     if (!_isAutoPage && chubTimelineLoadInFlight) return;
 
     const grid = document.getElementById('chubTimelineGrid');
-    const loadMoreContainer = document.getElementById('chubTimelineLoadMore');
     const isInitialLoad = !_isAutoPage;
 
     if (!_isAutoPage) chubTimelineLoadInFlight = true;
@@ -2355,10 +2351,12 @@ function renderChubTimeline(appendOnly = false) {
         if (state === 'include') includeTags.push(tag.toLowerCase());
         else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
     }
+    // Persistent excludes are user-typed; lowercase to match the charTopics map below.
     for (const t of getProviderExcludeTags('chub')) {
-        if (!excludeTags.includes(t)) excludeTags.push(t);
+        const lt = t.toLowerCase();
+        if (!excludeTags.includes(lt)) excludeTags.push(lt);
     }
-    
+
     let sourceChars = chubTimelineCharacters;
 
     const anyFilterActive = chubFilterImages || chubFilterLore || chubFilterExpressions ||
@@ -2748,8 +2746,7 @@ async function loadChubCharacters(forceRefresh = false) {
     const thisToken = ++chubLoadToken;
     
     const grid = document.getElementById('chubGrid');
-    const loadMoreContainer = document.getElementById('chubLoadMore');
-    
+
     // Special handling for favorites filter - use gateway API directly
     if (chubFilterFavorites && chubToken) {
         await loadChubFavorites(forceRefresh, thisToken);
@@ -3037,8 +3034,7 @@ async function fetchChubUserFavoriteIds() {
  */
 async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
     const grid = document.getElementById('chubGrid');
-    const loadMoreContainer = document.getElementById('chubLoadMore');
-    
+
     if (chubCurrentPage === 1) {
         renderSkeletonGrid(grid);
     }
@@ -3111,7 +3107,8 @@ async function loadChubFavorites(forceRefresh = false, loadToken = 0) {
             else if (state === 'exclude') excludeTags.push(tag.toLowerCase());
         }
         for (const t of getProviderExcludeTags('chub')) {
-            if (!excludeTags.includes(t)) excludeTags.push(t);
+            const lt = t.toLowerCase();
+            if (!excludeTags.includes(lt)) excludeTags.push(lt);
         }
         if (includeTags.length > 0 || excludeTags.length > 0) {
             nodes = nodes.filter(c => {
@@ -3422,9 +3419,21 @@ async function openChubCharPreview(char) {
     const taglineEl = document.getElementById('chubCharTagline');
     const openInBrowserBtn = document.getElementById('chubOpenInBrowserBtn');
     
-    // Creator's Notes (public ChubAI description - always visible at top)
+    // Creator's Notes (public ChubAI description). Hidden when empty, like every other section here.
+    const creatorNotesSection = document.getElementById('chubCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('chubCharCreatorNotes');
-    
+    const setChubCreatorNotes = (raw) => {
+        const notes = (raw || '').trim();
+        if (notes) {
+            if (creatorNotesSection) creatorNotesSection.style.display = 'block';
+            renderCreatorNotesSecure(notes, char.name, creatorNotesEl);
+        } else {
+            if (creatorNotesSection) creatorNotesSection.style.display = 'none';
+            cleanupCreatorNotesContainer(creatorNotesEl);
+            if (creatorNotesEl) creatorNotesEl.innerHTML = '';
+        }
+    };
+
     // Definition sections (from detailed fetch)
     const greetingsStat = document.getElementById('chubCharGreetingsStat');
     const greetingsCount = document.getElementById('chubCharGreetingsCount');
@@ -3497,8 +3506,18 @@ async function openChubCharPreview(char) {
     
     updateChubFavoriteButton(char);
 
-    // Creator's Notes (public ChubAI listing description) - use secure iframe renderer
-    renderCreatorNotesSecure(char.description || char.tagline || 'No description available.', char.name, creatorNotesEl);
+    // Assess from the slim data already present: skeleton only when notes are likely (description/
+    // tagline non-empty), else start hidden so empty cards dont flash a skeleton then collapse.
+    if (creatorNotesSection && creatorNotesEl) {
+        cleanupCreatorNotesContainer(creatorNotesEl);
+        if ((char.description || char.tagline || '').trim()) {
+            creatorNotesSection.style.display = 'block';
+            creatorNotesEl.innerHTML = skeletonLines(3);
+        } else {
+            creatorNotesSection.style.display = 'none';
+            creatorNotesEl.innerHTML = '';
+        }
+    }
     
     // Tagline
     if (char.tagline && char.tagline !== char.description) {
@@ -3527,18 +3546,18 @@ async function openChubCharPreview(char) {
     // Gallery stat - hidden until detail data loads with actual count
     if (galleryStat) galleryStat.style.display = 'none';
     
-    // Reset definition sections - show loading indicator until detail fetch completes
+    // defLoading kept around for the fetch-failure message path below; skeletons are the loading indicator otherwise.
     const defLoading = document.getElementById('chubCharDefinitionLoading');
-    descSection.style.display = 'none';
+    if (defLoading) defLoading.style.display = 'none';
+    descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3);
     personalitySection.style.display = 'none';
-    scenarioSection.style.display = 'none';
-    examplesSection.style.display = 'none';
-    firstMsgSection.style.display = 'none';
+    scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2);
+    examplesSection.style.display = 'block'; examplesEl.innerHTML = skeletonLines(3);
+    firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4);
     if (altGreetingsSection) altGreetingsSection.style.display = 'none';
     if (altGreetingsEl) altGreetingsEl.innerHTML = '';
     if (gallerySection) gallerySection.style.display = 'none';
     if (galleryGrid) galleryGrid.innerHTML = '';
-    if (defLoading) defLoading.style.display = 'block';
     
     // Import button state - show "In Library" if already imported
     const downloadBtn = document.getElementById('chubDownloadBtn');
@@ -3618,14 +3637,9 @@ async function openChubCharPreview(char) {
         if (!node) return;
         const def = node.definition || {};
 
-        // Clear the loading indicator
         if (defLoading) defLoading.style.display = 'none';
 
-        // Update Creator's Notes if node has better/different description than search result
-        // node.description is the PUBLIC listing description (Creator's Notes)
-        if (node.description && node.description !== char.description) {
-            renderCreatorNotesSecure(node.description, char.name, creatorNotesEl);
-        }
+        setChubCreatorNotes(node.description || char.description || char.tagline);
 
         // ChubAI quirk: def.personality is the main character definition, not a personality field.
         const firstMsg = def.first_message || def.first_mes;
@@ -3707,6 +3721,11 @@ async function openChubCharPreview(char) {
         chubDetailCache.delete(fullPath);
         chubDetailCache.set(fullPath, cachedDetail);
         applyDetailData(cachedDetail);
+    }
+
+    if (!cachedDetail && !fullPath) {
+        // No fetch path: resolve from the slim data.
+        setChubCreatorNotes(char.description || char.tagline);
     }
 
     if (!cachedDetail && fullPath) {
@@ -3791,8 +3810,18 @@ async function openChubCharPreview(char) {
                 debugLog('[ChubAI] Detail fetch aborted (modal closed)');
             } else {
                 debugLog('[ChubAI] Could not fetch detailed character info:', e.message);
-                if (chubSelectedChar === char && defLoading) {
-                    defLoading.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. The character can still be imported with basic info.</em>';
+                if (chubSelectedChar === char) {
+                    // Fall back to search-result description so the creator-notes skeleton doesnt sit forever.
+                    setChubCreatorNotes(char.description || char.tagline);
+                    // No def data arriving: collapse skeletons.
+                    descSection.style.display = 'none';
+                    scenarioSection.style.display = 'none';
+                    examplesSection.style.display = 'none';
+                    firstMsgSection.style.display = 'none';
+                    if (defLoading) {
+                        defLoading.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. The character can still be imported with basic info.</em>';
+                        defLoading.style.display = 'block';
+                    }
                 }
             }
         }
@@ -4005,7 +4034,7 @@ function cleanupChubCharModal() {
         }
         
         // Clear creator notes iframe - disconnect ResizeObserver and release its document
-        const creatorNotesEl = document.getElementById('chubCreatorNotes');
+        const creatorNotesEl = document.getElementById('chubCharCreatorNotes');
         cleanupCreatorNotesContainer(creatorNotesEl);
     }
     chubSelectedChar = null;

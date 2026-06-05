@@ -1474,21 +1474,16 @@
         opacity: 0.4;
         pointer-events: none;
     }
-    .cl-confirm-overlay .confirm-modal-header {
-        padding: 24px 20px 6px !important;
-        border-radius: 0 !important;
-        background: transparent !important;
-        border-bottom: none !important;
-        text-align: left;
+    .cl-confirm-overlay .cl-confirm-main {
+        padding: 24px 20px 16px !important;
+        gap: 14px;
     }
-    .cl-confirm-overlay .confirm-modal-header h3 {
+    .cl-confirm-overlay .cl-confirm-text h3 {
         font-size: var(--font-lg) !important;
-        font-weight: 600;
+        font-weight: 700;
     }
-    .cl-confirm-overlay .confirm-modal-body {
-        padding: 4px 20px 18px !important;
-    }
-    .cl-confirm-overlay .confirm-modal-body p {
+    .cl-confirm-overlay .cl-confirm-text #clConfirmMessage,
+    .cl-confirm-overlay .cl-confirm-text #clConfirmMessage p {
         font-size: var(--font-md);
         line-height: 1.5;
     }
@@ -1555,6 +1550,21 @@
         border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
         border: none !important;
         animation: mobileSheetUp 0.3s ease-out !important;
+    }
+    /* Save-preset picker: partial-height tap-away drawer, not full-viewport */
+    #savePresetPickerOverlay .cl-modal-content {
+        height: auto !important;
+        max-height: 75vh !important;
+        border: 1px solid var(--glass-border) !important;
+        border-bottom: none !important;
+        padding-bottom: max(8px, var(--safe-bottom));
+    }
+    .preset-picker-search { font-size: 16px; }
+    .preset-picker-list { max-height: none; }
+    .preset-picker-row,
+    .preset-picker-create-row {
+        min-height: var(--touch-target-min);
+        padding: 10px 14px;
     }
     .cl-modal-header {
         padding-block: var(--space-xs-sm);

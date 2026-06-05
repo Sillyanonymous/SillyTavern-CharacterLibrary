@@ -19,8 +19,9 @@ let currentScrollHandler = null;
 let isEditLocked = true;
 let originalValues = {};  // Form values for diff comparison
 let originalRawData = {}; // Raw character data for cancel/restore
-let pendingPayload = null;
+let pendingUpdates = null;
 let _editPanePopulated = false; // Deferred - set true after Edit tab first opened
+let editFieldsAutoGrowHandler = null;
 
 // Pending avatar (card image) replacement state — set when user picks a new image in the Edit tab.
 let pendingAvatarFile = null;
@@ -345,9 +346,9 @@ function initCustomSelect(select) {
     // Lock trigger width to the widest option so it doesn't resize on selection change.
     // Uses IntersectionObserver because selects in hidden views (chats, chub) have zero
     // scrollWidth until their container becomes visible.
-    // Skip for selects inside .browse-sort-container - they use CSS min-width instead.
+    // Skip for .browse-sort-container and .cl-select-fluid selects: they size via CSS + ellipsis instead.
     const triggerText = trigger.querySelector('.trigger-text');
-    const skipWidthLock = select.closest('.browse-sort-container');
+    const skipWidthLock = select.closest('.browse-sort-container') || select.classList.contains('cl-select-fluid');
     function lockTriggerWidth() {
         if (skipWidthLock || trigger.style.minWidth) return;
         let maxW = 0;
@@ -495,7 +496,6 @@ const DEFAULT_SETTINGS = {
     mediaLocalizationEnabled: true,
     fixFilenames: true,
     mediaLocalizationPerChar: {},
-    completedMediaLocalizations: [],
     notifyAdditionalContent: true,
     fastFilenameSkip: false,
     fastSkipValidateHeaders: false,
@@ -598,6 +598,61 @@ function getSTContext() {
     return null;
 }
 
+// Sentinel deletes keys on current ST only; older builds would store it as a literal, so probe once and fall back to null.
+const ST_UNSET_SENTINEL = '__@@UNSET@@__';
+const ST_MIN_VERSION_FOR_SENTINEL = '1.13.5';
+let _stSentinelProbePromise = null;
+
+function compareSemverParts(a, b) {
+    const pa = String(a || '').split('.').map(n => parseInt(n, 10) || 0);
+    const pb = String(b || '').split('.').map(n => parseInt(n, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const x = pa[i] || 0, y = pb[i] || 0;
+        if (x !== y) return x - y;
+    }
+    return 0;
+}
+
+async function probeSTSentinelSupport() {
+    // Function-presence check beats version sniffing: doesnt depend on getContext exposing a version field.
+    try {
+        const ctx = getSTContext();
+        if (ctx) {
+            if (typeof ctx.writeExtensionField === 'function') { debugLog('[ST sentinel] detected via getContext().writeExtensionField'); return true; }
+            if (ctx.UNSET_VALUE === ST_UNSET_SENTINEL) { debugLog('[ST sentinel] detected via getContext().UNSET_VALUE'); return true; }
+            const ctxVersion = ctx.applicationVersion || ctx.appVersion || ctx.version;
+            if (ctxVersion && compareSemverParts(String(ctxVersion), ST_MIN_VERSION_FOR_SENTINEL) >= 0) { debugLog('[ST sentinel] detected via getContext() version:', ctxVersion); return true; }
+        }
+    } catch { /* host window may be cross-origin or opener-detached in re-opened tabs */ }
+    try {
+        // /api/extensions/version exists on current ST and returns plain text version.
+        const resp = await fetch('/api/extensions/version', { headers: getRequestHeaders() });
+        if (resp.ok) {
+            const v = (await resp.text()).trim();
+            if (v && compareSemverParts(v, ST_MIN_VERSION_FOR_SENTINEL) >= 0) { debugLog('[ST sentinel] detected via /api/extensions/version:', v); return true; }
+        }
+    } catch { /* endpoint may not exist on older ST */ }
+    try {
+        // /settings/get response wraps a stringified settings JSON; the app_version field hides inside that.
+        const resp = await apiRequest('/settings/get', 'POST', {});
+        if (resp.ok) {
+            const data = await resp.json();
+            const inner = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+            const v = data?.appVersion || data?.applicationVersion || data?.version || inner?.app_version || inner?.applicationVersion;
+            if (v && compareSemverParts(String(v), ST_MIN_VERSION_FOR_SENTINEL) >= 0) { debugLog('[ST sentinel] detected via /settings/get:', v); return true; }
+        }
+    } catch { /* network or 404 */ }
+    debugLog('[ST sentinel] NOT detected; falling back to null-as-delete (broken on ST < 1.13.5)');
+    return false;
+}
+
+// Sentinel when ST supports it, else null (older ST cant delete keys, so they accumulate).
+async function getExtensionDeleteValue() {
+    if (!_stSentinelProbePromise) _stSentinelProbePromise = probeSTSentinelSupport();
+    return (await _stSentinelProbePromise) ? ST_UNSET_SENTINEL : null;
+}
+
+
 // Mirrors STs name-to-url proxy lookup; "None" forced empty to stop shared-entry leak.
 async function resolveProxyForProfile(profile) {
     try {
@@ -682,64 +737,6 @@ async function notifySTCharacterAdded(avatar) {
         }
     };
     await Promise.race([run(), new Promise(r => setTimeout(r, 3000))]);
-}
-
-// Uses explicit property assignment for cross-window write reliability
-function setSTExtensionSetting(path, key, value, immediate = false) {
-    try {
-        const stContext = getSTContext();
-        if (!stContext?.extensionSettings) {
-            debugWarn('[ST Settings] ST context or extensionSettings unavailable');
-            return false;
-        }
-        
-        // Navigate to the path, creating objects as needed
-        const parts = path.split('.');
-        let current = stContext.extensionSettings;
-        
-        for (const part of parts) {
-            if (!current[part]) {
-                current[part] = {};
-            }
-            current = current[part];
-        }
-        
-        current[key] = value;
-        
-        // Trigger save - use immediate save for critical operations to avoid race conditions
-        if (immediate && typeof stContext.saveSettings === 'function') {
-            stContext.saveSettings();
-        } else if (typeof stContext.saveSettingsDebounced === 'function') {
-            stContext.saveSettingsDebounced();
-        }
-        
-        return current[key] === value;
-    } catch (e) {
-        debugError('[ST Settings] Error setting value:', e);
-        return false;
-    }
-}
-
-function verifyContextAccess() {
-    const ourContext = getSTContext();
-    if (!ourContext?.extensionSettings) return false;
-    
-    if (!ourContext.extensionSettings.gallery) {
-        ourContext.extensionSettings.gallery = { folders: {} };
-    }
-    if (!ourContext.extensionSettings.gallery.folders) {
-        ourContext.extensionSettings.gallery.folders = {};
-    }
-    
-    // Try setting and reading back a test value
-    const testKey = '__contextTest__' + Date.now();
-    const testValue = 'test_' + Math.random();
-    
-    ourContext.extensionSettings.gallery.folders[testKey] = testValue;
-    const success = ourContext.extensionSettings.gallery.folders[testKey] === testValue;
-    delete ourContext.extensionSettings.gallery.folders[testKey];
-    
-    return success;
 }
 
 /**
@@ -828,11 +825,19 @@ async function loadGallerySettings() {
     migrateSettings();
 }
 
-// Rename legacy setting keys so existing users keep their values
+// ============================================================
+// Settings migrations
+// ============================================================
+
 function migrateSettings() {
     if (gallerySettings.includeChubGallery !== undefined) {
         gallerySettings.includeProviderGallery = gallerySettings.includeChubGallery;
         delete gallerySettings.includeChubGallery;
+        saveGallerySettings();
+    }
+    if ('showChubTagline' in gallerySettings) {
+        gallerySettings.showProviderTagline = gallerySettings.showChubTagline;
+        delete gallerySettings.showChubTagline;
         saveGallerySettings();
     }
 }
@@ -1070,17 +1075,25 @@ function updateThemeCustomizerVisibility() {
  */
 async function checkClHelperPlugin(...pairs) {
     let available = false;
+    let runningVersion = null;
+    let linkedInstall = false;
+    let isAdmin = false;
     try {
         const resp = await apiRequest('/plugins/cl-helper/health');
         if (resp.ok) {
             const data = await resp.json();
             available = data?.ok === true;
             _galleryThumbsAvailable = available && data?.thumbnails === true;
+            runningVersion = data?.version || null;
+            linkedInstall = data?.linked === true;
+            isAdmin = data?.admin === true;
             debugLog('[cl-helper] health:', JSON.stringify(data), '| thumbnails:', _galleryThumbsAvailable);
         } else {
             debugLog('[cl-helper] health check failed:', resp.status);
         }
     } catch (e) { debugLog('[cl-helper] not reachable:', e.message); }
+
+    refreshClHelperUpdateBanner(available, runningVersion, linkedInstall, isAdmin);
 
     for (let i = 0; i < pairs.length; i += 2) {
         const banner = pairs[i];
@@ -1095,6 +1108,153 @@ async function checkClHelperPlugin(...pairs) {
         }
     }
     return available;
+}
+
+let _bundledClHelperVersion = null;
+let _bundledClHelperFetchInflight = null;
+
+async function _fetchBundledClHelperVersion() {
+    if (_bundledClHelperVersion !== null) return _bundledClHelperVersion;
+    if (_bundledClHelperFetchInflight) return _bundledClHelperFetchInflight;
+    _bundledClHelperFetchInflight = (async () => {
+        try {
+            const r = await fetch('../extras/cl-helper/package.json', { cache: 'no-cache' });
+            if (!r.ok) return null;
+            const pkg = await r.json();
+            return pkg?.version ? String(pkg.version) : null;
+        } catch { return null; }
+    })();
+    const v = await _bundledClHelperFetchInflight;
+    if (v) _bundledClHelperVersion = v;
+    _bundledClHelperFetchInflight = null;
+    return v;
+}
+
+async function refreshClHelperUpdateBanner(available, runningVersion, linkedInstall, isAdmin) {
+    const statusGroup = document.getElementById('clHelperStatusGroup');
+    const banner = document.getElementById('clHelperUpdateBanner');
+    if (!statusGroup || !banner) return;
+    const statusOk = document.getElementById('clHelperStatusOk');
+    const statusMissing = document.getElementById('clHelperStatusMissing');
+
+    if (!available || !runningVersion) {
+        if (statusOk) statusOk.classList.add('cl-hidden');
+        if (statusMissing) statusMissing.classList.remove('cl-hidden');
+        statusGroup.classList.remove('cl-hidden');
+        banner.classList.add('cl-hidden');
+        return;
+    }
+
+    const bundled = await _fetchBundledClHelperVersion();
+    const upToDate = !bundled || bundled === runningVersion;
+
+    if (upToDate) {
+        if (statusMissing) statusMissing.classList.add('cl-hidden');
+        if (statusOk) statusOk.classList.remove('cl-hidden');
+        const versionEl = document.getElementById('clHelperStatusVersion');
+        if (versionEl) versionEl.textContent = runningVersion;
+        statusGroup.classList.remove('cl-hidden');
+        banner.classList.add('cl-hidden');
+        return;
+    }
+
+    statusGroup.classList.add('cl-hidden');
+    const titleEl = document.getElementById('clHelperUpdateTitle');
+    const bodyEl = document.getElementById('clHelperUpdateBody');
+    const actionsEl = document.getElementById('clHelperUpdateActions');
+    if (titleEl) titleEl.textContent = `cl-helper update available (running ${runningVersion}, bundled ${bundled})`;
+    if (bodyEl) {
+        if (linkedInstall) {
+            bodyEl.textContent = 'Symlinked to the extension. Restart SillyTavern to load.';
+        } else if (!isAdmin) {
+            bodyEl.textContent = 'Ask your SillyTavern administrator to update the cl-helper plugin.';
+        } else {
+            bodyEl.textContent = 'Update the plugin files, then restart SillyTavern.';
+        }
+    }
+    if (actionsEl) actionsEl.classList.toggle('cl-hidden', linkedInstall || !isAdmin);
+    banner.classList.remove('cl-hidden');
+}
+
+async function performClHelperSelfUpdate(btn) {
+    if (!btn) return;
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Preparing...';
+    let files;
+    let installPath = 'SillyTavern/plugins/cl-helper/';
+    let runningVersion = 'unknown';
+    let bundledVersion = 'unknown';
+    try {
+        files = {};
+        for (const name of ['package.json', 'index.js']) {
+            const r = await fetch(`../extras/cl-helper/${name}`, { cache: 'no-cache' });
+            if (!r.ok) throw new Error(`could not read bundled ${name} (${r.status})`);
+            files[name] = await r.text();
+        }
+        const healthResp = await apiRequest('/plugins/cl-helper/health');
+        const health = healthResp.ok ? await healthResp.json().catch(() => null) : null;
+        if (health?.installPath) installPath = String(health.installPath);
+        if (health?.version) runningVersion = String(health.version);
+        try {
+            const parsed = JSON.parse(files['package.json']);
+            if (parsed?.version) bundledVersion = String(parsed.version);
+        } catch {}
+    } catch (e) {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+        showToast(`Update preflight failed: ${e.message}`, 'error', 6000);
+        return;
+    }
+    btn.disabled = false;
+    btn.innerHTML = origHtml;
+
+    const fmtSize = (s) => {
+        const bytes = new Blob([s]).size;
+        return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+    };
+    const messageHtml = `
+        <div class="cl-helper-update-summary">
+            <div><span class="cl-update-label">Source:</span> <code>extras/cl-helper/</code> in your Character Library extension folder (v${escapeHtml(bundledVersion)})</div>
+            <div><span class="cl-update-label">Destination:</span> <code>${escapeHtml(installPath)}</code> (currently v${escapeHtml(runningVersion)})</div>
+            <div><span class="cl-update-label">Files to write:</span></div>
+            <ul>
+                <li><code>package.json</code> (${fmtSize(files['package.json'])})</li>
+                <li><code>index.js</code> (${fmtSize(files['index.js'])})</li>
+            </ul>
+            <p class="cl-update-note">The current files will be saved as <code>package.json.bak</code> and <code>index.js.bak</code> next to the originals. After the update, restart SillyTavern to load the new version.</p>
+        </div>
+    `;
+    const confirmed = await showConfirm({
+        title: 'Update cl-helper plugin?',
+        messageHtml,
+        icon: 'fa-solid fa-arrows-rotate',
+        confirmLabel: 'Update plugin files',
+        cancelLabel: 'Cancel',
+    });
+    if (!confirmed) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
+    try {
+        const resp = await apiRequest('/plugins/cl-helper/self-update', 'POST', { files });
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || !data?.ok) {
+            throw new Error(data?.error || `HTTP ${resp.status}`);
+        }
+        const installedVersion = data?.version || bundledVersion;
+        showToast(`cl-helper updated to v${installedVersion}. Restart SillyTavern to load it.`, 'success', 8000);
+        const titleEl = document.getElementById('clHelperUpdateTitle');
+        const bodyEl = document.getElementById('clHelperUpdateBody');
+        const actionsEl = document.getElementById('clHelperUpdateActions');
+        if (titleEl) titleEl.textContent = 'cl-helper update installed';
+        if (bodyEl) bodyEl.textContent = `Restart SillyTavern to load v${installedVersion}.`;
+        if (actionsEl) actionsEl.classList.add('cl-hidden');
+    } catch (e) {
+        showToast(`Update failed: ${e.message}. Copy extras/cl-helper/ over SillyTavern/plugins/cl-helper/ manually instead.`, 'error', 8000);
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
 }
 
 /**
@@ -1780,11 +1940,17 @@ function setupSettingsModal() {
             });
         }
 
-        // Check cl-helper plugin availability for provider sections
+        // Check cl-helper plugin availability for provider + cl-helper-backed feature sections
+        const gridThumbsClHelperBanner = document.getElementById('gridThumbsClHelperBanner');
+        const settingsGridThumbClHelperFields = document.getElementById('settingsGridThumbClHelperFields');
+        const galleryThumbsClHelperBanner = document.getElementById('galleryThumbsClHelperBanner');
+        const galleryThumbsClHelperFields = document.getElementById('galleryThumbsClHelperFields');
         checkClHelperPlugin(
             pygmalionPluginBanner, pygmalionSettingsFields,
             ctPluginBanner, ctSettingsFields,
             datacatPluginBanner, datacatSettingsFields,
+            gridThumbsClHelperBanner, settingsGridThumbClHelperFields,
+            galleryThumbsClHelperBanner, galleryThumbsClHelperFields,
         ).then(available => {
             if (datacatSessionStatus) {
                 if (!available) {
@@ -2008,6 +2174,14 @@ function setupSettingsModal() {
         item.addEventListener('click', () => {
             switchSettingsSection(item.dataset.section);
         });
+    });
+
+    // Inline "Open cl-helper status" links inside cl-helper-banner blocks jump to the Info section.
+    settingsModal.addEventListener('click', (e) => {
+        const link = e.target.closest('.cl-goto-info');
+        if (!link) return;
+        e.preventDefault();
+        switchSettingsSection('info');
     });
     
     // Settings search/filter
@@ -2388,22 +2562,6 @@ function setupSettingsModal() {
             ...readProviderOrderFromUI(),
             infiniteScroll: readInfiniteScrollFromUI(),
         });
-        
-        // If unique gallery folders was just enabled, register overrides for all characters with gallery_ids
-        const uniqueFoldersEnabled = uniqueGalleryFoldersCheckbox ? uniqueGalleryFoldersCheckbox.checked : false;
-        if (uniqueFoldersEnabled) {
-            let registeredCount = 0;
-            for (const char of allCharacters) {
-                if (getCharacterGalleryId(char)) {
-                    if (registerGalleryFolderOverride(char)) {
-                        registeredCount++;
-                    }
-                }
-            }
-            if (registeredCount > 0) {
-                debugLog(`[Settings] Registered ${registeredCount} folder overrides on enable`);
-            }
-        }
         
         // Clear media localization cache when setting changes
         clearAllMediaLocalizationCache();
@@ -3000,32 +3158,28 @@ function setupSettingsModal() {
         };
     }
 
-    // Update gallery migration status display
     function updateGalleryMigrationStatus() {
         if (!galleryMigrationStatus || !galleryMigrationStatusText) return;
-        
+
         if (window.extensionsRecoveryInProgress) {
             galleryMigrationStatus.style.display = 'block';
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Recovering character data — gallery status will update when done.`;
             return;
         }
-        
+
         const needsId = countCharactersNeedingGalleryId();
-        const needsRegistration = countCharactersNeedingFolderRegistration();
         const total = allCharacters.length;
         const hasId = total - needsId;
-        
+
         if (total === 0) {
             galleryMigrationStatus.style.display = 'none';
             return;
         }
-        
+
         galleryMigrationStatus.style.display = 'block';
-        
-        if (needsId === 0 && needsRegistration === 0) {
-            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: var(--cl-success);"></i> All ${total} characters have gallery IDs and folder overrides registered.`;
-        } else if (needsId === 0 && needsRegistration > 0) {
-            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> All characters have IDs, but ${needsRegistration} need folder override registration.`;
+
+        if (needsId === 0) {
+            galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-check-circle" style="color: var(--cl-success);"></i> All ${total} characters have gallery IDs.`;
         } else {
             galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-info-circle"></i> ${hasId}/${total} characters have gallery IDs. ${needsId} need assignment.`;
         }
@@ -3044,10 +3198,8 @@ function setupSettingsModal() {
         };
     }
     
-    // Migration button handler
     if (migrateGalleryFoldersBtn) {
         migrateGalleryFoldersBtn.onclick = async () => {
-            // Feature must be enabled to assign IDs
             if (!getSetting('uniqueGalleryFolders')) {
                 showToast('Enable "Use unique gallery folder names" first!', 'error');
                 return;
@@ -3056,161 +3208,47 @@ function setupSettingsModal() {
                 showToast('Character data is still loading — please wait', 'warning');
                 return;
             }
-            
-            // Use gallery-sync module if available
-            if (typeof window.fullGallerySync === 'function') {
-                const audit = await window.auditGalleryIntegrity();
-                const needsId = audit.issues.missingIds;
-                const needsMapping = audit.issues.missingMappings;
-                
-                if (needsId === 0 && needsMapping === 0) {
-                    showToast('All characters already have gallery IDs and folder overrides!', 'info');
-                    updateGalleryMigrationStatus();
-                    return;
-                }
-                
-                let confirmMsg = '';
-                if (needsId > 0) {
-                    confirmMsg = `This will assign unique gallery IDs to ${needsId} character(s).\n\n`;
-                }
-                if (needsMapping > 0) {
-                    confirmMsg += `${needsMapping} character(s) need folder override registration.\n\n`;
-                }
-                confirmMsg += `• Gallery IDs are stored in character data (data.extensions.gallery_id)\n` +
-                    `• Folder overrides will be registered in SillyTavern settings\n` +
-                    `• Existing gallery images are NOT moved (they remain accessible)\n\n` +
-                    `Continue?`;
-                
-                if (!confirm(confirmMsg)) return;
-                
-                const originalText = migrateGalleryFoldersBtn.innerHTML;
-                migrateGalleryFoldersBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
-                migrateGalleryFoldersBtn.disabled = true;
-                
-                try {
-                    const result = await window.fullGallerySync({
-                        assignIds: true,
-                        createMappings: true,
-                        cleanupOrphans: false, // Don't cleanup during initial migration
-                        onProgress: (phase, current, total) => {
-                            if (galleryMigrationStatusText) {
-                                const phaseNames = { assignIds: 'Assigning IDs', createMappings: 'Creating mappings' };
-                                galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${phaseNames[phase] || phase}... ${current}/${total}`;
-                            }
-                        }
-                    });
-                    
-                    // Build result message
-                    let resultMsg = '';
-                    const idCount = result.assignedIds?.success || 0;
-                    const mapCount = result.createdMappings?.success || 0;
-                    const idErrors = result.assignedIds?.failed || 0;
-                    const mapErrors = result.createdMappings?.failed || 0;
-                    
-                    if (idCount > 0) resultMsg += `${idCount} IDs assigned`;
-                    if (mapCount > 0) resultMsg += (resultMsg ? ', ' : '') + `${mapCount} folder overrides synced`;
-                    if (idErrors > 0) resultMsg += (resultMsg ? ', ' : '') + `${idErrors} ID errors`;
-                    if (mapErrors > 0) resultMsg += (resultMsg ? ', ' : '') + `${mapErrors} sync failures`;
-                    
-                    if (idErrors === 0 && mapErrors === 0) {
-                        showToast(resultMsg || 'Migration complete!', 'success');
-                        setTimeout(() => {
-                            showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
-                        }, 1500);
-                    } else {
-                        showToast(resultMsg + '. Check console for details.', 'error');
-                    }
-                } catch (err) {
-                    console.error('[GalleryMigration] Failed:', err);
-                    showToast('Migration failed - check console', 'error');
-                }
-                
-                migrateGalleryFoldersBtn.innerHTML = originalText;
-                migrateGalleryFoldersBtn.disabled = false;
+
+            const needsId = countCharactersNeedingGalleryId();
+            if (needsId === 0) {
+                showToast('All characters already have gallery IDs.', 'info');
                 updateGalleryMigrationStatus();
                 return;
             }
-            
-            // Fallback to old implementation if module not loaded
-            const needsId = countCharactersNeedingGalleryId();
-            const needsRegistration = countCharactersNeedingFolderRegistration();
-            
-            if (needsId === 0 && needsRegistration === 0) {
-                showToast('All characters already have gallery IDs and folder overrides!', 'info');
-                return;
-            }
-            
-            let confirmMsg = '';
-            if (needsId > 0) {
-                confirmMsg = `This will assign unique gallery IDs to ${needsId} character(s).\n\n`;
-            }
-            if (needsRegistration > 0) {
-                confirmMsg += `${needsRegistration} character(s) need folder override registration.\n\n`;
-            }
-            confirmMsg += `• Gallery IDs are stored in character data (data.extensions.gallery_id)\n` +
-                `• Folder overrides will be registered in SillyTavern settings\n` +
-                `• Existing gallery images are NOT moved (they remain accessible)\n\n` +
-                `Continue?`;
-            
-            const confirmed = confirm(confirmMsg);
-            
-            if (!confirmed) return;
-            
+
+            const confirmMsg = `Assign unique gallery IDs to ${needsId} character(s)?\n\n` +
+                `Gallery IDs are stored in character data (data.extensions.gallery_id) and travel with the card. Folder names are computed live from name + ID (no settings mapping needed).\n\n` +
+                `Existing images are NOT moved.`;
+            if (!confirm(confirmMsg)) return;
+
             const originalText = migrateGalleryFoldersBtn.innerHTML;
             migrateGalleryFoldersBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Processing...';
             migrateGalleryFoldersBtn.disabled = true;
-            
-            let idAssignedCount = 0;
-            let errorCount = 0;
-            const totalToProcess = needsId;
-            let processed = 0;
-            
+
+            let assigned = 0, errors = 0, processed = 0;
             for (const char of allCharacters) {
-                const hasId = getCharacterGalleryId(char);
-                
-                if (!hasId) {
-                    const result = await assignGalleryIdToCharacter(char);
-                    if (result.success) {
-                        idAssignedCount++;
-                    } else {
-                        errorCount++;
-                        console.error(`Failed to assign gallery_id to ${char.name}:`, result.error);
-                    }
-                    processed++;
-                    
-                    // Update status during processing
-                    if (galleryMigrationStatusText) {
-                        galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Assigning IDs... ${processed}/${totalToProcess}`;
-                    }
+                if (getCharacterGalleryId(char)) continue;
+                const result = await assignGalleryIdToCharacter(char);
+                if (result.success) assigned++;
+                else { errors++; console.error(`Failed to assign gallery_id to ${char.name}:`, result.error); }
+                processed++;
+                if (galleryMigrationStatusText) {
+                    galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Assigning IDs... ${processed}/${needsId}`;
                 }
             }
-            
-            // Sync folder overrides to ST at once (more reliable than individual registration)
-            if (galleryMigrationStatusText) {
-                galleryMigrationStatusText.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Syncing folder overrides to ST...`;
-            }
-            
-            const syncResult = syncAllGalleryFolderOverrides();
-            
+
             migrateGalleryFoldersBtn.innerHTML = originalText;
             migrateGalleryFoldersBtn.disabled = false;
-            
             updateGalleryMigrationStatus();
-            
-            // Build result message
-            let resultMsg = '';
-            if (idAssignedCount > 0) resultMsg += `${idAssignedCount} IDs assigned`;
-            if (syncResult.success > 0) resultMsg += (resultMsg ? ', ' : '') + `${syncResult.success} folder overrides synced`;
-            if (errorCount > 0) resultMsg += (resultMsg ? ', ' : '') + `${errorCount} errors`;
-            if (syncResult.failed > 0) resultMsg += (resultMsg ? ', ' : '') + `${syncResult.failed} sync failures`;
-            
-            if (errorCount === 0 && syncResult.failed === 0) {
-                showToast(resultMsg || 'Migration complete!', 'success');
-                setTimeout(() => {
-                    showToast('⚠️ Refresh the SillyTavern page for changes to take effect in ST gallery!', 'info', 8000);
-                }, 1500);
+
+            if (typeof window.updateGallerySyncWarning === 'function' && typeof window.auditGalleryIntegrity === 'function') {
+                window.updateGallerySyncWarning(window.auditGalleryIntegrity());
+            }
+
+            if (errors === 0) {
+                showToast(`${assigned} gallery IDs assigned.`, 'success');
             } else {
-                showToast(resultMsg + '. Check console for details.', 'error');
+                showToast(`${assigned} assigned, ${errors} failed. Check console.`, 'error');
             }
         };
     }
@@ -3427,97 +3465,46 @@ function setupSettingsModal() {
         };
     }
     
-    // Gallery Sync - Audit button handler
     const gallerySyncAuditBtn = document.getElementById('gallerySyncAuditBtn');
-    const gallerySyncFullBtn = document.getElementById('gallerySyncFullBtn');
-    const gallerySyncCleanupBtn = document.getElementById('gallerySyncCleanupBtn');
     const gallerySyncStatus = document.getElementById('gallerySyncStatus');
     
-    // Helper to update sync status UI
     const updateSyncStatusUI = (audit) => {
         if (!gallerySyncStatus) return;
-        
-        const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
-        const statusClass = totalIssues === 0 ? 'healthy' : 'issues';
-        
-        // Build expandable details for each issue type
+
+        const missingIds = audit.issues.missingIds;
+        const statusClass = missingIds === 0 ? 'healthy' : 'issues';
+        const hasId = audit.totalCharacters - missingIds;
+
         const buildMissingIdsDetails = () => {
             if (audit.missingGalleryId.length === 0) return '';
-            const items = audit.missingGalleryId.slice(0, 20).map(({ avatar, name }) => 
+            const items = audit.missingGalleryId.slice(0, 20).map(({ avatar, name }) =>
                 `<div class="sync-detail-item"><span class="sync-detail-name">${escapeHtml(name)}</span><span class="sync-detail-avatar">${escapeHtml(avatar)}</span></div>`
             ).join('');
             const moreCount = audit.missingGalleryId.length - 20;
             return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
         };
-        
-        const buildMissingMappingsDetails = () => {
-            if (audit.missingMapping.length === 0) return '';
-            const items = audit.missingMapping.slice(0, 20).map(({ avatar, name, galleryId }) => 
-                `<div class="sync-detail-item"><span class="sync-detail-name">${escapeHtml(name)}</span><span class="sync-detail-id">ID: ${escapeHtml(galleryId)}</span></div>`
-            ).join('');
-            const moreCount = audit.missingMapping.length - 20;
-            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
-        };
-        
-        const buildOrphanedDetails = () => {
-            if (audit.orphanedMappings.length === 0) return '';
-            const items = audit.orphanedMappings.slice(0, 20).map(({ avatar, folder }) => 
-                `<div class="sync-detail-item"><span class="sync-detail-avatar">${escapeHtml(avatar)}</span><span class="sync-detail-folder">→ ${escapeHtml(folder)}</span></div>`
-            ).join('');
-            const moreCount = audit.orphanedMappings.length - 20;
-            return `<div class="sync-details-content">${items}${moreCount > 0 ? `<div class="sync-detail-more">...and ${moreCount} more</div>` : ''}</div>`;
-        };
-        
+
         gallerySyncStatus.innerHTML = `
             <div class="sync-result">
                 <div class="sync-result-header ${statusClass}">
-                    <i class="fa-solid ${totalIssues === 0 ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
-                    <span>${totalIssues === 0 ? 'All Synced' : `${totalIssues} Issue${totalIssues !== 1 ? 's' : ''} Found`}</span>
+                    <i class="fa-solid ${missingIds === 0 ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
+                    <span>${missingIds === 0 ? 'All characters have gallery IDs' : `${missingIds} character${missingIds !== 1 ? 's' : ''} missing gallery_id`}</span>
                 </div>
-                ${totalIssues > 0 ? `
+                ${missingIds > 0 ? `
                 <div class="sync-issues-list">
-                    ${audit.issues.missingIds > 0 ? `
-                        <details class="sync-issue-details">
-                            <summary class="sync-issue-item">
-                                <i class="fa-solid fa-id-card"></i>
-                                <span>${audit.issues.missingIds} missing gallery_id</span>
-                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
-                            </summary>
-                            ${buildMissingIdsDetails()}
-                        </details>
-                    ` : ''}
-                    ${audit.issues.missingMappings > 0 ? `
-                        <details class="sync-issue-details">
-                            <summary class="sync-issue-item">
-                                <i class="fa-solid fa-folder-open"></i>
-                                <span>${audit.issues.missingMappings} missing folder mapping</span>
-                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
-                            </summary>
-                            ${!audit.stContextAvailable && audit.issues.missingMappings === audit.totalCharacters ? `
-                            <div class="sync-details-content" style="padding: 8px 12px; opacity: 0.8; font-size: 0.8rem;">
-                                <i class="fa-solid fa-info-circle" style="margin-right: 4px;"></i>
-                                SillyTavern's tab appears to be closed. Folder mappings can only be read when the ST tab is open.
-                            </div>
-                            ` : ''}
-                            ${buildMissingMappingsDetails()}
-                        </details>
-                    ` : ''}
-                    ${audit.issues.orphaned > 0 ? `
-                        <details class="sync-issue-details">
-                            <summary class="sync-issue-item">
-                                <i class="fa-solid fa-ghost"></i>
-                                <span>${audit.issues.orphaned} orphaned mapping${audit.issues.orphaned !== 1 ? 's' : ''}</span>
-                                <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
-                            </summary>
-                            ${buildOrphanedDetails()}
-                        </details>
-                    ` : ''}
+                    <details class="sync-issue-details" open>
+                        <summary class="sync-issue-item">
+                            <i class="fa-solid fa-id-card"></i>
+                            <span>${missingIds} missing gallery_id</span>
+                            <i class="fa-solid fa-chevron-down sync-expand-icon"></i>
+                        </summary>
+                        ${buildMissingIdsDetails()}
+                    </details>
                 </div>
                 ` : ''}
                 <div class="sync-stats">
                     <span><i class="fa-solid fa-users"></i> ${audit.totalCharacters} chars</span>
-                    <span><i class="fa-solid fa-folder"></i> ${audit.totalMappings} mappings</span>
-                    <span><i class="fa-solid fa-check"></i> ${audit.healthy.length} healthy</span>
+                    <span><i class="fa-solid fa-check"></i> ${hasId} with ID</span>
                 </div>
             </div>
         `;
@@ -3540,6 +3527,9 @@ function setupSettingsModal() {
                 try {
                     const audit = await window.auditGalleryIntegrity();
                     updateSyncStatusUI(audit);
+                    if (typeof window.updateGallerySyncWarning === 'function') {
+                        window.updateGallerySyncWarning(audit);
+                    }
                     showToast('Audit complete', 'success');
                 } catch (err) {
                     console.error('[GallerySync] Audit failed:', err);
@@ -3550,143 +3540,16 @@ function setupSettingsModal() {
         };
     }
     
-    if (gallerySyncFullBtn) {
-        gallerySyncFullBtn.onclick = async () => {
-            if (typeof window.fullGallerySync !== 'function') {
-                showToast('Gallery sync module not loaded', 'error');
-                return;
-            }
-            if (window.extensionsRecoveryInProgress) {
-                showToast('Character data is still loading — please wait', 'warning');
-                return;
-            }
-            
-            // Feature must be enabled
-            if (!getSetting('uniqueGalleryFolders')) {
-                showToast('Enable "Use unique gallery folder names" first!', 'error');
-                return;
-            }
-            
-            // Run audit first to check scope
-            const audit = await window.auditGalleryIntegrity();
-            const totalIssues = audit.issues.missingIds + audit.issues.missingMappings + audit.issues.orphaned;
-            
-            if (totalIssues === 0) {
-                showToast('Everything is already in sync!', 'info');
-                updateSyncStatusUI(audit);
-                return;
-            }
-            
-            // Confirm before making changes
-            const confirmMsg = `This will:\n` +
-                (audit.issues.missingIds > 0 ? `• Assign gallery_id to ${audit.issues.missingIds} character(s)\n` : '') +
-                (audit.issues.missingMappings > 0 ? `• Create ${audit.issues.missingMappings} folder mapping(s)\n` : '') +
-                (audit.issues.orphaned > 0 ? `• Remove ${audit.issues.orphaned} orphaned mapping(s)\n` : '') +
-                `\nContinue?`;
-            
-            if (!confirm(confirmMsg)) return;
-            
-            const originalText = gallerySyncFullBtn.innerHTML;
-            gallerySyncFullBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
-            gallerySyncFullBtn.disabled = true;
-            
-            gallerySyncStatus.innerHTML = '<div class="sync-loading"><i class="fa-solid fa-spinner fa-spin"></i> Running full sync...</div>';
-            
-            try {
-                const result = await window.fullGallerySync({
-                    onProgress: (phase, current, total, item) => {
-                        const phaseNames = {
-                            assignIds: 'Assigning IDs',
-                            createMappings: 'Creating mappings'
-                        };
-                        gallerySyncStatus.innerHTML = `
-                            <div class="sync-progress">
-                                <div class="sync-progress-text">
-                                    <i class="fa-solid fa-spinner fa-spin"></i> ${phaseNames[phase] || phase}: ${current}/${total}
-                                </div>
-                                <div class="sync-progress-bar">
-                                    <div class="sync-progress-bar-fill" style="width: ${(current/total)*100}%"></div>
-                                </div>
-                            </div>
-                        `;
-                    }
-                });
-                
-                // Build result message
-                const parts = [];
-                if (result.assignedIds?.success > 0) parts.push(`${result.assignedIds.success} IDs assigned`);
-                if (result.createdMappings?.success > 0) parts.push(`${result.createdMappings.success} mappings created`);
-                if (result.cleanedOrphans?.removed > 0) parts.push(`${result.cleanedOrphans.removed} orphans removed`);
-                
-                showToast(parts.length > 0 ? parts.join(', ') : 'Sync complete', 'success');
-                
-                // Re-run audit to show updated status
-                const newAudit = await window.auditGalleryIntegrity();
-                updateSyncStatusUI(newAudit);
-                
-                // Update warning indicator in top bar
-                if (typeof window.updateGallerySyncWarning === 'function') {
-                    window.updateGallerySyncWarning(newAudit);
-                }
-                
-            } catch (err) {
-                console.error('[GallerySync] Full sync failed:', err);
-                showToast('Sync failed - check console', 'error');
-            }
-            
-            gallerySyncFullBtn.innerHTML = originalText;
-            gallerySyncFullBtn.disabled = false;
-        };
-    }
-    
-    if (gallerySyncCleanupBtn) {
-        gallerySyncCleanupBtn.onclick = async () => {
-            if (typeof window.cleanupOrphanedMappings !== 'function') {
-                showToast('Gallery sync module not loaded', 'error');
-                return;
-            }
-            if (window.extensionsRecoveryInProgress) {
-                showToast('Character data is still loading — please wait', 'warning');
-                return;
-            }
-            
-            // Run audit first
-            const audit = await window.auditGalleryIntegrity();
-            
-            if (audit.issues.orphaned === 0) {
-                showToast('No orphaned mappings to clean up', 'info');
-                updateSyncStatusUI(audit);
-                return;
-            }
-            
-            if (!confirm(`Remove ${audit.issues.orphaned} orphaned mapping(s)?\n\nThese are folder mappings for characters that no longer exist.`)) {
-                return;
-            }
-            
-            try {
-                const result = await window.cleanupOrphanedMappings();
-                showToast(`Removed ${result.removed} orphaned mapping${result.removed !== 1 ? 's' : ''}`, 'success');
-                
-                // Re-run audit and update UI
-                const newAudit = await window.auditGalleryIntegrity();
-                updateSyncStatusUI(newAudit);
-                
-                // Update warning indicator in top bar
-                if (typeof window.updateGallerySyncWarning === 'function') {
-                    window.updateGallerySyncWarning(newAudit);
-                }
-            } catch (err) {
-                console.error('[GallerySync] Cleanup failed:', err);
-                showToast('Cleanup failed', 'error');
-            }
-        };
-    }
-
     // When extensions recovery finishes, refresh gallery migration status so the
     // settings panel shows real counts instead of the "recovering" placeholder.
     document.addEventListener('cl-extensions-recovered', () => {
         updateGalleryMigrationStatus();
     });
+
+    const clHelperUpdateBtn = document.getElementById('clHelperUpdateBtn');
+    if (clHelperUpdateBtn) {
+        clHelperUpdateBtn.addEventListener('click', () => performClHelperSelfUpdate(clHelperUpdateBtn));
+    }
 }
 
 // Helper to get cookie value
@@ -4167,52 +4030,6 @@ function buildUniqueGalleryFolderName(char) {
 }
 
 /**
- * Register or update the gallery folder override in SillyTavern's extensionSettings
- * This tells ST to use our unique folder instead of just the character name
- * @param {object} char - Character object with avatar and gallery_id
- * @param {boolean} [immediate=false] - If true, save immediately instead of debounced (use for critical operations)
- * @returns {boolean} True if successfully registered
- */
-function registerGalleryFolderOverride(char, immediate = false) {
-    if (!getSetting('uniqueGalleryFolders')) return false;
-    
-    const avatar = char?.avatar;
-    const uniqueFolder = buildUniqueGalleryFolderName(char);
-    
-    if (!avatar || !uniqueFolder) {
-        debugWarn('[GalleryFolder] Cannot register override - missing avatar or gallery_id');
-        return false;
-    }
-    
-    const success = setSTExtensionSetting('gallery.folders', avatar, uniqueFolder, immediate);
-    
-    if (success) {
-        debugLog(`[GalleryFolder] Registered: ${avatar} -> ${uniqueFolder}${immediate ? ' (immediate save)' : ''}`);
-    } else {
-        debugWarn(`[GalleryFolder] Failed to register: ${avatar}`);
-    }
-    
-    return success;
-}
-
-/**
- * Remove a gallery folder override for a character
- * @param {string} avatar - Character avatar filename
- */
-function removeGalleryFolderOverride(avatar) {
-    const context = getSTContext();
-    if (!context?.extensionSettings?.gallery?.folders) return;
-    
-    if (context.extensionSettings.gallery.folders[avatar]) {
-        delete context.extensionSettings.gallery.folders[avatar];
-        if (typeof context.saveSettingsDebounced === 'function') {
-            context.saveSettingsDebounced();
-            debugLog(`[GalleryFolder] Removed folder override for: ${avatar}`);
-        }
-    }
-}
-
-/**
  * Show or hide the per-character gallery ID warning on the Gallery tab.
  * Displays when uniqueGalleryFolders is enabled and the character has no gallery_id.
  * Wires up the 1-click "Assign ID" button to generate + save an ID immediately.
@@ -4244,22 +4061,16 @@ function updateGalleryIdWarning(char) {
             });
 
             if (success) {
-                // Update local char object so subsequent reads see the new ID
                 if (!char.data) char.data = {};
                 if (!char.data.extensions) char.data.extensions = {};
                 char.data.extensions.gallery_id = galleryId;
 
-                // Register the folder override in ST settings
-                registerGalleryFolderOverride(char, true);
-
-                // Update gallery sync warning (audit may be stale)
                 if (typeof window.auditGalleryIntegrity === 'function' &&
                     typeof window.updateGallerySyncWarning === 'function') {
                     const audit = await window.auditGalleryIntegrity();
                     window.updateGallerySyncWarning(audit);
                 }
 
-                // Hide warning and refresh gallery with the new unique folder
                 warningEl.classList.add('hidden');
                 fetchCharacterImages(char);
                 showToast(`Gallery ID assigned: ${galleryId}`, 'success');
@@ -4276,82 +4087,34 @@ function updateGalleryIdWarning(char) {
     };
 }
 
-/**
- * Get all active gallery folder overrides from ST settings
- * @returns {Array<{avatar: string, folder: string, char: object|null}>}
- */
-function getActiveGalleryFolderOverrides() {
-    const context = getSTContext();
-    if (!context?.extensionSettings?.gallery?.folders) return [];
-    
-    const overrides = [];
-    const folders = context.extensionSettings.gallery.folders;
-    
-    for (const [avatar, folder] of Object.entries(folders)) {
-        const char = allCharacters.find(c => c.avatar === avatar);
-        overrides.push({ avatar, folder, char });
-    }
-    
-    return overrides;
-}
 
 /**
- * Clear ALL gallery folder overrides from ST settings
- * @returns {{cleared: number}}
- */
-function clearAllGalleryFolderOverrides() {
-    const context = getSTContext();
-    if (!context?.extensionSettings?.gallery?.folders) {
-        return { cleared: 0 };
-    }
-    
-    const count = Object.keys(context.extensionSettings.gallery.folders).length;
-    context.extensionSettings.gallery.folders = {};
-    
-    if (typeof context.saveSettings === 'function') {
-        context.saveSettings();
-    }
-    
-    debugLog(`[GalleryFolder] Cleared all ${count} folder overrides`);
-    return { cleared: count };
-}
-
-/**
- * Move all images from unique folders back to default (character name) folders
- * @param {function} progressCallback - Optional callback(current, total, charName)
- * @returns {Promise<{moved: number, errors: number, chars: number}>}
+ * Move all images from unique folders back to default (character name) folders.
+ * Iterates characters with a gallery_id (those are the ones whose images live in `Name_id` folders).
  */
 async function moveImagesToDefaultFolders(progressCallback) {
-    const overrides = getActiveGalleryFolderOverrides();
+    const chars = allCharacters.filter(c => getCharacterGalleryId(c));
     const results = { moved: 0, errors: 0, chars: 0 };
-    
-    for (let i = 0; i < overrides.length; i++) {
-        const { avatar, folder, char } = overrides[i];
 
-        // Default folder name is just the character name.
-        const defaultFolder = char?.name || folder.split('_').slice(0, -1).join('_');
-        
-        if (!defaultFolder || folder === defaultFolder) {
-            continue;
-        }
-        
-        if (progressCallback) {
-            progressCallback(i + 1, overrides.length, char?.name || avatar);
-        }
-        
-        // List files in the unique folder
+    for (let i = 0; i < chars.length; i++) {
+        const char = chars[i];
+        const uniqueFolder = buildUniqueGalleryFolderName(char);
+        const defaultFolder = sanitizeFolderName(char?.name || '');
+        if (!uniqueFolder || !defaultFolder || uniqueFolder === defaultFolder) continue;
+
+        if (progressCallback) progressCallback(i + 1, chars.length, char.name || char.avatar);
+
         try {
-            const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: folder, type: 7 });
+            const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: uniqueFolder, type: 7 });
             if (!response.ok) continue;
-            
+
             const files = await response.json();
             if (!files || files.length === 0) continue;
-            
+
             results.chars++;
-            
-            // Move each file
+
             for (const fileName of files) {
-                const moveResult = await moveImageToFolder(folder, defaultFolder, fileName, true);
+                const moveResult = await moveImageToFolder(uniqueFolder, defaultFolder, fileName, true);
                 if (moveResult.success) {
                     results.moved++;
                 } else {
@@ -4360,7 +4123,7 @@ async function moveImagesToDefaultFolders(progressCallback) {
                 }
             }
         } catch (e) {
-            debugError(`[GalleryFolder] Error processing ${folder}:`, e);
+            debugError(`[GalleryFolder] Error processing ${uniqueFolder}:`, e);
         }
     }
     
@@ -4373,14 +4136,13 @@ async function moveImagesToDefaultFolders(progressCallback) {
  * @param {function} onCancel - Callback when user cancels
  */
 function showDisableGalleryFoldersModal(onConfirm, onCancel) {
-    const overrides = getActiveGalleryFolderOverrides();
-    
-    // If no overrides, just confirm immediately
-    if (overrides.length === 0) {
+    const charsWithId = allCharacters.filter(c => getCharacterGalleryId(c));
+
+    if (charsWithId.length === 0) {
         onConfirm(false);
         return;
     }
-    
+
     const modalHtml = `
         <div id="disableGalleryFoldersModal" class="confirm-modal cl-modal-drawer">
             <div class="confirm-modal-content" style="max-width: calc(500px * var(--modal-scale, 1));">
@@ -4388,11 +4150,11 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
                 </div>
                 <div class="confirm-modal-body">
                     <p>
-                        Found <strong>${overrides.length}</strong> character(s) with active folder mappings in SillyTavern.
+                        Found <strong>${charsWithId.length}</strong> character(s) with images in unique folders.
                     </p>
-                    
+
                     <p style="color: var(--text-secondary);">
-                        Disabling will remove folder mappings from ST settings. ST's gallery will revert to default behavior (folders by character name).
+                        Disabling will revert ST's gallery to default behavior (folders by character name). Gallery IDs stay on the cards, so re-enabling reuses them.
                     </p>
                     
                     <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 20px;">
@@ -4470,157 +4232,30 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
         
         if (moveImages) {
             progressDiv.style.display = 'block';
-            
+
             const results = await moveImagesToDefaultFolders((current, total, charName) => {
                 progressText.textContent = `Moving images... ${current}/${total} (${charName})`;
             });
-            
+
             debugLog(`[GalleryFolder] Move results:`, results);
         }
-        
-        clearAllGalleryFolderOverrides();
-        
+
         closeModal();
         onConfirm(moveImages);
     };
 }
 
 /**
- * Debug function to verify gallery folder overrides are properly set in ST
- * @returns {{total: number, registered: number, missing: Array<string>}}
- */
-function verifyGalleryFolderOverrides() {
-    const context = getSTContext();
-    const results = { total: 0, registered: 0, missing: [] };
-    
-    if (!context?.extensionSettings?.gallery?.folders) {
-        debugWarn('[GalleryFolder] Cannot verify - ST context or gallery settings unavailable');
-        return results;
-    }
-    
-    const folders = context.extensionSettings.gallery.folders;
-    
-    for (const char of allCharacters) {
-        const galleryId = getCharacterGalleryId(char);
-        if (!galleryId) continue;
-        
-        results.total++;
-        const expectedFolder = buildUniqueGalleryFolderName(char);
-        const actualFolder = folders[char.avatar];
-        
-        if (actualFolder === expectedFolder) {
-            results.registered++;
-        } else {
-            results.missing.push(`${char.name} (${char.avatar})`);
-        }
-    }
-    
-    debugLog(`[GalleryFolder] Verification: ${results.registered}/${results.total} overrides set`);
-    
-    return results;
-}
-
-/**
- * Sync all gallery folder overrides to ST - call this manually if overrides aren't working
- * This will register ALL characters with gallery_id to ST's settings
- * @returns {{success: number, failed: number, skipped: number}}
- */
-function syncAllGalleryFolderOverrides() {
-    if (!getSetting('uniqueGalleryFolders')) {
-        return { success: 0, failed: 0, skipped: 0, error: 'Feature disabled' };
-    }
-    
-    // Test cross-window access
-    if (!verifyContextAccess()) {
-        return { success: 0, failed: 0, skipped: 0, error: 'Cross-window access failed' };
-    }
-    
-    const results = { success: 0, failed: 0, skipped: 0 };
-    const charsWithGalleryId = allCharacters.filter(c => getCharacterGalleryId(c));
-    
-    for (const char of charsWithGalleryId) {
-        const uniqueFolder = buildUniqueGalleryFolderName(char);
-        if (!uniqueFolder) {
-            results.skipped++;
-            continue;
-        }
-        
-        if (setSTExtensionSetting('gallery.folders', char.avatar, uniqueFolder)) {
-            results.success++;
-        } else {
-            results.failed++;
-        }
-    }
-    
-    // Trigger an immediate save
-    const ctx = getSTContext();
-    if (typeof ctx?.saveSettings === 'function') {
-        ctx.saveSettings();
-    }
-    
-    debugLog(`[GalleryFolder] Sync complete: ${results.success} success, ${results.failed} failed, ${results.skipped} skipped`);
-    
-    return results;
-}
-
-// Expose for console access (useful for manual sync after migration)
-window.syncAllGalleryFolderOverrides = syncAllGalleryFolderOverrides;
-
-/**
  * Show a modal with folder mappings for characters sharing the same name
  * Helps users manually move unmatched images to the correct unique folder
  */
 function showFolderMappingModal() {
-    // Find characters with shared names
     const sharedNames = findCharactersWithSharedNames();
-    
-    // Also get all characters with gallery IDs for reference
     const charsWithGalleryIds = allCharacters.filter(c => getCharacterGalleryId(c));
-    
-    // Get orphaned mappings if gallery-sync module is available
-    let orphanedMappings = [];
-    if (typeof window.auditGalleryIntegrity === 'function') {
-        const audit = window.auditGalleryIntegrity();
-        orphanedMappings = audit.orphanedMappings || [];
-    }
-    
-    // Build modal content
+
     let contentHtml = '';
-    
-    // Show orphaned mappings first (issues that need attention)
-    if (orphanedMappings.length > 0) {
-        contentHtml += `
-            <div style="margin-bottom: 20px;">
-                <h4 style="margin: 0 0 10px 0; color: var(--cl-error-bright); display: flex; align-items: center; gap: 8px;">
-                    <i class="fa-solid fa-ghost"></i>
-                    Orphaned Mappings (${orphanedMappings.length})
-                </h4>
-                <p style="color: var(--text-muted); font-size: 0.85em; margin-bottom: 15px;">
-                    These folder mappings point to characters that no longer exist. They can be safely removed with "Cleanup Orphans" in Integrity Check.
-                </p>
-                <div style="max-height: 200px; overflow-y: auto; background: rgba(var(--cl-error-bright-rgb), 0.05); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.2); border-radius: var(--radius-md); padding: 10px;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">
-                        <thead>
-                            <tr style="color: var(--text-muted); border-bottom: 1px solid rgba(255,255,255,0.1);">
-                                <th style="text-align: left; padding: 6px;">Avatar (deleted)</th>
-                                <th style="text-align: left; padding: 6px;">Folder Mapping</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${orphanedMappings.map(({ avatar, folder }) => `
-                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                                    <td style="padding: 6px; color: var(--cl-error-bright); font-family: monospace; font-size: 0.85em;">${escapeHtml(avatar)}</td>
-                                    <td style="padding: 6px;"><code style="background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: var(--radius-xs); font-size: 0.9em;">${escapeHtml(folder)}</code></td>
-                                </tr>
-                            `).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-    }
-    
-    if (sharedNames.size === 0 && charsWithGalleryIds.length === 0 && orphanedMappings.length === 0) {
+
+    if (sharedNames.size === 0 && charsWithGalleryIds.length === 0) {
         contentHtml = `
             <div class="empty-state" style="padding: 30px; text-align: center;">
                 <i class="fa-solid fa-folder-open" style="font-size: 48px; color: var(--text-secondary); margin-bottom: 15px;"></i>
@@ -4726,40 +4361,38 @@ function showFolderMappingModal() {
         }
     }
     
-    // Create modal
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal cl-modal-drawer';
+    modal.className = 'cl-modal cl-modal-drawer';
     modal.id = 'folderMappingModal';
     modal.innerHTML = `
-        <div class="confirm-modal-content" style="max-width: calc(700px * var(--modal-scale, 1)); max-height: calc(80vh * var(--modal-scale, 1));">
-            <div class="confirm-modal-header">
-                <h3>
-                    <i class="fa-solid fa-map"></i> Gallery Folder Mapping
-                </h3>
-                <button class="close-confirm-btn" id="closeFolderMappingModal">&times;</button>
+        <div class="cl-modal-content folder-mapping-modal-content">
+            <div class="cl-modal-header">
+                <h3><i class="fa-solid fa-map"></i> Gallery Folder Names</h3>
+                <button class="cl-modal-close" id="closeFolderMappingModal"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="confirm-modal-body" style="max-height: 60vh; overflow-y: auto;">
-                <div style="background: rgba(var(--cl-info-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-info-bright-rgb), 0.3); border-radius: var(--radius-md); padding: 10px; margin-bottom: 15px;">
-                    <p style="margin: 0; color: var(--text-secondary); font-size: 0.9em;">
-                        <i class="fa-solid fa-lightbulb" style="color: var(--cl-warning-bright);"></i>
-                        <strong>Tip:</strong> Gallery images are stored in <code style="background: rgba(0,0,0,0.2); padding: 2px 4px; border-radius: var(--radius-xs);">data/default-user/images/</code>
-                        <br>Move files from the old <code>CharName</code> folder to the new <code>CharName_abc123xyz</code> folder.
-                    </p>
+            <div class="cl-modal-body">
+                <div class="folder-mapping-tip">
+                    <i class="fa-solid fa-lightbulb"></i>
+                    <p><strong>Tip:</strong> Gallery images are stored in <code>data/default-user/images/</code>. Move files from the old <code>CharName</code> folder to the new <code>CharName_abc123xyz</code> folder.</p>
                 </div>
                 ${contentHtml}
             </div>
-            <div class="confirm-modal-footer">
+            <div class="cl-modal-footer">
                 <button class="action-btn primary" id="closeFolderMappingBtn">
                     <i class="fa-solid fa-check"></i> Done
                 </button>
             </div>
         </div>
     `;
-    
+
     document.body.appendChild(modal);
-    
-    // Setup close handlers
-    const closeModal = () => modal.remove();
+    requestAnimationFrame(() => modal.classList.add('visible'));
+
+    const closeModal = () => {
+        modal.classList.remove('visible');
+        setTimeout(() => modal.remove(), 200);
+    };
+    modal._closeFn = closeModal;
     document.getElementById('closeFolderMappingModal').onclick = closeModal;
     document.getElementById('closeFolderMappingBtn').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
@@ -4987,61 +4620,48 @@ async function scanDuplicateGalleryIdFolders() {
 async function showOrphanedFoldersModal(initialMode = 'legacy') {
     let currentMode = initialMode;
 
-    // Create initial modal with loading state
     const modal = document.createElement('div');
-    modal.className = 'confirm-modal cl-modal-drawer';
+    modal.className = 'cl-modal cl-modal-drawer';
     modal.id = 'orphanedFoldersModal';
     modal.innerHTML = `
-        <div class="confirm-modal-content orphaned-folders-modal">
-            <div class="confirm-modal-header">
-                <h3>
-                    <i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders
-                </h3>
-                <select id="orphanedFoldersModeSelect" class="glass-select" style="margin-left: auto;">
+        <div class="cl-modal-content orphaned-folders-modal">
+            <div class="cl-modal-header">
+                <h3><i class="fa-solid fa-folder-open"></i> Browse Orphaned Folders</h3>
+                <select id="orphanedFoldersModeSelect" class="glass-select orphaned-folders-mode-select">
                     <option value="legacy"${currentMode === 'legacy' ? ' selected' : ''} data-icon="fa-solid fa-folder-open">Legacy Folders (no gallery ID)</option>
                     <option value="duplicate"${currentMode === 'duplicate' ? ' selected' : ''} data-icon="fa-solid fa-clone">Duplicate Gallery ID</option>
                 </select>
-                <button class="close-confirm-btn" id="closeOrphanedFoldersModal">&times;</button>
+                <button class="cl-modal-close" id="closeOrphanedFoldersModal"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="confirm-modal-body" id="orphanedFoldersBody" style="min-width: 600px; min-height: 300px;">
+            <div class="cl-modal-body" id="orphanedFoldersBody">
                 <div class="loading-spinner">
                     <i class="fa-solid fa-spinner fa-spin"></i>
                     <p>Scanning for orphaned folders...</p>
                 </div>
             </div>
-            <div class="confirm-modal-footer">
+            <div class="cl-modal-footer">
                 <button class="action-btn secondary" id="closeOrphanedFoldersBtn">
                     <i class="fa-solid fa-xmark"></i> Close
                 </button>
             </div>
         </div>
     `;
-    
-    document.body.appendChild(modal);
 
-    // Convert mode dropdown to styled custom select
+    document.body.appendChild(modal);
+    requestAnimationFrame(() => modal.classList.add('visible'));
+
     const modeSelect = document.getElementById('orphanedFoldersModeSelect');
     initCustomSelect(modeSelect);
-    
-    // Setup close handlers
+
     const closeModal = () => {
         if (modeSelect._customSelect?.menu) modeSelect._customSelect.menu.remove();
-        modal.remove();
+        modal.classList.remove('visible');
+        setTimeout(() => modal.remove(), 200);
     };
+    modal._closeFn = closeModal;
     document.getElementById('closeOrphanedFoldersModal').onclick = closeModal;
     document.getElementById('closeOrphanedFoldersBtn').onclick = closeModal;
     modal.onclick = (e) => { if (e.target === modal) closeModal(); };
-    
-    // Escape key handler - skip if char details modal is open above us
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            const charModal = document.getElementById('charModal');
-            if (charModal && !charModal.classList.contains('hidden')) return;
-            closeModal();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
     
     // ── Reusable scan + render for the current mode ──
     async function loadMode(mode) {
@@ -5963,73 +5583,20 @@ async function assignGalleryIdToCharacter(char) {
     }
     
     const galleryId = generateGalleryId();
-    
-    const existingExtensions = char.data?.extensions || {};
-    const updatedExtensions = {
-        ...existingExtensions,
-        gallery_id: galleryId
-    };
-    
+
     try {
-        // Save via merge-attributes; spread existing data so other fields survive.
-        const existingData = char.data || {};
-        const payload = {
-            avatar: char.avatar,
-            create_date: char.create_date,
-            data: {
-                ...existingData,
-                extensions: updatedExtensions,
-                create_date: char.create_date
-            }
-        };
-        
-        const response = await apiRequest('/characters/merge-attributes', 'POST', payload);
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`API error: ${errorText}`);
-        }
-        
-        // Update local character data
-        if (!char.data) char.data = {};
-        if (!char.data.extensions) char.data.extensions = {};
-        char.data.extensions.gallery_id = galleryId;
-        _extensionsCache.set(char.avatar, char.data.extensions);
-        
-        // Also update in allCharacters array
-        const charIndex = allCharacters.findIndex(c => c.avatar === char.avatar);
-        if (charIndex !== -1) {
-            if (!allCharacters[charIndex].data) allCharacters[charIndex].data = {};
-            if (!allCharacters[charIndex].data.extensions) allCharacters[charIndex].data.extensions = {};
-            allCharacters[charIndex].data.extensions.gallery_id = galleryId;
-        }
-        
+        // Route through applyCardFieldUpdates (handles preflight, in-memory sync, ST notify).
+        const success = await window.applyCardFieldUpdates(char.avatar, {
+            'extensions.gallery_id': galleryId,
+        });
+        if (!success) throw new Error('API error');
+
         debugLog(`[GalleryFolder] Assigned gallery_id to ${char.name}: ${galleryId}`);
         return { success: true, galleryId };
-        
     } catch (error) {
         debugError(`[GalleryFolder] Failed to assign gallery_id to ${char.name}:`, error);
         return { success: false, galleryId: null, error: error.message };
     }
-}
-
-/**
- * Check if a character needs gallery folder migration
- * (has gallery_id but folder override not registered, or has images in old folder)
- * @param {object} char - Character object
- * @returns {boolean}
- */
-function needsGalleryFolderMigration(char) {
-    if (!getSetting('uniqueGalleryFolders')) return false;
-    if (!getCharacterGalleryId(char)) return false;
-    
-    const context = getSTContext();
-    if (!context?.extensionSettings?.gallery?.folders) return true;
-    
-    const expectedFolder = buildUniqueGalleryFolderName(char);
-    const currentOverride = context.extensionSettings.gallery.folders[char.avatar];
-    
-    return currentOverride !== expectedFolder;
 }
 
 /**
@@ -6062,15 +5629,6 @@ async function getCharacterGalleryInfo(char) {
  */
 function countCharactersNeedingGalleryId() {
     return allCharacters.filter(c => !getCharacterGalleryId(c)).length;
-}
-
-/**
- * Count characters with gallery_id that need folder registration
- * @returns {number}
- */
-function countCharactersNeedingFolderRegistration() {
-    if (!getSetting('uniqueGalleryFolders')) return 0;
-    return allCharacters.filter(c => needsGalleryFolderMigration(c)).length;
 }
 
 // ========================================
@@ -6601,26 +6159,19 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
         const response = await apiRequest(ENDPOINTS.IMAGES_LIST, 'POST', { folder: oldFolderName, type: 7 });
         
         if (!response.ok) {
-            // Old folder doesn't exist or can't be read - might be empty, that's fine
             debugLog(`[GalleryRename] Old folder "${oldFolderName}" doesn't exist or is empty`);
-            // Still update the mapping for future use
-            const tempChar = { ...char, name: newName };
-            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
-        
+
         const files = await response.json();
-        
+
         if (!files || files.length === 0) {
             debugLog(`[GalleryRename] Old folder "${oldFolderName}" is empty`);
-            const tempChar = { ...char, name: newName };
-            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
-        
-        // Filter to media files
+
         const mediaExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.mp4', '.webm', '.mov', '.avi', '.mkv', '.m4v'];
         const mediaFiles = files.filter(f => {
             const fileName = typeof f === 'string' ? f : f.name;
@@ -6628,22 +6179,19 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
             const ext = fileName.toLowerCase().substring(fileName.lastIndexOf('.'));
             return mediaExtensions.includes(ext);
         });
-        
+
         if (mediaFiles.length === 0) {
             debugLog(`[GalleryRename] No media files to move`);
-            const tempChar = { ...char, name: newName };
-            registerGalleryFolderOverride(tempChar);
             result.success = true;
             return result;
         }
-        
+
         debugLog(`[GalleryRename] Moving ${mediaFiles.length} files from "${oldFolderName}" to "${newFolderName}"`);
-        
-        // Move each file
+
         for (const file of mediaFiles) {
             const fileName = typeof file === 'string' ? file : file.name;
             const moveResult = await moveImageToFolder(oldFolderName, newFolderName, fileName, true);
-            
+
             if (moveResult.success) {
                 result.moved++;
             } else {
@@ -6651,10 +6199,7 @@ async function handleGalleryFolderRename(char, oldName, newName, galleryId) {
                 console.warn(`[GalleryRename] Failed to move "${fileName}":`, moveResult.error);
             }
         }
-        
-        const tempChar = { ...char, name: newName };
-        registerGalleryFolderOverride(tempChar);
-        
+
         result.success = result.errors === 0;
         debugLog(`[GalleryRename] Complete: ${result.moved} moved, ${result.errors} errors`);
         
@@ -6717,14 +6262,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Load settings first to ensure defaults are available
     await loadGallerySettings();
-    
-    // Migrate renamed settings keys from older versions
-    if ('showChubTagline' in gallerySettings) {
-        gallerySettings.showProviderTagline = gallerySettings.showChubTagline;
-        delete gallerySettings.showChubTagline;
-        saveGallerySettings();
-    }
-    
+
+    // Must run after loadGallerySettings; the legacy-to-file migration reads gallerySettings.
+    loadCompletedMediaLocalizations().catch(() => {});
+
     // Fire-and-forget: check cl-helper for thumbnail support early
     checkClHelperPlugin();
 
@@ -6874,11 +6415,12 @@ function showConfirm({
         overlay.className = 'cl-confirm-overlay hidden';
         overlay.innerHTML = `
             <div class="confirm-modal-content">
-                <div class="confirm-modal-header">
-                    <h3 id="clConfirmTitle"></h3>
-                </div>
-                <div class="confirm-modal-body">
-                    <p id="clConfirmMessage"></p>
+                <div class="cl-confirm-main">
+                    <div class="cl-confirm-badge"><i id="clConfirmIcon" class="fa-solid fa-circle-question"></i></div>
+                    <div class="cl-confirm-text">
+                        <h3 id="clConfirmTitle"></h3>
+                        <div id="clConfirmMessage"></div>
+                    </div>
                 </div>
                 <div class="confirm-modal-footer">
                     <button type="button" class="action-btn secondary" id="clConfirmCancelBtn"></button>
@@ -6894,29 +6436,32 @@ function showConfirm({
         document.getElementById('clConfirmConfirmBtn').addEventListener('click', confirmFn);
         overlay.addEventListener('click', e => { if (e.target === overlay) cancelFn(); });
 
-        // Register with overlay registry so Escape and Android back resolve as cancel
+        // Register with overlay registry so Escape and Android back resolve as cancel.
+        // tier -1 keeps the confirm below the tier-0 band (pickers, fullscreen viewers) so it,
+        // the topmost interrupt, always closes before whatever overlay it is layered over.
         window.registerOverlay?.({
             id: 'clConfirmOverlay',
-            tier: 0,
+            tier: -1,
             close: cancelFn,
         });
     }
 
     const titleEl = document.getElementById('clConfirmTitle');
     const msgEl = document.getElementById('clConfirmMessage');
+    const iconEl = document.getElementById('clConfirmIcon');
     const cancelBtn = document.getElementById('clConfirmCancelBtn');
     const confirmBtn = document.getElementById('clConfirmConfirmBtn');
-    if (titleEl) {
-        if (icon) {
-            const colorAttr = iconColor ? ` style="color:${iconColor}"` : '';
-            titleEl.innerHTML = `<i class="${icon}"${colorAttr}></i> ${escapeHtml(title)}`;
-        } else {
-            titleEl.textContent = title;
-        }
+    // Intent badge: red for destructive, accent otherwise. Caller icon overrides the glyph.
+    overlay.classList.toggle('cl-confirm-danger', !!danger);
+    if (iconEl) {
+        iconEl.className = icon || (danger ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-question');
+        iconEl.style.color = iconColor || '';
     }
+    if (titleEl) titleEl.textContent = title;
     if (msgEl) {
         if (messageHtml != null) msgEl.innerHTML = messageHtml;
         else msgEl.textContent = message;
+        msgEl.style.display = (messageHtml != null || message) ? '' : 'none';
     }
     if (cancelBtn) cancelBtn.textContent = cancelLabel;
     if (confirmBtn) {
@@ -6932,6 +6477,121 @@ function showConfirm({
     });
 }
 
+// Shared "save preset" picker (AI Studio + recommender chat). Modeled on the playlist picker: type a name to
+// create, or pick an existing preset to overwrite (always confirmed). Resolves { name, overwriteIndex } where
+// overwriteIndex -1 means a new preset, or null on cancel.
+let _savePresetResolve = null;
+let _savePresetPresets = [];
+
+function _resolveSavePreset(result) {
+    document.getElementById('savePresetPickerOverlay')?.classList.remove('visible');
+    const res = _savePresetResolve;
+    _savePresetResolve = null;
+    _savePresetPresets = [];
+    res?.(result);
+}
+
+async function _savePresetOverwrite(idx) {
+    const p = _savePresetPresets[idx];
+    if (!p) return;
+    const ok = await showConfirm({
+        title: 'Overwrite preset?',
+        message: `Replace the saved prompt in "${p.name}"?`,
+        confirmLabel: 'Overwrite',
+        cancelLabel: 'Cancel',
+        danger: true,
+    });
+    if (ok) _resolveSavePreset({ name: p.name, overwriteIndex: idx });
+}
+
+function _savePresetCommit() {
+    const name = (document.getElementById('savePresetPickerInput')?.value || '').trim();
+    if (!name) return;
+    const idx = _savePresetPresets.findIndex(p => (p.name || '').toLowerCase() === name.toLowerCase());
+    if (idx >= 0) _savePresetOverwrite(idx);
+    else _resolveSavePreset({ name, overwriteIndex: -1 });
+}
+
+function _filterSavePresetList() {
+    const list = document.getElementById('savePresetPickerList');
+    if (!list) return;
+    const query = (document.getElementById('savePresetPickerInput')?.value || '').trim();
+    const qLower = query.toLowerCase();
+    let exactMatch = false;
+    list.querySelectorAll('.preset-picker-row').forEach(row => {
+        const name = row.querySelector('.preset-picker-name')?.textContent || '';
+        const show = !qLower || name.toLowerCase().includes(qLower);
+        row.style.display = show ? '' : 'none';
+        if (qLower && name.toLowerCase() === qLower) exactMatch = true;
+    });
+    let createRow = list.querySelector('.preset-picker-create-row');
+    if (query && !exactMatch) {
+        if (!createRow) {
+            createRow = document.createElement('div');
+            createRow.className = 'preset-picker-create-row';
+            createRow.addEventListener('click', _savePresetCommit);
+            list.appendChild(createRow);
+        }
+        createRow.innerHTML = `<i class="fa-solid fa-plus preset-picker-create-icon"></i><span>Create <strong>${escapeHtml(query)}</strong></span>`;
+        createRow.style.display = '';
+    } else if (createRow) {
+        createRow.style.display = 'none';
+    }
+}
+
+function _renderSavePresetList() {
+    const list = document.getElementById('savePresetPickerList');
+    if (!list) return;
+    list.innerHTML = _savePresetPresets.map((p, i) =>
+        `<div class="preset-picker-row" data-idx="${i}"><i class="fa-solid fa-pen-to-square preset-picker-row-icon"></i><span class="preset-picker-name">${escapeHtml(p.name || '')}</span><span class="preset-picker-row-hint">overwrite</span></div>`
+    ).join('');
+    _filterSavePresetList();
+}
+
+function savePresetPicker(title, presets) {
+    return new Promise(resolve => {
+        _savePresetResolve = resolve;
+        _savePresetPresets = Array.isArray(presets) ? presets : [];
+        let overlay = document.getElementById('savePresetPickerOverlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'savePresetPickerOverlay';
+            overlay.className = 'cl-modal cl-modal-drawer';
+            overlay.innerHTML = `
+                <div class="cl-modal-content" style="max-width: calc(420px * var(--modal-scale, 1));">
+                    <div class="cl-modal-header">
+                        <h3 id="savePresetPickerTitle"></h3>
+                        <button type="button" class="cl-modal-close" id="savePresetPickerClose"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="cl-modal-body" style="padding: 0;">
+                        <div class="preset-picker-search-wrap">
+                            <i class="fa-solid fa-tag preset-picker-search-icon"></i>
+                            <input type="search" id="savePresetPickerInput" class="cl-input preset-picker-search" placeholder="Name a new preset, or pick one to overwrite..." maxlength="100" autocomplete="one-time-code">
+                        </div>
+                        <div id="savePresetPickerList" class="preset-picker-list"></div>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+            overlay.querySelector('#savePresetPickerClose').addEventListener('click', () => _resolveSavePreset(null));
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) _resolveSavePreset(null); });
+            const inputEl = overlay.querySelector('#savePresetPickerInput');
+            inputEl.addEventListener('input', _filterSavePresetList);
+            inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); _savePresetCommit(); } });
+            overlay.querySelector('#savePresetPickerList').addEventListener('click', (e) => {
+                const row = e.target.closest('.preset-picker-row');
+                if (row) _savePresetOverwrite(parseInt(row.dataset.idx, 10));
+            });
+            window.registerOverlay({ id: 'savePresetPickerOverlay', tier: 0, close: () => _resolveSavePreset(null), visible: (el) => el.classList.contains('visible') });
+        }
+        overlay.querySelector('#savePresetPickerTitle').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> ${escapeHtml(title || 'Save preset')}`;
+        const input = overlay.querySelector('#savePresetPickerInput');
+        input.value = '';
+        _renderSavePresetList();
+        overlay.classList.add('visible');
+        requestAnimationFrame(() => input.focus());
+    });
+}
+
 // Sync with Main Window
 async function loadCharInMain(charOrAvatar) {
     // In embedded mode, send a message to the parent frame
@@ -6939,10 +6599,6 @@ async function loadCharInMain(charOrAvatar) {
         let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
         let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
         if (!charObj && avatar) charObj = allCharacters.find(c => c.avatar === avatar);
-
-        if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
-            registerGalleryFolderOverride(charObj);
-        }
 
         window.parent.postMessage({ source: 'character-library', type: 'cl-open-character', avatar }, window.location.origin);
         showToast(`Loading ${charObj?.name || avatar}...`, 'success');
@@ -6963,12 +6619,6 @@ async function loadCharInMain(charOrAvatar) {
     // If we only have avatar string, find the full character object
     if (!charObj && avatar) {
         charObj = allCharacters.find(c => c.avatar === avatar);
-    }
-
-    // Register the gallery folder override before loading the character so index.js
-    // resolves the right folder during media localization.
-    if (charObj && getSetting('uniqueGalleryFolders') && getCharacterGalleryId(charObj)) {
-        registerGalleryFolderOverride(charObj);
     }
 
     debugLog(`Attempting to load character by file: ${avatar}`);
@@ -7207,14 +6857,6 @@ async function fetchAndAddCharacter(avatarFileName, options = {}) {
         allCharacters.push(slim);
         currentCharacters.push(slim);
 
-        // Register gallery folder override for just this character
-        if (getSetting('uniqueGalleryFolders') && getCharacterGalleryId(slim)) {
-            const uniqueFolder = buildUniqueGalleryFolderName(slim);
-            if (uniqueFolder && verifyContextAccess()) {
-                setSTExtensionSetting('gallery.folders', slim.avatar, uniqueFolder);
-            }
-        }
-
         _needsCharacterRefresh = true;
         return true;
     } catch (e) {
@@ -7363,9 +7005,6 @@ async function recoverShallowExtensions(generation) {
         window.ProviderRegistry?.hideRecoveryBanner?.();
         window.ProviderRegistry?.rebuildAllBrowseLookups?.();
         window.ProviderRegistry?.refreshActiveBrowseBadges?.();
-        if (getSetting('uniqueGalleryFolders')) {
-            try { syncAllGalleryFolderOverrides(); } catch { /* ignore */ }
-        }
         runGallerySyncAudit();
         return;
     }
@@ -7428,14 +7067,6 @@ async function recoverShallowExtensions(generation) {
     }
 
     document.dispatchEvent(new CustomEvent('cl-extensions-recovered'));
-
-    if (recovered > 0 && getSetting('uniqueGalleryFolders')) {
-        try {
-            syncAllGalleryFolderOverrides();
-        } catch (e) {
-            console.warn('[ShallowRecovery] Gallery folder sync failed:', e);
-        }
-    }
 
     runGallerySyncAudit();
 }
@@ -7553,21 +7184,7 @@ function processAndRender(data) {
         window.playlistsPruneDeleted();
     }
 
-    // Sync gallery folder overrides to opener's settings after every character list refresh.
-    // This ensures the opener's in-memory extensionSettings.gallery.folders is up-to-date,
-    // even if another client (e.g. mobile) imported characters and the opener's settings are stale.
-    if (getSetting('uniqueGalleryFolders')) {
-        try {
-            syncAllGalleryFolderOverrides();
-        } catch (e) {
-            console.warn('[processAndRender] Gallery folder sync failed:', e);
-        }
-    }
-    
-    // Audit + auto-cleanup orphaned mappings, then update the warning indicator.
-    // On fast local loads, processAndRender may outrun module initialization
-    // (gallery-sync.js hasn't been loaded yet), so we poll briefly before
-    // falling back to gallery-sync's own 5-second safety-net timer.
+    // Audit only checks for missing gallery_ids; folder mapping is computed live by the Proxy in index.js.
     runGallerySyncAudit();
 }
 
@@ -7575,25 +7192,10 @@ function runGallerySyncAudit(retries = 10) {
     try {
         if (typeof window.auditGalleryIntegrity !== 'function' ||
             typeof window.updateGallerySyncWarning !== 'function') {
-            if (retries > 0) {
-                setTimeout(() => runGallerySyncAudit(retries - 1), 200);
-            }
+            if (retries > 0) setTimeout(() => runGallerySyncAudit(retries - 1), 200);
             return;
         }
-        const freshAudit = window.auditGalleryIntegrity();
-
-        if (freshAudit.issues.orphaned > 0 && typeof window.cleanupOrphanedMappings === 'function') {
-            const cleanup = window.cleanupOrphanedMappings();
-            if (cleanup.removed > 0) {
-                debugLog(`[processAndRender] Auto-cleaned ${cleanup.removed} orphaned mapping(s)`);
-                const cleanAudit = window.auditGalleryIntegrity();
-                window.updateGallerySyncWarning(cleanAudit);
-            } else {
-                window.updateGallerySyncWarning(freshAudit);
-            }
-        } else {
-            window.updateGallerySyncWarning(freshAudit);
-        }
+        window.updateGallerySyncWarning(window.auditGalleryIntegrity());
         gallerySyncAuditDone = true;
     } catch { /* ignore */ }
 }
@@ -8615,6 +8217,9 @@ function refreshPlaylistBadges() {
 // Modal Logic
 const modal = document.getElementById('charModal');
 let activeChar = null;
+// Per-session override for the detail modal's prev/next source (eg. recommender results); null = grid default.
+let modalNavList = null;
+const getModalNavList = () => modalNavList ?? currentCharsList;
 let _modalOpenGen = 0;
 
 // Cached tab element references - these are static DOM nodes, queried once
@@ -8640,6 +8245,10 @@ function resetTabScrollPositions() {
     getTabPanes().forEach(p => p.scrollTop = 0);
     const sidebar = document.querySelector('.modal-sidebar');
     if (sidebar) sidebar.scrollTop = 0;
+    // Mobile makes .modal-body the scroll container (panes are overflow:visible). The early reset in
+    // openModal runs while the modal is still hidden on a fresh open, so reset here post-show too.
+    const modalBody = document.querySelector('#charModal .modal-body');
+    if (modalBody) modalBody.scrollTop = 0;
 }
 
 // Fetch User Images for Character
@@ -9541,7 +9150,7 @@ async function showLegacyFolderModal(char) {
     });
 }
 
-function openCharModalElevated(char) {
+function openCharModalElevated(char, navList) {
     const charModal = document.getElementById('charModal');
     if (!charModal) return;
     // Pin existing visible modals so char-modal-above only elevates new ones
@@ -9553,24 +9162,26 @@ function openCharModalElevated(char) {
     const restore = () => {
         document.body.classList.remove('char-modal-above');
         pinnedModals.forEach(m => m.style.removeProperty('z-index'));
+        modalNavList = null;
         obs.disconnect();
     };
     const obs = new MutationObserver(() => {
         if (charModal.classList.contains('hidden')) restore();
     });
     obs.observe(charModal, { attributes: true, attributeFilter: ['class'] });
-    openModal(char);
+    openModal(char, { navList });
 }
 
-// Walks currentCharsList (the live filtered+sorted view) so nav order tracks the user's current sort/filter state. Dirty-edit gate + teardown live inside openModal so this stays thin.
+// Steps prev/next through getModalNavList() (elevated opener's list, else the grid); gate + teardown live in openModal.
 function navigateModal(direction) {
     if (!activeChar) return;
     if (getSetting('enableCharDetailNav') === false) return;
-    const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+    const navList = getModalNavList();
+    const idx = navList.findIndex(c => c.avatar === activeChar.avatar);
     if (idx === -1) return;
     const targetIdx = idx + direction;
-    if (targetIdx < 0 || targetIdx >= currentCharsList.length) return;
-    openModal(currentCharsList[targetIdx]);
+    if (targetIdx < 0 || targetIdx >= navList.length) return;
+    openModal(navList[targetIdx]);
 }
 
 function isCharModalDirty() {
@@ -9608,19 +9219,22 @@ function updateCharModalNavState() {
     const nextBtn = document.getElementById('charModalNavNext');
     if (!prevBtn || !nextBtn) return;
     const enabled = getSetting('enableCharDetailNav') !== false && !!activeChar;
-    const idx = enabled ? currentCharsList.findIndex(c => c.avatar === activeChar.avatar) : -1;
+    const navList = getModalNavList();
+    const idx = enabled ? navList.findIndex(c => c.avatar === activeChar.avatar) : -1;
     const show = idx !== -1;
     prevBtn.style.display = show ? '' : 'none';
     nextBtn.style.display = show ? '' : 'none';
     if (!show) return;
     prevBtn.disabled = idx === 0;
-    nextBtn.disabled = idx >= currentCharsList.length - 1;
+    nextBtn.disabled = idx >= navList.length - 1;
 }
 
-async function openModal(char) {
+async function openModal(char, { navList } = {}) {
     // Swap-while-open gate: dirty-edit prompt + per-character teardown live here so every modal-to-modal entry point (navigateModal, openRelatedCharacter, anywhere else) inherits the same protection.
     const charModalEl = document.getElementById('charModal');
     const isSwap = charModalEl && !charModalEl.classList.contains('hidden') && activeChar && activeChar.avatar !== char.avatar;
+    // Fresh open picks the nav source; swaps/steps pass no navList so the session's source persists while paging.
+    if (!isSwap) modalNavList = navList ?? null;
     if (isSwap && isCharModalDirty()) {
         const ok = await confirmDiscardCharModalEdits();
         if (!ok) return;
@@ -9760,13 +9374,10 @@ async function openModal(char) {
     // Provider Link Indicator (generic - any provider)
     updateProviderLinkIndicator(char);
 
-    // Provider Tagline (from whichever provider owns this card)
+    // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
     const taglineRow = document.getElementById('modalProviderTaglineRow');
     const taglineEl = document.getElementById('modalProviderTagline');
-    const providerMatch = window.ProviderRegistry?.getCharacterProvider(char) || null;
-    const providerTagline = providerMatch && providerMatch.provider.id !== 'jannyai'
-        ? (char?.data?.extensions?.[providerMatch.provider.id]?.tagline || '')
-        : '';
+    const providerTagline = getDisplayTagline(char);
     if (taglineRow && taglineEl) {
         taglineRow.classList.remove('expanded');
         taglineRow.setAttribute('aria-expanded', 'false');
@@ -10028,6 +9639,9 @@ function populateEditPane() {
 
     document.getElementById('editCreator').value = author;
     document.getElementById('editVersion').value = charVersion;
+    // Read tagline from the active namespace (not getDisplayTagline) so a linked card's stored value stays editable.
+    const editTaglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    document.getElementById('editTagline').value = char?.data?.extensions?.[editTaglineNs]?.tagline || '';
     document.getElementById('editPersonality').value = personality;
     document.getElementById('editScenario').value = scenario;
     document.getElementById('editMesExample').value = mesExample;
@@ -10057,6 +9671,7 @@ function populateEditPane() {
         first_mes: document.getElementById('editFirstMes').value,
         creator: document.getElementById('editCreator').value,
         character_version: document.getElementById('editVersion').value,
+        tagline: document.getElementById('editTagline').value,
         tagsArray: [..._editTagsArray],
         personality: document.getElementById('editPersonality').value,
         scenario: document.getElementById('editScenario').value,
@@ -11311,12 +10926,6 @@ async function deleteCharacter(char, deleteChats = false) {
         }
         
         debugLog('[Delete] API call successful, cleaning up...');
-        
-        // Clean up gallery folder override if this character had a unique folder
-        if (avatar && getCharacterGalleryId(char)) {
-            removeGalleryFolderOverride(avatar);
-            debugLog('[Delete] Removed gallery folder override for:', avatar);
-        }
 
         // Clean up playlist membership
         if (avatar && window.playlistsOnCharDeleted) {
@@ -11393,6 +11002,7 @@ function collectEditValues() {
         first_mes: document.getElementById('editFirstMes').value,
         creator: document.getElementById('editCreator').value,
         character_version: document.getElementById('editVersion').value,
+        tagline: document.getElementById('editTagline').value,
         tagsArray: [..._editTagsArray],
         personality: document.getElementById('editPersonality').value,
         scenario: document.getElementById('editScenario').value,
@@ -11414,6 +11024,7 @@ function generateChangesDiff(original, current) {
         first_mes: 'First Message',
         creator: 'Creator',
         character_version: 'Version',
+        tagline: 'Tagline',
         tagsArray: 'Tags',
         personality: 'Personality',
         scenario: 'Scenario',
@@ -11685,20 +11296,10 @@ function showSaveConfirmation() {
         showToast("No changes detected", "info");
         return;
     }
-    
-    // merge-attributes wants V2/V3 shape (fields at root for back-compat plus under data).
-    // Pull existing values up so the payload doesn't wipe anything the form doesn't touch.
-    const existingExtensions = activeChar.data?.extensions || activeChar.extensions || {};
-    const existingCreateDate = activeChar.create_date;
-    const existingSpec = activeChar.spec || activeChar.data?.spec;
-    const existingSpecVersion = activeChar.spec_version || activeChar.data?.spec_version;
-    const existingData = activeChar.data || {};
-    
-    pendingPayload = {
-        avatar: activeChar.avatar,
-        // Preserve spec info at root level
-        ...(existingSpec && { spec: existingSpec }),
-        ...(existingSpecVersion && { spec_version: existingSpecVersion }),
+
+    // Tagline as a leaf write so the namespace's sibling fields (id, full_path, linkedAt) survive the spread.
+    const taglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(activeChar) ?? 'cl';
+    pendingUpdates = {
         name: currentValues.name,
         description: currentValues.description,
         first_mes: currentValues.first_mes,
@@ -11713,27 +11314,7 @@ function showSaveConfirmation() {
         tags: currentValues.tagsArray,
         alternate_greetings: currentValues.alternate_greetings,
         character_book: currentValues.character_book,
-        // Preserve original create_date
-        create_date: existingCreateDate,
-        data: {
-            ...existingData,
-            name: currentValues.name,
-            description: currentValues.description,
-            first_mes: currentValues.first_mes,
-            personality: currentValues.personality,
-            scenario: currentValues.scenario,
-            mes_example: currentValues.mes_example,
-            system_prompt: currentValues.system_prompt,
-            post_history_instructions: currentValues.post_history_instructions,
-            creator_notes: currentValues.creator_notes,
-            creator: currentValues.creator,
-            character_version: currentValues.character_version,
-            tags: currentValues.tagsArray,
-            alternate_greetings: currentValues.alternate_greetings,
-            character_book: currentValues.character_book,
-            create_date: existingCreateDate,
-            extensions: existingExtensions
-        }
+        [`extensions.${taglineNs}.tagline`]: currentValues.tagline ?? '',
     };
     
     // Build diff HTML
@@ -11761,8 +11342,8 @@ function showSaveConfirmation() {
 
 // Actually perform the save
 async function performSave() {
-    if (!activeChar || !pendingPayload) return;
-    
+    if (!activeChar || !pendingUpdates) return;
+
     const hasAvatarChange = !!pendingAvatarFile;
 
     // Auto-snapshot before edit (non-blocking - don't let snapshot failure block the save).
@@ -11771,17 +11352,18 @@ async function performSave() {
     if (window.autoSnapshotBeforeChange) {
         try { await window.autoSnapshotBeforeChange(activeChar, 'edit', { embedAvatar: hasAvatarChange }); } catch (_) {}
     }
-    
-    // Capture old name BEFORE updating for gallery folder rename
+
+    // Capture old name before the write so the gallery folder rename has the pre-write value.
     const oldName = originalValues.name;
-    const newName = pendingPayload.name;
+    const newName = pendingUpdates.name;
     const nameChanged = oldName && newName && oldName !== newName;
     const galleryId = getCharacterGalleryId(activeChar);
-    
+
     try {
-        const response = await apiRequest('/characters/merge-attributes', 'POST', pendingPayload);
-        
-        if (response.ok) {
+        // writeCardFields does the card write; performSave keeps the non-generic orchestration (avatar upload, gallery rename, date bump, refresh, notify).
+        const writeResult = await writeCardFields(activeChar, pendingUpdates);
+
+        if (writeResult.ok) {
             // Upload replacement avatar (after fields succeeded). edit-avatar reads existing
             // card JSON from the PNG and re-embeds it into the new image, so all fields,
             // extensions, gallery_id, version_uid, chats, and the filename are preserved.
@@ -11810,69 +11392,18 @@ async function performSave() {
             }
 
             showToast("Character saved successfully!", "success");
-            
+
             // Close confirmation immediately so it doesn't wait on folder rename / grid refresh
             document.getElementById('confirmSaveModal').classList.add('hidden');
-            
+
             // Handle gallery folder rename if name changed and character has unique gallery folder
             if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
                 await handleGalleryFolderRename(activeChar, oldName, newName, galleryId);
             }
-            
-            // Update local data - update root level fields
-            activeChar.name = pendingPayload.name;
-            activeChar.description = pendingPayload.description;
-            activeChar.first_mes = pendingPayload.first_mes;
-            activeChar.personality = pendingPayload.personality;
-            activeChar.scenario = pendingPayload.scenario;
-            activeChar.mes_example = pendingPayload.mes_example;
-            activeChar.system_prompt = pendingPayload.system_prompt;
-            activeChar.post_history_instructions = pendingPayload.post_history_instructions;
-            activeChar.creator_notes = pendingPayload.creator_notes;
-            activeChar.creator = pendingPayload.creator;
-            activeChar.character_version = pendingPayload.character_version;
-            activeChar.tags = pendingPayload.tags;
-            activeChar.alternate_greetings = pendingPayload.alternate_greetings;
-            activeChar.character_book = pendingPayload.character_book;
-            
-            // Also update the data object if it exists
-            if (activeChar.data) {
-                // Preserve extensions (like favorites) that aren't part of the edit form
-                const existingExtensions = activeChar.data.extensions;
-                Object.assign(activeChar.data, pendingPayload.data);
-                if (existingExtensions) {
-                    activeChar.data.extensions = existingExtensions;
-                }
-            }
-            
-            // Also update the character in allCharacters array for immediate grid refresh
+
+            // Re-point activeChar to the canonical array entry in case writeCardFields received a different ref.
             const charIndex = allCharacters.findIndex(c => c.avatar === activeChar.avatar);
-            if (charIndex !== -1) {
-                // Copy all updated fields to the array entry
-                Object.assign(allCharacters[charIndex], {
-                    name: pendingPayload.name,
-                    description: pendingPayload.description,
-                    first_mes: pendingPayload.first_mes,
-                    personality: pendingPayload.personality,
-                    scenario: pendingPayload.scenario,
-                    mes_example: pendingPayload.mes_example,
-                    system_prompt: pendingPayload.system_prompt,
-                    post_history_instructions: pendingPayload.post_history_instructions,
-                    creator_notes: pendingPayload.creator_notes,
-                    creator: pendingPayload.creator,
-                    character_version: pendingPayload.character_version,
-                    tags: pendingPayload.tags,
-                    alternate_greetings: pendingPayload.alternate_greetings,
-                    character_book: pendingPayload.character_book
-                });
-                if (allCharacters[charIndex].data) {
-                    const existingExt = allCharacters[charIndex].data.extensions;
-                    Object.assign(allCharacters[charIndex].data, pendingPayload.data);
-                    if (existingExt) {
-                        allCharacters[charIndex].data.extensions = existingExt;
-                    }
-                }
-                // Ensure activeChar points to the array entry
+            if (charIndex !== -1 && allCharacters[charIndex] !== activeChar) {
                 activeChar = allCharacters[charIndex];
             }
 
@@ -11884,10 +11415,10 @@ async function performSave() {
                 allCharacters[charIndex].date_added = nowMs;
                 if (allCharacters[charIndex]._meta) allCharacters[charIndex]._meta.date_added = nowMs;
             }
-            
+
             // Update original values to reflect saved state
             originalValues = collectEditValues();
-            
+
             // Refresh the modal display to show saved changes
             refreshModalDisplay();
 
@@ -11908,8 +11439,8 @@ async function performSave() {
             
             // Lock editing and clean up
             setEditLock(true);
-            pendingPayload = null;
-            
+            pendingUpdates = null;
+
             // Tell ST to re-read the character so open chats pick up the edits
             // without requiring a tab refresh. Best-effort, non-blocking.
             notifySTCharacterEdited(activeChar.avatar);
@@ -11918,8 +11449,8 @@ async function performSave() {
             // forceRefresh avoids stale opener data overwriting recent changes
             fetchCharacters(true);
         } else {
-            const err = await response.text();
-            showToast("Error saving: " + err, "error");
+            const err = writeResult.response ? await writeResult.response.text().catch(() => '') : '';
+            showToast("Error saving: " + (err || 'unknown'), "error");
         }
     } catch (e) {
         showToast("Network error saving character: " + e.message, "error");
@@ -11975,13 +11506,10 @@ function refreshModalDisplay() {
         window.currentCreatorNotesContent = null;
     }
 
-    // Update Provider Tagline (from whichever provider the character is linked to)
+    // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
     const taglineRow = document.getElementById('modalProviderTaglineRow');
     const taglineEl = document.getElementById('modalProviderTagline');
-    const providerMatch = window.ProviderRegistry?.getCharacterProvider(char) || null;
-    const providerTagline = providerMatch
-        ? (char?.data?.extensions?.[providerMatch.provider.id]?.tagline || '')
-        : (char?.data?.extensions?.chub?.tagline || char?.extensions?.chub?.tagline || '');
+    const providerTagline = getDisplayTagline(char);
     if (taglineRow && taglineEl) {
         taglineRow.classList.remove('expanded');
         taglineRow.setAttribute('aria-expanded', 'false');
@@ -12058,22 +11586,45 @@ async function saveCharacter() {
 
 // Edit Lock Functions
 
+// Reset to 'auto' first so scrollHeight reflects current content; without it the field grows but never shrinks.
+function autoGrowEditField(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = (ta.scrollHeight + 4) + 'px';
+}
+
+function detachEditFieldsAutoGrow() {
+    if (!editFieldsAutoGrowHandler) return;
+    document.getElementById('pane-edit')?.removeEventListener('input', editFieldsAutoGrowHandler);
+    editFieldsAutoGrowHandler = null;
+}
+
 function toggleEditFieldsExpand() {
     const btn = document.getElementById('editFieldsToggleBtn');
     const icon = btn?.querySelector('i');
     if (!btn || !icon) return;
+    const container = document.getElementById('pane-edit');
     const textareas = document.querySelectorAll('#pane-edit textarea.glass-input');
     if (btn.classList.contains('active')) {
         textareas.forEach(ta => { ta.style.height = ''; });
+        detachEditFieldsAutoGrow();
         btn.classList.remove('active');
         icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
         btn.title = 'Expand all fields to fit content';
     } else {
+        // Initial pass only expands fields that already overflow, so empty textareas keep their min-height.
         textareas.forEach(ta => {
-            if (ta.scrollHeight > ta.clientHeight) {
-                ta.style.height = (ta.scrollHeight + 4) + 'px';
-            }
+            if (ta.scrollHeight > ta.clientHeight) autoGrowEditField(ta);
         });
+        // Delegated listener on #pane-edit catches input from any descendant textarea, so dynamically-added alt-greetings auto-grow too.
+        if (container && !editFieldsAutoGrowHandler) {
+            editFieldsAutoGrowHandler = (e) => {
+                const ta = e.target;
+                if (ta?.matches?.('#pane-edit textarea.glass-input')) {
+                    autoGrowEditField(ta);
+                }
+            };
+            container.addEventListener('input', editFieldsAutoGrowHandler);
+        }
         btn.classList.add('active');
         icon.className = 'fa-solid fa-down-left-and-up-right-to-center';
         btn.title = 'Contract fields to default size';
@@ -12133,6 +11684,7 @@ function setEditLock(locked) {
         const fieldsToggle = document.getElementById('editFieldsToggleBtn');
         if (fieldsToggle?.classList.contains('active')) {
             document.querySelectorAll('#pane-edit textarea.glass-input').forEach(ta => { ta.style.height = ''; });
+            detachEditFieldsAutoGrow();
             fieldsToggle.classList.remove('active');
             const icon = fieldsToggle.querySelector('i');
             if (icon) icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
@@ -12214,6 +11766,7 @@ function cancelEditing() {
     document.getElementById('editFirstMes').value = originalValues.first_mes || '';
     document.getElementById('editCreator').value = originalValues.creator || '';
     document.getElementById('editVersion').value = originalValues.character_version || '';
+    document.getElementById('editTagline').value = originalValues.tagline || '';
     document.getElementById('editPersonality').value = originalValues.personality || '';
     document.getElementById('editScenario').value = originalValues.scenario || '';
     document.getElementById('editMesExample').value = originalValues.mes_example || '';
@@ -12412,59 +11965,42 @@ async function toggleCharacterFavorite(char) {
     hapticFeedback(12);
 
     try {
-        // fav lives in data.extensions.fav; full data must be passed through.
-        const existingData = char.data || {};
-        const existingExtensions = existingData.extensions || {};
-        
-        const response = await apiRequest('/characters/merge-attributes', 'POST', {
-            avatar: char.avatar,
-            fav: newFavStatus,
-            create_date: char.create_date,
-            data: {
-                ...existingData,
-                extensions: {
-                    ...existingExtensions,
-                    fav: newFavStatus
-                }
-            }
+        // Route through applyCardFieldUpdates; ST notify mirrors fav into the main window via getOneCharacter.
+        const success = await window.applyCardFieldUpdates(char.avatar, {
+            'extensions.fav': newFavStatus,
         });
-        
-        if (response.ok) {
-            // Update local character data
-            char.fav = newFavStatus;
-            if (!char.data) char.data = {};
-            if (!char.data.extensions) char.data.extensions = {};
-            char.data.extensions.fav = newFavStatus;
-            
-            // Also update in the main window's character list if available
-            try {
-                const context = getSTContext();
-                if (context && context.characters) {
-                    const charIndex = context.characters.findIndex(c => c.avatar === char.avatar);
-                    if (charIndex !== -1) {
-                        context.characters[charIndex].fav = newFavStatus;
-                        if (context.characters[charIndex].data?.extensions) {
-                            context.characters[charIndex].data.extensions.fav = newFavStatus;
-                        }
+        if (!success) {
+            showToast('Error updating favorite', 'error');
+            return;
+        }
+        // Mirror root-level char.fav for back-compat with readers that check the root field directly.
+        char.fav = newFavStatus;
+
+        // Same-tick ST sync; the helper's notify refetch is async, this gives instant visibility.
+        try {
+            const context = getSTContext();
+            if (context && context.characters) {
+                const stIdx = context.characters.findIndex(c => c.avatar === char.avatar);
+                if (stIdx !== -1) {
+                    context.characters[stIdx].fav = newFavStatus;
+                    if (context.characters[stIdx].data?.extensions) {
+                        context.characters[stIdx].data.extensions.fav = newFavStatus;
                     }
                 }
-            } catch (e) {
-                console.warn('[Favorites] Could not update main window:', e);
             }
-            
-            // Update UI
-            updateFavoriteButtonUI(newFavStatus);
-            updateCharacterCardFavoriteStatus(char.avatar, newFavStatus);
-            
-            showToast(newFavStatus ? 'Added to favorites!' : 'Removed from favorites', 'success');
-            
-            // If showing favorites only and just unfavorited, refresh grid
-            if (showFavoritesOnly && !newFavStatus) {
-                performSearch();
-            }
-        } else {
-            const err = await response.text();
-            showToast('Error updating favorite: ' + err, 'error');
+        } catch (e) {
+            console.warn('[Favorites] Could not update main window:', e);
+        }
+
+        // Update UI
+        updateFavoriteButtonUI(newFavStatus);
+        updateCharacterCardFavoriteStatus(char.avatar, newFavStatus);
+
+        showToast(newFavStatus ? 'Added to favorites!' : 'Removed from favorites', 'success');
+
+        // If showing favorites only and just unfavorited, refresh grid
+        if (showFavoritesOnly && !newFavStatus) {
+            performSearch();
         }
     } catch (e) {
         showToast('Network error: ' + e.message, 'error');
@@ -13084,20 +12620,18 @@ function openLorebookModal() {
         return;
     }
     
-    // Collect current lorebook entries from the edit form
+    // Collect current lorebook entries from the edit form. Carry each entry's full current data
+    // (original fields + any inline edits) on `_full` so the expanded editor round-trips it losslessly
+    // instead of reducing it to the 9 editable fields.
     const entries = [];
     lorebookContainer.querySelectorAll('.lorebook-entry-edit').forEach((entryEl, idx) => {
-        const name = entryEl.querySelector('.lorebook-entry-name-input')?.value || '';
-        const keys = entryEl.querySelector('.lorebook-keys-input')?.value || '';
-        const secondaryKeys = entryEl.querySelector('.lorebook-secondary-keys-input')?.value || '';
-        const content = entryEl.querySelector('.lorebook-content-input')?.value || '';
-        const enabled = entryEl.querySelector('.lorebook-enabled-checkbox')?.checked ?? true;
-        const selective = entryEl.querySelector('.lorebook-selective-checkbox')?.checked ?? false;
-        const constant = entryEl.querySelector('.lorebook-constant-checkbox')?.checked ?? false;
-        const order = entryEl.querySelector('.lorebook-order-input')?.value ?? idx;
-        const priority = entryEl.querySelector('.lorebook-priority-input')?.value ?? 10;
-        
-        entries.push({ name, keys, secondaryKeys, content, enabled, selective, constant, order, priority });
+        const cur = readInlineLorebookInputs(entryEl);
+        const full = buildLorebookEntryFromInputs(entryEl._originalEntry, entryEl._populated || {}, cur, idx);
+        entries.push({
+            name: cur.name, keys: cur.keys, secondaryKeys: cur.secondaryKeys, content: cur.content,
+            enabled: cur.enabled, selective: cur.selective, constant: cur.constant, order: cur.order, priority: cur.priority,
+            _full: full,
+        });
     });
     
     // Build entries HTML
@@ -13229,6 +12763,12 @@ function openLorebookModal() {
         // Setup handlers for new entry
         const newEntryEl = container.lastElementChild;
         setupExpandedLorebookEntryHandlers(newEntryEl);
+        // No original to preserve; the populated baseline matches the freshly-rendered empty inputs.
+        newEntryEl._fullEntry = null;
+        newEntryEl._populated = {
+            name: '', keys: '', secondaryKeys: '', content: '',
+            order: String(idx), priority: '10', enabled: true, selective: false, constant: false,
+        };
         updateExpandedLorebookCount();
         
         // Focus the name input
@@ -13238,15 +12778,29 @@ function openLorebookModal() {
     
     // Setup handlers for existing entries
     modal.querySelectorAll('.expanded-lorebook-entry').forEach(setupExpandedLorebookEntryHandlers);
+
+    // Stash the full original entry + the populated display values on each expanded row so Save can merge
+    // the user's edits back losslessly. The 9 visible fields are all that can change; everything else
+    // (position, insertion_order, case_sensitive, id, extensions, ...) rides along on _fullEntry.
+    document.getElementById('expandedLorebookContainer')?.querySelectorAll('.expanded-lorebook-entry').forEach((el, idx) => {
+        const e = entries[idx];
+        if (!e) return;
+        el._fullEntry = e._full ?? null;
+        el._populated = {
+            name: e.name, keys: e.keys, secondaryKeys: e.secondaryKeys, content: e.content,
+            order: String(e.order), priority: String(e.priority),
+            enabled: e.enabled, selective: e.selective, constant: e.constant,
+        };
+    });
     
     // Save/Apply handler
     document.getElementById('lorebookModalSave').onclick = () => {
         const expandedContainer = document.getElementById('expandedLorebookContainer');
-        const newEntries = [];
-        
+        const mergedEntries = [];
+
         if (expandedContainer) {
             expandedContainer.querySelectorAll('.expanded-lorebook-entry').forEach((entryEl, idx) => {
-                newEntries.push({
+                const cur = {
                     name: entryEl.querySelector('.expanded-lorebook-name')?.value || '',
                     keys: entryEl.querySelector('.expanded-lorebook-keys')?.value || '',
                     secondaryKeys: entryEl.querySelector('.expanded-lorebook-secondary-keys')?.value || '',
@@ -13254,31 +12808,24 @@ function openLorebookModal() {
                     enabled: entryEl.querySelector('.expanded-lorebook-enabled')?.checked ?? true,
                     selective: entryEl.querySelector('.expanded-lorebook-selective')?.checked ?? false,
                     constant: entryEl.querySelector('.expanded-lorebook-constant')?.checked ?? false,
-                    order: parseInt(entryEl.querySelector('.expanded-lorebook-order')?.value) || idx,
-                    priority: parseInt(entryEl.querySelector('.expanded-lorebook-priority')?.value) || 10
-                });
+                    order: entryEl.querySelector('.expanded-lorebook-order')?.value ?? idx,
+                    priority: entryEl.querySelector('.expanded-lorebook-priority')?.value ?? 10,
+                };
+                // Merge edits onto _fullEntry so position/insertion_order/id/extensions survive; only changed fields override.
+                mergedEntries.push(buildLorebookEntryFromInputs(entryEl._fullEntry, entryEl._populated || {}, cur, idx));
             });
         }
-        
-        // Clear and repopulate lorebook container in main edit form
+
+        // Feed the full merged entries back into the inline editor. addLorebookEntryField re-stashes each as
+        // _originalEntry + _populated, so the subsequent performSave read-back stays lossless.
         const lorebookContainerCurrent = document.getElementById('lorebookEntriesEdit');
         if (lorebookContainerCurrent) {
             lorebookContainerCurrent.innerHTML = '';
-            newEntries.forEach((entry, idx) => {
-                addLorebookEntryField(lorebookContainerCurrent, {
-                    comment: entry.name,
-                    keys: entry.keys.split(',').map(k => k.trim()).filter(k => k),
-                    secondary_keys: entry.secondaryKeys.split(',').map(k => k.trim()).filter(k => k),
-                    content: entry.content,
-                    enabled: entry.enabled,
-                    selective: entry.selective,
-                    constant: entry.constant,
-                    order: entry.order,
-                    priority: entry.priority
-                }, idx);
+            mergedEntries.forEach((entry, idx) => {
+                addLorebookEntryField(lorebookContainerCurrent, entry, idx);
             });
         }
-        
+
         updateLorebookCount();
         closeModal();
         document.removeEventListener('keydown', handleKeydown);
@@ -13842,7 +13389,8 @@ let _filterPresetsData = null;
 let _filterPresetsSaving = false;
 let _filterPresetsSaveQueued = false;
 
-function _filterPresetsToBase64(str) {
+// UTF-8 string to base64 for Files-API JSON uploads. Plain fromCharCode loop, no chunking, so its safe at any size.
+function utf8ToBase64(str) {
     const bytes = new TextEncoder().encode(str);
     let bin = '';
     for (const b of bytes) bin += String.fromCharCode(b);
@@ -13875,7 +13423,7 @@ async function saveFilterPresets() {
     if (_filterPresetsSaving) { _filterPresetsSaveQueued = true; return; }
     _filterPresetsSaving = true;
     try {
-        const b64 = _filterPresetsToBase64(JSON.stringify(_filterPresetsData));
+        const b64 = utf8ToBase64(JSON.stringify(_filterPresetsData));
         const resp = await apiRequest('/files/upload', 'POST', { name: FILTER_PRESETS_FILE, data: b64 });
         if (!resp.ok) throw new Error(resp.status);
     } catch (e) {
@@ -15437,7 +14985,20 @@ function addLorebookEntryField(container, entry = null, index = null) {
     wrapper.querySelector('.lorebook-content-input').value = content;
     wrapper.querySelector('.lorebook-order-input').value = order;
     wrapper.querySelector('.lorebook-priority-input').value = priority;
-    
+
+    // Snapshot what we populated so read-back preserves untouched fields verbatim instead of re-materialising them.
+    wrapper._populated = {
+        name: wrapper.querySelector('.lorebook-entry-name-input').value,
+        keys: wrapper.querySelector('.lorebook-keys-input').value,
+        secondaryKeys: wrapper.querySelector('.lorebook-secondary-keys-input').value,
+        content: wrapper.querySelector('.lorebook-content-input').value,
+        order: wrapper.querySelector('.lorebook-order-input').value,
+        priority: wrapper.querySelector('.lorebook-priority-input').value,
+        enabled: wrapper.querySelector('.lorebook-enabled-checkbox').checked,
+        selective: wrapper.querySelector('.lorebook-selective-checkbox').checked,
+        constant: wrapper.querySelector('.lorebook-constant-checkbox').checked,
+    };
+
     // Toggle enabled handler
     const toggleLabel = wrapper.querySelector('.lorebook-entry-toggle');
     toggleLabel.addEventListener('click', (e) => {
@@ -15473,53 +15034,85 @@ function updateLorebookCount() {
 }
 
 /**
+ * Lossless merge of one lorebook entry's editor state. Starts from the original entry (`orig`)
+ * and overrides only the fields whose input actually changed from what was populated (`pop`).
+ * Shared by the inline editor (getLorebookFromEditor) and the expanded modal so both round-trip
+ * untouched entries byte-for-byte: no trimmed comment, no injected `order`, no materialised
+ * defaults, no dropped position/insertion_order/case_sensitive/id/extensions. `cur`/`pop` use the
+ * editor-neutral keys: name, keys, secondaryKeys, content, enabled, selective, constant, order,
+ * priority. New entries (no `orig`) materialise the full shape; the caller assigns the id.
+ */
+function buildLorebookEntryFromInputs(orig, pop, cur, idx) {
+    const entry = orig ? { ...orig } : {
+        position: 'before_char',
+        case_sensitive: false,
+        use_regex: false,
+        extensions: {}
+    };
+    const dirty = (c, w) => !orig || c !== w;
+    const parseList = (s) => String(s).split(',').map(k => k.trim()).filter(Boolean);
+
+    if (dirty(cur.keys, pop.keys)) entry.keys = parseList(cur.keys);
+    if (dirty(cur.secondaryKeys, pop.secondaryKeys)) entry.secondary_keys = parseList(cur.secondaryKeys);
+    if (dirty(cur.content, pop.content)) entry.content = cur.content;
+    if (dirty(cur.name, pop.name)) entry.comment = String(cur.name).trim() || `Entry ${idx + 1}`;
+    if (dirty(cur.enabled, pop.enabled)) entry.enabled = cur.enabled;
+    if (dirty(cur.selective, pop.selective)) entry.selective = cur.selective;
+    if (dirty(cur.constant, pop.constant)) entry.constant = cur.constant;
+    if (dirty(cur.order, pop.order)) {
+        const o = parseInt(cur.order);
+        const v = Number.isNaN(o) ? idx : o;
+        entry.insertion_order = v;
+        // Carry order only when the original had it; dont inject it onto entries that only stored insertion_order.
+        if (!orig || 'order' in entry) entry.order = v;
+    }
+    if (dirty(cur.priority, pop.priority)) {
+        const p = parseInt(cur.priority);
+        entry.priority = Number.isNaN(p) ? 10 : p;
+    }
+    return entry;
+}
+
+// Reads the 9 editable fields off one inline `.lorebook-entry-edit` element into the editor-neutral shape.
+function readInlineLorebookInputs(el) {
+    return {
+        name: el.querySelector('.lorebook-entry-name-input')?.value ?? '',
+        keys: el.querySelector('.lorebook-keys-input')?.value ?? '',
+        secondaryKeys: el.querySelector('.lorebook-secondary-keys-input')?.value ?? '',
+        content: el.querySelector('.lorebook-content-input')?.value ?? '',
+        order: el.querySelector('.lorebook-order-input')?.value ?? '',
+        priority: el.querySelector('.lorebook-priority-input')?.value ?? '',
+        enabled: el.querySelector('.lorebook-enabled-checkbox')?.checked ?? true,
+        selective: el.querySelector('.lorebook-selective-checkbox')?.checked || false,
+        constant: el.querySelector('.lorebook-constant-checkbox')?.checked || false,
+    };
+}
+
+/**
  * Get lorebook entries from the editor
  * @returns {Array} Array of lorebook entry objects
  */
 function getLorebookFromEditor() {
     const container = document.getElementById('lorebookEntriesEdit');
     if (!container) return [];
-    
+
     const entries = [];
     const entryEls = container.querySelectorAll('.lorebook-entry-edit');
-    
-    entryEls.forEach((el, idx) => {
-        const name = el.querySelector('.lorebook-entry-name-input')?.value.trim() || `Entry ${idx + 1}`;
-        const keysStr = el.querySelector('.lorebook-keys-input')?.value || '';
-        const secondaryKeysStr = el.querySelector('.lorebook-secondary-keys-input')?.value || '';
-        const content = el.querySelector('.lorebook-content-input')?.value || '';
-        const enabled = el.querySelector('.lorebook-enabled-checkbox')?.checked ?? true;
-        const selective = el.querySelector('.lorebook-selective-checkbox')?.checked || false;
-        const constant = el.querySelector('.lorebook-constant-checkbox')?.checked || false;
-        const order = parseInt(el.querySelector('.lorebook-order-input')?.value) || idx;
-        const priority = parseInt(el.querySelector('.lorebook-priority-input')?.value) || 10;
-        
-        // Parse keys
-        const keys = keysStr.split(',').map(k => k.trim()).filter(k => k);
-        const secondaryKeys = secondaryKeysStr.split(',').map(k => k.trim()).filter(k => k);
-        
-        const base = el._originalEntry ? { ...el._originalEntry } : {
-            position: 'before_char',
-            case_sensitive: false,
-            use_regex: false,
-            extensions: {}
-        };
-        entries.push({
-            ...base,
-            keys: keys,
-            secondary_keys: secondaryKeys,
-            content: content,
-            comment: name,
-            enabled: enabled,
-            selective: selective,
-            constant: constant,
-            insertion_order: order,
-            order: order,
-            priority: priority,
-            id: idx,
-        });
+
+    // Preserve each entry's imported id; only mint ids for entries added in the editor.
+    let maxExistingId = -1;
+    entryEls.forEach((el) => {
+        const origId = el._originalEntry?.id;
+        if (typeof origId === 'number' && origId > maxExistingId) maxExistingId = origId;
     });
-    
+    let nextNewId = maxExistingId + 1;
+
+    entryEls.forEach((el, idx) => {
+        const entry = buildLorebookEntryFromInputs(el._originalEntry, el._populated || {}, readInlineLorebookInputs(el), idx);
+        if (typeof entry.id !== 'number') entry.id = nextNewId++;
+        entries.push(entry);
+    });
+
     return entries;
 }
 
@@ -15561,6 +15154,8 @@ function getListingNameFromExtensions(char) {
         const pn = ext[activeProvider.provider.id]?.pageName;
         if (pn) return pn;
     }
+    // CL-owned fallback checked before other provider namespaces, so a migrated cl value wins over a stale leftover.
+    if (ext.cl?.pageName) return ext.cl.pageName;
     for (const key of PROVIDER_EXT_KEYS) {
         if (ext[key]?.pageName) return ext[key].pageName;
     }
@@ -15586,6 +15181,13 @@ function getCharacterAvatarUrl(avatar) {
     return bust
         ? `/characters/${encodeURIComponent(avatar)}?v=${bust}`
         : `/characters/${encodeURIComponent(avatar)}`;
+}
+
+// Tagline lives in the active provider namespace (cl when unlinked); jannyai excluded since its tagline mirrors creator_notes.
+function getDisplayTagline(char) {
+    const activeId = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    if (activeId === 'jannyai') return '';
+    return char?.data?.extensions?.[activeId]?.tagline || '';
 }
 
 // ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the cl-helper thumb is overkill. Soft above ~64px target on retina; use the cl-helper helper instead for hero-sized previews.
@@ -17323,13 +16925,7 @@ startImportBtn?.addEventListener('click', async () => {
             if (!incrementalDone) {
                 await fetchCharacters(true);
             }
-            
-            // Register gallery folder overrides for newly imported characters
-            if (getSetting('uniqueGalleryFolders')) {
-                syncAllGalleryFolderOverrides();
-                debugLog('[BatchImport] Synced gallery folder overrides for newly imported characters');
-            }
-            
+
             // Also refresh the main SillyTavern window's character list (fire-and-forget)
             try {
                 const context = getSTContext();
@@ -18105,25 +17701,44 @@ async function unlinkFromProvider() {
         const match = linkModalActiveProvider || window.ProviderRegistry?.getCharacterProvider(activeChar);
         const provider = match?.provider;
         if (!provider) throw new Error('No provider found for this character');
-        
+
+        // Non-blocking auto-snapshot before unlink (destructive, restore is the only undo).
+        if (window.autoSnapshotBeforeChange) {
+            try { await window.autoSnapshotBeforeChange(activeChar, 'unlink'); } catch (_) {}
+        }
+
+        // Capture provider display metadata before setLinkInfo wipes it, so it survives as CL-owned fallback.
+        const provTagline = activeChar.data?.extensions?.[provider.id]?.tagline;
+        const provPageName = activeChar.data?.extensions?.[provider.id]?.pageName;
+
+        // Drop the provider namespace in-memory so reads see unlinked state before the round-trip completes.
         provider.setLinkInfo(activeChar, null);
         const charInArray = allCharacters.find(c => c.avatar === activeChar.avatar);
         if (charInArray && charInArray !== activeChar) {
             provider.setLinkInfo(charInArray, null);
         }
-        
-        // Explicitly null the extension key so merge-attributes removes it
-        // (setLinkInfo deletes the key, but merge ignores absent keys)
-        const existingData = activeChar.data || {};
-        const extensions = { ...(existingData.extensions || {}), [provider.id]: null };
-        const response = await apiRequest('/characters/merge-attributes', 'POST', {
-            avatar: activeChar.avatar,
-            create_date: activeChar.create_date,
-            data: { ...existingData, extensions, create_date: activeChar.create_date }
-        });
-        if (!response.ok) throw new Error(`Failed to save: ${response.status}`);
+
+        // Sentinel-delete the provider namespace; migrate display metadata into cl only where cl is empty (dont clobber user values).
+        const existingCl = activeChar.data?.extensions?.cl;
+        const updates = { [`extensions.${provider.id}`]: ST_UNSET_SENTINEL };
+        if (provTagline && !(existingCl && 'tagline' in existingCl)) {
+            updates['extensions.cl.tagline'] = provTagline;
+        }
+        if (provPageName && !(existingCl && 'pageName' in existingCl)) {
+            updates['extensions.cl.pageName'] = provPageName;
+        }
+
+        const success = await window.applyCardFieldUpdates(activeChar.avatar, updates);
+        if (!success) throw new Error('Failed to save unlink');
+
+        // Recompute _lowerListingName on both refs: it's CL-side state outside char.data, so the helper's write doesnt touch it.
+        for (const c of [activeChar, charInArray].filter(Boolean)) {
+            const ln = getListingNameFromExtensions(c);
+            c._lowerListingName = ln ? ln.toLowerCase() : '';
+        }
+
         showToast(`Unlinked from ${provider.name}`, 'info');
-        
+
         updateProviderLinkIndicator(activeChar);
         openProviderLinkModal();
         
@@ -19146,37 +18761,35 @@ function updateBulkAutoLinkSelectedCount() {
 async function saveProviderLink(char, provider, linkInfo) {
     if (!char?.avatar) throw new Error('No character or avatar');
 
-    // Update local objects via provider
+    // Non-blocking auto-snapshot before link (overwrites the cl namespace).
+    if (window.autoSnapshotBeforeChange) {
+        try { await window.autoSnapshotBeforeChange(char, 'link'); } catch (_) {}
+    }
+
+    // Populate provider namespace + drop cl in-memory so the spread carries the new link and the cl-delete has a target.
     provider.setLinkInfo(char, linkInfo);
     const charInArray = allCharacters.find(c => c.avatar === char.avatar);
     if (charInArray && charInArray !== char) {
         provider.setLinkInfo(charInArray, linkInfo);
     }
+    for (const c of [char, charInArray].filter(Boolean)) {
+        if (c.data?.extensions && 'cl' in c.data.extensions) delete c.data.extensions.cl;
+    }
 
-    // Persist full data to server (extensions now contain the provider's link)
-    const existingData = char.data || {};
-    const response = await apiRequest('/characters/merge-attributes', 'POST', {
-        avatar: char.avatar,
-        create_date: char.create_date,
-        data: { ...existingData, create_date: char.create_date }
+    // Persist via applyCardFieldUpdates; the provider namespace rides the existing-extensions spread, so only the cl-delete is a dot-path update.
+    const success = await window.applyCardFieldUpdates(char.avatar, {
+        'extensions.cl': ST_UNSET_SENTINEL,
     });
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`Failed to save character: ${response.status} ${errorText}`);
-    }
+    if (!success) throw new Error('Failed to save provider link');
 
-    if (char.data?.extensions) {
-        _extensionsCache.set(char.avatar, char.data.extensions);
-    }
-
-    // Recompute listing name search key
+    // Recompute listing name search key (CL-side state outside char.data; helper doesnt know about it).
     const listingName = getListingNameFromExtensions(char);
     char._lowerListingName = listingName ? listingName.toLowerCase() : '';
     if (charInArray && charInArray !== char) {
         charInArray._lowerListingName = char._lowerListingName;
     }
 
-    // Sync to ST main window
+    // Same-tick ST sync: setLinkInfo on mainChar makes the new link visible immediately, ahead of the async refetch.
     try {
         const context = getSTContext();
         const mainChar = context?.characters?.find(c => c.avatar === char.avatar);
@@ -19193,27 +18806,10 @@ function isUpdateLocked(char) {
 }
 
 async function setUpdateLocked(avatar, locked) {
-    const char = allCharacters.find(c => c.avatar === avatar);
-    if (!char) return;
-
-    if (!char.data) char.data = {};
-    if (!char.data.extensions) char.data.extensions = {};
-    char.data.extensions.update_locked = !!locked;
-
-    const existingData = char.data;
-    const response = await apiRequest('/characters/merge-attributes', 'POST', {
-        avatar: char.avatar,
-        create_date: char.create_date,
-        data: { ...existingData, create_date: char.create_date }
+    const success = await window.applyCardFieldUpdates(avatar, {
+        'extensions.update_locked': !!locked,
     });
-    if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`Failed to save update lock: ${response.status} ${errorText}`);
-    }
-
-    if (char.data?.extensions) {
-        _extensionsCache.set(char.avatar, char.data.extensions);
-    }
+    if (!success) throw new Error('Failed to save update lock');
 }
 
 /**
@@ -21591,31 +21187,87 @@ function showBulkSummary(wasAborted = false, skippedCompleted = 0) {
     bulkSummaryModal.classList.add('visible');
 }
 
-/**
- * Get Set of character avatars that have completed media localization
- * @returns {Set<string>} Set of avatar filenames
- */
-function getCompletedMediaLocalizations() {
-    const stored = getSetting('completedMediaLocalizations') || [];
-    return new Set(stored);
+// Kept in its own Files-API JSON so settings.json doesnt accumulate one entry per processed char; in-memory Set is the runtime source.
+const MEDIA_LOC_COMPLETED_FILE = '_cl_media_loc_completed.json';
+let _completedMediaLocCache = null;
+let _completedMediaLocSaving = false;
+let _completedMediaLocSaveQueued = false;
+let _completedMediaLocLoadPromise = null;
+
+async function loadCompletedMediaLocalizations() {
+    if (_completedMediaLocCache) return _completedMediaLocCache;
+    if (_completedMediaLocLoadPromise) return _completedMediaLocLoadPromise;
+    _completedMediaLocLoadPromise = (async () => {
+        let avatars = null;
+        try {
+            const resp = await fetch(`/user/files/${MEDIA_LOC_COMPLETED_FILE}`);
+            if (resp.ok) {
+                const text = await resp.text();
+                if (text && text.trim()) {
+                    const parsed = JSON.parse(text);
+                    if (parsed && Array.isArray(parsed.avatars)) avatars = parsed.avatars;
+                }
+            }
+        } catch {}
+        if (avatars === null) {
+            // Migration: pull legacy list out of settings.json on first load if present.
+            const legacy = getSetting('completedMediaLocalizations');
+            if (Array.isArray(legacy) && legacy.length > 0) {
+                _completedMediaLocCache = new Set(legacy);
+                const saved = await saveCompletedMediaLocalizations();
+                if (saved) {
+                    try { delete gallerySettings.completedMediaLocalizations; saveGallerySettings(); } catch {}
+                    debugLog(`[MediaLoc] Migrated ${legacy.length} completed entries from settings.json to ${MEDIA_LOC_COMPLETED_FILE}`);
+                } else {
+                    console.warn('[MediaLoc] Migration file save failed; legacy data left in settings.json for retry on next boot.');
+                }
+                _completedMediaLocLoadPromise = null;
+                return _completedMediaLocCache;
+            }
+            avatars = [];
+        }
+        _completedMediaLocCache = new Set(avatars);
+        _completedMediaLocLoadPromise = null;
+        return _completedMediaLocCache;
+    })();
+    return _completedMediaLocLoadPromise;
 }
 
-/**
- * Mark a character as having completed media localization
- * @param {string} avatar - The character's avatar filename
- */
+async function saveCompletedMediaLocalizations() {
+    if (!_completedMediaLocCache) return false;
+    if (_completedMediaLocSaving) { _completedMediaLocSaveQueued = true; return false; }
+    _completedMediaLocSaving = true;
+    let ok = false;
+    try {
+        const payload = { version: 1, avatars: [..._completedMediaLocCache] };
+        const jsonStr = JSON.stringify(payload);
+        const base64 = utf8ToBase64(jsonStr);
+        const resp = await apiRequest('/files/upload', 'POST', { name: MEDIA_LOC_COMPLETED_FILE, data: base64 });
+        if (resp.ok) ok = true;
+        else console.warn('[MediaLoc] Save failed:', resp.status);
+    } catch (e) {
+        console.warn('[MediaLoc] Save failed:', e?.message || e);
+    } finally {
+        _completedMediaLocSaving = false;
+        if (_completedMediaLocSaveQueued) { _completedMediaLocSaveQueued = false; saveCompletedMediaLocalizations(); }
+    }
+    return ok;
+}
+
+function getCompletedMediaLocalizations() {
+    return _completedMediaLocCache || new Set();
+}
+
 function markMediaLocalizationComplete(avatar) {
     if (!avatar) return;
-    const completed = getCompletedMediaLocalizations();
-    completed.add(avatar);
-    setSetting('completedMediaLocalizations', [...completed]);
+    if (!_completedMediaLocCache) _completedMediaLocCache = new Set();
+    _completedMediaLocCache.add(avatar);
+    saveCompletedMediaLocalizations();
 }
 
-/**
- * Clear all completed media localization records
- */
 function clearCompletedMediaLocalizations() {
-    setSetting('completedMediaLocalizations', []);
+    _completedMediaLocCache = new Set();
+    saveCompletedMediaLocalizations();
 }
 
 /**
@@ -21625,8 +21277,9 @@ async function runBulkLocalization() {
     bulkLocalizeAborted = false;
     bulkLocalizeAbortController = new AbortController();
     bulkLocalizeResults = [];
-    
-    // Get previously completed characters
+
+    // Load the completed cache before reading it, else a fast click re-processes already-done chars.
+    await loadCompletedMediaLocalizations();
     const completedAvatars = getCompletedMediaLocalizations();
     
     // Reset UI
@@ -21797,17 +21450,15 @@ async function runBulkLocalization() {
 }
 
 // Bulk Localize button in settings
-document.getElementById('bulkLocalizeBtn')?.addEventListener('click', () => {
-    // Close settings modal
+document.getElementById('bulkLocalizeBtn')?.addEventListener('click', async () => {
     document.getElementById('gallerySettingsModal')?.classList.remove('visible');
-    
-    // Confirm with user
+
     if (allCharacters.length === 0) {
         showToast('No characters loaded', 'error');
         return;
     }
-    
-    // Check how many have already been completed
+
+    await loadCompletedMediaLocalizations();
     const completedAvatars = getCompletedMediaLocalizations();
     const alreadyDone = allCharacters.filter(c => c.avatar && completedAvatars.has(c.avatar)).length;
     const remaining = allCharacters.length - alreadyDone;
@@ -21825,7 +21476,8 @@ document.getElementById('bulkLocalizeBtn')?.addEventListener('click', () => {
 });
 
 // Clear bulk localize history button
-document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click', () => {
+document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click', async () => {
+    await loadCompletedMediaLocalizations();
     const completedAvatars = getCompletedMediaLocalizations();
     const count = completedAvatars.size;
     
@@ -25152,14 +24804,17 @@ function createCreatorNotesIframe(srcdoc, initialHeight) {
  * Handles both short content (auto-fit) and long content (scrollable)
  * @param {HTMLIFrameElement} iframe - The iframe element
  */
-function setupCreatorNotesResize(iframe) {
+function setupCreatorNotesResize(iframe, onSettled) {
+    let settled = false;
+    const settle = () => { if (settled) return; settled = true; try { onSettled?.(); } catch (e) { /* ignore */ } };
     iframe.onload = () => {
         try {
             const doc = iframe.contentDocument;
             const wrapper = doc?.getElementById('content-wrapper');
-            
+
             if (!doc || !wrapper) {
                 iframe.style.height = '200px';
+                settle();
                 return;
             }
             
@@ -25209,12 +24864,14 @@ function setupCreatorNotesResize(iframe) {
             // Initial measurements with delays for CSS parsing
             measureAndApply();
             setTimeout(measureAndApply, 50);
-            setTimeout(measureAndApply, 150);
+            // reveal once the early measures have settled a near-final height, while still behind the opacity/bridge curtain
+            setTimeout(() => { measureAndApply(); settle(); }, 150);
             setTimeout(measureAndApply, 400);
-            
+
         } catch (e) {
             console.error('Creator notes resize error:', e);
             iframe.style.height = '200px';
+            settle();
         }
     };
 }
@@ -25248,30 +24905,85 @@ function cleanupCreatorNotesContainer(container) {
 
 function renderCreatorNotesSecure(content, charName, container) {
     if (!content || !container) return;
-    
-    // Clean up any existing iframe + ResizeObserver before creating a new one
-    cleanupCreatorNotesContainer(container);
-    
+
     if (!getSetting('richCreatorNotes')) {
+        cleanupCreatorNotesContainer(container);
         renderCreatorNotesSimple(content, charName, container);
         return;
     }
-    
-    // Process pipeline: format -> sanitize HTML -> sanitize CSS -> harden media
+
+    // Disconnect old observers but leave DOM in place; the prior render bridges the new iframe's first paint.
+    const oldIframe = container.querySelector('iframe');
+    if (oldIframe) {
+        if (oldIframe._resizeObserver) {
+            try { oldIframe._resizeObserver.disconnect(); } catch (e) { /* ignore */ }
+            oldIframe._resizeObserver = null;
+        }
+        oldIframe.onload = null;
+    }
+
     const formatted = formatRichText(content, charName, true);
     const sanitizedHTML = sanitizeCreatorNotesHTML(formatted);
     const sanitizedCSS = sanitizeCreatorNotesCSS(sanitizedHTML);
     const hardened = hardenCreatorNotesMedia(sanitizedCSS);
-    
-    // Build and insert iframe
+
     const iframeDoc = buildCreatorNotesIframeDoc(hardened);
     const initialHeight = estimateCreatorNotesHeight(hardened);
     const iframe = createCreatorNotesIframe(iframeDoc, initialHeight);
-    
+
+    const priorChildren = Array.from(container.children);
+    const hasBridge = priorChildren.length > 0;
+
+    // Keep prior notes visible until the new iframe loads, then swap instantly (cross-fading looked bad on fast prev/next).
+    // Iframe stays opacity 0 until load so unstyled content never flashes; a render token drops superseded late renders.
+    const prevContainerPosition = container.style.position;
+    if (hasBridge) {
+        // Overlay the new iframe so the still-visible prior notes hold the section height until the swap.
+        container.style.position = 'relative';
+        iframe.style.position = 'absolute';
+        iframe.style.top = '0';
+        iframe.style.left = '0';
+        iframe.style.right = '0';
+    }
+
+    iframe.style.height = `${initialHeight}px`;
+    // Override the iframe cssText min-height too; measureAndApply re-floors via height post-load.
+    iframe.style.minHeight = '0';
+    iframe.style.opacity = '0';
+    iframe.style.transition = hasBridge ? '' : 'opacity 0.25s ease-out';
+
+    const myToken = (container._clnRenderToken = (container._clnRenderToken || 0) + 1);
     container.appendChild(iframe);
-    
-    // Setup resize behavior
-    setupCreatorNotesResize(iframe);
+
+    let revealed = false;
+    const reveal = () => {
+        if (revealed) return;
+        revealed = true;
+        // Skip if cleanupCreatorNotesContainer wiped the iframe between bridge start and reveal.
+        if (!iframe.isConnected) return;
+        // Superseded by a newer render (rapid prev/next): drop this stale frame instead of swapping in.
+        if (container._clnRenderToken !== myToken) {
+            try { iframe.remove(); } catch (e) { /* ignore */ }
+            return;
+        }
+        // Instant swap: drop the prior notes + any stale pending frames, settle the new one back in flow.
+        priorChildren.forEach(el => { try { el.remove(); } catch (e) { /* ignore */ } });
+        iframe.style.position = '';
+        iframe.style.top = '';
+        iframe.style.left = '';
+        iframe.style.right = '';
+        iframe.style.opacity = '1';
+        container.style.position = prevContainerPosition;
+        // showing at the settled height now, so enable a height transition: late image/font loads after
+        // reveal morph smoothly instead of snapping the box.
+        iframe.style.transition = (hasBridge ? '' : 'opacity 0.25s ease-out, ') + 'height 0.2s ease-out';
+    };
+
+    // Reveal once the height has settled (driven by setupCreatorNotesResize) so the settle snaps stay hidden
+    // behind the opacity/bridge curtain. Kill-switch in case load/settle never fires.
+    setTimeout(reveal, 3000);
+
+    setupCreatorNotesResize(iframe, reveal);
 }
 
 /**
@@ -26096,8 +25808,8 @@ window.registerOverlay?.({ id: 'confirmSaveModal', tier: 7, close: (el) => el?.c
 window.registerOverlay?.({ id: 'deleteConfirmModal',  tier: 7, static: false, close: (el) => el?.remove() });
 window.registerOverlay?.({ id: 'deleteDuplicateModal', tier: 7, static: false, close: (el) => el?.remove() });
 window.registerOverlay?.({ id: 'legacyFolderModal',    tier: 7, static: false, close: (el) => el?.remove() });
-window.registerOverlay?.({ id: 'folderMappingModal',   tier: 7, static: false, close: (el) => el?.remove() });
-window.registerOverlay?.({ id: 'orphanedFoldersModal', tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'folderMappingModal',   tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
+window.registerOverlay?.({ id: 'orphanedFoldersModal', tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 
 function openThemeCustomizer() {
     initThemeCustomizer();
@@ -26159,36 +25871,51 @@ window.clResetCSS = function () {
 // making future refactoring possible without breaking all modules.
 // ========================================
 
-// Global Escape handler - walks the overlay registry (populated via window.registerOverlay)
-// so overlays don't need their own individual keydown listeners for Escape.
-document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+// Global Escape handler. Closes the visible registered overlay that is actually painted on
+// top, the same thing a click-outside would hit, instead of a hand-assigned tier order that
+// drifts from the real stacking. Paint order for these fixed body-level + nested overlays is:
+// a descendant always sits above its ancestor; otherwise higher computed z-index wins; exact
+// ties break on later DOM order. Tier is no longer consulted here (the mobile back handler in
+// library-mobile.js still uses it).
+function _overlayZIndex(el) {
+    const z = parseInt(getComputedStyle(el).zIndex, 10);
+    return Number.isNaN(z) ? 0 : z;
+}
 
-    // When charModal is elevated above another modal, close it first
-    if (document.body.classList.contains('char-modal-above')) {
-        const charModal = document.getElementById('charModal');
-        if (charModal && !charModal.classList.contains('hidden')) {
-            e.stopPropagation();
-            closeModal();
-            return;
-        }
-    }
+function _overlayIsAbove(a, b) {
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_CONTAINED_BY) return false; // b nested in a, so b paints above
+    if (pos & Node.DOCUMENT_POSITION_CONTAINS) return true;      // a nested in b, so a paints above
+    const za = _overlayZIndex(a), zb = _overlayZIndex(b);
+    if (za !== zb) return za > zb;
+    return !!(pos & Node.DOCUMENT_POSITION_PRECEDING);           // b precedes a in DOM, so a is later/on top
+}
 
-    const regs = [...(window._overlayRegistry || [])].sort((a, b) => a.tier - b.tier);
-    for (const reg of regs) {
+function _isOverlayVisible(reg, el) {
+    return reg.visible
+        ? reg.visible(el)
+        : el.classList.contains('cl-modal')
+            ? el.classList.contains('visible')
+            : !el.classList.contains('hidden');
+}
+
+function getTopmostOverlay() {
+    let top = null;
+    for (const reg of (window._overlayRegistry || [])) {
         if (reg.escape === false) continue;
         const el = document.getElementById(reg.id);
-        if (!el) continue;
-        const visible = reg.visible
-            ? reg.visible(el)
-            : el.classList.contains('cl-modal')
-                ? el.classList.contains('visible')
-                : !el.classList.contains('hidden');
-        if (visible) {
-            e.stopPropagation();
-            reg.close(el);
-            return;
-        }
+        if (!el || !_isOverlayVisible(reg, el)) continue;
+        if (!top || _overlayIsAbove(el, top.el)) top = { reg, el };
+    }
+    return top;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const top = getTopmostOverlay();
+    if (top) {
+        e.stopPropagation();
+        top.reg.close(top.el);
     }
 }, true);
 
@@ -26196,7 +25923,9 @@ document.addEventListener('keydown', (e) => {
 window.apiRequest = apiRequest;
 window.showToast = showToast;
 window.showConfirm = showConfirm;
+window.savePresetPicker = savePresetPicker;
 window.escapeHtml = escapeHtml;
+window.utf8ToBase64 = utf8ToBase64;
 window.safePurify = safePurify;
 window.isExtensionsRecoveryInProgress = function() { return !!window.extensionsRecoveryInProgress; };
 window.getCSRFToken = getCSRFToken;
@@ -26224,8 +25953,8 @@ window.getGalleryFolderName = getGalleryFolderName;
 window.getGalleryThumbUrl = getGalleryThumbUrl;
 window.getCharacterGalleryInfo = getCharacterGalleryInfo;
 window.getCharacterGalleryId = getCharacterGalleryId;
-window.removeGalleryFolderOverride = removeGalleryFolderOverride;
 window.deleteCharacter = deleteCharacter;
+window.showDeleteConfirmation = showDeleteConfirmation;
 window.generateGalleryId = generateGalleryId;
 window.getCharacterByAvatar = getCharacterByAvatar;
 window.getGallerySyncAuditDone = function() { return gallerySyncAuditDone; };
@@ -26263,7 +25992,6 @@ window.getListingNameFromExtensions = getListingNameFromExtensions;
 window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;
 window.loadCharInMain = loadCharInMain;
-window.registerGalleryFolderOverride = registerGalleryFolderOverride;
 window.debugLog = debugLog;
 window.performSearch = performSearch;
 window.toggleFavoritesFilter = toggleFavoritesFilter;
@@ -26332,6 +26060,8 @@ window.initContentExpandHandlers = initContentExpandHandlers;
 // (openChubTokenModal, etc. are set by provider modules)
 window.isUpdateLocked = isUpdateLocked;
 window.setUpdateLocked = setUpdateLocked;
+window.ST_UNSET_SENTINEL = ST_UNSET_SENTINEL;
+window.getExtensionDeleteValue = getExtensionDeleteValue;
 
 // ========================================
 // WORLD INFO API
@@ -26575,55 +26305,90 @@ window.mergeRemoteLorebookIntoWorldFile = async function(avatar, remoteBook) {
 };
 
 /**
- * Apply field updates to a character card
- * Used by card-updates module to apply selective field changes
- * @param {string} avatar - Character avatar filename
- * @param {Object} fieldUpdates - Object with field paths as keys (supports dot notation like 'depth_prompt.prompt')
- * @returns {Promise<boolean>} Success status
+ * Primitive card-write operation. Takes a char object directly (caller already has the ref).
+ * Hydrates the char, preflight-cleans null pollution, builds the merge-attributes payload,
+ * sends it, and syncs in-memory state on both the passed char and the matching allCharacters entry.
+ *
+ * Does NOT do convenience side effects (gallery folder rename, ST main-window notify). Callers
+ * that want those should use applyCardFieldUpdates instead.
+ *
+ * @param {Object} char - the character object (live ref, mutated in place).
+ * @param {Object<string, *>} fieldUpdates - dot-path keys to values. Pass ST_UNSET_SENTINEL as value to delete an extension key (e.g. {'extensions.chub': ST_UNSET_SENTINEL}).
+ * @returns {Promise<{ok: boolean, response?: Response}>}
  */
-window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
-    const char = allCharacters.find(c => c.avatar === avatar);
+async function writeCardFields(char, fieldUpdates) {
     if (!char) {
-        console.error('[applyCardFieldUpdates] Character not found:', avatar);
-        return false;
+        console.error('[writeCardFields] No char provided');
+        return { ok: false };
     }
-    
+
     try {
         // Must hydrate before building the merge payload - slim chars lack heavy fields
         // and sending undefined would erase existing content on the server.
         await hydrateCharacter(char);
-        
+
+        // PRE-FLIGHT: sentinel-delete null-valued extension keys before the main write; ST otherwise drops object writes aimed at a null namespace. No-op on older ST.
+        const existingExtRaw = char.data?.extensions || char.extensions || {};
+        const polluted = Object.keys(existingExtRaw).filter(k => existingExtRaw[k] === null);
+        if (polluted.length > 0) {
+            const deleteValue = await getExtensionDeleteValue();
+            if (deleteValue !== null) {
+                try {
+                    const cleanupExt = {};
+                    for (const k of polluted) cleanupExt[k] = deleteValue;
+                    await apiRequest('/characters/merge-attributes', 'POST', {
+                        avatar: char.avatar,
+                        create_date: char.create_date,
+                        data: { extensions: cleanupExt, create_date: char.create_date },
+                    });
+                    // Mirror server-side cleanup in memory so the main payload spread doesnt carry the null forward.
+                    for (const k of polluted) delete char.data.extensions[k];
+                } catch (cleanupErr) {
+                    console.warn('[writeCardFields] Null-pollution cleanup failed; main payload may still trip ST deepMerge:', cleanupErr);
+                }
+            }
+        }
+
         // Build update payload preserving all existing data
-        const oldName = char.data?.name || char.name || '';
         const existingExtensions = char.data?.extensions || char.extensions || {};
         const existingCreateDate = char.create_date;
         const existingSpec = char.spec || char.data?.spec;
         const existingSpecVersion = char.spec_version || char.data?.spec_version;
         const existingData = char.data || {};
-        
-        // Helper to set nested value
+
+        // Treat null/undefined alike when descending so legacy null-polluted namespaces dont throw on the leaf write.
         const setNestedValue = (obj, path, value) => {
             const keys = path.split('.');
             const lastKey = keys.pop();
             const target = keys.reduce((o, k) => {
-                if (o[k] === undefined) o[k] = {};
+                if (o[k] == null) o[k] = {};
                 return o[k];
             }, obj);
             target[lastKey] = value;
         };
-        
+
+        // Resolve SENTINEL values centrally so callers can pass ST_UNSET_SENTINEL freely; degrades to null on old ST.
+        const deleteValue = await getExtensionDeleteValue();
+        const resolvedUpdates = {};
+        for (const [field, value] of Object.entries(fieldUpdates)) {
+            resolvedUpdates[field] = value === ST_UNSET_SENTINEL ? deleteValue : value;
+        }
+
         // Start with existing data
         const updatedData = { ...existingData };
-        
-        for (const [field, value] of Object.entries(fieldUpdates)) {
+        // Deep-clone the extensions subtree so a nested write (eg. extensions.chub.tagline) mutates this
+        // copy, not the live char.data.extensions, until the round trip succeeds.
+        updatedData.extensions = (existingExtensions && typeof existingExtensions === 'object')
+            ? JSON.parse(JSON.stringify(existingExtensions))
+            : {};
+
+        for (const [field, value] of Object.entries(resolvedUpdates)) {
             const mapped = field.startsWith('depth_prompt.') ? 'extensions.' + field : field;
             setNestedValue(updatedData, mapped, value);
         }
-        
-        updatedData.extensions = { ...existingExtensions, ...(updatedData.extensions || {}) };
-        
+
         const payload = {
-            avatar: avatar,
+            avatar: char.avatar,
             ...(existingSpec && { spec: existingSpec }),
             ...(existingSpecVersion && { spec_version: existingSpecVersion }),
             name: updatedData.name,
@@ -26641,49 +26406,90 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
             alternate_greetings: updatedData.alternate_greetings,
             character_book: updatedData.character_book,
             create_date: existingCreateDate,
-            data: updatedData
+            data: updatedData,
         };
-        
+
         const response = await apiRequest('/characters/merge-attributes', 'POST', payload);
-        
-        if (response.ok) {
-            // Update local data
-            const charIndex = allCharacters.findIndex(c => c.avatar === avatar);
-            if (charIndex !== -1) {
-                allCharacters[charIndex].data = updatedData;
-                
-                if (updatedData.extensions) {
-                    _extensionsCache.set(avatar, updatedData.extensions);
-                }
-
-                // Also update root-level fields for compatibility
-                for (const [field, value] of Object.entries(fieldUpdates)) {
-                    if (!field.includes('.')) {
-                        allCharacters[charIndex][field] = value;
-                    }
-                }
-            }
-
-            const newName = updatedData.name || oldName;
-            const nameChanged = oldName && newName && oldName !== newName;
-            const galleryId = getCharacterGalleryId(char);
-            if (nameChanged && galleryId && getSetting('uniqueGalleryFolders')) {
-                await handleGalleryFolderRename(char, oldName, newName, galleryId);
-            }
-
-            notifySTCharacterEdited(avatar);
-
-            debugLog('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
-            return true;
-        } else {
-            console.error('[applyCardFieldUpdates] API error:', response.status);
-            return false;
+        if (!response.ok) {
+            console.error('[writeCardFields] API error:', response.status);
+            return { ok: false, response };
         }
+
+        // Strip resolved sentinels from the in-memory copy so readers never see the literal wire value.
+        const cleanSentinels = (obj) => {
+            if (!obj || typeof obj !== 'object') return;
+            for (const k of Object.keys(obj)) {
+                if (obj[k] === ST_UNSET_SENTINEL) delete obj[k];
+                else if (obj[k] && typeof obj[k] === 'object') cleanSentinels(obj[k]);
+            }
+        };
+        cleanSentinels(updatedData);
+
+        // In-memory sync. Mutate the passed char and the matching allCharacters entry (which may be the same reference or different).
+        char.data = updatedData;
+        for (const [field, value] of Object.entries(fieldUpdates)) {
+            if (!field.includes('.') && value !== ST_UNSET_SENTINEL) char[field] = value;
+        }
+        const charIndex = allCharacters.findIndex(c => c.avatar === char.avatar);
+        if (charIndex !== -1 && allCharacters[charIndex] !== char) {
+            allCharacters[charIndex].data = updatedData;
+            for (const [field, value] of Object.entries(fieldUpdates)) {
+                if (!field.includes('.') && value !== ST_UNSET_SENTINEL) allCharacters[charIndex][field] = value;
+            }
+        }
+        if (updatedData.extensions) _extensionsCache.set(char.avatar, updatedData.extensions);
+
+        return { ok: true, response };
     } catch (error) {
-        console.error('[applyCardFieldUpdates] Error:', error);
+        console.error('[writeCardFields] Error:', error);
+        return { ok: false };
+    }
+}
+
+/**
+ * Convenience wrapper for callers that have an avatar but not a char ref.
+ * Looks up the char, calls writeCardFields, then runs convenience side effects:
+ *   - Gallery folder rename if data.name changed.
+ *   - notifySTCharacterEdited to refresh ST main window.
+ *
+ * Orchestrators with their own gallery-rename or ST-notify logic should call writeCardFields
+ * directly to avoid duplicate side effects.
+ *
+ * @param {string} avatar - Character avatar filename
+ * @param {Object} fieldUpdates - Object with field paths as keys (supports dot notation)
+ * @returns {Promise<boolean>} Success status
+ */
+window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
+    const char = allCharacters.find(c => c.avatar === avatar);
+    if (!char) {
+        console.error('[applyCardFieldUpdates] Character not found:', avatar);
         return false;
     }
+
+    // Capture name BEFORE write for gallery-rename comparison. writeCardFields will mutate char.data in place.
+    const oldName = char.data?.name || char.name || '';
+
+    const result = await writeCardFields(char, fieldUpdates);
+    if (!result.ok) return false;
+
+    // Convenience side effects. Failure here doesn't roll back the write.
+    try {
+        const newName = char.data?.name || char.name || '';
+        if (oldName && newName && oldName !== newName) {
+            const galleryId = getCharacterGalleryId(char);
+            if (galleryId && getSetting('uniqueGalleryFolders')) {
+                await handleGalleryFolderRename(char, oldName, newName, galleryId);
+            }
+        }
+        notifySTCharacterEdited(avatar);
+    } catch (sideErr) {
+        console.warn('[applyCardFieldUpdates] Side effect failed (write succeeded):', sideErr);
+    }
+
+    debugLog('[applyCardFieldUpdates] Updated', Object.keys(fieldUpdates).length, 'fields for:', avatar);
+    return true;
 };
+window.writeCardFields = writeCardFields;
 
 // Expose allCharacters as a getter so CoreAPI always gets current value
 Object.defineProperty(window, 'allCharacters', {

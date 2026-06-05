@@ -167,6 +167,10 @@ function setExclusivePanes(enabled) {
     }
 }
 
+// ============================================================
+// Settings migrations
+// ============================================================
+
 function migrateSettings() {
     try {
         const context = SillyTavern?.getContext?.();
@@ -928,10 +932,12 @@ function injectExtensionSettings() {
 // ==============================================
 
 jQuery(async () => {
+    // Must run before the 2s wait; ST's gallery initSettings is synchronous at load.
+    initGalleryFolderResolver();
+
     // Delay to ensure ST's UI is fully loaded
     await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Migrate legacy settings before anything reads them
+
     migrateSettings();
 
     // Set up the postMessage bridge for embedded mode
@@ -1034,28 +1040,131 @@ function sanitizeFolderName(name) {
 }
 
 /**
- * Get the gallery folder name for a character
- * Checks for unique folder override first, then falls back to character name
- * @param {object} character - Character object with name and avatar
- * @returns {string} The folder name to use
+ * Get the gallery folder name for a character. Computed live from card data;
+ * uniqueGalleryFolders ON and gallery_id present → "Name_id", else sanitized name.
  */
 function getGalleryFolderForCharacter(character) {
     if (!character) return '';
-    
+    const settings = getExtensionSettings();
+    const uniqueFoldersOn = settings.uniqueGalleryFolders === true;
+    const galleryId = character?.data?.extensions?.gallery_id;
+    const safeName = sanitizeFolderName(character.name || '');
+    if (uniqueFoldersOn && galleryId && safeName) {
+        return safeName + '_' + galleryId;
+    }
+    return safeName;
+}
+
+// Install a Proxy on extensionSettings.gallery.folders so reads are answered live from card data instead of from a persisted map.
+function initGalleryFolderResolver() {
     try {
         const context = SillyTavern?.getContext?.();
-        
-        // Check for gallery folder override (unique folder)
-        const overrideFolders = context?.extensionSettings?.gallery?.folders;
-        if (overrideFolders && character.avatar && overrideFolders[character.avatar]) {
-            return overrideFolders[character.avatar];
+        if (!context?.extensionSettings) return;
+        if (!context.extensionSettings.gallery) {
+            context.extensionSettings.gallery = { folders: {}, sort: 'dateAsc' };
+        }
+        // Forensics: categorize any leftover mapping entries and write a report so power-users with custom folder renames have a record.
+        const existing = context.extensionSettings.gallery.folders;
+        const entries = (existing && typeof existing === 'object') ? Object.entries(existing) : [];
+        if (entries.length > 0) {
+            const report = buildGalleryMigrationReport(entries, context);
+            console.log(`[CharLibrary] Discarding ${entries.length} legacy gallery folder mapping(s); folder names are now computed live from card data.`);
+            console.log(`[CharLibrary]   ${report.matched.length} matched the computed value (safe), ${report.differed.length} differed (custom ST folder renames), ${report.unknown.length} had no resolvable character.`);
+            writeGalleryMigrationReport(report).then(fileName => {
+                if (fileName) console.log(`[CharLibrary] Forensic report saved to user/files/${fileName}`);
+            }).catch(() => {});
+        }
+        const resolve = (avatar) => {
+            if (typeof avatar !== 'string') return undefined;
+            const settings = getExtensionSettings();
+            if (settings.uniqueGalleryFolders !== true) return undefined;
+            const char = context.characters?.find(c => c?.avatar === avatar);
+            const id = char?.data?.extensions?.gallery_id;
+            if (id && char?.name) return sanitizeFolderName(char.name) + '_' + id;
+            return undefined;
+        };
+        context.extensionSettings.gallery.folders = new Proxy({}, {
+            get: (_, avatar) => resolve(avatar),
+            has: (_, avatar) => resolve(avatar) !== undefined,
+            set: () => true,
+            deleteProperty: () => true,
+            ownKeys: () => [],
+            getOwnPropertyDescriptor: () => undefined,
+        });
+        if (typeof context.saveSettingsDebounced === 'function') {
+            context.saveSettingsDebounced();
         }
     } catch (e) {
-        // Fall through to default
+        console.warn('[CharLibrary] initGalleryFolderResolver failed:', e?.message || e);
     }
-    
-    // Default to character name
-    return sanitizeFolderName(character.name || '');
+}
+
+// Categorize legacy folder entries against the live-computed value so the report separates redundant from genuinely-lost custom renames.
+function buildGalleryMigrationReport(entries, context) {
+    const matched = [];
+    const differed = [];
+    const unknown = [];
+    for (const [avatar, folder] of entries) {
+        const char = context.characters?.find(c => c?.avatar === avatar);
+        if (!char) {
+            unknown.push({ avatar, folder, reason: 'no character with this avatar (orphan mapping)' });
+            continue;
+        }
+        const id = char.data?.extensions?.gallery_id;
+        const safeName = sanitizeFolderName(char.name || '');
+        if (id && safeName) {
+            const computed = safeName + '_' + id;
+            if (computed === folder) matched.push({ avatar, folder, charName: char.name });
+            else differed.push({ avatar, folder, computed, charName: char.name });
+        } else {
+            unknown.push({ avatar, folder, reason: 'character has no gallery_id', charName: char.name });
+        }
+    }
+    return { matched, differed, unknown };
+}
+
+async function writeGalleryMigrationReport(report) {
+    try {
+        const ts = new Date();
+        const stamp = ts.toISOString().replace(/[:.]/g, '-');
+        const fileName = `cl_gallery_migration_${stamp}.txt`;
+        const total = report.matched.length + report.differed.length + report.unknown.length;
+        const lines = [];
+        lines.push('Gallery folder mapping migration report');
+        lines.push(`Timestamp: ${ts.toISOString()}`);
+        lines.push(`Total entries discarded: ${total}`);
+        lines.push('');
+        lines.push(`Matched the computed Name_galleryId (safe to drop): ${report.matched.length}`);
+        for (const e of report.matched) lines.push(`  ${e.avatar}  ->  "${e.folder}"`);
+        lines.push('');
+        lines.push(`Differed from the computed value (were custom folder renames via ST's gallery folder-input UI): ${report.differed.length}`);
+        for (const e of report.differed) lines.push(`  ${e.avatar}  ->  "${e.folder}"   (computed value would be "${e.computed}")`);
+        lines.push('');
+        lines.push(`No resolvable character (orphan mapping or character missing gallery_id): ${report.unknown.length}`);
+        for (const e of report.unknown) {
+            const nameSuffix = e.charName ? `  (char: "${e.charName}")` : '';
+            lines.push(`  ${e.avatar}  ->  "${e.folder}"   [${e.reason}]${nameSuffix}`);
+        }
+        const text = lines.join('\n') + '\n';
+        const bytes = new TextEncoder().encode(text);
+        let binary = '';
+        for (const b of bytes) binary += String.fromCharCode(b);
+        const base64 = btoa(binary);
+        const csrfToken = await getCsrfToken();
+        const resp = await fetch('/api/files/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+            body: JSON.stringify({ name: fileName, data: base64 }),
+        });
+        if (!resp.ok) {
+            console.warn(`[CharLibrary] Failed to save migration report (HTTP ${resp.status})`);
+            return null;
+        }
+        return fileName;
+    } catch (e) {
+        console.warn('[CharLibrary] Failed to save migration report:', e?.message || e);
+        return null;
+    }
 }
 
 /**
@@ -1579,6 +1688,8 @@ let _displayNameUiRaf = 0;
 function getListingName(character) {
     const ext = character?.data?.extensions;
     if (!ext) return null;
+    // CL-owned fallback checked before provider namespaces so cross-window display matches library.js:getListingNameFromExtensions.
+    if (ext.cl?.pageName?.trim()) return ext.cl.pageName.trim();
     for (const key of PROVIDER_EXT_KEYS) {
         const pageName = ext[key]?.pageName;
         if (pageName?.trim()) return pageName.trim();

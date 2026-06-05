@@ -138,7 +138,7 @@ async function puterFetchHtml(url) {
             // Catch WASM/DOMException from rustls.js and permanently disable Puter
             if (e instanceof DOMException || e.message?.includes('WebAssembly') || e.message?.includes('serialize')) {
                 _puterBroken = true;
-                throw new Error('Puter.js WASM broken (missing COOP/COEP headers) — disabled for this session');
+                throw new Error('Puter.js WASM broken (missing COOP/COEP headers); disabled for this session');
             }
             throw e;
         }
@@ -186,7 +186,7 @@ async function stProxyFetchHtml(url) {
     if (r.status === 404) {
         const t = await r.text();
         if (t.includes('CORS proxy is disabled')) {
-            throw new Error('ST CORS proxy is disabled — enable it in SillyTavern settings');
+            throw new Error('ST CORS proxy is disabled, enable it in SillyTavern settings');
         }
         throw new Error('ST proxy returned 404');
     }
@@ -258,7 +258,8 @@ function decodeAstroValue(value) {
 async function searchJanny(opts = {}) {
     const { search = '', page = 1, limit = 40 } = opts;
 
-    const filters = ['totalToken <= 4101 AND totalToken >= 29'];
+    // Browse view ceiling is 100000 (janny-browse.js:65-66); 4101 was an old default that excluded heavy cards from fetchLinkStats / buildPreviewObject / searchForBulkLink.
+    const filters = ['totalToken >= 29'];
     const body = {
         queries: [{
             indexUid: 'janny-characters',
@@ -347,7 +348,7 @@ async function fetchCharacterDetails(characterId, slug) {
     }
 
     if (character?.personality || character?.firstMessage) {
-        console.info(`[JannyProvider] Character "${character.name}" parsed — personality: ${(character.personality || '').length} chars, firstMsg: ${(character.firstMessage || '').length} chars${creatorUsername ? `, creator: @${creatorUsername}` : ''}`);
+        console.info(`[JannyProvider] Character "${character.name}" parsed. Personality: ${(character.personality || '').length} chars, firstMsg: ${(character.firstMessage || '').length} chars${creatorUsername ? `, creator: @${creatorUsername}` : ''}`);
     } else {
         console.warn(`[JannyProvider] Character parsed but missing definition fields:`, Object.keys(character || {}));
     }
@@ -529,7 +530,7 @@ class JannyProvider extends ProviderBase {
             const data = await fetchCharacterDetails(linkInfo.id, slug);
             if (data) {
                 const result = buildV2FromDetails(data);
-                if (result) result._listingName = this.getListingName(data);
+                if (result) result._listingName = this.getListingName(data.character);
                 return result;
             }
             return null;
@@ -634,7 +635,7 @@ class JannyProvider extends ProviderBase {
             };
         }
 
-        // No Janny extensions — try to find this character on JannyAI
+        // No Janny extensions, try to find this character on JannyAI
         const name = cardData.data?.name;
         if (!name) return null;
 
@@ -661,7 +662,7 @@ class JannyProvider extends ProviderBase {
             // Strict creator verification: require both sides to have a creator
             // and require an exact (case-insensitive) match. Names alone are far too
             // ambiguous ("Akari" exists on Janny dozens of times). Local cards may
-            // store creator as a URL, in which case auto-linking is unsafe — skip.
+            // store creator as a URL, in which case auto-linking is unsafe; skip.
             const localCreator = creator.trim();
             const remoteCreator = (char.creatorUsername || '').trim();
             if (!localCreator || !remoteCreator) return null;
@@ -770,7 +771,7 @@ class JannyProvider extends ProviderBase {
 
             // Fall back to raw MeiliSearch hit data if scrape failed (definitions will be empty)
             if (!data?.character && hitData) {
-                console.warn('[JannyProvider] Using MeiliSearch hit as last resort — definitions will be incomplete');
+                console.warn('[JannyProvider] Using MeiliSearch hit as last resort; definitions will be incomplete');
                 data = { character: hitData, imageUrl: hitData.avatar ? `${JANNY_IMAGE_BASE}${hitData.avatar}` : null };
             }
             if (!data?.character) throw new Error('Could not fetch character data from JannyAI');

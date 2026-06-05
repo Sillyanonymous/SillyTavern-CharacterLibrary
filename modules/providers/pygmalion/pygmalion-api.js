@@ -78,23 +78,22 @@ export async function searchCharacters(opts = {}) {
     if (tagsNamesExclude?.length) message.tagsNamesExclude = tagsNamesExclude;
 
     if (token) {
-        try {
-            const resp = await fetchWithProxy(`${PYGMALION_API_BASE}/CharacterSearch`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify(message)
-            });
-            if (!resp.ok) throw new Error(`Search failed (${resp.status})`);
-            return resp.json();
-        } catch (e) {
-            const err = new Error(e.message);
-            err.authFailed = true;
+        const resp = await fetchWithProxy(`${PYGMALION_API_BASE}/CharacterSearch`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify(message)
+        });
+        if (!resp.ok) {
+            // authFailed tag drives re-auth flow in callers; tag only on real auth statuses so transient 5xx / network blips dont masquerade as expired-token.
+            const err = new Error(`Search failed (${resp.status})`);
+            if (resp.status === 401 || resp.status === 403) err.authFailed = true;
             throw err;
         }
+        return resp.json();
     }
 
     const url = buildGetUrl('CharacterSearch', message);
@@ -255,22 +254,21 @@ export async function getFollowedUsers(token, opts = {}) {
     const message = { pageNumber, pageSize };
     if (queryName) message.queryName = queryName;
 
-    try {
-        const resp = await fetchWithProxy(`${PYGMALION_USER_API_BASE}/GetFollowedUsers`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(message)
-        });
-        return resp.json();
-    } catch (e) {
-        const err = new Error(e.message);
-        err.authFailed = true;
+    const resp = await fetchWithProxy(`${PYGMALION_USER_API_BASE}/GetFollowedUsers`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(message)
+    });
+    if (!resp.ok) {
+        const err = new Error(`GetFollowedUsers failed (${resp.status})`);
+        if (resp.status === 401 || resp.status === 403) err.authFailed = true;
         throw err;
     }
+    return resp.json();
 }
 
 /**
@@ -280,22 +278,21 @@ export async function getFollowedUsers(token, opts = {}) {
  * @returns {Promise<{isFollowing: boolean}>}
  */
 export async function toggleFollowUser(token, userId) {
-    try {
-        const resp = await fetchWithProxy(`${PYGMALION_USER_API_BASE}/ToggleFollowUser`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ userId })
-        });
-        return resp.json();
-    } catch (e) {
-        const err = new Error(e.message);
-        err.authFailed = true;
+    const resp = await fetchWithProxy(`${PYGMALION_USER_API_BASE}/ToggleFollowUser`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ userId })
+    });
+    if (!resp.ok) {
+        const err = new Error(`ToggleFollowUser failed (${resp.status})`);
+        if (resp.status === 401 || resp.status === 403) err.authFailed = true;
         throw err;
     }
+    return resp.json();
 }
 
 // ========================================

@@ -18,15 +18,8 @@ let saveQueued = false;
 // FILE I/O
 // ========================================
 
-function toBase64(str) {
-    const bytes = new TextEncoder().encode(str);
-    let binary = '';
-    for (const b of bytes) binary += String.fromCharCode(b);
-    return btoa(binary);
-}
-
 async function fileUpload(name, data) {
-    const base64 = toBase64(JSON.stringify(data));
+    const base64 = CoreAPI.utf8ToBase64(JSON.stringify(data));
     const resp = await CoreAPI.apiRequest('/files/upload', 'POST', { name, data: base64 });
     if (!resp.ok) {
         const err = await resp.text().catch(() => resp.statusText);

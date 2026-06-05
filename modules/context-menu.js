@@ -421,54 +421,34 @@ function positionMenu(x, y) {
 
 async function toggleFavorite(char) {
     // Check both root and extensions location
-    const currentFav = char.fav === true || char.fav === 'true' || 
+    const currentFav = char.fav === true || char.fav === 'true' ||
                        char.data?.extensions?.fav === true || char.data?.extensions?.fav === 'true';
     const newFav = !currentFav;
-    
-    // Preserve existing data and extensions when updating
-    const existingData = char.data || {};
-    const existingExtensions = existingData.extensions || char.extensions || {};
-    const updatedExtensions = {
-        ...existingExtensions,
-        fav: newFav
-    };
-    
+
     try {
-        const response = await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', {
-            avatar: char.avatar,
-            fav: newFav,
-            create_date: char.create_date,
-            data: {
-                ...existingData,
-                extensions: updatedExtensions
-            }
+        // applyCardFieldUpdates handles hydrate + preflight + merge + in-memory sync (on char and allCharacters entry) + ST notify.
+        const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
+            'extensions.fav': newFav,
         });
-        
-        if (response.ok) {
-            // Update local character data in both locations
-            char.fav = newFav;
-            if (!char.data) char.data = {};
-            if (!char.data.extensions) char.data.extensions = {};
-            char.data.extensions.fav = newFav;
-            
-            const card = CoreAPI.findCardElement(char.avatar);
-            if (card) {
-                if (newFav) {
-                    card.classList.add('is-favorite');
-                    if (!card.querySelector('.favorite-indicator')) {
-                        card.insertAdjacentHTML('afterbegin', 
-                            '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
-                    }
-                } else {
-                    card.classList.remove('is-favorite');
-                    card.querySelector('.favorite-indicator')?.remove();
+        if (!success) throw new Error('API request failed');
+        // Mirror to char root for back-compat with readers that check the V1 fav field directly.
+        char.fav = newFav;
+
+        const card = CoreAPI.findCardElement(char.avatar);
+        if (card) {
+            if (newFav) {
+                card.classList.add('is-favorite');
+                if (!card.querySelector('.favorite-indicator')) {
+                    card.insertAdjacentHTML('afterbegin',
+                        '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
                 }
+            } else {
+                card.classList.remove('is-favorite');
+                card.querySelector('.favorite-indicator')?.remove();
             }
-            
-            CoreAPI.showToast(newFav ? 'Added to favorites' : 'Removed from favorites', 'success');
-        } else {
-            throw new Error('API request failed');
         }
+
+        CoreAPI.showToast(newFav ? 'Added to favorites' : 'Removed from favorites', 'success');
     } catch (err) {
         console.error('[ContextMenu] Failed to toggle favorite:', err);
         CoreAPI.showToast('Failed to update favorite', 'error');
@@ -478,44 +458,27 @@ async function toggleFavorite(char) {
 async function bulkToggleFavorites(setFavorite) {
     const selected = CoreAPI.getSelectedCharacters();
     if (selected.length === 0) return;
-    
+
     let successCount = 0;
     let failCount = 0;
-    
+
     CoreAPI.showToast(`Updating ${selected.length} characters...`, 'info');
-    
+
     for (const char of selected) {
         try {
-            // fav lives in data.extensions.fav; full data must be passed through.
-            const existingData = char.data || {};
-            const existingExtensions = existingData.extensions || char.extensions || {};
-            
-            const response = await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', {
-                avatar: char.avatar,
-                fav: setFavorite,
-                create_date: char.create_date,
-                data: {
-                    ...existingData,
-                    extensions: {
-                        ...existingExtensions,
-                        fav: setFavorite
-                    }
-                }
+            const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
+                'extensions.fav': setFavorite,
             });
-            
-            if (response.ok) {
+            if (success) {
                 char.fav = setFavorite;
-                if (!char.data) char.data = {};
-                if (!char.data.extensions) char.data.extensions = {};
-                char.data.extensions.fav = setFavorite;
-                
+
                 // Update card UI
                 const card = CoreAPI.findCardElement(char.avatar);
                 if (card) {
                     if (setFavorite) {
                         card.classList.add('is-favorite');
                         if (!card.querySelector('.favorite-indicator')) {
-                            card.insertAdjacentHTML('afterbegin', 
+                            card.insertAdjacentHTML('afterbegin',
                                 '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
                         }
                     } else {
@@ -739,10 +702,6 @@ async function bulkDelete() {
                 });
                 
                 if (response.ok) {
-                    // Clean up gallery folder override if character had unique gallery
-                    if (galleryData?.hasUniqueGallery) {
-                        CoreAPI.removeGalleryFolderOverride(char.avatar);
-                    }
                     CoreAPI.playlistsOnCharDeleted(char.avatar);
                     
                     const card = CoreAPI.findCardElement(char.avatar);
@@ -834,37 +793,9 @@ async function exportCharacter(char) {
     }
 }
 
+// Delegate to the shared single-delete dialog (takes the char directly; no detail-modal detour).
 function confirmDelete(char) {
-    CoreAPI.openCharacterModal(char);
-    setTimeout(() => {
-        const deleteBtn = document.getElementById('deleteCharBtn');
-        if (deleteBtn) {
-            deleteBtn.click();
-        } else {
-            if (confirm(`Are you sure you want to delete "${CoreAPI.getCharacterName(char)}"?\n\nThis cannot be undone.`)) {
-                deleteCharacter(char);
-            }
-        }
-    }, 200);
-}
-
-async function deleteCharacter(char) {
-    try {
-        const response = await CoreAPI.apiRequest('/characters/delete', 'POST', {
-            avatar_url: char.avatar,
-            delete_chats: false
-        });
-        
-        if (response.ok) {
-            CoreAPI.playlistsOnCharDeleted(char.avatar);
-            currentCard?.remove();
-            CoreAPI.showToast(`Deleted "${char.name}"`, 'success');
-            CoreAPI.refreshCharacters();
-        }
-    } catch (err) {
-        console.error('[ContextMenu] Delete failed:', err);
-        CoreAPI.showToast('Failed to delete character', 'error');
-    }
+    CoreAPI.showDeleteConfirmation(char);
 }
 
 function escapeHtml(text) {

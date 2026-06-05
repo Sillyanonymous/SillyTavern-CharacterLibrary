@@ -7450,24 +7450,50 @@ input[type="search"]::-webkit-search-results-decoration {
     animation: clConfirmPop 0.22s cubic-bezier(0.34, 1.3, 0.5, 1);
 }
 
-.cl-confirm-overlay .confirm-modal-header {
-    border-bottom: none;
-    background: transparent;
-    padding: var(--space-lg) var(--space-lg) var(--space-2xs);
-    border-radius: var(--radius-3xl) var(--radius-3xl) 0 0;
+/* Intent-badge layout: icon badge (left) + title/message column (right). */
+.cl-confirm-overlay .cl-confirm-main {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: var(--space-lg) var(--space-lg) var(--space-md);
 }
 
-.cl-confirm-overlay .confirm-modal-header h3 {
+.cl-confirm-overlay .cl-confirm-badge {
+    flex-shrink: 0;
+    width: 42px;
+    height: 42px;
+    border-radius: var(--radius-circle);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-xl);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
+}
+
+.cl-confirm-overlay.cl-confirm-danger .cl-confirm-badge {
+    background: rgba(var(--cl-error-rgb), 0.13);
+    color: var(--cl-error-bright);
+}
+
+.cl-confirm-overlay .cl-confirm-text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+.cl-confirm-overlay .cl-confirm-text h3 {
+    margin: 0;
+    color: var(--text-primary);
     font-size: var(--font-lg);
-    font-weight: 600;
-    letter-spacing: 0.1px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    line-height: 1.3;
 }
 
-.cl-confirm-overlay .confirm-modal-body {
-    padding: var(--space-xs) var(--space-lg) var(--space-md) !important;
-}
-
-.cl-confirm-overlay .confirm-modal-body p {
+.cl-confirm-overlay .cl-confirm-text #clConfirmMessage,
+.cl-confirm-overlay .cl-confirm-text #clConfirmMessage p {
     margin: 0;
     line-height: 1.5;
     color: var(--text-secondary);
@@ -7493,6 +7519,102 @@ input[type="search"]::-webkit-search-results-decoration {
 @keyframes clConfirmPop {
     from { opacity: 0; transform: scale(0.94) translateY(8px); }
     to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* @canonical preset-picker
+   Shared "save preset" picker (window.savePresetPicker). Type a name to create, or pick an existing
+   preset to overwrite (confirmed). Modeled on the playlist picker. Sits above base modals (10000),
+   below showConfirm (10003) so the overwrite confirm stacks on top. */
+#savePresetPickerOverlay {
+    z-index: 10002;
+}
+
+.preset-picker-search-wrap {
+    position: relative;
+    padding: var(--space-md) var(--space-md) var(--space-sm);
+}
+
+.preset-picker-search-icon {
+    position: absolute;
+    left: calc(var(--space-md) + var(--space-sm));
+    top: calc(50% + var(--space-2xs));
+    transform: translateY(-50%);
+    color: var(--text-faint);
+    font-size: var(--font-sm);
+    pointer-events: none;
+}
+
+.preset-picker-search.cl-input {
+    width: 100%;
+    padding-left: calc(var(--space-lg) + var(--space-md));
+}
+
+.preset-picker-list {
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 0 var(--space-sm) var(--space-sm);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+}
+
+.preset-picker-row,
+.preset-picker-create-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.12s ease;
+}
+
+.preset-picker-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.preset-picker-row-icon {
+    color: var(--text-faint);
+    font-size: var(--font-sm);
+}
+
+.preset-picker-name {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: var(--font-md);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.preset-picker-row-hint {
+    color: var(--text-faint);
+    font-size: var(--font-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+}
+
+.preset-picker-row:hover .preset-picker-row-hint {
+    opacity: 1;
+}
+
+.preset-picker-create-row {
+    color: var(--accent);
+}
+
+.preset-picker-create-row:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+}
+
+.preset-picker-create-icon {
+    font-size: var(--font-sm);
+}
+
+.preset-picker-create-row strong {
+    font-weight: 700;
 }
 
 /* Disable Gallery Folders Modal - higher z-index to appear above settings */
@@ -7821,6 +7943,17 @@ details.settings-provider-section > .settings-provider-body {
     padding: 0 15px 15px;
 }
 
+/* Settings-group-title info icon: smaller, dimmer, cursor:help for the tooltip affordance. */
+.settings-group-title .datacat-exclude-info {
+    font-size: var(--font-sm);
+    opacity: 0.5;
+    cursor: help;
+    color: var(--text-secondary);
+}
+.settings-group-title .datacat-exclude-info:hover {
+    opacity: 0.85;
+}
+
 /* @canonical provider-exclude-tags */
 .provider-exclude-tags-container {
     display: flex;
@@ -7933,13 +8066,63 @@ details.settings-provider-section > .settings-provider-body {
     font-size: var(--font-sm);
 }
 
-.cl-helper-banner.cl-helper-ok {
-    background: rgba(var(--cl-success-bright-rgb), 0.08);
-    border-color: rgba(var(--cl-success-bright-rgb), 0.2);
+.cl-helper-banner.cl-helper-update {
+    flex-direction: column;
+    background: rgba(var(--cl-warning-bright-rgb), 0.1);
+    border-color: rgba(var(--cl-warning-bright-rgb), 0.3);
 }
 
-.cl-helper-banner.cl-helper-ok > i {
+.cl-helper-banner-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm-md);
+}
+
+.cl-helper-banner.cl-helper-update .cl-helper-banner-row > i {
+    color: var(--cl-warning-bright);
+    font-size: var(--font-base);
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.cl-helper-banner .cl-helper-update-actions {
+    margin-top: var(--space-sm);
+}
+
+.cl-helper-status-check {
     color: var(--cl-success-bright);
+    margin-left: 6px;
+}
+
+.cl-helper-update-summary {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.cl-helper-update-summary .cl-update-label {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-right: 6px;
+}
+
+.cl-helper-update-summary code {
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+    font-size: var(--font-sm);
+    word-break: break-all;
+}
+
+.cl-helper-update-summary ul {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.cl-helper-update-summary .cl-update-note {
+    color: var(--text-secondary);
+    margin-top: var(--space-sm);
+    margin-bottom: 0;
 }
 
 /* Grey out settings fields when plugin unavailable */
@@ -10537,8 +10720,46 @@ html.cl-initial-loading .mobile-fab {
     min-width: 320px;
 }
 
-.orphaned-folders-modal .confirm-modal-body {
+.orphaned-folders-modal .cl-modal-body {
+    min-width: 600px;
     min-height: 350px;
+}
+
+.orphaned-folders-mode-select {
+    margin-left: auto;
+}
+
+.cl-modal-content.folder-mapping-modal-content {
+    max-width: calc(700px * var(--modal-scale, 1));
+}
+
+.folder-mapping-tip {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    background: rgba(var(--cl-info-bright-rgb), 0.1);
+    border: 1px solid rgba(var(--cl-info-bright-rgb), 0.3);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm-md);
+    margin-bottom: var(--space-md);
+}
+
+.folder-mapping-tip > i {
+    color: var(--cl-warning-bright);
+    font-size: var(--font-md-lg);
+    margin-top: 2px;
+}
+
+.folder-mapping-tip p {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+}
+
+.folder-mapping-tip code {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 2px 4px;
+    border-radius: var(--radius-xs);
 }
 
 .orphaned-folders-modal .loading-spinner {
@@ -10991,7 +11212,7 @@ html.cl-initial-loading .mobile-fab {
 
 /* Responsive - Stack layout on smaller screens */
 @media (max-width: 700px) {
-    .orphaned-folders-modal .confirm-modal-body {
+    .orphaned-folders-modal .cl-modal-body {
         min-width: unset !important;
         min-height: 250px;
     }

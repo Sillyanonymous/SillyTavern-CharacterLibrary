@@ -66,6 +66,10 @@ When the user asks for styled, rich, fancy, HTML, or designed notes: generate a 
 - Dark theme friendly (assume dark background by default)
 The HTML must be fully self-contained with all styles in a <style> block at the top. Do not use external images. Do not use markdown. Output raw HTML only, no code fences.`,
     },
+    tagline: {
+        label: 'Tagline',
+        system: `You write taglines for AI roleplay characters. A tagline is a single-line hook (~80 to 150 characters) that captures the character's essence and entices a user to chat with them. Think of it like a book's back-cover one-liner or a movie tagline: punchy, evocative, specific. No markdown, no quotes, no character names, no preamble. Output one line only.`,
+    },
 };
 
 // ========================================
@@ -83,6 +87,7 @@ let avatarSourceAvatar = null;
 let creatorTagsArray = [];
 let tagAutocompleteList = [];
 let saveAsTarget = null;
+let fieldsAutoGrowHandler = null;
 
 
 // ========================================
@@ -185,6 +190,15 @@ function createModal() {
                                     <label>Version</label>
                                     <input type="search" id="creatorVersion" class="glass-input" placeholder="1.0" autocomplete="one-time-code">
                                 </div>
+                            </div>
+                            <div class="form-group creator-field-group">
+                                <div class="creator-field-header">
+                                    <label>Tagline</label>
+                                    <button type="button" class="creator-ai-btn" data-field="tagline" title="Generate with AI">
+                                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                    </button>
+                                </div>
+                                <input type="search" id="creatorTagline" class="glass-input" placeholder="Short hook shown under the name" autocomplete="one-time-code">
                             </div>
                         </div>
 
@@ -347,6 +361,7 @@ function isDirty() {
     const textFields = [
         'creatorName', 'creatorDescription', 'creatorPersonality', 'creatorScenario',
         'creatorFirstMes', 'creatorMesExample', 'creatorSystemPrompt', 'creatorPostHistory', 'creatorNotes',
+        'creatorTagline',
     ];
     if (textFields.some(id => document.getElementById(id)?.value.trim())) return true;
     if (avatarBuffer) return true;
@@ -377,7 +392,7 @@ function resetForm() {
     const fields = [
         'creatorName', 'creatorAuthor', 'creatorVersion', 'creatorDescription',
         'creatorPersonality', 'creatorScenario', 'creatorFirstMes', 'creatorMesExample',
-        'creatorSystemPrompt', 'creatorPostHistory', 'creatorNotes',
+        'creatorSystemPrompt', 'creatorPostHistory', 'creatorNotes', 'creatorTagline',
     ];
     fields.forEach(id => {
         const el = document.getElementById(id);
@@ -405,6 +420,18 @@ function resetForm() {
     clearAllFieldStates();
 }
 
+// Reset to 'auto' first so scrollHeight reflects current content; without it the field grows but never shrinks.
+function autoGrowField(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = (ta.scrollHeight + 4) + 'px';
+}
+
+function detachFieldsAutoGrow() {
+    if (!fieldsAutoGrowHandler) return;
+    document.querySelector('.creator-fields')?.removeEventListener('input', fieldsAutoGrowHandler);
+    fieldsAutoGrowHandler = null;
+}
+
 function clearAllFieldStates() {
     document.querySelectorAll('.creator-ai-btn').forEach(btn => {
         btn.classList.remove('generating');
@@ -420,6 +447,7 @@ function clearAllFieldStates() {
         document.querySelectorAll('.creator-fields textarea.glass-input, .creator-alt-textarea').forEach(ta => {
             ta.style.height = '';
         });
+        detachFieldsAutoGrow();
     }
 }
 
@@ -427,18 +455,29 @@ function toggleFieldExpand() {
     const btn = document.getElementById('creatorFieldsToggle');
     const icon = btn?.querySelector('i');
     if (!btn || !icon) return;
+    const container = document.querySelector('.creator-fields');
     const textareas = document.querySelectorAll('.creator-fields textarea.glass-input, .creator-alt-textarea');
     if (btn.classList.contains('active')) {
         textareas.forEach(ta => { ta.style.height = ''; });
+        detachFieldsAutoGrow();
         btn.classList.remove('active');
         icon.className = 'fa-solid fa-up-right-and-down-left-from-center';
         btn.title = 'Expand all fields to fit content';
     } else {
+        // Initial pass only expands fields that already overflow, so empty textareas keep their min-height.
         textareas.forEach(ta => {
-            if (ta.scrollHeight > ta.clientHeight) {
-                ta.style.height = (ta.scrollHeight + 4) + 'px';
-            }
+            if (ta.scrollHeight > ta.clientHeight) autoGrowField(ta);
         });
+        // Delegated on .creator-fields so textareas added/removed after the toggle (alt-greetings) still grow.
+        if (container && !fieldsAutoGrowHandler) {
+            fieldsAutoGrowHandler = (e) => {
+                const ta = e.target;
+                if (ta?.matches?.('.creator-fields textarea.glass-input, .creator-alt-textarea')) {
+                    autoGrowField(ta);
+                }
+            };
+            container.addEventListener('input', fieldsAutoGrowHandler);
+        }
         btn.classList.add('active');
         icon.className = 'fa-solid fa-down-left-and-up-right-to-center';
         btn.title = 'Contract fields to default size';
@@ -1090,6 +1129,7 @@ const FIELD_TEXTAREA_MAP = {
     mes_example: 'creatorMesExample',
     system_prompt: 'creatorSystemPrompt',
     creator_notes: 'creatorNotes',
+    tagline: 'creatorTagline',
 };
 
 let studioFieldKey = '';
@@ -1127,6 +1167,7 @@ function gatherContext() {
         mes_example: document.getElementById('creatorMesExample')?.value?.trim() || '',
         system_prompt: document.getElementById('creatorSystemPrompt')?.value?.trim() || '',
         creator_notes: document.getElementById('creatorNotes')?.value?.trim() || '',
+        tagline: document.getElementById('creatorTagline')?.value?.trim() || '',
         tags: [...creatorTagsArray],
     };
 }
@@ -1174,12 +1215,9 @@ async function loadSavedPrompts() {
 
 async function saveSavedPrompts(data) {
     const jsonStr = JSON.stringify(data, null, 2);
-    const bytes = new TextEncoder().encode(jsonStr);
-    let binary = '';
-    for (const b of bytes) binary += String.fromCharCode(b);
     await CoreAPI.apiRequest('/files/upload', 'POST', {
         name: PROMPTS_FILE,
-        data: btoa(binary),
+        data: CoreAPI.utf8ToBase64(jsonStr),
     });
 }
 
@@ -1269,75 +1307,33 @@ async function loadPromptPresetList() {
     select._customSelect?.refresh();
 }
 
-let _namePromptResolve = null;
-
-function promptForName(label) {
-    return new Promise(resolve => {
-        _namePromptResolve = resolve;
-        let overlay = document.getElementById('creatorNamePromptOverlay');
-        if (!overlay) {
-            overlay = document.createElement('div');
-            overlay.id = 'creatorNamePromptOverlay';
-            overlay.className = 'cl-modal creator-saveas-diff-overlay';
-            overlay.innerHTML = `
-            <div class="cl-modal-content" style="max-width:calc(360px * var(--modal-scale, 1))">
-                <div class="cl-modal-header">
-                    <h3 id="creatorNamePromptLabel"></h3>
-                </div>
-                <div class="cl-modal-body" style="padding:12px 16px">
-                    <input id="creatorNamePromptInput" class="glass-input" type="text" style="width:100%" />
-                </div>
-                <div class="cl-modal-footer">
-                    <button type="button" class="action-btn secondary" id="creatorNamePromptCancel">Cancel</button>
-                    <button type="button" class="action-btn primary" id="creatorNamePromptOk">Save</button>
-                </div>
-            </div>`;
-            document.body.appendChild(overlay);
-            const submit = () => {
-                const val = document.getElementById('creatorNamePromptInput').value.trim();
-                overlay.classList.remove('visible');
-                const res = _namePromptResolve;
-                _namePromptResolve = null;
-                res?.(val || null);
-            };
-            document.getElementById('creatorNamePromptOk').addEventListener('click', submit);
-            document.getElementById('creatorNamePromptCancel').addEventListener('click', () => {
-                overlay.classList.remove('visible');
-                const res = _namePromptResolve;
-                _namePromptResolve = null;
-                res?.(null);
-            });
-            document.getElementById('creatorNamePromptInput').addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); submit(); }
-            });
-        }
-        document.getElementById('creatorNamePromptLabel').textContent = label;
-        const input = document.getElementById('creatorNamePromptInput');
-        input.value = '';
-        overlay.classList.add('visible');
-        input.focus();
-    });
-}
-
 async function saveCurrentPrompt() {
     const promptText = document.getElementById('studioSettingsPrompt')?.value?.trim();
     if (!promptText) {
         CoreAPI.showToast('Write a custom prompt first', 'warning', 2000);
         return;
     }
-    const name = await promptForName('Name for this prompt preset:');
-    if (!name) return;
-
     const data = await loadSavedPrompts();
     if (!data[studioFieldKey]) data[studioFieldKey] = [];
-    data[studioFieldKey].push({ name: name.trim(), prompt: promptText });
+    const presets = data[studioFieldKey];
+    const result = await CoreAPI.savePresetPicker('Save prompt preset', presets);
+    if (!result) return;
+
+    let savedIdx;
+    if (result.overwriteIndex >= 0) {
+        presets[result.overwriteIndex].prompt = promptText;
+        savedIdx = result.overwriteIndex;
+    } else {
+        presets.push({ name: result.name, prompt: promptText });
+        savedIdx = presets.length - 1;
+    }
     await saveSavedPrompts(data);
     await loadPromptPresetList();
 
-    // Auto-select the newly saved preset
+    // Auto-select the saved preset
     const select = document.getElementById('studioPromptPresets');
     if (select && select.options.length > 1) {
-        select.value = String(data[studioFieldKey].length - 1);
+        select.value = String(savedIdx);
         select._customSelect?.refresh();
     }
 
@@ -1517,6 +1513,9 @@ async function importCharacterFromLibrary(avatar) {
     document.getElementById('creatorSystemPrompt').value = data.system_prompt || '';
     document.getElementById('creatorPostHistory').value = data.post_history_instructions || '';
     document.getElementById('creatorNotes').value = data.creator_notes || '';
+    // Read tagline from the active namespace so the imported source carries its tagline forward whatever its origin.
+    const importTaglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    document.getElementById('creatorTagline').value = data.extensions?.[importTaglineNs]?.tagline || '';
 
     // Alt greetings
     document.getElementById('creatorAltGreetings').innerHTML = '';
@@ -2144,6 +2143,23 @@ function getFieldSuggestions(fieldKey, charName) {
             `Build an elegant dark-themed HTML notes page with sections`,
             `Make a stylish HTML creator page with gradients and icons`,
             `Design a professional HTML card overview with custom fonts`,
+        ],
+        tagline: [
+            `Write a punchy noir-style hook for ${name}`,
+            `Craft an evocative one-liner for ${name}`,
+            `Write a tagline that hints at a hidden secret`,
+            `Make it playful and mysterious in one line`,
+            `Write a tagline with romantic, slow-burn energy`,
+            `Craft a darkly atmospheric single-line hook`,
+            `Write a tagline with a single specific quirk`,
+            `Make it dangerous and inviting at once`,
+            `Write a melancholy one-liner with a glimmer of hope`,
+            `Craft a snarky, self-aware tagline`,
+            `Write a tagline that promises high stakes`,
+            `Make it warm and inviting with a single twist`,
+            `Write a movie-poster style tagline for ${name}`,
+            `Craft a haunting one-liner that lingers`,
+            `Write a tagline that asks the reader a question`,
         ],
     };
     const all = map[fieldKey] || [];
@@ -2995,6 +3011,7 @@ function collectCreatorValues() {
         creator_notes: document.getElementById('creatorNotes').value.trim(),
         creator: document.getElementById('creatorAuthor').value.trim(),
         character_version: document.getElementById('creatorVersion').value.trim(),
+        tagline: document.getElementById('creatorTagline').value.trim(),
         tags: [...creatorTagsArray],
         alternate_greetings: collectAltGreetings(),
     };
@@ -3002,6 +3019,8 @@ function collectCreatorValues() {
 
 function extractOriginalValues(char) {
     const d = char.data || {};
+    // Read tagline from the target's active namespace so the diff sees no change when the value already matches.
+    const taglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
     return {
         name: char.name || '',
         description: d.description || '',
@@ -3014,6 +3033,7 @@ function extractOriginalValues(char) {
         creator_notes: d.creator_notes || '',
         creator: d.creator || '',
         character_version: d.character_version || '',
+        tagline: d.extensions?.[taglineNs]?.tagline || '',
         tags: Array.isArray(d.tags) ? [...d.tags] : [],
         alternate_greetings: Array.isArray(d.alternate_greetings) ? [...d.alternate_greetings] : [],
     };
@@ -3024,6 +3044,7 @@ const DIFF_FIELD_LABELS = {
     scenario: 'Scenario', first_mes: 'First Message', mes_example: 'Example Dialogue',
     system_prompt: 'System Prompt', post_history_instructions: 'Post-History Instructions',
     creator_notes: "Creator's Notes", creator: 'Creator', character_version: 'Version',
+    tagline: 'Tagline',
     tags: 'Tags', alternate_greetings: 'Alternate Greetings',
 };
 
@@ -3127,16 +3148,10 @@ async function confirmSaveAs() {
 
     try {
         const current = collectCreatorValues();
-        const existingData = saveAsTarget.data || {};
-        const existingExtensions = existingData.extensions || {};
-        const existingCreateDate = saveAsTarget.create_date;
-        const existingSpec = saveAsTarget.spec || existingData.spec;
-        const existingSpecVersion = saveAsTarget.spec_version || existingData.spec_version;
-
-        const payload = {
-            avatar: saveAsTarget.avatar,
-            ...(existingSpec && { spec: existingSpec }),
-            ...(existingSpecVersion && { spec_version: existingSpecVersion }),
+        const hasAvatarChange = avatarBuffer && avatarSourceAvatar !== saveAsTarget.avatar;
+        // Tagline as a dot-path leaf write so the namespace's sibling fields (id, full_path, linkedAt) survive the spread.
+        const taglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(saveAsTarget) ?? 'cl';
+        const updates = {
             name: current.name,
             description: current.description,
             first_mes: current.first_mes,
@@ -3150,37 +3165,19 @@ async function confirmSaveAs() {
             character_version: current.character_version,
             tags: current.tags,
             alternate_greetings: current.alternate_greetings,
-            create_date: existingCreateDate,
-            data: {
-                ...existingData,
-                name: current.name,
-                description: current.description,
-                first_mes: current.first_mes,
-                personality: current.personality,
-                scenario: current.scenario,
-                mes_example: current.mes_example,
-                system_prompt: current.system_prompt,
-                post_history_instructions: current.post_history_instructions,
-                creator_notes: current.creator_notes,
-                creator: current.creator,
-                character_version: current.character_version,
-                tags: current.tags,
-                alternate_greetings: current.alternate_greetings,
-                create_date: existingCreateDate,
-                extensions: existingExtensions,
-            },
+            [`extensions.${taglineNs}.tagline`]: current.tagline ?? '',
         };
 
-        // Auto-snapshot before overwrite (same pattern as detail modal edit save)
-        try { await CoreAPI.autoSnapshotBeforeChange(saveAsTarget, 'edit'); } catch (snapErr) {
+        // Auto-snapshot before overwrite; embed the old avatar when we're about to replace it so it stays restorable.
+        try { await CoreAPI.autoSnapshotBeforeChange(saveAsTarget, 'edit', { embedAvatar: hasAvatarChange }); } catch (snapErr) {
             CoreAPI.debugLog('[Creator] Auto-snapshot failed (non-blocking):', snapErr);
         }
 
-        const resp = await CoreAPI.apiRequest('/characters/merge-attributes', 'POST', payload);
-        if (!resp?.ok) throw new Error('Save failed');
+        // Route through applyCardFieldUpdates (preflight, in-memory sync, gallery rename on name change, ST notify); no direct merge-attributes.
+        const success = await CoreAPI.applyCardFieldUpdates(saveAsTarget.avatar, updates);
+        if (!success) throw new Error('Save failed');
 
         // Upload new avatar if changed (edit-avatar reads existing card data from PNG, preserving all fields)
-        const hasAvatarChange = avatarBuffer && avatarSourceAvatar !== saveAsTarget.avatar;
         if (hasAvatarChange) {
             const formData = new FormData();
             formData.append('avatar', new File([avatarBuffer], 'avatar.png', { type: 'image/png' }));
@@ -3197,7 +3194,6 @@ async function confirmSaveAs() {
 
         CoreAPI.showToast(`Saved over "${saveAsTarget.name}"`, 'success');
         await CoreAPI.fetchCharacters(true);
-        CoreAPI.notifySTCharacterEdited(saveAsTarget.avatar);
         closeSaveAsDiff();
         closeModal();
     } catch (err) {
@@ -3231,6 +3227,7 @@ function buildCharacterCard() {
     const systemPrompt = document.getElementById('creatorSystemPrompt').value.trim();
     const postHistory = document.getElementById('creatorPostHistory').value.trim();
     const creatorNotes = document.getElementById('creatorNotes').value.trim();
+    const tagline = document.getElementById('creatorTagline').value.trim();
     const altGreetings = collectAltGreetings();
     const tags = [...creatorTagsArray];
 
@@ -3241,6 +3238,9 @@ function buildCharacterCard() {
         depth_prompt: { prompt: '', depth: 4, role: 'system' },
         group_only_greetings: [],
     };
+
+    // New cards are unlinked, so tagline lives under the 'cl' namespace; skip when empty to avoid bloating a fresh card.
+    if (tagline) extensions.cl = { tagline };
 
     // Assign gallery ID if the setting is enabled
     if (CoreAPI.getSetting('uniqueGalleryFolders')) {
@@ -3286,7 +3286,6 @@ function init() {
     reg({ id: 'creatorNotesPreview',          tier: 2, close: () => window.closeNotesPreview?.() });
     reg({ id: 'creatorSaveAsDiff',            tier: 4, close: () => closeSaveAsDiff(), visible: (el) => el.classList.contains('visible') });
     reg({ id: 'creatorImportPicker',          tier: 5, close: () => closeImportPicker?.() });
-    reg({ id: 'creatorNamePromptOverlay',     tier: 6, close: () => document.getElementById('creatorNamePromptCancel')?.click() });
     reg({ id: 'creatorModal',                 tier: 7, close: () => maybeClose?.() });
 }
 

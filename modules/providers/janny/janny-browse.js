@@ -36,7 +36,6 @@ const {
     getProviderExcludeTags,
     renderLoadingState,
     renderSkeletonGrid,
-    renderEmptyState,
 } = CoreAPI;
 
 // ========================================
@@ -409,21 +408,13 @@ async function loadCharacters(append = false) {
         renderGrid(jannyCharacters, append);
 
         if (!append && jannyCharacters.length === 0) {
-            const isMobile = window.matchMedia('(max-width: 768px)').matches;
-            if (isMobile) {
-                renderEmptyState(grid, {
-                    icon: 'fa-solid fa-ghost',
-                    title: 'No matches on JannyAI',
-                    hint: 'Try a different search term or relax your tag filters. JannyAI search is keyword-based, broad terms tend to surface more results.',
-                });
-            } else {
-                grid.innerHTML = `
-                    <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
-                        <i class="fa-solid fa-search" style="font-size: 2rem; opacity: 0.5;"></i>
-                        <p style="margin-top: 12px;">No characters found</p>
-                    </div>
-                `;
-            }
+            grid.innerHTML = `
+                <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted);">
+                    <i class="fa-solid fa-ghost" style="font-size: 2rem; opacity: 0.5;"></i>
+                    <p style="margin-top: 12px; font-weight: 600;">No matches on JannyAI</p>
+                    <p style="margin-top: 8px; font-size: 0.9em;">Try a different search term or relax your tag filters. JannyAI search is keyword-based, broad terms tend to surface more results.</p>
+                </div>
+            `;
         }
 
         debugLog('[JannyBrowse] Loaded', hits.length, 'characters, page', jannyCurrentPage, '/', totalPages);
@@ -580,7 +571,7 @@ async function fetchAndPopulateDetails(hit, token) {
             const descEl = document.getElementById('jannyCharDescription');
             if (descSection && descEl) {
                 descSection.style.display = 'block';
-                descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition — Cloudflare may be blocking the request. The character can still be imported with basic info.</em>';
+                descEl.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. Cloudflare may be blocking the request; the character can still be imported with basic info.</em>';
             }
             return;
         }
@@ -867,7 +858,7 @@ function renderTagsList(filter = '') {
         const included = jannyIncludeTags.has(tag.id);
         const stateClass = included ? 'state-include' : 'state-neutral';
         const stateIcon = included ? '<i class="fa-solid fa-plus"></i>' : '';
-        const stateTitle = included ? 'Included — click to remove' : 'Click to include';
+        const stateTitle = included ? 'Included (click to remove)' : 'Click to include';
         return `
             <div class="browse-tag-filter-item" data-tag-id="${tag.id}">
                 <button class="browse-tag-state-btn ${stateClass}" title="${stateTitle}">${stateIcon}</button>
@@ -900,7 +891,7 @@ function cycleTagState(btn, included) {
     if (included) {
         btn.classList.add('state-include');
         btn.innerHTML = '<i class="fa-solid fa-plus"></i>';
-        btn.title = 'Included — click to remove';
+        btn.title = 'Included (click to remove)';
     } else {
         btn.classList.add('state-neutral');
         btn.innerHTML = '';
@@ -1385,7 +1376,7 @@ class JannyBrowseView extends BrowseView {
                 <div id="jannyAuthorBanner" class="browse-author-banner hidden">
                     <div class="browse-author-banner-content">
                         <i class="fa-solid fa-magnifying-glass"></i>
-                        <span>Searching for <strong id="jannyAuthorBannerName">Author</strong> <span class="browse-author-banner-hint">(keyword search — may include unrelated results)</span></span>
+                        <span>Searching for <strong id="jannyAuthorBannerName">Author</strong> <span class="browse-author-banner-hint">(keyword search, may include unrelated results)</span></span>
                     </div>
                     <div class="browse-author-banner-actions">
                         <button id="jannyClearAuthorBtn" class="glass-btn icon-only" title="Clear author filter">
@@ -1448,7 +1439,7 @@ class JannyBrowseView extends BrowseView {
                     <div class="browse-char-tags" id="jannyCharTags"></div>
                 </div>
 
-                <!-- Creator's Notes (website description — may contain images) -->
+                <!-- Creator's Notes (website description, may contain images) -->
                 <div class="browse-char-section" id="jannyCharCreatorNotesSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="jannyCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes

@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy, BROWSE_PURIFY_CONFIG } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy, BROWSE_PURIFY_CONFIG, skeletonLines } from '../provider-utils.js';
 import {
     WYVERN_API_BASE,
     WYVERN_SITE_BASE,
@@ -276,12 +276,19 @@ class WyvernBrowseView extends BrowseView {
     }
 
     canLoadMore() {
-        return wyvernHasMore && !wyvernIsLoading && wyvernViewMode === 'browse';
+        if (wyvernViewMode === 'browse') return wyvernHasMore && !wyvernIsLoading;
+        if (wyvernViewMode === 'following') return wyvernFollowingHasMore && !wyvernFollowingLoading;
+        return false;
     }
 
     loadMore() {
-        wyvernCurrentPage++;
-        loadWyvernCharacters();
+        if (wyvernViewMode === 'browse') {
+            wyvernCurrentPage++;
+            loadWyvernCharacters();
+        } else if (wyvernViewMode === 'following') {
+            wyvernFollowingPage++;
+            loadWyvernFollowing(false);
+        }
     }
 
     // ── Filter Bar ──────────────────────────────────────────
@@ -544,13 +551,11 @@ class WyvernBrowseView extends BrowseView {
                 </div>
 
                 <!-- Creator's Notes -->
-                <div class="browse-char-section">
+                <div class="browse-char-section" id="wyvernCharCreatorNotesSection" style="display: none;">
                     <h3 class="browse-section-title" data-section="wyvernCharCreatorNotes" data-label="Creator's Notes" data-icon="fa-solid fa-feather-pointed" title="Click to expand">
                         <i class="fa-solid fa-feather-pointed"></i> Creator's Notes
                     </h3>
-                    <div id="wyvernCharCreatorNotes" class="scrolling-text">
-                        No description available.
-                    </div>
+                    <div id="wyvernCharCreatorNotes" class="scrolling-text"></div>
                 </div>
 
                 <!-- Definition loading indicator -->
@@ -655,6 +660,9 @@ class WyvernBrowseView extends BrowseView {
             wyvernGridRenderedCount = 0;
             wyvernIsLoading = false;
             wyvernFollowingLoading = false;
+            wyvernFollowingCharacters = [];
+            wyvernFollowingPage = 1;
+            wyvernFollowingHasMore = true;
             wyvernTagFilters = new Map();
             wyvernFilterHideOwned = false;
             wyvernFilterHidePossible = false;
@@ -1136,6 +1144,8 @@ function wyvernLogout() {
     // Drop following state so logged-out users dont see stale data.
     wyvernFollowingCharacters = [];
     wyvernFollowingLoading = false;
+    wyvernFollowingPage = 1;
+    wyvernFollowingHasMore = true;
     if (wyvernViewMode === 'following') {
         switchWyvernViewMode('browse');
         return;
@@ -1716,8 +1726,10 @@ async function loadWyvernCharacters(forceRefresh = false) {
         for (const [tag, state] of wyvernTagFilters) {
             if (state === 'exclude') autoFetchExcludeTags.push(tag);
         }
+        // Persistent excludes are user-typed so may carry any case; charTags below are lowercased before comparison.
         for (const t of getProviderExcludeTags('wyvern')) {
-            if (!autoFetchExcludeTags.includes(t)) autoFetchExcludeTags.push(t);
+            const lt = t.toLowerCase();
+            if (!autoFetchExcludeTags.includes(lt)) autoFetchExcludeTags.push(lt);
         }
         const hasClientFilters = wyvernFilterHideOwned || wyvernFilterHidePossible || autoFetchExcludeTags.length > 0 || wyvernFilterHasLorebook || wyvernFilterHasAltGreetings;
 
@@ -1837,6 +1849,7 @@ async function switchWyvernViewMode(mode) {
 // ========================================
 
 let wyvernFollowingPage = 1;
+let wyvernFollowingHasMore = true;
 const FOLLOWING_PAGE_SIZE = 30;
 
 async function loadWyvernFollowing(forceRefresh = false) {
@@ -1853,9 +1866,11 @@ async function loadWyvernFollowing(forceRefresh = false) {
     if (forceRefresh) {
         wyvernFollowingCharacters = [];
         wyvernFollowingPage = 1;
+        wyvernFollowingHasMore = true;
     }
 
-    if (grid) {
+    // Skeleton only on the first page; subsequent pages append.
+    if (grid && wyvernFollowingPage === 1) {
         renderSkeletonGrid(grid);
     }
 
@@ -1882,9 +1897,10 @@ async function loadWyvernFollowing(forceRefresh = false) {
             throw e;
         }
 
-        debugLog('[WyvernFollowing] Page', wyvernFollowingPage, '— items:', feedData.items?.length, 'total:', feedData.total, 'hasMore:', feedData.hasMore);
+        debugLog('[WyvernFollowing] Page', wyvernFollowingPage, ', items:', feedData.items?.length, 'total:', feedData.total, 'hasMore:', feedData.hasMore);
 
         const items = feedData.items || [];
+        wyvernFollowingHasMore = feedData.hasMore === true && items.length > 0;
 
         if (items.length === 0 && wyvernFollowingCharacters.length === 0) {
             renderWyvernFollowingEmpty('empty');
@@ -2229,7 +2245,8 @@ function renderWyvernGrid(appendOnly = false) {
         if (state === 'exclude') excludeTags.push(tag);
     }
     for (const t of getProviderExcludeTags('wyvern')) {
-        if (!excludeTags.includes(t)) excludeTags.push(t);
+        const lt = t.toLowerCase();
+        if (!excludeTags.includes(lt)) excludeTags.push(lt);
     }
     if (excludeTags.length > 0) {
         displayCharacters = displayCharacters.filter(c => {
@@ -2410,7 +2427,19 @@ async function openWyvernCharPreview(char) {
     const taglineSection = document.getElementById('wyvernCharTaglineSection');
     const taglineEl = document.getElementById('wyvernCharTagline');
     const openInBrowserBtn = document.getElementById('wyvernOpenInBrowserBtn');
+    const creatorNotesSection = document.getElementById('wyvernCharCreatorNotesSection');
     const creatorNotesEl = document.getElementById('wyvernCharCreatorNotes');
+    const setWyvernCreatorNotes = (raw) => {
+        const notes = (raw || '').trim();
+        if (notes) {
+            if (creatorNotesSection) creatorNotesSection.style.display = 'block';
+            renderCreatorNotesSecure(notes, char.name, creatorNotesEl);
+        } else {
+            if (creatorNotesSection) creatorNotesSection.style.display = 'none';
+            cleanupCreatorNotesContainer(creatorNotesEl);
+            if (creatorNotesEl) creatorNotesEl.innerHTML = '';
+        }
+    };
     const greetingsStat = document.getElementById('wyvernCharGreetingsStat');
     const greetingsCount = document.getElementById('wyvernCharGreetingsCount');
     const descSection = document.getElementById('wyvernCharDescriptionSection');
@@ -2471,8 +2500,18 @@ async function openWyvernCharPreview(char) {
     viewsEl.textContent = formatNumber(stats.views);
     dateEl.textContent = char.created_at ? new Date(char.created_at).toLocaleDateString() : 'Unknown';
 
-    // Creator's Notes
-    renderCreatorNotesSecure(char.creator_notes || char.tagline || 'No description available.', char.name, creatorNotesEl);
+    // Assess from the slim data already present: skeleton only when notes are likely (creator_notes/
+    // tagline non-empty), else start hidden so empty cards dont flash a skeleton then collapse.
+    if (creatorNotesSection && creatorNotesEl) {
+        cleanupCreatorNotesContainer(creatorNotesEl);
+        if ((char.creator_notes || char.tagline || '').trim()) {
+            creatorNotesSection.style.display = 'block';
+            creatorNotesEl.innerHTML = skeletonLines(3);
+        } else {
+            creatorNotesSection.style.display = 'none';
+            creatorNotesEl.innerHTML = '';
+        }
+    }
 
     // Tagline
     if (char.tagline && getSetting('showWyvernTagline') !== false) {
@@ -2491,19 +2530,19 @@ async function openWyvernCharPreview(char) {
         greetingsStat.style.display = 'none';
     }
 
-    // Reset definition sections - show loading indicator until detail fetch completes
+    // defLoading kept around for the fetch-failure message path below; skeletons are the loading indicator otherwise.
     const defLoading = document.getElementById('wyvernCharDefinitionLoading');
-    descSection.style.display = 'none';
-    personalitySection.style.display = 'none';
-    scenarioSection.style.display = 'none';
-    examplesSection.style.display = 'none';
-    firstMsgSection.style.display = 'none';
+    if (defLoading) defLoading.style.display = 'none';
+    descSection.style.display = 'block'; descEl.innerHTML = skeletonLines(3);
+    personalitySection.style.display = 'block'; personalityEl.innerHTML = skeletonLines(2);
+    scenarioSection.style.display = 'block'; scenarioEl.innerHTML = skeletonLines(2);
+    examplesSection.style.display = 'block'; examplesEl.innerHTML = skeletonLines(3);
+    firstMsgSection.style.display = 'block'; firstMsgEl.innerHTML = skeletonLines(4);
     if (altGreetingsSection) altGreetingsSection.style.display = 'none';
     if (altGreetingsEl) altGreetingsEl.innerHTML = '';
     if (gallerySection) gallerySection.style.display = 'none';
     if (galleryGrid) galleryGrid.innerHTML = '';
     if (galleryStat) galleryStat.style.display = 'none';
-    if (defLoading) defLoading.style.display = 'block';
 
     // Import button state
     const downloadBtn = document.getElementById('wyvernDownloadBtn');
@@ -2576,15 +2615,14 @@ async function openWyvernCharPreview(char) {
 
     renderAltGreetings(char.alternate_greetings || []);
 
-    const applyDetailData = (node) => {
+    const applyDetailData = (node, opts = {}) => {
         if (!node) return;
 
-        // Clear the loading indicator
         if (defLoading) defLoading.style.display = 'none';
 
-        // Creator notes from detail if richer
-        if (node.creator_notes && node.creator_notes !== char.creator_notes) {
-            renderCreatorNotesSecure(node.creator_notes, char.name, creatorNotesEl);
+        // Settled data only; the inline-data call passes false to avoid destroy+recreate when fetch follows.
+        if (opts.renderCreatorNotes !== false) {
+            setWyvernCreatorNotes(node.creator_notes || char.creator_notes || char.tagline);
         }
 
         // RAF defer so safePurify doesnt block the modal-open paint frame.
@@ -2648,7 +2686,7 @@ async function openWyvernCharPreview(char) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${count})`;
                 galleryGrid.innerHTML = node.galleryImages.map(img =>
-                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.title || '')}" title="${escapeHtml(img.title || 'Gallery image')}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')ist.add('load-failed')"></div>`
+                    `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(img.url)}" alt="${escapeHtml(img.title || '')}" title="${escapeHtml(img.title || 'Gallery image')}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`
                 ).join('');
             }
         } else if (node.galleryImages !== undefined) {
@@ -2675,7 +2713,8 @@ async function openWyvernCharPreview(char) {
             alternate_greetings: char.alternate_greetings,
             galleryImages,
         };
-        applyDetailData(inlineDetail);
+        // Defer the iframe until cache/fetch settles; avoids destroy+recreate flash.
+        applyDetailData(inlineDetail, { renderCreatorNotes: false });
     }
 
     // Check detail cache - if cached, apply immediately (replaces spinner)
@@ -2723,12 +2762,26 @@ async function openWyvernCharPreview(char) {
             } else {
                 debugLog('[Wyvern] Could not fetch detailed character info:', e.message);
                 if (wyvernSelectedChar === char) {
-                    if (defLoading) defLoading.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. The character can still be imported with basic info.</em>';
+                    // Fall back so the creator-notes skeleton doesnt sit forever.
+                    setWyvernCreatorNotes(char.creator_notes || char.tagline);
+                    // No def data arriving: collapse skeletons.
+                    descSection.style.display = 'none';
+                    personalitySection.style.display = 'none';
+                    scenarioSection.style.display = 'none';
+                    examplesSection.style.display = 'none';
+                    firstMsgSection.style.display = 'none';
+                    if (defLoading) {
+                        defLoading.innerHTML = '<em style="color: var(--text-secondary, #888)">Could not load character definition. The character can still be imported with basic info.</em>';
+                        defLoading.style.display = 'block';
+                    }
                     const gs = document.getElementById('wyvernCharGallerySection');
                     if (gs) gs.style.display = 'none';
                 }
             }
         }
+    } else if (!cachedDetail) {
+        // No fetch path: resolve from the slim data.
+        setWyvernCreatorNotes(char.creator_notes || char.tagline);
     }
 }
 
