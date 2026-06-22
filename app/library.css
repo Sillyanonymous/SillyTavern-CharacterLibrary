@@ -4737,6 +4737,11 @@ input[type="search"]::-webkit-search-results-decoration {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
+    /* iOS Safari paints composited layers (the card grid animates transforms and
+       uses backdrop-filter) above non-composited siblings regardless of z-index,
+       which left these menus stuck behind the cards. Promote the menu to its own
+       compositing layer so its z-index is honored. translateZ(0) is visually inert. */
+    transform: translateZ(0);
 }
 
 .dropdown-menu.hidden {
