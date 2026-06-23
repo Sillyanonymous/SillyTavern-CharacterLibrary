@@ -180,15 +180,12 @@ function resolveCharactersDir() {
     return null;
 }
 
-// Per-request directory resolution. SillyTavern attaches the logged-in user's
-// directories to every request, so thumbnails must be served from the dir of
-// the user actually making the request - not a single dir frozen at init.
-// The init-time globals (_imagesDir / _charactersDir) only gate "is the feature
-// available at all" and act as a fallback when a request carries no user context.
-// Resolve to absolute: ST's per-user dirs derive from DATA_ROOT, which can be a
-// relative path (eg. ./data). The route's traversal guard compares against
-// resolve()'d (absolute) paths, so a relative dir here would always fail the
-// startsWith check and 403. resolve() is a no-op on already-absolute paths.
+// Serve thumbnails from the requesting user's own dir (ST provides it on every
+// request) instead of one dir frozen at init. The init-time globals are just a
+// fallback for requests with no user context.
+// resolve() to absolute: DATA_ROOT may be relative (eg. ./data), and the routes'
+// traversal guard compares against absolute paths - a relative dir always fails
+// the startsWith check and 403s. No-op when already absolute.
 function imagesDirForReq(req) {
     const dir = req.user?.directories?.userImages || _imagesDir;
     return dir ? resolve(dir) : null;
