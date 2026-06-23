@@ -117,11 +117,9 @@ async function peekImageDimensions(filePath) {
     }
 }
 
-let _cacheDir = null;
 let _Jimp = null;
 let _imagesDir = null;
 let _charactersDir = null;
-let _avatarThumbDir = null;
 let _thumbsReady = false;
 let _thumbActive = 0;
 let _thumbQueue = [];
@@ -182,6 +180,28 @@ function resolveCharactersDir() {
     return null;
 }
 
+// Per-request directory resolution. SillyTavern attaches the logged-in user's
+// directories to every request, so thumbnails must be served from the dir of
+// the user actually making the request - not a single dir frozen at init.
+// The init-time globals (_imagesDir / _charactersDir) only gate "is the feature
+// available at all" and act as a fallback when a request carries no user context.
+// Resolve to absolute: ST's per-user dirs derive from DATA_ROOT, which can be a
+// relative path (eg. ./data). The route's traversal guard compares against
+// resolve()'d (absolute) paths, so a relative dir here would always fail the
+// startsWith check and 403. resolve() is a no-op on already-absolute paths.
+function imagesDirForReq(req) {
+    const dir = req.user?.directories?.userImages || _imagesDir;
+    return dir ? resolve(dir) : null;
+}
+function charactersDirForReq(req) {
+    const dir = req.user?.directories?.characters || _charactersDir;
+    return dir ? resolve(dir) : null;
+}
+function avatarThumbDirForReq(req) {
+    const charactersDir = charactersDirForReq(req);
+    return charactersDir ? join(charactersDir, '..', 'cl_avatar_thumbs') : null;
+}
+
 async function initImageLib() {
     const stModules = join(process.cwd(), 'node_modules');
     const stImport = async (pkg) => {
@@ -222,6 +242,11 @@ function registerThumbnailRoutes(router) {
         const { folder, file } = req.params;
         const size = Math.min(Math.max(parseInt(req.query.s) || 384, 64), THUMB_MAX_SIZE);
 
+        const imagesDir = imagesDirForReq(req);
+        if (!imagesDir) {
+            return res.status(503).json({ error: 'Thumbnails not available' });
+        }
+
         // Block path separators only; benign filenames can legitimately contain ".." (eg. ellipsis).
         // The resolve + startsWith check below catches any traversal that survives this.
         if (!folder || !file
@@ -234,8 +259,8 @@ function registerThumbnailRoutes(router) {
             return res.status(400).json({ error: 'Unsupported file type' });
         }
 
-        const originalPath = resolve(_imagesDir, folder, file);
-        if (!originalPath.startsWith(_imagesDir + sep)) {
+        const originalPath = resolve(imagesDir, folder, file);
+        if (!originalPath.startsWith(imagesDir + sep)) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
@@ -258,7 +283,7 @@ function registerThumbnailRoutes(router) {
             return res.status(413).json({ error: 'Image dimensions too large' });
         }
 
-        const cacheFolder = join(_cacheDir, folder);
+        const cacheFolder = join(imagesDir, '..', 'cl_thumbs', folder);
         const cachePath = join(cacheFolder, `${file}_${size}.jpg`);
 
         try {
@@ -291,7 +316,8 @@ function registerThumbnailRoutes(router) {
     });
 
     router.post('/gallery-thumb-cleanup/:folder', (req, res) => {
-        if (!_cacheDir) {
+        const imagesDir = imagesDirForReq(req);
+        if (!imagesDir) {
             return res.status(503).json({ error: 'Thumbnails not available' });
         }
 
@@ -300,8 +326,9 @@ function registerThumbnailRoutes(router) {
             return res.status(400).json({ error: 'Invalid folder' });
         }
 
-        const cacheFolder = resolve(_cacheDir, folder);
-        if (!cacheFolder.startsWith(_cacheDir + sep)) {
+        const cacheDir = join(imagesDir, '..', 'cl_thumbs');
+        const cacheFolder = resolve(cacheDir, folder);
+        if (!cacheFolder.startsWith(cacheDir + sep)) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
@@ -324,7 +351,8 @@ function registerThumbnailRoutes(router) {
     // for retina-DPR mobile grids; we serve a larger one (default 512w) with
     // our own jimp pipeline + on-disk cache.
     router.get('/avatar-thumb/:file', async (req, res) => {
-        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+        const charactersDir = charactersDirForReq(req);
+        if (!_Jimp || !charactersDir) {
             return res.status(503).json({ error: 'Avatar thumbnails not available' });
         }
 
@@ -338,8 +366,8 @@ function registerThumbnailRoutes(router) {
             return res.status(400).json({ error: 'Unsupported file type' });
         }
 
-        const originalPath = resolve(_charactersDir, file);
-        if (!originalPath.startsWith(_charactersDir + sep)) {
+        const originalPath = resolve(charactersDir, file);
+        if (!originalPath.startsWith(charactersDir + sep)) {
             return res.status(403).json({ error: 'Access denied' });
         }
 
@@ -354,7 +382,8 @@ function registerThumbnailRoutes(router) {
             return res.status(413).json({ error: 'Image too large' });
         }
 
-        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+        const avatarThumbDir = avatarThumbDirForReq(req);
+        const cachePath = join(avatarThumbDir, `${file}_${size}.jpg`);
 
         try {
             const cacheStat = await stat(cachePath);
@@ -373,7 +402,7 @@ function registerThumbnailRoutes(router) {
             const buffer = await image.getBuffer('image/jpeg', { quality: THUMB_QUALITY, jpegColorSpace: 'ycbcr' });
             _thumbRelease();
 
-            mkdirSync(_avatarThumbDir, { recursive: true });
+            mkdirSync(avatarThumbDir, { recursive: true });
             writeFile(cachePath, buffer).catch(() => {});
 
             res.set('Content-Type', 'image/jpeg');
@@ -387,16 +416,17 @@ function registerThumbnailRoutes(router) {
     });
 
     router.get('/avatar-thumb-stats', async (req, res) => {
-        if (!_avatarThumbDir) {
+        const avatarThumbDir = avatarThumbDirForReq(req);
+        if (!avatarThumbDir) {
             return res.json({ count: 0, bytes: 0, available: false });
         }
         try {
-            if (!existsSync(_avatarThumbDir)) return res.json({ count: 0, bytes: 0, available: true });
-            const entries = readdirSync(_avatarThumbDir);
+            if (!existsSync(avatarThumbDir)) return res.json({ count: 0, bytes: 0, available: true });
+            const entries = readdirSync(avatarThumbDir);
             let bytes = 0;
             for (const name of entries) {
                 try {
-                    const s = await stat(join(_avatarThumbDir, name));
+                    const s = await stat(join(avatarThumbDir, name));
                     if (s.isFile()) bytes += s.size;
                 } catch { /* skip */ }
             }
@@ -408,14 +438,15 @@ function registerThumbnailRoutes(router) {
     });
 
     router.post('/avatar-thumb-cleanup', (req, res) => {
-        if (!_avatarThumbDir) {
+        const avatarThumbDir = avatarThumbDirForReq(req);
+        if (!avatarThumbDir) {
             return res.status(503).json({ error: 'Avatar thumbnails not available' });
         }
         try {
             let deleted = 0;
-            if (existsSync(_avatarThumbDir)) {
-                deleted = readdirSync(_avatarThumbDir).length;
-                rmSync(_avatarThumbDir, { recursive: true, force: true });
+            if (existsSync(avatarThumbDir)) {
+                deleted = readdirSync(avatarThumbDir).length;
+                rmSync(avatarThumbDir, { recursive: true, force: true });
                 console.log(`[cl-helper] Purged avatar thumb cache (${deleted} files)`);
             }
             res.json({ ok: true, deleted });
@@ -429,7 +460,9 @@ function registerThumbnailRoutes(router) {
     // for progress. Sequential + setImmediate yield between each thumb keeps ST's
     // event loop responsive (jimp's PNG decode is synchronous on the main thread).
     router.post('/avatar-thumb-populate', async (req, res) => {
-        if (!_Jimp || !_charactersDir || !_avatarThumbDir) {
+        const charactersDir = charactersDirForReq(req);
+        const avatarThumbDir = avatarThumbDirForReq(req);
+        if (!_Jimp || !charactersDir || !avatarThumbDir) {
             return res.status(503).json({ error: 'Avatar thumbnails not available' });
         }
         if (_populateJob && _populateJob.running) {
@@ -439,13 +472,13 @@ function registerThumbnailRoutes(router) {
 
         let files;
         try {
-            files = readdirSync(_charactersDir).filter(f => /\.png$/i.test(f));
+            files = readdirSync(charactersDir).filter(f => /\.png$/i.test(f));
         } catch (err) {
             return res.status(500).json({ error: 'Failed to read characters directory' });
         }
 
-        mkdirSync(_avatarThumbDir, { recursive: true });
-        runAvatarPopulateJob(size, files).catch(err => {
+        mkdirSync(avatarThumbDir, { recursive: true });
+        runAvatarPopulateJob(size, files, charactersDir, avatarThumbDir).catch(err => {
             console.error('[cl-helper] populate job crashed:', err.message);
             if (_populateJob) { _populateJob.running = false; _populateJob.finishedAt = Date.now(); }
         });
@@ -459,7 +492,7 @@ function registerThumbnailRoutes(router) {
 
 let _populateJob = null;
 
-async function runAvatarPopulateJob(size, files) {
+async function runAvatarPopulateJob(size, files, charactersDir, avatarThumbDir) {
     _populateJob = {
         running: true,
         total: files.length,
@@ -473,8 +506,8 @@ async function runAvatarPopulateJob(size, files) {
     };
 
     for (const file of files) {
-        const originalPath = resolve(_charactersDir, file);
-        const cachePath = join(_avatarThumbDir, `${file}_${size}.jpg`);
+        const originalPath = resolve(charactersDir, file);
+        const cachePath = join(avatarThumbDir, `${file}_${size}.jpg`);
 
         try {
             const origStat = await stat(originalPath);
@@ -1867,7 +1900,6 @@ export async function init(router) {
     _imagesDir = resolveImagesDir();
     _charactersDir = resolveCharactersDir();
     if (_imagesDir) {
-        _cacheDir = join(_imagesDir, '..', 'cl_thumbs');
         const ok = await initImageLib();
         _thumbsReady = ok;
         if (ok) {
@@ -1879,7 +1911,6 @@ export async function init(router) {
         console.log('[cl-helper] Gallery thumbnails disabled (images directory not found)');
     }
     if (_charactersDir && _thumbsReady) {
-        _avatarThumbDir = join(_charactersDir, '..', 'cl_avatar_thumbs');
         console.log(`[cl-helper] Avatar thumbnails enabled (characters: ${_charactersDir})`);
     } else if (!_charactersDir) {
         console.log('[cl-helper] Avatar thumbnails disabled (characters directory not found)');
