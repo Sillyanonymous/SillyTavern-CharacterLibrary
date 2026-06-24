@@ -159,18 +159,12 @@
 
 }
 
-/* Curated extras (sort + freshness toggle) claim topbar space only while shown, so they
+/* The curated sub-sort select claims topbar space only while shown, so it
    display:none when hidden rather than the shared visibility-hide, which would otherwise
-   reserve their width in every other sort mode. */
+   reserve its width in every other sort mode. */
 #botbooruCuratedSort.browse-filter-hidden,
-[data-select-id="botbooruCuratedSort"].browse-filter-hidden,
-#botbooruCuratedFreshBtn.browse-filter-hidden {
+[data-select-id="botbooruCuratedSort"].browse-filter-hidden {
     display: none;
-}
-
-#botbooruCuratedFreshBtn.active {
-    color: var(--accent);
-    border-color: rgba(var(--accent-rgb), 0.5);
 }
 
 /* NSFL reads distinctly from NSFW: inverted treatment on the same badge

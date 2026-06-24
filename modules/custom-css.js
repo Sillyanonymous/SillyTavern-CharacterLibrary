@@ -281,11 +281,10 @@ function buildModalHTML() {
 <pre>:root {
     --accent: #ff6b9d;
     --accent-rgb: 255, 107, 157;
-    --cl-accent-rgb: 255, 107, 157;
     --bg-primary: #1a1a2e;
     --space-md: 12px;
 }</pre>
-                        <p class="custom-css-tip-note">For a full accent retheme, set both <code>--accent</code> (with its <code>--accent-rgb</code>) and <code>--cl-accent-rgb</code>. They drive parallel paths: <code>--accent</code> powers most app surfaces, <code>--cl-accent-rgb</code> powers the module dialog button family.</p>
+                        <p class="custom-css-tip-note">Setting <code>--accent</code> (with its <code>--accent-rgb</code>) rethemes the whole app, module dialogs included. <code>--accent-hover</code> is a separate hardcoded token; override it too if you want the hover state to match.</p>
 
                         <p><strong>Surface backgrounds.</strong> Five different tokens, each for a different layer:</p>
                         <ul class="custom-css-token-list">

@@ -129,7 +129,7 @@
 }
 
 .bt-suggestion-item strong {
-    color: var(--cl-accent);
+    color: var(--accent);
 }
 
 /* =========================================================

@@ -28,14 +28,11 @@ COLOR TOKENS (override on :root to retheme the whole app):
   --card-bg              Background for character grid cards (rgba(40, 40, 40, 0.4)).
   --cl-favorite-gold     Gold accent for favorite indicators and the favorite-button hover treatment (#ffd700). Has a matching --cl-favorite-gold-rgb (255, 215, 0) for rgba() tints.
 
-PARALLEL --cl-* TOKEN FAMILY (separate chain that powers module dialogs):
-  --cl-accent-rgb        Comma-separated RGB. The "source" of this chain.
-  --cl-accent            Derived: rgb(var(--cl-accent-rgb)). Override --cl-accent-rgb and this updates.
-  --cl-accent-hover      Derived: color-mix(in srgb, var(--cl-accent), white 20%). Auto-updates from --cl-accent. Do NOT hand-pick a hover color.
+--cl-* MODULE-DIALOG TOKEN FAMILY (surface + text only; the accent is unified into the core --accent chain, there is no separate --cl-accent anymore):
   --cl-border            General-purpose border token for module dialogs. Used for internal dividers, panel outlines, dashed borders across batch-tagging, card-updates, character-versions, context-menu, playlists. NOT used by .cl-btn: the base button is borderless, and the DEFAULT glass button style adds its own hardcoded 1px rgba(255,255,255,0.08) border that follows neither this token nor the accent (target :root[data-btn-style="glass"] .cl-btn to restyle it).
   --cl-text-primary      Default value resolves to #e0e0e0. (The declaration references SmartTheme but CL runs in its own browser tab where those vars are never defined, so the fallback always wins.)
   --cl-text-secondary    Default value resolves to #a0a0a0. Same situation.
-  IMPORTANT for global accent retheme: override BOTH --accent / --accent-rgb AND --cl-accent-rgb. --accent-rgb drives --accent-glow. --cl-accent-rgb drives --cl-accent and --cl-accent-hover. Same hex value in both chains is the usual pattern. Setting --accent without --cl-accent-rgb leaves the .cl-btn family (used in every module dialog) on the default blue.
+  Global accent retheme: override --accent / --accent-rgb only. Module dialogs (.cl-btn, card-updates, playlists, character-versions, context-menu, batch-tagging) read the core --accent / --accent-rgb / --accent-hover directly now, so they follow automatically. --accent-rgb also drives --accent-glow. There is no separate --cl-accent chain to override anymore.
   CAVEAT: --text-primary and --cl-text-primary are INDEPENDENT vars. Overriding --text-primary does NOT change text inside module dialogs. To re-color module-dialog text, override --cl-text-primary directly.
 
 MODAL BACKGROUND VARS:
@@ -157,6 +154,7 @@ TOUCH + MOBILE CHROME:
   --chrome-h-mobile (56px)    Mobile modal header height + bottom nav height. Apply as min-height on cl-modal-header / confirm-modal-header / mobile-bottom-nav-tab on mobile.
   --back-arrow-zone (56px)    Header padding-left reserved for the absolutely-positioned mobile back-arrow.
   --safe-bottom               env(safe-area-inset-bottom, 0px) alias. Use in padding-bottom + calc() expressions on bottom-stuck mobile elements (sticky footers, bottom sheets, FABs).
+  --ease-drawer               cubic-bezier(0.32, 0.72, 0, 1). The canonical bottom-sheet/drawer slide easing, shared by every mobile sheet/drawer (settings/menu/selector/context, cl-modal-drawer pickers, filter popups). Use as the timing-function in transition/animation on any bottom drawer so its motion matches; pair with an explicit duration (0.28s opens, 0.22s quick-dismiss). Retarget it to restyle all drawer motion at once.
 `.trim();
 
 const CATALOGUE_COMPONENTS = `
@@ -177,7 +175,7 @@ Layout / Chrome (defined in library.css; no !important needed):
   .modal-glass           Full-viewport detail panel (character detail, character creator, chat preview). NOT gallery viewer (that's .gv-modal).
   .modal-sidebar         Right-side info pane inside the character detail modal.
   .tab-pane              Tab content panes inside the character detail modal. Use .tab-pane.active for the visible one.
-  .char-modal-nav        Prev/Next chevron buttons on the sides of the character detail modal (desktop only; mobile uses swipe). Floating glass capsules: blurred backdrop, idle opacity 0.75, accent-gradient glow + slight scale + directional icon nudge on hover, press feedback on :active. Variants: .char-modal-nav-prev, .char-modal-nav-next. Icon glyph is a ::before pseudo using Font Awesome 6 Free. Component-scoped vars for per-component theming (override on .char-modal-nav itself): --cmn-bg (default rgba(0,0,0,0.4)), --cmn-bg-hover (accent-to-accent-secondary gradient, FOLLOWS accent retheming; accepts any background value), --cmn-border (1px solid rgba(255,255,255,0.12)), --cmn-color (rgba(255,255,255,0.85)), --cmn-width (44px), --cmn-height (96px), --cmn-side-offset (1%, distance from viewport edge), --cmn-icon-size (var(--font-xl)), --cmn-icon-prev ('\\f053' = fa-chevron-left, override with any FA6 unicode), --cmn-icon-next ('\\f054' = fa-chevron-right), --cmn-disabled-opacity (0.3). Hover border/shadow also use --accent-rgb directly (follow retheming). Hidden on mobile via library-mobile.css; gated on the enableCharDetailNav setting.
+  .char-modal-nav        Prev/Next chevron buttons on the sides of the character detail modal (desktop only; mobile uses swipe). Mirrors the gallery viewer's .gv-nav: a plain dark capsule (rgba(0,0,0,0.5)) with a white chevron, flush to the modal edge and half-rounded toward center, background lightens on hover. Not accent-coupled. Variants: .char-modal-nav-prev, .char-modal-nav-next. Icon glyph is a ::before pseudo using Font Awesome 6 Free. Component-scoped vars for per-component theming (override on .char-modal-nav itself): --cmn-bg (rgba(0,0,0,0.5)), --cmn-bg-hover (rgba(255,255,255,0.1)), --cmn-border (1px solid rgba(255,255,255,0.1)), --cmn-color (#fff), --cmn-width (50px), --cmn-height (80px), --cmn-icon-size (var(--font-2xl)), --cmn-icon-prev ('\\f053' = fa-chevron-left, override with any FA6 unicode), --cmn-icon-next ('\\f054' = fa-chevron-right), --cmn-disabled-opacity (0.3). Hidden on mobile via library-mobile.css; gated on the enableCharDetailNav setting.
   .toast / .toast-container  Toast notifications. Variants: .toast.success, .toast.error, .toast.warning, .toast.info.
   .toast-icon            Icon inside a toast.
   .close-btn             Generic X-close button on modals.
@@ -310,8 +308,8 @@ Mobile chrome (defined in library-mobile.css and modules/chats.css; mobile viewp
   .mobile-more-actions-menu     Popover menu spawned by .mobile-more-actions-btn. Contains .mobile-more-actions-item rows mirroring the provider's action buttons.
   .mobile-quick-import-btn      Icon-only Download/Import/Extract square that mirrors the provider's primary action button state. Color-coded via the data-state attribute: data-state="primary" (accent), data-state="warning" (--cl-warning-bright, possible-match), data-state="secondary" (muted, in-library).
   .mobile-provider-quick-switch Topbar provider-switch icon button on the Online view (small icon next to the view tabs).
-  .mobile-ctx-sheet / .mobile-ctx-scrim   Bottom-sheet context menu (right-click / long-press on cards). Visible state adds .visible.
-  .mobile-sheet-overlay / .mobile-sheet   Generic mobile bottom sheet shell (used by Filters / More sheets and the provider-switch bottom sheet). Open state: .mobile-sheet.open.
+  .mobile-sheet-overlay / .mobile-sheet   THE canonical mobile bottom-sheet shell (slide-up, drag handle, scrim). Used by Settings/Filters, More menu, provider-switch, the <select> picker, confirm sheets AND the card context menu (long-press). Open state: .mobile-sheet.open. Rows: .mobile-sheet-item; cloned context-menu rows use .cl-context-menu-item inside it.
+  .mobile-settings-select       Full-width button chip inside the mobile settings sheet's Sort By section; opens the selector drawer for the real <select> it mirrors. Children: .mobile-settings-select-text (current value, ellipsised) + .mobile-settings-select-arrow (chevron). COUPLING GAP: its background is a HARDCODED rgba(255,255,255,0.08), NOT bound to the accent, so an accent retheme leaves it neutral; retarget .mobile-settings-select background explicitly to follow accent.
   .mobile-avatar-viewer         Tap-on-avatar quick fullscreen image viewer.
   .mobile-pull-refresh-indicator Pull-to-refresh affordance attached to .gallery-content; modifiers: .ready, .refreshing.
   .char-card-swipe-chip         Swipe-action chip rendered on a card during left/right swipe. .char-card-swipe-chip.right is the favorite (gold) chip; .char-card-swipe-chip.left is the destructive (red) chip. .armed state activates on threshold crossing.
@@ -340,7 +338,6 @@ EXAMPLE 1 (GLOBAL, request: "synthwave pink theme"):
     --accent: #ff2e93;
     --accent-rgb: 255, 46, 147;
     --accent-hover: #ff5cab;
-    --cl-accent-rgb: 255, 46, 147;
     --accent-secondary: #00f0ff;
     --accent-secondary-rgb: 0, 240, 255;
     --bg-primary: #0a0014;
@@ -354,7 +351,7 @@ body {
     background: radial-gradient(ellipse at top, #2a0a4e 0%, #0a0014 70%) fixed;
 }
 \`\`\`
-Pink accent on deep purple, cyan secondary. --cl-accent-rgb overrides propagate to --cl-accent and --cl-accent-hover automatically (both are computed). --accent-hover is hardcoded so it needs an explicit override. All three modal-background vars overridden so card-update + settings + module dialogs match. Text in module dialogs reads from --cl-text-primary (independent of --text-primary); override that var explicitly if a non-default text color is wanted there too.
+Pink accent on deep purple, cyan secondary. --accent-hover is hardcoded (not derived from --accent-rgb), so it needs its own override alongside --accent / --accent-rgb. All three modal-background vars overridden so card-update + settings + module dialogs match. Text in module dialogs reads from --cl-text-primary (independent of --text-primary); override that var explicitly if a non-default text color is wanted there too.
 
 EXAMPLE 2 (request: "make character cards more rounded and bigger"):
 \`\`\`css
@@ -429,7 +426,7 @@ CSS RULES:
 
 2. When changing the modal background (global theme only), override --modal-bg AND --bg-secondary AND --cl-glass-bg together. Three flavors of modal read from these three independent vars.
 
-3. For a global accent retheme, override BOTH --accent / --accent-rgb AND --cl-accent / --cl-accent-rgb. The two chains are independent (see PARALLEL --cl-* TOKEN FAMILY in CATALOGUE_TOKENS).
+3. For a global accent retheme, override --accent / --accent-rgb (and --accent-hover, which is hardcoded). The module-dialog button family and all module CSS read the core --accent chain directly now, so it carries through automatically. The --cl-* family that remains is surface/text only (see CATALOGUE_TOKENS).
 
 4. Use rgba() and the *-rgb tokens (e.g. rgba(var(--accent-rgb), 0.3)) for translucent effects tied to the active theme. For one-off scoped colors that aren't theme-tied, raw rgba is fine.
 
@@ -439,14 +436,13 @@ CSS RULES:
 
 KNOWN GOTCHAS (avoid these failure modes):
 
-1. The --cl-* parallel token family is INDEPENDENT from the main tokens. For "make my whole app pink", override BOTH chains together:
+1. Global accent retheme is a single chain. Override --accent + --accent-rgb (and --accent-hover, which is hardcoded, not derived):
      :root {
          --accent: #ff2e93;
          --accent-rgb: 255, 46, 147;
          --accent-hover: #ff5cab;
-         --cl-accent-rgb: 255, 46, 147;
      }
-   --cl-accent and --cl-accent-hover are derived from --cl-accent-rgb (via rgb() and color-mix), so the one --cl-accent-rgb override propagates. --accent-hover is hardcoded (not derived) so it needs its own override. The .cl-btn family (used in every module dialog), .cl-modal-content chrome, and the card-update / batch-tagging / playlists module CSS all read from --cl-accent. Module-specific selectors inside custom-css and css-assistant read from --accent. The two chains coexist; override only one and roughly half the app stays blue.
+   Module dialogs (.cl-btn, .cl-modal-content chrome, card-updates / batch-tagging / playlists / character-versions / context-menu) all read the core --accent / --accent-rgb / --accent-hover directly, so this carries through the whole app. The old separate --cl-accent chain was removed; there is no second chain to override.
 
 2. Buttons get their visual identity from --accent (background, focus ring, glow). The --accent-glow token is computed from --accent-rgb at 30% alpha, so changing --accent-rgb automatically updates glows. Don't add direct rules like ".glass-btn { border: 1px solid ... }" for a global retheme; they stack messily with the built-in hover/focus styles. Direct rules are fine when you want a behavior tokens can't produce (e.g. a neon outer glow only on hover).
 

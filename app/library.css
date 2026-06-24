@@ -92,6 +92,7 @@
     --chrome-h-mobile: 56px;          /* mobile modal headers + bottom nav */
     --back-arrow-zone: 56px;          /* header padding-left reserved for the back-arrow */
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);   /* canonical bottom-sheet/drawer slide easing */
 
     /* Font size for mobile text fields. Compact everywhere except iOS, which auto-zooms the page
        on focus below 16px. The html.cl-ios override (set at boot) bumps it to 16px there. Consumed
@@ -131,14 +132,14 @@ body.modal-size-small .cl-modal-content.provider-link-modal-content { max-width:
 body.modal-size-small .cl-modal-content.gallery-info-modal-content { max-width: 840px; max-height: 68vh; }
 body.modal-size-small .confirm-modal-content { max-width: 480px; max-height: 64vh; }
 body.modal-size-small .cl-modal-content.recommender-modal-content { max-width: 544px; max-height: 76vh; }
-body.modal-size-small #disableGalleryFoldersModal .confirm-modal-content { max-width: 400px; }
+body.modal-size-small #disableGalleryFoldersModal .cl-modal-content { max-width: 400px; }
 body.modal-size-small .cl-modal-content.settings-modal-content { max-width: 440px; }
 body.modal-size-small .cl-modal-content.settings-with-sidebar { width: 680px; max-width: 95vw; height: min(560px, 72vh); max-height: 72vh; }
 body.modal-size-small .cl-modal-content.bulk-auto-link-modal-content { max-width: 640px; max-height: 68vh; }
 body.modal-size-small .cl-modal-content.bulk-localize-modal-content { max-width: 440px; }
 body.modal-size-small .cl-modal-content.bulk-summary-modal-content { max-width: 640px; max-height: 72vh; }
 body.modal-size-small .browse-char-modal { max-width: 656px; max-height: 68vh; }
-body.modal-size-small .orphaned-folders-modal { max-width: 720px; max-height: 68vh; }
+body.modal-size-small .cl-modal-content.orphaned-folders-modal { max-width: 720px; max-height: 68vh; }
 body.modal-size-small .cl-modal-content { max-width: 400px; max-height: 64vh; }
 body.modal-size-small .card-update-modal .cl-modal-content { max-width: 600px; }
 body.modal-size-small .card-update-modal .cl-modal-body { max-height: 52vh; }
@@ -174,14 +175,14 @@ body.modal-size-large .cl-modal-content.provider-link-modal-content { max-width:
 body.modal-size-large .cl-modal-content.gallery-info-modal-content { max-width: 1312px; max-height: 100vh; }
 body.modal-size-large .confirm-modal-content { max-width: 750px; max-height: 100vh; }
 body.modal-size-large .cl-modal-content.recommender-modal-content { max-width: 850px; max-height: 100vh; }
-body.modal-size-large #disableGalleryFoldersModal .confirm-modal-content { max-width: 625px; }
+body.modal-size-large #disableGalleryFoldersModal .cl-modal-content { max-width: 625px; }
 body.modal-size-large .cl-modal-content.settings-modal-content { max-width: 687px; }
 body.modal-size-large .cl-modal-content.settings-with-sidebar { width: 1062px; max-width: 96vw; height: min(875px, 97vh); max-height: 97vh; }
 body.modal-size-large .cl-modal-content.bulk-auto-link-modal-content { max-width: 1000px; max-height: 100vh; }
 body.modal-size-large .cl-modal-content.bulk-localize-modal-content { max-width: 687px; }
 body.modal-size-large .cl-modal-content.bulk-summary-modal-content { max-width: 1000px; max-height: 100vh; }
 body.modal-size-large .browse-char-modal { max-width: 1025px; max-height: 100vh; }
-body.modal-size-large .orphaned-folders-modal { max-width: 1125px; max-height: 100vh; }
+body.modal-size-large .cl-modal-content.orphaned-folders-modal { max-width: 1125px; max-height: 100vh; }
 body.modal-size-large .cl-modal-content { max-width: 625px; max-height: 100vh; }
 body.modal-size-large .card-update-modal .cl-modal-content { max-width: 937px; }
 body.modal-size-large .card-update-modal .cl-modal-body { max-height: 81vh; }
@@ -273,7 +274,7 @@ body.modal-size-large .cl-modal-content.creator-saveas-diff-content { max-width:
  *   --font-4xs/3xs/2xs/xs/sm/md/base/lg/xl/2xl - typography scale (font sizes)
  *   --btn-pad-v-xl/lg/md/sm, --btn-pad-h-xl/lg/md/sm, --btn-font-xl/lg/md/sm - button sizing tiers
  *   --space-xs/sm/md/lg/xl/2xl - spacing scale
- *   --cl-accent, --cl-glass-bg, --cl-border, etc. - module vars (bottom of file)
+ *   --cl-glass-bg, --cl-border, etc. - module vars (bottom of file)
  * ======================================================================== */
 
 /* @canonical select-dropdown */
@@ -1539,30 +1540,22 @@ body.char-modal-above .cl-modal.visible {
 
 /* @canonical char-modal-nav */
 .char-modal-nav {
-    --cmn-bg: rgba(16, 17, 22, 0.46);
-    --cmn-bg-hover: rgba(24, 26, 32, 0.6);
-    --cmn-border: 1px solid rgba(255, 255, 255, 0.07);
-    --cmn-border-hover: rgba(255, 255, 255, 0.16);
-    --cmn-color: rgba(255, 255, 255, 0.6);
-    --cmn-color-hover: rgba(255, 255, 255, 0.95);
-    --cmn-width: 40px;
-    --cmn-height: 96px;
-    --cmn-side-offset: 1%;
+    --cmn-bg: rgba(0, 0, 0, 0.5);
+    --cmn-bg-hover: rgba(255, 255, 255, 0.1);
+    --cmn-border: 1px solid rgba(255, 255, 255, 0.1);
+    --cmn-color: #fff;
+    --cmn-width: 50px;
+    --cmn-height: 80px;
     --cmn-icon-size: var(--font-2xl);
-    --cmn-icon-prev: '\f104';
-    --cmn-icon-next: '\f105';
-    --cmn-disabled-opacity: 0.25;
-    --cmn-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    --cmn-shadow: 0 4px 16px rgba(0, 0, 0, 0.28);
+    --cmn-icon-prev: '\f053';
+    --cmn-icon-next: '\f054';
+    --cmn-disabled-opacity: 0.3;
 
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
     background: var(--cmn-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
     border: var(--cmn-border);
-    border-radius: var(--radius-2xl);
     color: var(--cmn-color);
     width: var(--cmn-width);
     height: var(--cmn-height);
@@ -1570,51 +1563,35 @@ body.char-modal-above .cl-modal.visible {
     display: flex;
     align-items: center;
     justify-content: center;
-    opacity: 0.65;
-    box-shadow: var(--cmn-shadow), var(--cmn-highlight);
-    transition: opacity 0.2s ease, background-color 0.2s ease, border-color 0.2s ease,
-                color 0.2s ease, transform 0.15s ease;
+    transition: background-color 0.2s ease, opacity 0.2s ease;
     z-index: 10;
 }
 .char-modal-nav:hover:not(:disabled) {
     background: var(--cmn-bg-hover);
-    border-color: var(--cmn-border-hover);
-    color: var(--cmn-color-hover);
-    opacity: 1;
-}
-.char-modal-nav:active:not(:disabled) {
-    transform: translateY(-50%) scale(0.96);
 }
 .char-modal-nav:disabled {
     opacity: var(--cmn-disabled-opacity);
     cursor: not-allowed;
 }
-/* angle glyphs (f104/f105) read thinner than chevron, sleeker at this size */
 .char-modal-nav::before {
     font-family: 'Font Awesome 6 Free';
     font-weight: 900;
     font-size: var(--cmn-icon-size);
     line-height: 1;
-    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
-    transition: transform 0.2s ease;
 }
 .char-modal-nav-prev {
-    left: var(--cmn-side-offset);
+    left: 0;
+    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
 }
 .char-modal-nav-prev::before {
     content: var(--cmn-icon-prev);
 }
-.char-modal-nav-prev:hover:not(:disabled)::before {
-    transform: translateX(-2px);
-}
 .char-modal-nav-next {
-    right: var(--cmn-side-offset);
+    right: 0;
+    border-radius: var(--radius-lg) 0 0 var(--radius-lg);
 }
 .char-modal-nav-next::before {
     content: var(--cmn-icon-next);
-}
-.char-modal-nav-next:hover:not(:disabled)::before {
-    transform: translateX(2px);
 }
 
 .modal-header {
@@ -4737,10 +4714,7 @@ input[type="search"]::-webkit-search-results-decoration {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
-    /* iOS Safari paints composited layers (the card grid animates transforms and
-       uses backdrop-filter) above non-composited siblings regardless of z-index,
-       which left these menus stuck behind the cards. Promote the menu to its own
-       compositing layer so its z-index is honored. translateZ(0) is visually inert. */
+    /* promote to its own layer so z-index wins over the iOS-composited card grid; translateZ(0) is visually inert */
     transform: translateZ(0);
 }
 
@@ -5110,6 +5084,30 @@ input[type="search"]::-webkit-search-results-decoration {
     }
 }
 
+/* Edit-tab loading cover: shown while a slim card hydrates so the form cant be read or saved empty */
+#pane-edit.edit-pane-loading > :not(.edit-pane-loader) {
+    display: none;
+}
+.edit-pane-loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-md);
+    min-height: 240px;
+    padding: var(--space-2xl);
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
+}
+.edit-pane-loader i {
+    font-size: var(--font-2xl);
+    color: var(--accent);
+}
+.edit-pane-loader span {
+    max-width: 320px;
+}
+
 /* Edit Lock Header */
 .edit-lock-header {
     display: flex;
@@ -5151,7 +5149,8 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 
 /* Card Image edit overlay (in-place hero swap when edit lock is unlocked) */
-.portrait-edit-overlay {
+.portrait-edit-overlay,
+.portrait-view-overlay {
     position: absolute;
     inset: 0;
     display: flex;
@@ -5169,7 +5168,8 @@ input[type="search"]::-webkit-search-results-decoration {
     z-index: 2;
 }
 
-.portrait-edit-overlay i {
+.portrait-edit-overlay i,
+.portrait-view-overlay i {
     font-size: var(--font-3xl);
 }
 
@@ -5179,6 +5179,15 @@ input[type="search"]::-webkit-search-results-decoration {
 
 .char-portrait-container.editing-unlocked .portrait-edit-overlay:hover {
     opacity: 1;
+}
+
+/* View-mode twin of the edit overlay: eye fades in on hover, click opens the gallery viewer. Hidden in edit mode so the edit overlay owns the clicks. */
+.char-portrait-container:not(.editing-unlocked) .portrait-view-overlay:hover {
+    opacity: 1;
+}
+
+.char-portrait-container.editing-unlocked .portrait-view-overlay {
+    display: none;
 }
 
 .portrait-pending-badge {
@@ -7383,7 +7392,8 @@ input[type="search"]::-webkit-search-results-decoration {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 2000;
+    /* Confirms must sit above feature modals (.cl-modal is 10000); 10003 = the confirm tier. */
+    z-index: 10003;
     backdrop-filter: blur(5px);
 }
 
@@ -7655,14 +7665,14 @@ input[type="search"]::-webkit-search-results-decoration {
 
 .preset-picker-search-wrap {
     position: relative;
+    display: flex;
+    align-items: center;
     padding: var(--space-md) var(--space-md) var(--space-sm);
 }
 
 .preset-picker-search-icon {
     position: absolute;
     left: calc(var(--space-md) + var(--space-sm));
-    top: calc(50% + var(--space-2xs));
-    transform: translateY(-50%);
     color: var(--text-faint);
     font-size: var(--font-sm);
     pointer-events: none;
@@ -7741,13 +7751,14 @@ input[type="search"]::-webkit-search-results-decoration {
     font-weight: 700;
 }
 
-/* Disable Gallery Folders Modal - higher z-index to appear above settings */
-#disableGalleryFoldersModal {
-    z-index: 3000;
+/* Disable Gallery Folders Modal */
+#disableGalleryFoldersModal .cl-modal-content {
+    max-width: calc(500px * var(--modal-scale, 1));
 }
 
-#disableGalleryFoldersModal .confirm-modal-content {
-    max-width: calc(500px * var(--modal-scale, 1));
+/* cl-modal-body lacks the default <p> margin confirm-modal-body had; restore it here. */
+#disableGalleryFoldersModal .cl-modal-body > p {
+    margin: 0 0 var(--space-md) 0;
 }
 
 .disable-gallery-option {
@@ -11387,33 +11398,50 @@ html.cl-initial-loading .mobile-fab {
     font-family: monospace;
 }
 
-/* Responsive - Stack layout on smaller screens */
+/* Phone: stack orphaned-folders panes. */
 @media (max-width: 700px) {
     .orphaned-folders-modal .cl-modal-body {
         min-width: unset !important;
-        min-height: 250px;
+        min-height: 0;
     }
-    
+
+    .orphaned-folders-info {
+        padding: var(--space-sm) var(--space-sm-md);
+        margin-bottom: var(--space-sm);
+        font-size: var(--font-sm);
+    }
+
     .orphaned-folders-layout {
         flex-direction: column;
-        max-height: 60vh;
+        max-height: none;
     }
-    
+
     .orphaned-folders-list {
         width: 100%;
-        max-height: 120px;
+        max-height: 38vh;
     }
-    
     .orphaned-folders-list-items {
-        max-height: 80px;
+        max-height: none;
     }
-    
+
     .orphaned-folders-content {
-        min-height: 300px;
+        flex: none;
+        min-height: 0;
+        overflow: visible;
     }
-    
     .orphaned-images-grid {
-        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+        flex: none;
+        overflow-y: visible;
+    }
+
+    .orphaned-content-header {
+        flex-direction: column;
+        align-items: stretch;
+        gap: var(--space-sm);
+    }
+    .orphaned-content-actions {
+        flex-wrap: wrap;
     }
 }
 
@@ -11560,9 +11588,6 @@ html.cl-initial-loading .mobile-fab {
 
 /* ---- Module CSS Variables ---- */
 :root {
-    --cl-accent-rgb: 74, 158, 255;
-    --cl-accent: rgb(var(--cl-accent-rgb));
-    --cl-accent-hover: color-mix(in srgb, var(--cl-accent), white 20%);
     --cl-glass-bg: rgba(30, 30, 30, 0.95);
     --cl-topbar-bg: rgba(20, 20, 20, 0.8);
     --cl-border: rgba(58, 58, 58, 0.6);
@@ -11772,12 +11797,12 @@ html.cl-initial-loading .mobile-fab {
 }
 
 .cl-btn-primary {
-    background: var(--cl-accent);
+    background: var(--accent);
     color: var(--accent-text);
 }
 
 .cl-btn-primary:hover:not(:disabled) {
-    background: var(--cl-accent-hover);
+    background: var(--accent-hover);
 }
 
 .cl-btn-primary:disabled {
@@ -11817,7 +11842,7 @@ html.cl-initial-loading .mobile-fab {
 
 .cl-input:focus {
     outline: none;
-    border-color: var(--cl-accent);
+    border-color: var(--accent);
 }
 
 .cl-input::placeholder {

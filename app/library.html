@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=102">
-    <link rel="stylesheet" href="library-mobile.css?v=32" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=103">
+    <link rel="stylesheet" href="library-mobile.css?v=33" media="screen and (max-width: 768px)">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -118,6 +118,7 @@
                         <label><input type="checkbox" id="searchTags" checked> Tags</label>
                         <label><input type="checkbox" id="searchAuthor" checked> Author</label>
                         <label><input type="checkbox" id="searchNotes"> Creator's Notes</label>
+                        <label><input type="checkbox" id="searchTagline"> Tagline</label>
                         <div class="dropdown-divider"></div>
                         <label><input type="checkbox" id="searchFavoritesOnly"> <i class="fa-solid fa-star" style="color: var(--cl-favorite-gold); margin-right: 2px;"></i> Favorites only</label>
                     </div>
@@ -367,6 +368,10 @@
                 <div class="modal-sidebar">
                     <div class="char-portrait-container">
                         <img id="modalImage" src="" alt="Character Portrait">
+                        <div id="portraitViewOverlay" class="portrait-view-overlay" title="Click to view image">
+                            <i class="fa-solid fa-eye"></i>
+                            <span>View Image</span>
+                        </div>
                         <div id="portraitEditOverlay" class="portrait-edit-overlay hidden" title="Click to change card image">
                             <i class="fa-solid fa-camera"></i>
                             <span>Change Image</span>
@@ -763,7 +768,7 @@
     </div>
 
     <!-- Provider Link Modal -->
-    <div id="linkLorebookModal" class="cl-modal cl-modal-drawer">
+    <div id="linkLorebookModal" class="cl-modal cl-modal-drawer cl-drawer-partial">
         <div class="cl-modal-content lorebook-link-modal-content">
             <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-book-atlas cl-modal-header-icon"></i> Link Lorebook</h3>
@@ -1524,10 +1529,10 @@ https://jannyai.com/characters/uuid_slug
                                 <li><strong>NSFW is account-gated:</strong> the NSFW toggle requires login. Include NSFL posts via Settings → Online → Botbooru → Content (only applies while NSFW is on); NSFL cards carry their own badge, distinct from NSFW</li>
                                 <li><strong>Curated sort + favorite tags:</strong> favorite tags boost matching cards in the Curated sort. Manage them in Settings → Online → Botbooru → Favorite Tags, or with the star icons in the browse Tags dropdown</li>
                                 <li><strong>Weighted tag mode (experimental):</strong> an account-side switch that replaces the simple favorite-tags list with per-tag weights (-1000 to 1000) plus always-follow / always-block flags, and unlocks extra Curated orderings (Recent, Tag Score, Only Followed). While on, the site ignores the simple list, and the dropdown stars add +100 weight entries you can fine-tune in Settings</li>
-                                <li><strong>New uploads only:</strong> the seedling button next to the sort dropdown (Curated only) excludes bumped/updated cards</li>
+                                <li><strong>New uploads only:</strong> a checkbox in the Features dropdown's Curated section (shown while a Curated sort is active) that excludes bumped/updated cards</li>
                                 <li><strong>Sorting:</strong> beyond Latest, Curated, and Random, popularity sorts cover favorites, views, and downloads over day, week, month, and all-time windows</li>
                                 <li><strong>Advanced Options</strong> (bottom of the Tags dropdown): minimum token count, optionally counting lorebook text, and an uploaded after/before date range</li>
-                                <li><strong>Features dropdown:</strong> My Favorites (login required), Hide Owned Characters, Hide Possible Matches, and Hide AI-generated</li>
+                                <li><strong>Features dropdown:</strong> My Favorites (login required), Hide Owned Characters, Hide Possible Matches, Hide AI-generated, and (Curated sorts only) New Uploads Only</li>
                                 <li><strong>Following:</strong> follow uploaders from the banner that appears when browsing their cards, then switch to the Following timeline, which has its own sort options</li>
                             </ul>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> Username/password login needs the cl-helper plugin. Without it, paste a token manually in the login dialog; a copied "Bearer " prefix is stripped automatically.</p>
@@ -2006,6 +2011,7 @@ https://jannyai.com/characters/uuid_slug
                                 <label><input type="checkbox" id="settingsSearchTags" checked> Tags</label>
                                 <label><input type="checkbox" id="settingsSearchAuthor"> Author</label>
                                 <label><input type="checkbox" id="settingsSearchNotes"> Creator Notes</label>
+                                <label><input type="checkbox" id="settingsSearchTagline"> Tagline</label>
                             </div>
                         </div>
                         
@@ -2723,9 +2729,8 @@ https://jannyai.com/characters/uuid_slug
                                         <div class="provider-exclude-tags-container">
                                             <div id="botbooruTagWeightsList" class="botbooru-weights-list"></div>
                                             <div class="settings-input-group">
-                                                <input type="search" class="glass-input provider-exclude-tags-input" id="botbooruTagWeightsInput" placeholder="Tag to weight" autocomplete="off">
-                                                <input type="number" class="glass-input botbooru-weight-input" id="botbooruTagWeightsValue" min="-1000" max="1000" step="10" value="100" title="Weight (-1000 to 1000)">
-                                                <button id="botbooruTagWeightsAddBtn" class="glass-btn icon-only" title="Add tag weight">
+                                                <input type="search" class="glass-input provider-exclude-tags-input" id="botbooruTagWeightsInput" placeholder="Search a tag to add..." autocomplete="off">
+                                                <button id="botbooruTagWeightsAddBtn" class="glass-btn icon-only" title="Add tag">
                                                     <i class="fa-solid fa-plus"></i>
                                                 </button>
                                             </div>
@@ -3026,7 +3031,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.3.0</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.4.0</span>
                             </div>
                         </div>
 
@@ -3182,8 +3187,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=190"></script>
-    <script type="module" src="../modules/module-loader.js?v=42"></script>
-    <script src="library-mobile.js?v=20"></script>
+    <script src="library.js?v=191"></script>
+    <script type="module" src="../modules/module-loader.js?v=43"></script>
+    <script src="library-mobile.js?v=21"></script>
 </body>
 </html>

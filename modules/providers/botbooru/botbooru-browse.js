@@ -445,7 +445,6 @@ class BotbooruBrowseView extends BrowseView {
         return {
             sort: 'botbooruSortPreset',
             subSort: 'botbooruCuratedSort',
-            subSortBtn: 'botbooruCuratedFreshBtn',
             tags: 'botbooruTagsBtn',
             filters: 'botbooruFiltersBtn',
             nsfw: 'botbooruNsfwToggle',
@@ -569,11 +568,6 @@ class BotbooruBrowseView extends BrowseView {
                 </select>
             </div>
 
-            <!-- Curated freshness: exclude bumped/updated cards (any account) -->
-            <button id="botbooruCuratedFreshBtn" class="glass-btn icon-only browse-filter-hidden" data-mobile-label="New Uploads Only" title="New uploads only (exclude bumped/updated cards)">
-                <i class="fa-solid fa-seedling"></i>
-            </button>
-
             <!-- Tags & Advanced Filters -->
             <div class="browse-tags-dropdown-container" style="position: relative;">
                 <button id="botbooruTagsBtn" class="glass-btn" title="Tag filters and advanced options">
@@ -616,6 +610,11 @@ class BotbooruBrowseView extends BrowseView {
                     <i class="fa-solid fa-sliders"></i> <span>Features</span>
                 </button>
                 <div id="botbooruFiltersDropdown" class="dropdown-menu browse-features-dropdown hidden" style="width: 240px;">
+                    <div id="botbooruCuratedSection" class="hidden">
+                        <div class="dropdown-section-title">Curated:</div>
+                        <label class="filter-checkbox" title="New uploads only (exclude bumped/updated cards)"><input type="checkbox" id="botbooruCuratedFresh"> <i class="fa-solid fa-seedling"></i> New Uploads Only</label>
+                        <hr style="margin: 8px 0; border-color: var(--glass-border);">
+                    </div>
                     <div class="dropdown-section-title">Personal <span style="font-size: 0.8em; opacity: 0.6;">(requires login)</span>:</div>
                     <label class="filter-checkbox"><input type="checkbox" id="botbooruFilterFavorites"> <i class="fa-solid fa-heart" style="color: #e74c3c;"></i> My Favorites</label>
                     <hr style="margin: 8px 0; border-color: var(--glass-border);">
@@ -1136,9 +1135,8 @@ function initBotbooruView() {
         loadBotbooruPosts(true);
     });
 
-    on('botbooruCuratedFreshBtn', 'click', (e) => {
-        bbCuratedFreshOnly = !bbCuratedFreshOnly;
-        e.currentTarget.classList.toggle('active', bbCuratedFreshOnly);
+    on('botbooruCuratedFresh', 'change', (e) => {
+        bbCuratedFreshOnly = e.target.checked;
         loadBotbooruPosts(true);
     });
 
@@ -2264,7 +2262,8 @@ function setupBotbooruGridDelegates() {
 // ========================================
 
 // Curated extras only show when they can do anything: the sub-select needs
-// Curated active AND weighted-tag mode; the freshness toggle just needs Curated
+// Curated active AND weighted-tag mode; the freshness checkbox (in the Features
+// dropdown) just needs Curated active
 function syncCuratedSortVisibility() {
     const curatedActive = bbSortPreset === 'curated' && bbViewMode !== 'following';
     const el = document.getElementById('botbooruCuratedSort');
@@ -2273,11 +2272,10 @@ function syncCuratedSortVisibility() {
         const target = el._customSelect?.container || el;
         target.classList.toggle('browse-filter-hidden', !show);
     }
-    const freshBtn = document.getElementById('botbooruCuratedFreshBtn');
-    if (freshBtn) {
-        freshBtn.classList.toggle('browse-filter-hidden', !curatedActive);
-        freshBtn.classList.toggle('active', bbCuratedFreshOnly);
-    }
+    const curatedSection = document.getElementById('botbooruCuratedSection');
+    if (curatedSection) curatedSection.classList.toggle('hidden', !curatedActive);
+    const freshCb = document.getElementById('botbooruCuratedFresh');
+    if (freshCb) freshCb.checked = bbCuratedFreshOnly;
 }
 
 function switchBotbooruViewMode(newMode, opts = {}) {

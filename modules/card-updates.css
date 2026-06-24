@@ -197,7 +197,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-pill.tag {
-    color: var(--cl-accent);
+    color: var(--accent);
     border-color: rgba(var(--accent-rgb), 0.4);
     background: rgba(var(--accent-rgb), 0.12);
 }
@@ -295,9 +295,9 @@ body.char-modal-above .gv-modal.visible {
     margin-left: 8px;
     border-radius: var(--radius-sm);
     vertical-align: middle;
-    background: rgba(var(--cl-accent-rgb), 0.12);
-    color: var(--cl-accent);
-    border: 1px solid rgba(var(--cl-accent-rgb), 0.25);
+    background: rgba(var(--accent-rgb), 0.12);
+    color: var(--accent);
+    border: 1px solid rgba(var(--accent-rgb), 0.25);
     cursor: help;
 }
 
@@ -413,7 +413,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-char-link {
     cursor: pointer;
-    color: var(--cl-accent);
+    color: var(--accent);
 }
 .card-update-char-link:hover {
     text-decoration: underline;
@@ -522,7 +522,7 @@ body.char-modal-above .gv-modal.visible {
 
 .card-update-batch-view-btn {
     padding: 4px 10px;
-    background: var(--cl-accent);
+    background: var(--accent);
     color: var(--accent-text);
     border: none;
     border-radius: var(--radius-sm);
@@ -630,7 +630,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-title i {
-    color: var(--cl-accent);
+    color: var(--accent);
     font-size: var(--font-lg);
 }
 
@@ -682,7 +682,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-field-option input {
-    accent-color: var(--cl-accent);
+    accent-color: var(--accent);
 }
 
 .card-update-field-label {
@@ -732,9 +732,9 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .card-update-filter-pill.active {
-    border-color: var(--cl-accent);
+    border-color: var(--accent);
     background: rgba(var(--accent-rgb), 0.15);
-    color: var(--cl-accent);
+    color: var(--accent);
     font-weight: 500;
 }
 
@@ -762,7 +762,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-select-link {
     background: none;
     border: none;
-    color: var(--cl-accent);
+    color: var(--accent);
     cursor: pointer;
     font-size: inherit;
     padding: 2px 4px;
@@ -787,7 +787,7 @@ body.char-modal-above .gv-modal.visible {
 .card-update-batch-checkbox {
     width: 16px;
     height: 16px;
-    accent-color: var(--cl-accent);
+    accent-color: var(--accent);
     cursor: pointer;
 }
 
@@ -806,7 +806,7 @@ body.char-modal-above .gv-modal.visible {
     height: 24px;
     border-radius: var(--radius-sm-alt);
     background: rgba(var(--accent-rgb), 0.12);
-    color: var(--cl-accent);
+    color: var(--accent);
     font-size: var(--font-2xs);
 }
 
@@ -835,7 +835,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .batch-summary-header i {
-    color: var(--cl-accent);
+    color: var(--accent);
     font-size: var(--font-md);
 }
 
@@ -886,7 +886,7 @@ body.char-modal-above .gv-modal.visible {
 }
 
 .batch-summary-toggle-all input {
-    accent-color: var(--cl-accent);
+    accent-color: var(--accent);
 }
 
 .batch-summary-char-list {
@@ -915,7 +915,7 @@ body.char-modal-above .gv-modal.visible {
 .batch-summary-char-cb {
     width: 16px;
     height: 16px;
-    accent-color: var(--cl-accent);
+    accent-color: var(--accent);
     flex-shrink: 0;
     cursor: pointer;
 }
@@ -934,7 +934,7 @@ body.char-modal-above .gv-modal.visible {
     text-overflow: ellipsis;
 }
 .batch-summary-char-name.card-update-char-link {
-    color: var(--cl-accent);
+    color: var(--accent);
     cursor: pointer;
 }
 .batch-summary-char-name.card-update-char-link:hover {
@@ -1002,7 +1002,7 @@ body.char-modal-above .gv-modal.visible {
     color: var(--cl-text-secondary);
 }
 .lorebook-diff-info-box > i {
-    color: var(--cl-accent);
+    color: var(--accent);
     margin-top: 2px;
     flex-shrink: 0;
 }
@@ -1013,7 +1013,7 @@ body.char-modal-above .gv-modal.visible {
 .lorebook-diff-help-details summary {
     cursor: pointer;
     font-size: var(--font-md);
-    color: var(--cl-accent);
+    color: var(--accent);
     user-select: none;
     list-style: none;
 }
@@ -1530,9 +1530,9 @@ body.char-modal-above .gv-modal.visible {
         color: var(--cl-text-secondary);
     }
     .card-update-filter-pill.active:hover {
-        border-color: var(--cl-accent);
+        border-color: var(--accent);
         background: rgba(var(--accent-rgb), 0.15);
-        color: var(--cl-accent);
+        color: var(--accent);
     }
 
     .filter-count {

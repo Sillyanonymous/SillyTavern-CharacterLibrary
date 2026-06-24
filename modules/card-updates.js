@@ -1595,6 +1595,8 @@ async function applySingleUpdates() {
         const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields) : true;
         
         if (success) {
+            // tagline is a namespace-derived search key; refresh it after the write
+            char._lowerTagline = CoreAPI.getDisplayTagline(char).toLowerCase();
             CoreAPI.showToast(`Updated ${checkboxes.length} field${checkboxes.length > 1 ? 's' : ''}`, 'success');
             closeSingleModal();
             
@@ -1801,6 +1803,7 @@ async function applyAllBatchUpdates() {
             const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(avatar, updatedFields) : true;
             
             if (success) {
+                char._lowerTagline = CoreAPI.getDisplayTagline(char).toLowerCase();
                 successCount++;
                 
                 // Update batch list

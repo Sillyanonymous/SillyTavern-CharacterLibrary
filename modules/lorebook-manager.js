@@ -1449,7 +1449,7 @@ async function unlinkCharFromCurrentWorld(avatar) {
         danger: true,
     });
     if (!ok) return;
-    const success = await CoreAPI.applyCardFieldUpdates(avatar, { 'extensions.world': '' });
+    const success = await CoreAPI.applyCardFieldUpdates(avatar, { 'extensions.world': '' }, { awaitNotify: true });
     if (!success) { CoreAPI.showToast('Failed to unlink', 'error'); return; }
     buildLinkedMap();
     renderEditor();

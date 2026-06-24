@@ -752,6 +752,22 @@ Some image hosts (Imgur, Catbox, etc.) block direct browser requests due to CORS
 
 This affects embedded media downloads, provider gallery downloads, and bulk localization.
 
+### Characters load more slowly behind HTTP Basic auth
+
+If SillyTavern is behind HTTP Basic authentication (ST's `basicAuthMode`, or an upstream reverse proxy that asks for a username and password), loading a character's heavy data can be noticeably slower than on an instance without it.
+
+To keep memory low on large libraries, Character Library holds only lightweight data in memory and fetches each character's full content (description, greetings, embedded lorebook, etc.) on demand, one request per character. Basic auth adds overhead to each request, so it is paid on every per-character load: the detail view opens instantly but its text fills in a moment later, and update or version checks run slower. The character grid loads in one bulk request and is unaffected. This happens regardless of ST's `lazyLoadCharacters` setting (it comes from Character Library's own memory optimization, not ST shallow loading); enabling ST lazy loading only makes it more noticeable.
+
+The delay is in how Basic auth is handled per request between your browser and SillyTavern, not processing time in either, so there is no extension setting to speed it up. If it is bothersome, reach SillyTavern over a trusted local network or a tunnel/VPN that authenticates the connection rather than each HTTP request.
+
+---
+
+### Reminder: Online features depend on services we don't control
+
+Anything in Character Library that reaches an external service rides on third-party APIs we neither own nor control: the online provider browsers (ChubAI, JanitorAI, CharacterTavern, Pygmalion, Wyvern, DataCat, Botbooru) and their imports, plus embedded media and gallery downloads. Those services change without warning. Endpoints get renamed or removed, response shapes shift, access is tightened, rate limits change, and Cloudflare-style protections start challenging automated requests. When one of them changes, the feature that relied on it can break or start misbehaving, and there is frequently nothing the extension can do from its side until the new behavior is understood.
+
+We treat these as bugs and fix them as they come, but this kind of breakage is inevitable over time and largely outside our hands. The fastest path to a fix is a report. If a provider stops working or starts acting strangely, please open an issue describing what you did and what happened.
+
 ## License
 
 Licensed under the [GNU Affero General Public License v3](LICENSE).

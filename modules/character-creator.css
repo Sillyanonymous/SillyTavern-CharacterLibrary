@@ -1491,6 +1491,149 @@
     opacity: 0.5;
 }
 
+/* --- Brainstorm inspiration pool --- */
+
+.ai-studio-pool {
+    display: none;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    padding: 0 4px;
+    margin-bottom: 4px;
+}
+
+/* Pool is brainstorm-only; the per-field word target is irrelevant in brainstorm mode. */
+.ai-studio-modal.brainstorm-mode .ai-studio-pool { display: flex; }
+.ai-studio-modal.brainstorm-mode .ai-studio-word-target { display: none; }
+
+/* Field pills + budget row appear only once a playlist is chosen (None = dropdown only). */
+.ai-studio-pool:not(.pool-active) .ai-studio-pool-fields,
+.ai-studio-pool:not(.pool-active) .ai-studio-pool-foot { display: none; }
+
+.ai-studio-pool-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-2xs);
+    color: var(--text-secondary);
+}
+
+.ai-studio-pool-head > label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    white-space: nowrap;
+    opacity: 0.8;
+}
+
+/* Keep a long playlist name from blowing out the row; ellipsize the trigger. */
+.ai-studio-pool-head .custom-select-container { min-width: 0; max-width: 220px; }
+.ai-studio-pool-head .custom-select-trigger { min-width: 0 !important; }
+.ai-studio-pool-head .custom-select-trigger .trigger-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ai-studio-pool-status {
+    margin-left: auto;
+    font-size: var(--font-3xs);
+    color: var(--text-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ai-studio-pool-fields {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2xs);
+    margin-top: var(--space-xs);
+}
+
+.ai-studio-pool-pill {
+    font-size: var(--font-2xs);
+    line-height: 1.4;
+    padding: 2px var(--space-xs);
+    border-radius: var(--radius-md);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ai-studio-pool-pill:hover {
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: var(--text-primary);
+}
+
+.ai-studio-pool-pill.active {
+    background: rgba(var(--accent-rgb), 0.18);
+    border-color: rgba(var(--accent-rgb), 0.5);
+    color: var(--text-primary);
+}
+
+/* Heavy fields load the full card; a dot signals the extra cost. */
+.ai-studio-pool-pill.heavy::before {
+    content: '';
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    margin-right: 5px;
+    vertical-align: middle;
+    background: var(--text-faint);
+}
+.ai-studio-pool-pill.heavy.active::before { background: rgba(var(--accent-rgb), 0.9); }
+
+.ai-studio-pool-foot {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    font-size: var(--font-3xs);
+    color: var(--text-faint);
+}
+
+.ai-studio-pool-tokens { white-space: nowrap; }
+
+.ai-studio-pool-max {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2xs);
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.ai-studio-pool-max input {
+    width: 64px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: var(--font-2xs);
+    padding: 2px 6px;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.15s ease;
+    -moz-appearance: textfield;
+}
+.ai-studio-pool-max input::-webkit-outer-spin-button,
+.ai-studio-pool-max input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ai-studio-pool-max input:focus { border-color: rgba(var(--accent-rgb), 0.3); }
+
+@media (max-width: 768px) {
+    .ai-studio-pool { gap: var(--space-xs); }
+    .ai-studio-pool-head { flex-wrap: wrap; row-gap: var(--space-2xs); }
+    .ai-studio-pool-head > label { flex: 0 0 auto; }
+    .ai-studio-pool-head .custom-select-container { max-width: none; flex: 1 1 auto; }
+    .ai-studio-pool-status { flex-basis: 100%; margin-left: 0; text-align: left; }
+    .ai-studio-pool-pill { padding: 4px var(--space-sm); }
+    .ai-studio-pool-foot { flex-wrap: wrap; row-gap: var(--space-2xs); }
+    .ai-studio-pool-tokens { flex: 1 1 auto; }
+    .ai-studio-pool-max { margin-left: 0; }
+    .ai-studio-pool-max input { font-size: var(--mobile-input-size); }
+}
+
 /* --- Footer --- */
 
 .ai-studio-footer {

@@ -26,6 +26,7 @@ let isEditLocked = true;
 let originalValues = {};  // Form values for diff comparison
 let originalRawData = {}; // Raw character data for cancel/restore
 let pendingUpdates = null;
+let _saveInProgress = false; // re-entrancy guard for performSave (double-tap Confirm Save)
 let _editPanePopulated = false; // Deferred - set true after Edit tab first opened
 let editFieldsAutoGrowHandler = null;
 
@@ -318,6 +319,11 @@ function initCustomSelect(select) {
     // --- Event listeners ---
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
+        // Decided at click time, not attach time, so a live breakpoint cross switches sheet/menu.
+        if (window.matchMedia('(max-width: 768px)').matches) {
+            window.openSelectorSheetFromSelect?.(select);
+            return;
+        }
         toggle();
     });
 
@@ -450,6 +456,7 @@ function prepareCharacterKeys(chars) {
         c._lowerName = c.name.toLowerCase();
         c._lowerCreator = String(c.creator || c.data?.creator || '').toLowerCase();
         c._lowerListingName = (getListingNameFromExtensions(c) || '').toLowerCase();
+        c._lowerTagline = getDisplayTagline(c).toLowerCase();
         const tags = getTags(c);
         c._tagsLower = tags.length > 0 ? tags.join(' ').toLowerCase() : '';
         c._lowerNotes = String(c.creator_notes || c.data?.creator_notes || '').toLowerCase();
@@ -515,6 +522,7 @@ const DEFAULT_SETTINGS = {
     searchInTags: true,
     searchInAuthor: false,
     searchInNotes: false,
+    searchInTagline: false,
     tagIncludeMode: 'any',
     tagExcludeMode: 'all',
 
@@ -1108,8 +1116,6 @@ async function loadGallerySettings() {
     } catch (e) {
         console.warn('[Settings] Failed to load from localStorage:', e);
     }
-    
-    migrateSettings();
 }
 
 // ============================================================
@@ -1597,6 +1603,7 @@ function setupSettingsModal() {
     const searchTagsCheckbox = document.getElementById('settingsSearchTags');
     const searchAuthorCheckbox = document.getElementById('settingsSearchAuthor');
     const searchNotesCheckbox = document.getElementById('settingsSearchNotes');
+    const searchTaglineCheckbox = document.getElementById('settingsSearchTagline');
     const defaultSortSelect = document.getElementById('settingsDefaultSort');
     const defaultFilterPresetSelect = document.getElementById('settingsDefaultFilterPreset');
     const groupFavoritesFirstCheckbox = document.getElementById('settingsGroupFavoritesFirst');
@@ -2489,7 +2496,6 @@ function setupSettingsModal() {
 
         async function addBotbooruTagWeight() {
             const nameInput = document.getElementById('botbooruTagWeightsInput');
-            const valueInput = document.getElementById('botbooruTagWeightsValue');
             const value = nameInput?.value.trim();
             if (!value) return;
             const prov = window.ProviderRegistry?.getProvider('botbooru');
@@ -2497,7 +2503,7 @@ function setupSettingsModal() {
             nameInput.disabled = true;
             nameInput.placeholder = 'Adding...';
             try {
-                const entry = await prov?.setTagWeight?.(value, { weight: valueInput?.value ?? 100, category: pickedCategoryFor(nameInput, value) });
+                const entry = await prov?.setTagWeight?.(value, { weight: 100, category: pickedCategoryFor(nameInput, value) });
                 if (!entry) { showToast(`Tag "${value}" not found on Botbooru (or the request failed)`, 'error'); return; }
                 nameInput.value = '';
                 prov?.browseView?.invalidateFollowedTags?.();
@@ -2648,6 +2654,7 @@ function setupSettingsModal() {
         searchTagsCheckbox.checked = getSetting('searchInTags') !== false;
         searchAuthorCheckbox.checked = getSetting('searchInAuthor') || false;
         searchNotesCheckbox.checked = getSetting('searchInNotes') || false;
+        if (searchTaglineCheckbox) searchTaglineCheckbox.checked = getSetting('searchInTagline') || false;
         defaultSortSelect.value = getSetting('defaultSort') || 'name_asc';
         if (defaultFilterPresetSelect) {
             populateDefaultFilterPresetSelect(defaultFilterPresetSelect, getSetting('defaultFilterPreset') || '');
@@ -3187,6 +3194,7 @@ function setupSettingsModal() {
             searchInTags: searchTagsCheckbox.checked,
             searchInAuthor: searchAuthorCheckbox.checked,
             searchInNotes: searchNotesCheckbox.checked,
+            searchInTagline: searchTaglineCheckbox ? searchTaglineCheckbox.checked : false,
             defaultSort: defaultSortSelect.value,
             defaultFilterPreset: defaultFilterPresetSelect ? defaultFilterPresetSelect.value : '',
             groupFavoritesFirst: groupFavoritesFirstCheckbox ? groupFavoritesFirstCheckbox.checked : false,
@@ -3281,6 +3289,8 @@ function setupSettingsModal() {
         if (searchTags) searchTags.checked = searchTagsCheckbox.checked;
         if (searchAuthor) searchAuthor.checked = searchAuthorCheckbox.checked;
         if (searchNotes) searchNotes.checked = searchNotesCheckbox.checked;
+        const searchTagline = document.getElementById('searchTagline');
+        if (searchTagline && searchTaglineCheckbox) searchTagline.checked = searchTaglineCheckbox.checked;
         if (sortSelect) sortSelect.value = defaultSortSelect.value;
         
         showToast('Settings saved', 'success');
@@ -3361,6 +3371,7 @@ function setupSettingsModal() {
         searchTagsCheckbox.checked = DEFAULT_SETTINGS.searchInTags;
         searchAuthorCheckbox.checked = DEFAULT_SETTINGS.searchInAuthor;
         searchNotesCheckbox.checked = DEFAULT_SETTINGS.searchInNotes;
+        if (searchTaglineCheckbox) searchTaglineCheckbox.checked = DEFAULT_SETTINGS.searchInTagline;
         defaultSortSelect.value = DEFAULT_SETTINGS.defaultSort;
         if (defaultFilterPresetSelect) {
             populateDefaultFilterPresetSelect(defaultFilterPresetSelect, DEFAULT_SETTINGS.defaultFilterPreset);
@@ -3480,6 +3491,8 @@ function setupSettingsModal() {
         if (searchTags) searchTags.checked = DEFAULT_SETTINGS.searchInTags;
         if (searchAuthor) searchAuthor.checked = DEFAULT_SETTINGS.searchInAuthor;
         if (searchNotes) searchNotes.checked = DEFAULT_SETTINGS.searchInNotes;
+        const searchTagline = document.getElementById('searchTagline');
+        if (searchTagline) searchTagline.checked = DEFAULT_SETTINGS.searchInTagline;
         if (sortSelect) sortSelect.value = DEFAULT_SETTINGS.defaultSort;
         
         showToast('Settings restored to defaults', 'success');
@@ -4005,7 +4018,10 @@ function setupSettingsModal() {
             let totalUnmatched = 0;
             let totalErrors = 0;
             let groupsProcessed = 0;
-            
+            // Shared breaker: a run of provider block statuses trips shouldAbort, stopping every loop layer.
+            const rateLimit = { tripped: false, consecutiveBlocks: 0, providerName: '' };
+            const shouldAbort = () => rateLimit.tripped;
+
             for (const [name, chars] of sharedNames) {
                 // Update status
                 if (imageRelocationStatusText) {
@@ -4019,12 +4035,17 @@ function setupSettingsModal() {
                     },
                     onLogUpdate: (entry, msg, status) => {
                         debugLog(`[Relocate] ${msg}`);
-                    }
+                    },
+                    shouldAbort,
+                    rateLimit
                 });
-                
+
                 totalMoved += result.moved;
                 totalUnmatched += result.unmatched;
                 totalErrors += result.errors;
+
+                // Break before the increment: a blocked (zero-move) group must not count as completed.
+                if (rateLimit.tripped) break;
                 groupsProcessed++;
             }
             
@@ -4034,11 +4055,12 @@ function setupSettingsModal() {
             updateImageRelocationStatus();
             
             // Show summary
-            const message = `Relocation complete: ${totalMoved} images moved, ${totalUnmatched} unmatched, ${totalErrors} errors`;
-            if (totalErrors === 0) {
-                showToast(message, 'success');
+            if (rateLimit.tripped) {
+                const who = rateLimit.providerName || 'The provider';
+                showToast(`${who} rate-limited your connection, so relocation stopped after ${groupsProcessed}/${sharedNames.size} group(s). Wait a few minutes, then run it again (images already moved are skipped).`, 'warning', 10000);
             } else {
-                showToast(message, 'error');
+                const message = `Relocation complete: ${totalMoved} images moved, ${totalUnmatched} unmatched, ${totalErrors} errors`;
+                showToast(message, totalErrors === 0 ? 'success' : 'error');
             }
             
             debugLog('[ImageRelocation] Summary:', { totalMoved, totalUnmatched, totalErrors, groupsProcessed });
@@ -4823,12 +4845,16 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
         return;
     }
 
-    const modalHtml = `
-        <div id="disableGalleryFoldersModal" class="confirm-modal cl-modal-drawer">
-            <div class="confirm-modal-content" style="max-width: calc(500px * var(--modal-scale, 1));">
-                    <button class="close-confirm-btn" id="closeDisableGalleryModal">&times;</button>
-                </div>
-                <div class="confirm-modal-body">
+    const modal = document.createElement('div');
+    modal.className = 'cl-modal cl-modal-drawer';
+    modal.id = 'disableGalleryFoldersModal';
+    modal.innerHTML = `
+        <div class="cl-modal-content">
+            <div class="cl-modal-header">
+                <h3><i class="fa-solid fa-folder-tree"></i> Disable Unique Gallery Folders</h3>
+                <button class="cl-modal-close" id="closeDisableGalleryModal"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="cl-modal-body">
                     <p>
                         Found <strong>${charsWithId.length}</strong> character(s) with images in unique folders.
                     </p>
@@ -4867,42 +4893,31 @@ function showDisableGalleryFoldersModal(onConfirm, onCancel) {
                         </div>
                     </div>
                 </div>
-                <div class="confirm-modal-footer">
+                <div class="cl-modal-footer">
                     <button id="cancelDisableGallery" class="action-btn secondary">Cancel</button>
                     <button id="confirmDisableGallery" class="action-btn danger">Disable</button>
                 </div>
-            </div>
         </div>
     `;
     
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-    const modal = document.getElementById('disableGalleryFoldersModal');
-    const closeBtn = document.getElementById('closeDisableGalleryModal');
+    document.body.appendChild(modal);
+    requestAnimationFrame(() => modal.classList.add('visible'));
     const cancelBtn = document.getElementById('cancelDisableGallery');
     const confirmBtn = document.getElementById('confirmDisableGallery');
     const progressDiv = document.getElementById('disableGalleryProgress');
     const progressText = document.getElementById('disableGalleryProgressText');
     
     const closeModal = () => {
-        modal.remove();
+        modal.classList.remove('visible');
+        setTimeout(() => modal.remove(), 200);
     };
-    
-    closeBtn.onclick = () => {
-        closeModal();
-        onCancel();
-    };
-    
-    cancelBtn.onclick = () => {
-        closeModal();
-        onCancel();
-    };
-    
-    modal.onclick = (e) => {
-        if (e.target === modal) {
-            closeModal();
-            onCancel();
-        }
-    };
+    // Closing via X / Cancel / backdrop / Escape reverts the still-unsaved checkbox.
+    const cancel = () => { closeModal(); onCancel(); };
+    modal._closeFn = cancel;
+
+    document.getElementById('closeDisableGalleryModal').onclick = cancel;
+    cancelBtn.onclick = cancel;
+    modal.onclick = (e) => { if (e.target === modal) cancel(); };
     
     confirmBtn.onclick = async () => {
         const moveImages = document.querySelector('input[name="disableOption"]:checked')?.value === 'move';
@@ -5301,7 +5316,8 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
     let currentMode = initialMode;
 
     const modal = document.createElement('div');
-    modal.className = 'cl-modal cl-modal-drawer';
+    // Full-viewport on mobile, not a drawer: the two-pane file manager needs the whole screen.
+    modal.className = 'cl-modal';
     modal.id = 'orphanedFoldersModal';
     modal.innerHTML = `
         <div class="cl-modal-content orphaned-folders-modal">
@@ -6318,19 +6334,24 @@ function countCharactersNeedingGalleryId() {
 // from shared folders to unique folders
 // ========================================
 
+// A run of these statuses = blocked; 404/timeouts never count (stale links must not false-trip).
+const RELOCATE_BLOCK_STATUSES = new Set([403, 429, 503]);
+const RELOCATE_BLOCK_THRESHOLD = 5;
+const RELOCATE_GALLERY_FETCH_DELAY_MS = 150; // light pacing between provider gallery downloads
+
 /**
  * Build an ownership fingerprint for a character by downloading and hashing
  * their provider gallery images and embedded media URLs (without saving).
  * This fingerprint proves which images belong to this character.
  * @param {object} char - Character object
  * @param {object} options - Progress callbacks
- * @returns {Promise<{hashes: Set<string>, errors: number, chubCount: number, embeddedCount: number}>}
+ * @returns {Promise<{hashes: Set<string>, errors: number, providerGalleryCount: number, embeddedCount: number}>}
  */
 async function buildOwnershipFingerprint(char, options = {}) {
-    const { onLog, onLogUpdate, shouldAbort } = options;
+    const { onLog, onLogUpdate, shouldAbort, rateLimit } = options;
     const hashes = new Set();
     let errors = 0;
-    let chubCount = 0;
+    let providerGalleryCount = 0;
     let embeddedCount = 0;
     
     // 1. Get hashes from provider gallery images (if character is linked)
@@ -6345,20 +6366,34 @@ async function buildOwnershipFingerprint(char, options = {}) {
             
             for (const image of galleryImages) {
                 if (shouldAbort && shouldAbort()) break;
-                
+
                 let downloadResult = await downloadMediaToMemory(image.url || image.imageUrl, 30000);
                 if (downloadResult.success) {
                     const hash = await calculateHash(downloadResult.arrayBuffer);
                     hashes.add(hash);
-                    chubCount++;
+                    providerGalleryCount++;
+                    if (rateLimit) rateLimit.consecutiveBlocks = 0;
                 } else {
                     errors++;
+                    // Trip the shared breaker once a run of block statuses confirms a rate-limit.
+                    if (rateLimit && RELOCATE_BLOCK_STATUSES.has(downloadResult.status)) {
+                        rateLimit.consecutiveBlocks++;
+                        rateLimit.providerName = fpProvider.name || rateLimit.providerName;
+                        if (rateLimit.consecutiveBlocks >= RELOCATE_BLOCK_THRESHOLD) {
+                            rateLimit.tripped = true;
+                            downloadResult = null;
+                            break;
+                        }
+                    }
                 }
                 downloadResult = null;
+                if (RELOCATE_GALLERY_FETCH_DELAY_MS > 0) {
+                    await new Promise(resolve => setTimeout(resolve, RELOCATE_GALLERY_FETCH_DELAY_MS));
+                }
             }
             
             if (onLogUpdate && logEntry) {
-                onLogUpdate(logEntry, `${fpProvider.name} gallery: ${chubCount} hashes collected`, 'success');
+                onLogUpdate(logEntry, `${fpProvider.name} gallery: ${providerGalleryCount} hashes collected`, 'success');
             }
         } catch (e) {
             console.error('[Fingerprint] Provider gallery error:', e);
@@ -6396,9 +6431,9 @@ async function buildOwnershipFingerprint(char, options = {}) {
         }
     }
     
-    debugLog(`[Fingerprint] ${char.name}: ${hashes.size} total hashes (${chubCount} chub, ${embeddedCount} embedded, ${errors} errors)`);
-    
-    return { hashes, errors, chubCount, embeddedCount };
+    debugLog(`[Fingerprint] ${char.name}: ${hashes.size} total hashes (${providerGalleryCount} provider, ${embeddedCount} embedded, ${errors} errors)`);
+
+    return { hashes, errors, providerGalleryCount, embeddedCount };
 }
 
 /**
@@ -6556,7 +6591,7 @@ function findCharactersWithSharedNames() {
  * @returns {Promise<{moved: number, unmatched: number, errors: number, details: Array}>}
  */
 async function relocateSharedFolderImages(characters, options = {}) {
-    const { onLog, onLogUpdate, onProgress, shouldAbort } = options;
+    const { onLog, onLogUpdate, onProgress, shouldAbort, rateLimit } = options;
     const results = { moved: 0, unmatched: 0, errors: 0, details: [] };
     
     if (characters.length < 2) {
@@ -6581,7 +6616,7 @@ async function relocateSharedFolderImages(characters, options = {}) {
         // Hydrate so findCharacterMediaUrls can extract embedded URLs from heavy fields
         await hydrateCharacter(char);
         
-        const fingerprint = await buildOwnershipFingerprint(char, { shouldAbort });
+        const fingerprint = await buildOwnershipFingerprint(char, { shouldAbort, rateLimit });
         fingerprints.set(char.avatar, fingerprint.hashes);
         totalFingerprints += fingerprint.hashes.size;
         
@@ -6594,7 +6629,7 @@ async function relocateSharedFolderImages(characters, options = {}) {
     
     if (totalFingerprints === 0) {
         if (onLogUpdate && logEntry) {
-            onLogUpdate(logEntry, `No fingerprints found - characters may not be linked to Chub or have embedded media`, 'success');
+            onLogUpdate(logEntry, `No fingerprints found - characters may not be linked to a provider with a gallery, or have embedded media`, 'success');
         }
         return results;
     }
@@ -6943,6 +6978,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Load settings first to ensure defaults are available
     await loadGallerySettings();
 
+    // Run once at boot on any settings-load path; idempotent (renamed keys are gone, so re-runs no-op).
+    migrateSettings();
+
     // Must run after loadGallerySettings; the legacy-to-file migration reads gallerySettings.
     loadCompletedMediaLocalizations().catch(() => {});
 
@@ -7257,7 +7295,7 @@ function savePresetPicker(title, presets) {
         if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = 'savePresetPickerOverlay';
-            overlay.className = 'cl-modal cl-modal-drawer';
+            overlay.className = 'cl-modal cl-modal-drawer cl-drawer-partial';
             overlay.innerHTML = `
                 <div class="cl-modal-content" style="max-width: calc(420px * var(--modal-scale, 1));">
                     <div class="cl-modal-header">
@@ -7294,14 +7332,15 @@ function savePresetPicker(title, presets) {
 }
 
 // Sync with Main Window
-async function loadCharInMain(charOrAvatar) {
+async function loadCharInMain(charOrAvatar, newChat = false) {
     // In embedded mode, send a message to the parent frame
     if (isEmbedded && window.parent !== window) {
         let avatar = (typeof charOrAvatar === 'string') ? charOrAvatar : charOrAvatar.avatar;
         let charObj = (typeof charOrAvatar === 'object') ? charOrAvatar : null;
         if (!charObj && avatar) charObj = allCharacters.find(c => c.avatar === avatar);
 
-        window.parent.postMessage({ source: 'character-library', type: 'cl-open-character', avatar }, window.location.origin);
+        // newChat runs ST-side via index.js: the active-char state + slash executor live in ST's window.
+        window.parent.postMessage({ source: 'character-library', type: 'cl-open-character', avatar, newChat }, window.location.origin);
         showToast(`Loading ${charObj?.name || avatar}...`, 'success');
         return true;
     }
@@ -7377,6 +7416,10 @@ async function loadCharInMain(charOrAvatar) {
                  // If it returns a promise, wait briefly; otherwise assume success
                  if (result && typeof result.then === 'function') {
                      await withTimeout(result, 5000);
+                 }
+                 if (newChat && typeof context.executeSlashCommandsWithOptions === 'function') {
+                     try { await context.executeSlashCommandsWithOptions('/newchat', { displayCommand: false, showOutput: false }); }
+                     catch (e) { console.warn('Could not start new chat:', e); }
                  }
                  return true;
              } catch (err) {
@@ -7613,6 +7656,7 @@ function slimCharacter(char) {
         _lowerName: char._lowerName,
         _lowerCreator: char._lowerCreator,
         _lowerListingName: char._lowerListingName || '',
+        _lowerTagline: char._lowerTagline || '',
         _tagsLower: char._tagsLower,
         _lowerNotes: char._lowerNotes || '',
         _dateAdded: char._dateAdded,
@@ -7624,6 +7668,7 @@ function slimCharacter(char) {
     if (char.data) {
         slim.data = {
             name: char.data.name,
+            nickname: char.data.nickname,
             creator: char.data.creator,
             tags: char.data.tags,
             extensions: char.data.extensions,
@@ -7659,6 +7704,13 @@ async function hydrateCharacter(char) {
 
         for (const field of HEAVY_FIELDS) {
             if (full[field] !== undefined) char[field] = full[field];
+            if (full.data?.[field] !== undefined) {
+                if (!char.data) char.data = {};
+                char.data[field] = full.data[field];
+            }
+        }
+
+        for (const field of ['nickname', 'group_only_greetings']) {
             if (full.data?.[field] !== undefined) {
                 if (!char.data) char.data = {};
                 char.data[field] = full.data[field];
@@ -7736,6 +7788,7 @@ async function recoverShallowExtensions(generation) {
                         if (full.spec) char.spec = full.spec;
                         if (full.spec_version) char.spec_version = full.spec_version;
                         char._lowerListingName = (getListingNameFromExtensions(char) || '').toLowerCase();
+                        char._lowerTagline = getDisplayTagline(char).toLowerCase();
                         _extensionsCache.set(char.avatar, full.data.extensions);
                         recovered++;
                     } catch { /* skip */ }
@@ -7786,7 +7839,9 @@ function processAndRender(data) {
     // Detect ST lazy loading - toShallow() sets { shallow: true } and strips
     // data.extensions.* (except fav), which breaks provider links, gallery IDs, etc.
     const isSTShallow = allCharacters.length > 0 && allCharacters[0].shallow === true;
-    
+    // Persist shallow-mode so extensionsReady can distinguish lazy-off from lazy-on after recovery.
+    window.stShallowMode = isSTShallow;
+
     // Restore previously recovered extensions from cache before slimming.
     // Without this, every processAndRender call would discard recovered extensions
     // and trigger a full re-recovery of all characters.
@@ -8605,9 +8660,9 @@ function preloadImages(indices) {
     const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
     const cap = isMobile ? 10 : 12;
     if (inFlightPreloads.size >= cap) return;
-    // Match the card path's URL choice exactly so the browser cache hits.
-    const masterOn = getSetting('useGridThumbnails') === true;
-    const useThumbs = masterOn && (isMobile || getSetting('gridThumbnailsDesktop') === true);
+    // Match the card path's URL choice exactly so the browser cache hits. Single source of truth for the
+    // viewport-aware thumb decision; isMobile above is still needed for the concurrency cap.
+    const useThumbs = gridUsesThumbnails();
     for (const i of indices) {
         if (inFlightPreloads.size >= cap) break;
         if (inFlightPreloads.has(i)) continue;
@@ -8695,14 +8750,15 @@ function setupCharacterGridDelegates() {
         openModal(char);
     });
 
-    // Preload the full avatar on mousedown so the modal-open path finds it cached. Only matters when grid uses thumbs; otherwise the browser dedupes.
+    // Preload the full avatar on mousedown so the modal-open path finds it cached. Only useful when the grid
+    // shows thumbs (full PNG not loaded yet); with thumbs off the card already holds the full PNG, so skip.
     grid.addEventListener('mousedown', (e) => {
         if (e.button !== 0) return;
         if (document.body.classList.contains('multi-select-mode')) return;
         const card = e.target.closest('.char-card');
         if (!card || !grid.contains(card)) return;
         const avatar = card.dataset.avatar;
-        if (avatar) new Image().src = getCharacterAvatarUrl(avatar);
+        if (avatar && gridUsesThumbnails()) new Image().src = getCharacterAvatarUrl(avatar);
     });
 
     grid.addEventListener('load', (e) => {
@@ -9924,6 +9980,28 @@ function navigateModal(direction) {
     openModal(navList[targetIdx]);
 }
 
+// Mirror the preload path's thumb gate so the modal-hero prefetch agrees on cache-warmth.
+function gridUsesThumbnails() {
+    if (getSetting('useGridThumbnails') !== true) return false;
+    const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+    return !!(isMobile || getSetting('gridThumbnailsDesktop') === true);
+}
+
+function prefetchModalNeighbors(currentChar) {
+    if (!currentChar || getSetting('enableCharDetailNav') === false) return;
+    const navList = getModalNavList();
+    if (!Array.isArray(navList) || navList.length < 2) return;
+    const idx = navList.findIndex(c => c && c.avatar === currentChar.avatar);
+    if (idx === -1) return;
+    const warmHero = gridUsesThumbnails(); // full PNG needs warming only when the grid isnt already loading it
+    for (const offset of [1, -1, 2, -2]) { // forward first: next is the common direction
+        const neighbor = navList[idx + offset];
+        if (!neighbor) continue;
+        if (neighbor._slim) hydrateCharacter(neighbor);
+        if (warmHero && neighbor.avatar) new Image().src = getCharacterAvatarUrl(neighbor.avatar);
+    }
+}
+
 function isCharModalDirty() {
     if (!activeChar || isEditLocked) return false;
     if (pendingAvatarFile) return true;
@@ -10015,31 +10093,7 @@ async function openModal(char, { navList } = {}) {
     const _mobileHeader = document.querySelector('#charModal .mobile-header-avatar');
     if (_mobileHeader) _mobileHeader.src = getCharacterAvatarStThumbUrl(char.avatar);
 
-    // Fetch heavy fields on demand (slim index keeps only grid/search data in memory)
-    await hydrateCharacter(char);
-    if (gen !== _modalOpenGen) return;
-
-    // processAndRender may have replaced activeChar with a new slim object during
-    // the await (non-awaited fetchCharacters(true) from _needsCharacterRefresh).
-    // Transfer hydrated data to the array-linked object so Edit tab etc. stay in sync.
-    if (activeChar !== char && activeChar?.avatar === char.avatar && activeChar._slim) {
-        for (const field of HEAVY_FIELDS) {
-            if (char[field] !== undefined) activeChar[field] = char[field];
-            if (char.data?.[field] !== undefined) {
-                if (!activeChar.data) activeChar.data = {};
-                activeChar.data[field] = char.data[field];
-            }
-        }
-        if (char.data?.extensions) {
-            if (!activeChar.data) activeChar.data = {};
-            activeChar.data.extensions = char.data.extensions;
-        }
-        if (char.spec) activeChar.spec = char.spec;
-        if (char.spec_version) activeChar.spec_version = char.spec_version;
-        activeChar._slim = false;
-        char = activeChar;
-    }
-
+    // Hydrate await is deferred until after the modal shows so a slow /characters/get cant gate the open.
     const imgPath = getCharacterAvatarUrl(char.avatar);
 
     // Load avatar with transition: keep spinner until the correct image is ready
@@ -10112,14 +10166,13 @@ async function openModal(char, { navList } = {}) {
         authContainer.style.display = 'none';
     }
 
-    // Provider Link Indicator (generic - any provider)
-    updateProviderLinkIndicator(char);
+    // Provider Link Indicator (generic). Show loading until hydrate, so a linked card never flashes "unlinked" under lazy loading.
+    if (extensionsReady(char)) updateProviderLinkIndicator(char);
+    else setProviderLinkIndicatorLoading();
 
-    // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
+    // Tagline lives in the active namespace (provider id when linked, cl when unlinked).
     const taglineRow = document.getElementById('modalProviderTaglineRow');
-    const taglineEl = document.getElementById('modalProviderTagline');
-    const providerTagline = getDisplayTagline(char);
-    if (taglineRow && taglineEl) {
+    if (taglineRow) {
         taglineRow.classList.remove('expanded');
         taglineRow.setAttribute('aria-expanded', 'false');
         taglineRow.setAttribute('role', 'button');
@@ -10127,15 +10180,9 @@ async function openModal(char, { navList } = {}) {
             const isExpanded = taglineRow.classList.toggle('expanded');
             taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
         };
-        const showTagline = getSetting('showProviderTagline') !== false;
-        if (showTagline && providerTagline) {
-            taglineEl.innerHTML = sanitizeTaglineHtml(providerTagline, char.name);
-            taglineRow.style.display = 'block';
-        } else {
-            taglineEl.textContent = '';
-            taglineRow.style.display = 'none';
-        }
     }
+    if (extensionsReady(char)) renderProviderTaglineRow(char);
+    else if (taglineRow) taglineRow.style.display = 'none';
 
     // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe
     const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
@@ -10165,61 +10212,75 @@ async function openModal(char, { navList } = {}) {
         window.currentCreatorNotesContent = null;
     }
 
-    // Description/First Message
-    const desc = char.description || (char.data ? char.data.description : "") || "";
-    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
-    
-    // Store raw content for fullscreen expand feature
-    window.currentDescriptionContent = desc || null;
-    window.currentFirstMesContent = firstMes || null;
-    
-    // Details tab uses rich HTML rendering (initially without localization for instant display)
-    document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
-    document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
-
-    // Alternate Greetings
-    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
-    const altBox = document.getElementById('modalAltGreetingsBox');
-    
-    // Store raw content for fullscreen expand feature
-    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
-    
-    if (altBox) {
-        if (altGreetings && altGreetings.length > 0) {
-            document.getElementById('altGreetingsCount').innerText = altGreetings.length;
-            const listHTML = altGreetings.map((g, i) => 
-                `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
-            ).join('');
-            document.getElementById('modalAltGreetings').innerHTML = listHTML;
-            altBox.style.display = 'block';
-        } else {
-            altBox.style.display = 'none';
-        }
-    }
-    
-    initContentExpandHandlers();
-    
-    // Apply media localization asynchronously (if enabled)
-    // This updates the already-rendered content with localized URLs
-    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
-    
-    // Embedded Lorebook
-    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
-    const lorebookBox = document.getElementById('modalLorebookBox');
-    
-    if (lorebookBox) {
-        if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
-            document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
-            document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
-            lorebookBox.style.display = 'block';
-        } else {
-            lorebookBox.style.display = 'none';
-        }
+    if (char._slim) {
+        const sk = '<div class="cl-skeleton-line"></div><div class="cl-skeleton-line"></div><div class="cl-skeleton-line short"></div>';
+        document.getElementById('modalDescription').innerHTML = sk;
+        document.getElementById('modalFirstMes').innerHTML = sk;
+        const skAlt = document.getElementById('modalAltGreetingsBox');
+        if (skAlt) skAlt.style.display = 'none';
+        const skLb = document.getElementById('modalLorebookBox');
+        if (skLb) skLb.style.display = 'none';
     }
 
-    // Linked Lorebook (external world file via extensions.world) - async, shown below embedded
-    populateLinkedLorebookBox(char);
+    const paintModalHeavyContent = () => {
+        // Description/First Message
+        const desc = char.description || (char.data ? char.data.description : "") || "";
+        const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+
+        // Store raw content for fullscreen expand feature
+        window.currentDescriptionContent = desc || null;
+        window.currentFirstMesContent = firstMes || null;
+
+        // Details tab uses rich HTML rendering (initially without localization for instant display)
+        document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
+        document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
+
+        // Alternate Greetings
+        const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
+        const altBox = document.getElementById('modalAltGreetingsBox');
+
+        // Store raw content for fullscreen expand feature
+        window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
+
+        if (altBox) {
+            if (altGreetings && altGreetings.length > 0) {
+                document.getElementById('altGreetingsCount').innerText = altGreetings.length;
+                const listHTML = altGreetings.map((g, i) =>
+                    `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
+                ).join('');
+                document.getElementById('modalAltGreetings').innerHTML = listHTML;
+                altBox.style.display = 'block';
+            } else {
+                altBox.style.display = 'none';
+            }
+        }
+
+        initContentExpandHandlers();
+
+        // Apply media localization asynchronously (if enabled)
+        // This updates the already-rendered content with localized URLs
+        applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
+
+        // Embedded Lorebook
+        const characterBook = char.character_book || (char.data ? char.data.character_book : null);
+        const lorebookBox = document.getElementById('modalLorebookBox');
+
+        if (lorebookBox) {
+            if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
+                document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
+                const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
+                document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
+                lorebookBox.style.display = 'block';
+            } else {
+                lorebookBox.style.display = 'none';
+            }
+        }
+    };
+
+    // Linked Lorebook (external world file via extensions.world) - async, shown below embedded.
+    // Extensions may be absent on open under ST lazy loading; hide until hydrate, then re-populate.
+    if (extensionsReady(char)) populateLinkedLorebookBox(char);
+    else { const lb = document.getElementById('modalLinkedLorebookBox'); if (lb) lb.style.display = 'none'; }
 
     // Edit pane is populated lazily on first Edit tab click (see populateEditPane)
     _editPanePopulated = false;
@@ -10342,18 +10403,90 @@ async function openModal(char, { navList } = {}) {
 
     // Show modal
     modal.classList.remove('hidden');
-    
+
     // Reset scroll positions after modal is visible (using setTimeout to ensure DOM is ready)
     setTimeout(() => resetTabScrollPositions(), 0);
+
+    // Deferred hydrate: slim cards hydrate after the open so /characters/get cant gate the modal.
+    if (char._slim) {
+        await hydrateCharacter(char);
+        if (gen !== _modalOpenGen) return;
+
+        // processAndRender may have replaced activeChar with a new slim object during the await
+        // (non-awaited fetchCharacters(true) from _needsCharacterRefresh). Transfer hydrated data to
+        // the array-linked object so Edit tab etc. stay in sync.
+        if (activeChar !== char && activeChar?.avatar === char.avatar && activeChar._slim) {
+            for (const field of HEAVY_FIELDS) {
+                if (char[field] !== undefined) activeChar[field] = char[field];
+                if (char.data?.[field] !== undefined) {
+                    if (!activeChar.data) activeChar.data = {};
+                    activeChar.data[field] = char.data[field];
+                }
+            }
+            if (char.data?.extensions) {
+                if (!activeChar.data) activeChar.data = {};
+                activeChar.data.extensions = char.data.extensions;
+            }
+            if (char.spec) activeChar.spec = char.spec;
+            if (char.spec_version) activeChar.spec_version = char.spec_version;
+            activeChar._slim = false;
+            char = activeChar;
+        }
+
+        if (extensionsReady(char)) {
+            updateProviderLinkIndicator(char);
+            renderProviderTaglineRow(char);
+            populateLinkedLorebookBox(char);
+        }
+    }
+
+    paintModalHeavyContent();
+
+    // Warm the prev/next neighbors so the next navigation lands on a hydrated card (no skeleton flash).
+    if (gen === _modalOpenGen) prefetchModalNeighbors(char);
+}
+
+/** Edit-tab cover ('loading'|'error'|'hidden'): while shown the form is hidden so a slim card cant be saved empty. */
+function setEditPaneLoadingState(state) {
+    const pane = document.getElementById('pane-edit');
+    if (!pane) return;
+    if (state === 'hidden') {
+        pane.classList.remove('edit-pane-loading');
+        const existing = pane.querySelector('.edit-pane-loader');
+        if (existing) existing.remove();
+        return;
+    }
+    let loader = pane.querySelector('.edit-pane-loader');
+    if (!loader) {
+        loader = document.createElement('div');
+        loader.className = 'edit-pane-loader';
+        pane.appendChild(loader);
+    }
+    pane.classList.add('edit-pane-loading');
+    loader.innerHTML = state === 'error'
+        ? '<i class="fa-solid fa-triangle-exclamation"></i><span>Couldn\'t load this card. Check your connection, then reopen the Edit tab.</span>'
+        : '<i class="fa-solid fa-spinner fa-spin"></i><span>Loading card data...</span>';
 }
 
 /** Populate the Edit tab form fields, editors, and original-value baselines. Called once per modal open. */
-function populateEditPane() {
+async function populateEditPane() {
     if (_editPanePopulated) return;
     _editPanePopulated = true;
 
-    const char = activeChar;
-    if (!char) return;
+    let char = activeChar;
+    if (!char) { _editPanePopulated = false; return; }
+
+    setEditPaneLoadingState('hidden'); // drop any stale loader from a prior open
+
+    if (char._slim) {
+        const avatar = char.avatar;
+        setEditPaneLoadingState('loading');
+        await hydrateCharacter(char);
+        char = activeChar; // re-resolve: a concurrent refresh may have swapped activeChar for a fresh object
+        if (!char || char.avatar !== avatar) { setEditPaneLoadingState('hidden'); _editPanePopulated = false; return; } // modal swapped mid-fetch
+        if (char._slim) { setEditPaneLoadingState('error'); _editPanePopulated = false; return; } // hydrate failed or re-slimmed; leave covered
+        setEditPaneLoadingState('hidden');
+    }
 
     const desc = char.description || (char.data ? char.data.description : "") || "";
     const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
@@ -12112,6 +12245,15 @@ function showSaveConfirmation() {
 async function performSave() {
     if (!activeChar || !pendingUpdates) return;
 
+    if (activeChar._slim) {
+        await hydrateCharacter(activeChar);
+        if (activeChar._slim) { showToast('Card data still loading, please try again', 'warning'); return; }
+    }
+
+    // Re-entrancy guard: a double-tap Confirm Save must not run two concurrent snapshot+write+upload passes.
+    if (_saveInProgress) return;
+    _saveInProgress = true;
+
     const hasAvatarChange = !!pendingAvatarFile;
 
     // Auto-snapshot before edit (non-blocking - don't let snapshot failure block the save).
@@ -12199,13 +12341,22 @@ async function performSave() {
                 if (heroImg) heroImg.src = newUrl;
                 const headerAvatar = document.querySelector('#charModal .mobile-header-avatar');
                 if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
+                // Repaint the edited card's grid image now, in case the re-render below reuses the node.
+                const gridUrl = gridUsesThumbnails() ? getCharacterAvatarThumbUrl(activeChar.avatar) : getCharacterAvatarUrl(activeChar.avatar);
+                document.querySelectorAll('.char-card').forEach(card => {
+                    if (card.dataset.avatar === activeChar.avatar) {
+                        const cardImg = card.querySelector('.card-image');
+                        if (cardImg) cardImg.src = gridUrl;
+                    }
+                });
                 clearPendingAvatar();
             }
             
-            // Listing name feeds _lowerListingName (search + filter), CL-side state the card write doesnt touch, so recompute it before the grid re-renders below.
+            // Listing name + tagline feed the search keys (CL-side state the card write doesnt touch), so recompute them before the grid re-renders below.
             for (const c of [activeChar, charIndex !== -1 ? allCharacters[charIndex] : null].filter(Boolean)) {
                 const ln = getListingNameFromExtensions(c);
                 c._lowerListingName = ln ? ln.toLowerCase() : '';
+                c._lowerTagline = getDisplayTagline(c).toLowerCase();
             }
 
             // Force re-render the grid to show updated data immediately
@@ -12228,6 +12379,8 @@ async function performSave() {
         }
     } catch (e) {
         showToast("Network error saving character: " + e.message, "error");
+    } finally {
+        _saveInProgress = false;
     }
 }
 
@@ -13195,7 +13348,7 @@ async function unlinkLorebookFromCharacter() {
         danger: true,
     });
     if (!ok) return;
-    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': '' });
+    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': '' }, { awaitNotify: true });
     if (!success) { showToast('Failed to unlink lorebook', 'error'); return; }
     // Refresh the Edit-tab buttons and the detail-modal Linked Lorebook box.
     populateLorebookEditor(activeChar.data?.character_book || activeChar.character_book);
@@ -13267,7 +13420,7 @@ async function linkLorebookToCharacter(fileId) {
     if (!activeChar || !fileId) return;
     const current = activeChar.data?.extensions?.world || '';
     if (current === fileId) { closeLinkLorebookPicker(); return; }
-    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': fileId });
+    const success = await applyCardFieldUpdates(activeChar.avatar, { 'extensions.world': fileId }, { awaitNotify: true });
     if (!success) { showToast('Failed to link lorebook', 'error'); return; }
     closeLinkLorebookPicker();
     populateLorebookEditor(activeChar.data?.character_book || activeChar.character_book);
@@ -14880,6 +15033,7 @@ function performSearch() {
     const useTags = document.getElementById('searchTags').checked;
     const useAuthor = document.getElementById('searchAuthor').checked;
     const useNotes = document.getElementById('searchNotes').checked;
+    const useTagline = document.getElementById('searchTagline')?.checked;
     
     // ========================================================================
     // Parse prefix tokens from query, leaving remaining text as free-text search.
@@ -15048,6 +15202,7 @@ function performSearch() {
             if (!matchesSearch && useTags && c._tagsLower.includes(query)) matchesSearch = true;
             if (!matchesSearch && useAuthor && c._lowerCreator.includes(query)) matchesSearch = true;
             if (!matchesSearch && useNotes && (c._lowerNotes || '').includes(query)) matchesSearch = true;
+            if (!matchesSearch && useTagline && (c._lowerTagline || '').includes(query)) matchesSearch = true;
         }
 
         // 2. Tag Filter Logic - Tri-state: include, exclude, neutral
@@ -15268,7 +15423,7 @@ function setupEventListeners() {
     on('searchInput', 'input', debouncedSearch);
 
     // Filter Checkboxes
-    ['searchName', 'searchListingName', 'searchTags', 'searchAuthor', 'searchNotes'].forEach(id => {
+    ['searchName', 'searchListingName', 'searchTags', 'searchAuthor', 'searchNotes', 'searchTagline'].forEach(id => {
         on(id, 'change', performSearch);
     });
 
@@ -15636,20 +15791,27 @@ function setupEventListeners() {
     // Char detail prev/next nav (desktop chevrons + keyboard; mobile swipe wired in library-mobile.js).
     on('charModalNavPrev', 'click', () => navigateModal(-1));
     on('charModalNavNext', 'click', () => navigateModal(1));
-    // Hover preload: same shape as the grid mousedown preload so the avatar is cache-warm by the time openModal sets src.
+    // View-mode hero avatar overlay (desktop only; sidebar is hidden on mobile): click opens it in the gallery viewer, gallery images follow as prev/next.
+    on('portraitViewOverlay', 'click', () => {
+        if (activeChar) openAvatarInGalleryViewer(activeChar);
+    });
+    // Hover preload: warm the sibling's hero (only useful when the grid shows thumbs, else already cached).
     const navPrevBtn = document.getElementById('charModalNavPrev');
     const navNextBtn = document.getElementById('charModalNavNext');
     const previewSiblingAt = (offset) => {
         if (!activeChar) return null;
-        const idx = currentCharsList.findIndex(c => c.avatar === activeChar.avatar);
+        const navList = getModalNavList();
+        const idx = navList.findIndex(c => c.avatar === activeChar.avatar);
         if (idx === -1) return null;
-        return currentCharsList[idx + offset] || null;
+        return navList[idx + offset] || null;
     };
     navPrevBtn?.addEventListener('mouseenter', () => {
+        if (!gridUsesThumbnails()) return;
         const s = previewSiblingAt(-1);
         if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
     });
     navNextBtn?.addEventListener('mouseenter', () => {
+        if (!gridUsesThumbnails()) return;
         const s = previewSiblingAt(1);
         if (s) new Image().src = getCharacterAvatarUrl(s.avatar);
     });
@@ -16256,9 +16418,25 @@ function getCharacterAvatarUrl(avatar) {
 
 // Tagline lives in the active provider namespace (cl when unlinked); jannyai excluded since its tagline mirrors creator_notes.
 function getDisplayTagline(char) {
+    if (!char?.data?.extensions) return '';
     const activeId = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
     if (activeId === 'jannyai') return '';
     return char?.data?.extensions?.[activeId]?.tagline || '';
+}
+
+/** Tagline row, data part only; expand wiring lives in openModal. */
+function renderProviderTaglineRow(char) {
+    const taglineRow = document.getElementById('modalProviderTaglineRow');
+    const taglineEl = document.getElementById('modalProviderTagline');
+    if (!taglineRow || !taglineEl) return;
+    const providerTagline = getDisplayTagline(char);
+    if (getSetting('showProviderTagline') !== false && providerTagline) {
+        taglineEl.innerHTML = sanitizeTaglineHtml(providerTagline, char.name);
+        taglineRow.style.display = 'block';
+    } else {
+        taglineEl.textContent = '';
+        taglineRow.style.display = 'none';
+    }
 }
 
 // ST's built-in /thumbnail (96x144). For small avatars (chat list rows, modal header thumb, message bubbles, dupe-finder cards, recommender results) where even the cl-helper thumb is overkill. Soft above ~64px target on retina; use the cl-helper helper instead for hero-sized previews.
@@ -16285,12 +16463,25 @@ function getCharacterAvatarThumbUrl(avatar) {
     return `/thumbnail?type=avatar&file=${encodeURIComponent(avatar)}${tail}`;
 }
 
-// Per-avatar cache-bust tokens, set after an in-place image swap so freshly rendered
-// <img> tags request the new bytes instead of the browser cache.
-const _avatarCacheBust = new Map();
+// Per-avatar cache-bust tokens for in-place image swaps, persisted so the new image survives a reload.
+const AVATAR_CACHEBUST_KEY = 'cl_avatarCacheBust';
+const AVATAR_CACHEBUST_CAP = 600;
+const _avatarCacheBust = (() => {
+    try {
+        const raw = localStorage.getItem(AVATAR_CACHEBUST_KEY);
+        if (raw) return new Map(Object.entries(JSON.parse(raw)));
+    } catch {}
+    return new Map();
+})();
 function bumpAvatarCacheBust(avatar) {
     if (!avatar) return;
     _avatarCacheBust.set(avatar, Date.now());
+    if (_avatarCacheBust.size > AVATAR_CACHEBUST_CAP) {
+        // Drop oldest; those swaps aged out of the browser cache long ago.
+        const stale = [..._avatarCacheBust.entries()].sort((a, b) => a[1] - b[1]).slice(0, _avatarCacheBust.size - AVATAR_CACHEBUST_CAP);
+        for (const [k] of stale) _avatarCacheBust.delete(k);
+    }
+    try { localStorage.setItem(AVATAR_CACHEBUST_KEY, JSON.stringify(Object.fromEntries(_avatarCacheBust))); } catch {}
 }
 
 /**
@@ -18520,10 +18711,33 @@ on('importSummaryDownloadAllBtn', 'click', async () => {
  * Update the provider link indicator in the modal (generic — any provider)
  * @param {Object} char - Character object
  */
+/** Whether char's data.extensions are trustworthy right now. */
+function extensionsReady(char) {
+    if (!char) return true;
+    if (!char._slim) return true;
+    if (!window.stShallowMode) return true;
+    return _extensionsCache.has(char.avatar);
+}
+
+/** Provider-link indicator loading state while shallow extensions are fetched. */
+function setProviderLinkIndicatorLoading() {
+    const indicator = document.getElementById('providerLinkIndicator');
+    if (!indicator) return;
+    indicator.classList.remove('linked');
+    indicator.style.pointerEvents = 'none';
+    indicator.title = 'Loading link status...';
+    delete indicator.dataset.providerId;
+    const textSpan = indicator.querySelector('.provider-link-text');
+    if (textSpan) textSpan.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    const toggle = document.getElementById('namePreferenceToggle');
+    if (toggle) toggle.classList.add('hidden'); // listing name unknown until hydrate
+}
+
 function updateProviderLinkIndicator(char) {
     const indicator = document.getElementById('providerLinkIndicator');
     if (!indicator) return;
-    
+    indicator.style.pointerEvents = '';
+
     const result = window.ProviderRegistry?.getCharacterProvider(char) || null;
     const textSpan = indicator.querySelector('.provider-link-text');
     const locked = isUpdateLocked(char);
@@ -18994,10 +19208,11 @@ async function unlinkFromProvider() {
         const success = await window.applyCardFieldUpdates(activeChar.avatar, updates);
         if (!success) throw new Error('Failed to save unlink');
 
-        // Recompute _lowerListingName on both refs: it's CL-side state outside char.data, so the helper's write doesnt touch it.
+        // Recompute the listing-name + tagline search keys on both refs: CL-side state outside char.data, so the helper's write doesnt touch it.
         for (const c of [activeChar, charInArray].filter(Boolean)) {
             const ln = getListingNameFromExtensions(c);
             c._lowerListingName = ln ? ln.toLowerCase() : '';
+            c._lowerTagline = getDisplayTagline(c).toLowerCase();
         }
 
         showToast(`Unlinked from ${provider.name}`, 'info');
@@ -20045,11 +20260,13 @@ async function saveProviderLink(char, provider, linkInfo) {
     });
     if (!success) throw new Error('Failed to save provider link');
 
-    // Recompute listing name search key (CL-side state outside char.data; helper doesnt know about it).
+    // Recompute the listing-name + tagline search keys (CL-side state outside char.data; helper doesnt know about it).
     const listingName = getListingNameFromExtensions(char);
     char._lowerListingName = listingName ? listingName.toLowerCase() : '';
+    char._lowerTagline = getDisplayTagline(char).toLowerCase();
     if (charInArray && charInArray !== char) {
         charInArray._lowerListingName = char._lowerListingName;
+        charInArray._lowerTagline = char._lowerTagline;
     }
 
     // Same-tick ST sync: setLinkInfo on mainChar makes the new link visible immediately, ahead of the async refetch.
@@ -21303,7 +21520,9 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
                         throw new Error('CORS blocked and proxy is disabled');
                     }
                 }
-                throw new Error(`${usedProxy ? 'Proxy ' : ''}HTTP ${response.status}`);
+                const httpErr = new Error(`${usedProxy ? 'Proxy ' : ''}HTTP ${response.status}`);
+                httpErr.httpStatus = response.status;
+                throw httpErr;
             }
         } finally {
             clearTimeout(timeoutId);
@@ -21342,7 +21561,8 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
     } catch (error) {
         return {
             success: false,
-            error: error.message || String(error)
+            error: error.message || String(error),
+            status: typeof error?.httpStatus === 'number' ? error.httpStatus : null
         };
     }
 }
@@ -24094,14 +24314,17 @@ async function findCharacterDuplicates(forceRefresh = false) {
     return applyDuplicateMinScoreFilter(groups);
 }
 
+// Shared min-score predicate so the filtered render and the transfer-target list cant drift apart.
+function dupePassesMinScore(d, minScore, exactMode) {
+    return exactMode ? d.strictIdentical : (d.contentIdentical || d.score >= minScore);
+}
+
 function applyDuplicateMinScoreFilter(groups) {
     const minScore = getSetting('duplicateMinScore') || 35;
     const exactMode = minScore >= 120;
     const filtered = [];
     for (const group of groups) {
-        const dupes = group.duplicates.filter(d =>
-            exactMode ? d.strictIdentical : (d.contentIdentical || d.score >= minScore)
-        );
+        const dupes = group.duplicates.filter(d => dupePassesMinScore(d, minScore, exactMode));
         if (dupes.length > 0) {
             filtered.push({ ...group, duplicates: dupes });
         }
@@ -24646,7 +24869,7 @@ function getDuplicateScoreLabel(score, isStrictIdentical = false) {
     return 'Possible Match';
 }
 
-function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
+function renderCharDupCard(char, type, charIdx = 0, diffs = null) {
     const name = getCharField(char, 'name') || 'Unknown';
     const creator = getCharField(char, 'creator') || 'Unknown creator';
     const avatarPath = getCharacterAvatarStThumbUrl(char.avatar);
@@ -24726,7 +24949,7 @@ function renderCharDupCard(char, type, groupIdx, charIdx = 0, diffs = null) {
                 <button class="action-btn secondary small dup-playlist-btn" title="Add to Playlist">
                     <i class="fa-solid fa-list"></i> Playlist
                 </button>
-                <button class="action-btn danger-hover small dup-delete-btn" data-group-idx="${groupIdx}">
+                <button class="action-btn danger-hover small dup-delete-btn">
                     <i class="fa-solid fa-trash"></i> Delete
                 </button>
             </div>
@@ -24964,7 +25187,7 @@ async function renderDuplicateGroups(groups) {
             
             html += `
                 <div class="char-dup-comparison" data-dup-idx="${dupIdx}">
-                    ${renderCharDupCard(ref, 'reference', idx)}
+                    ${renderCharDupCard(ref, 'reference')}
                     <div class="char-dup-divider">
                         <i class="fa-solid fa-arrows-left-right"></i>
                         <div class="char-dup-group-confidence ${dup.confidence} match-score" title="${dup.score || 0} pts">
@@ -24975,7 +25198,7 @@ async function renderDuplicateGroups(groups) {
                         </div>
                         ${scoreBreakdown}
                     </div>
-                    ${renderCharDupCard(dupChar, 'duplicate', idx, dupIdx, diffs)}
+                    ${renderCharDupCard(dupChar, 'duplicate', dupIdx, diffs)}
                 </div>
                 ${diffSummary}
                 ${differentFields ? `
@@ -25075,6 +25298,25 @@ async function viewDupCharGallery(el) {
     }
 }
 
+
+// Detail-modal hero avatar -> gallery viewer, avatar is image 0 and the chars gallery images are appended as prev/next.
+async function openAvatarInGalleryViewer(char) {
+    if (!char || !window.openGalleryViewerWithImages) return;
+    const images = [{ name: char.name || 'Avatar', url: getCharacterAvatarUrl(char.avatar) }];
+    let folder = null;
+    try {
+        const info = await getCharacterGalleryInfo(char);
+        folder = info.folder || null;
+        if (info.files?.length) {
+            for (const f of info.files) {
+                images.push({ name: f, url: `/user/images/${encodeURIComponent(info.folder)}/${encodeURIComponent(f)}` });
+            }
+        }
+    } catch (e) {
+        debugLog('[AvatarViewer] gallery fetch failed, showing avatar only:', e);
+    }
+    window.openGalleryViewerWithImages(images, 0, char.name || 'Gallery', folder);
+}
 
 /**
  * Load and display gallery image counts for all characters in duplicate groups
@@ -25239,7 +25481,7 @@ function viewCharFromDuplicates(avatar) {
 /**
  * Delete a duplicate character with option to transfer gallery images
  */
-async function deleteDuplicateChar(avatar, groupIdx) {
+async function deleteDuplicateChar(avatar) {
     const char = allCharacters.find(c => c.avatar === avatar);
     if (!char) return;
     
@@ -25254,18 +25496,22 @@ async function deleteDuplicateChar(avatar, groupIdx) {
     // Shared galleries should NOT be modified as they may contain other characters' images
     const hasUniqueGallery = !!getCharacterGalleryId(char);
     
-    // Find other characters this could be transferred to (same name or in same duplicate group)
-    const currentGroup = duplicateScanCache.groups?.[groupIdx];
+    // Match by identity, not index: the rendered list is min-score-filtered, so an index into the unfiltered cache mis-points.
+    const currentGroup = duplicateScanCache.groups?.find(g =>
+        g.reference?.avatar === avatar || g.duplicates?.some(d => d.char?.avatar === avatar)
+    );
     const transferTargets = [];
-    
+
     if (currentGroup) {
-        // Add reference character
+        const minScore = getSetting('duplicateMinScore') || 35;
+        const exactMode = minScore >= 120;
+        // Reference anchors the group; always a valid target.
         if (currentGroup.reference.avatar !== avatar) {
             transferTargets.push(currentGroup.reference);
         }
-        // Add other duplicates
+        // Match the rendered group's filter so a target is never a low-score match the user never saw.
         currentGroup.duplicates.forEach(d => {
-            if (d.char.avatar !== avatar) {
+            if (d.char.avatar !== avatar && dupePassesMinScore(d, minScore, exactMode)) {
                 transferTargets.push(d.char);
             }
         });
@@ -25659,8 +25905,7 @@ document.getElementById('charDuplicatesResults')?.addEventListener('click', (e) 
 
     const deleteBtn = e.target.closest('.dup-delete-btn');
     if (deleteBtn) {
-        const groupIdx = parseInt(deleteBtn.dataset.groupIdx);
-        if (!isNaN(groupIdx)) deleteDuplicateChar(avatar, groupIdx);
+        deleteDuplicateChar(avatar);
     }
 });
 
@@ -27096,7 +27341,7 @@ function initThemeCustomizer() {
 
 // Overlay registrations for library.js modals
 window.registerOverlay?.({ id: 'charModal', tier: 8, close: () => maybeCloseModal() });
-window.registerOverlay?.({ id: 'disableGalleryFoldersModal', tier: 6, static: false, close: (el) => el.remove() });
+window.registerOverlay?.({ id: 'disableGalleryFoldersModal', tier: 6, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 window.registerOverlay?.({ id: 'greetingsExpandModal', tier: 5, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'lorebookExpandModal', tier: 5, static: false, close: (el) => el.remove() });
 window.registerOverlay?.({ id: 'expandFieldModal', tier: 5, static: false, close: (el) => el.remove() });
@@ -27259,6 +27504,7 @@ window.getAllCharacters = function() { return allCharacters; };
 window.getCurrentCharacters = function() { return currentCharacters; };
 window.getActiveChar = function() { return activeChar; };
 window.setActiveChar = function(c) { activeChar = c; };
+window.openAvatarInGalleryViewer = openAvatarInGalleryViewer;
 window.fetchCharacters = fetchCharacters;
 window.fetchAndAddCharacter = fetchAndAddCharacter;
 window.notifySTCharacterAdded = notifySTCharacterAdded;
@@ -27310,6 +27556,8 @@ window.getActiveFilterState = getActiveFilterState;
 window.getCharacterAvatarUrl = getCharacterAvatarUrl;
 window.getCharacterAvatarStThumbUrl = getCharacterAvatarStThumbUrl;
 window.getListingNameFromExtensions = getListingNameFromExtensions;
+window.bumpAvatarCacheBust = bumpAvatarCacheBust;
+window.getDisplayTagline = getDisplayTagline;
 window.getCharacterName = getCharacterName;
 window.formatRichText = formatRichText;
 window.loadCharInMain = loadCharInMain;
@@ -27872,9 +28120,10 @@ async function writeCardFields(char, fieldUpdates) {
  *
  * @param {string} avatar - Character avatar filename
  * @param {Object} fieldUpdates - Object with field paths as keys (supports dot notation)
+ * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write.
  * @returns {Promise<boolean>} Success status
  */
-window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
+window.applyCardFieldUpdates = async function(avatar, fieldUpdates, opts = {}) {
     const char = allCharacters.find(c => c.avatar === avatar);
     if (!char) {
         console.error('[applyCardFieldUpdates] Character not found:', avatar);
@@ -27896,7 +28145,12 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates) {
                 await handleGalleryFolderRename(char, oldName, newName, galleryId);
             }
         }
-        notifySTCharacterEdited(avatar);
+        // awaitNotify resyncs ST in-memory before ST's openCharacterChat implicit-save can clobber this out-of-band write
+        if (opts.awaitNotify) {
+            await notifySTCharacterEdited(avatar);
+        } else {
+            notifySTCharacterEdited(avatar);
+        }
     } catch (sideErr) {
         console.warn('[applyCardFieldUpdates] Side effect failed (write succeeded):', sideErr);
     }

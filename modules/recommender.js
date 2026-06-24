@@ -992,6 +992,8 @@ const PROVIDER_SOURCE_MAP = [
     ['jannyai', 'JanitorAI'],
     ['pygmalion', 'Pygmalion'],
     ['wyvern', 'Wyvern'],
+    ['datacat', 'DataCat'],
+    ['botbooru', 'Botbooru'],
 ];
 
 

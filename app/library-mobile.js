@@ -601,12 +601,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         let currentY = 0;
         let dragging = false;
 
-        // Both class systems get drag-dismiss when marked .cl-modal-drawer:
-        //   confirm-modal: outer .cl-confirm-overlay:not(.hidden), inner .confirm-modal-content
-        //   cl-modal:      outer .cl-modal.visible (.cl-modal-drawer), inner .cl-modal-content
         const DRAGGABLE_SHEET_SELECTOR = [
             '.cl-confirm-overlay:not(.hidden) .confirm-modal-content',
             '.cl-modal.cl-modal-drawer.visible .cl-modal-content',
+            '.mobile-sheet-overlay:not(.hidden) .mobile-sheet',
+            '.mobile-fixed-popup:not(.hidden)',
         ].join(', ');
 
         document.addEventListener('touchstart', (e) => {
@@ -617,6 +616,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             const rect = sheet.getBoundingClientRect();
             const offsetY = e.touches[0].clientY - rect.top;
             if (offsetY > DRAG_ZONE_HEIGHT) return;
+            // Only start a dismiss-drag when the content under the touch is at the top.
+            // A scrolled-down list/sheet should scroll up, not drag the sheet shut.
+            for (let n = e.target; n && n !== sheet.parentElement; n = n.parentElement) {
+                if (n.scrollTop > 0) return;
+            }
             activeSheet = sheet;
             startY = e.touches[0].clientY;
             currentY = startY;
@@ -629,28 +633,38 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             currentY = e.touches[0].clientY;
             const delta = Math.max(0, currentY - startY);
             activeSheet.style.transform = `translateY(${delta}px)`;
-        }, { passive: true });
+            // Non-passive: stop the browser co-opting the downward drag for
+            // pull-to-refresh / overscroll while a sheet is being dismissed.
+            if (e.cancelable) e.preventDefault();
+        }, { passive: false });
+
+        // Route drag-close through each sheet's own close so its cleanup (picker state, back-guards, checkbox revert) runs.
+        function closeDraggedSheet(overlay) {
+            if (!overlay) return;
+            if (typeof overlay._closeFn === 'function') {
+                overlay._closeFn(overlay);
+            } else {
+                const reg = (window._overlayRegistry || []).find(o => o.id && o.id === overlay.id && typeof o.close === 'function');
+                if (reg) reg.close(overlay);
+                // Legacy fallback for any unregistered drawer: toggle the family's own class.
+                else if (overlay.classList.contains('cl-modal')) overlay.classList.remove('visible');
+                else overlay.classList.add('hidden');
+            }
+            overlay._resolve?.(false);
+        }
 
         function endDrag() {
             if (!dragging || !activeSheet) return;
             const delta = currentY - startY;
             const sheet = activeSheet;
-            // .cl-confirm-overlay wraps confirm modals; .cl-modal IS the overlay for the cl-modal family.
-            const overlay = sheet.closest('.cl-confirm-overlay, .cl-modal');
-            sheet.style.transition = 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)';
+            // For .mobile-fixed-popup the panel IS the toggled element; the others wrap it.
+            const overlay = sheet.closest('.cl-confirm-overlay, .cl-modal, .mobile-sheet-overlay') || sheet;
+            sheet.style.transition = 'transform 0.22s var(--ease-drawer)';
 
             if (delta > DISMISS_THRESHOLD) {
                 sheet.style.transform = 'translateY(100%)';
                 setTimeout(() => {
-                    if (overlay) {
-                        // Dual class system: confirm-modal toggles .hidden, cl-modal toggles .visible.
-                        if (overlay.classList.contains('cl-modal')) {
-                            overlay.classList.remove('visible');
-                        } else {
-                            overlay.classList.add('hidden');
-                        }
-                        overlay._resolve?.(false);
-                    }
+                    closeDraggedSheet(overlay);
                     sheet.style.transition = '';
                     sheet.style.transform = '';
                 }, 220);
@@ -735,7 +749,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 indicator.classList.remove('ready');
                 indicator.classList.add('refreshing');
                 indicator.innerHTML = ICON_LOAD;
-                indicator.style.transition = 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.22s ease';
+                indicator.style.transition = 'transform 0.22s var(--ease-drawer), opacity 0.22s ease';
                 indicator.style.transform = `translateY(${REST_POSITION}px)`;
                 window.hapticFeedback?.(15);
 
@@ -743,7 +757,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                     await triggerViewRefresh();
                 } finally {
                     indicator.classList.remove('refreshing');
-                    indicator.style.transition = 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.18s ease';
+                    indicator.style.transition = 'transform 0.22s var(--ease-drawer), opacity 0.18s ease';
                     indicator.style.transform = 'translateY(-100%)';
                     indicator.style.opacity = '0';
                     setTimeout(() => {
@@ -1159,7 +1173,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
             // Tier 1 - top z-index overlays
             ['#galleryViewerModal.visible',    () => window.closeGalleryViewer?.()],
-            ['.mobile-ctx-sheet.visible',      () => { document.querySelector('.mobile-ctx-sheet')?.classList.remove('visible'); document.querySelector('.mobile-ctx-scrim')?.classList.remove('visible'); }],
             ['#clContextMenu.visible',         el => el.classList.remove('visible')],
             ['.custom-select-menu:not(.hidden)', el => el.classList.add('hidden')],
 
@@ -1246,8 +1259,10 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
             // Tier 2 - confirm/dialog modals (z-2000+)
             ['#disableGalleryFoldersModal',          el => el.remove()],
-            // Tier 2.5 - mobile sheets & overlays (.mobile-search-overlay lives in Tier 1.56)
-            ['.mobile-sheet-overlay:not(.hidden)', el => {
+            // Tier 2.5 - mobile sheets & overlays (.mobile-search-overlay lives in Tier 1.56).
+            ['.mobile-sheet-overlay:not(.hidden)', () => {
+                const overlays = document.querySelectorAll('.mobile-sheet-overlay:not(.hidden)');
+                const el = overlays[overlays.length - 1];
                 el.querySelector('.mobile-sheet')?.classList.remove('open');
                 setTimeout(() => el.classList.add('hidden'), 300);
             }],
@@ -1597,9 +1612,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         const { overlay, sheet, close } = createBottomSheet();
 
-        const handle = document.createElement('div');
-        handle.className = 'mobile-sheet-handle';
-        sheet.appendChild(handle);
+        addSheetHandle(sheet);
 
         const body = document.createElement('div');
         body.className = 'mobile-settings-body';
@@ -1613,23 +1626,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         // Sort
         const sortSection = createSection('Sort By');
-        const sortSelect = document.createElement('select');
-        sortSelect.className = 'mobile-settings-select';
-        const realSort = document.getElementById('sortSelect');
-        if (realSort) {
-            Array.from(realSort.options).forEach(opt => {
-                const o = document.createElement('option');
-                o.value = opt.value;
-                o.textContent = opt.textContent;
-                o.selected = opt.selected;
-                sortSelect.appendChild(o);
-            });
-            sortSelect.addEventListener('change', () => {
-                realSort.value = sortSelect.value;
-                realSort.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-        }
-        sortSection.appendChild(sortSelect);
+        const sortChip = createSettingsSelectChip(() => document.getElementById('sortSelect'), 'Sort By');
+        sortSection.appendChild(sortChip);
         charSection.appendChild(sortSection);
 
         // Filters
@@ -1682,7 +1680,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const checksGrid = document.createElement('div');
         checksGrid.className = 'mobile-settings-checks';
         [{ id: 'searchName', label: 'Name' }, { id: 'searchTags', label: 'Tags' },
-         { id: 'searchAuthor', label: 'Author' }, { id: 'searchNotes', label: 'Notes' }]
+         { id: 'searchAuthor', label: 'Author' }, { id: 'searchNotes', label: 'Notes' },
+         { id: 'searchTagline', label: 'Tagline' }]
         .forEach(field => {
             const realCb = document.getElementById(field.id);
             if (!realCb) return;
@@ -1746,8 +1745,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             const isFollowing = followChip.classList.contains('active');
             // Wyvern has no Following-mode sort; gate the whole Sort By section so it doesnt show empty.
             const hasFollowSort = !!getIds()?.timelineSort;
-            mtBrowseSortSelect.style.display = isFollowing ? 'none' : '';
-            mtFollowSortSelect.style.display = (isFollowing && hasFollowSort) ? '' : 'none';
+            mtBrowseSortChip.style.display = isFollowing ? 'none' : '';
+            mtFollowSortChip.style.display = (isFollowing && hasFollowSort) ? '' : 'none';
             mtSortSection.style.display = (isFollowing && !hasFollowSort) ? 'none' : '';
         }
 
@@ -1769,80 +1768,40 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         modeSection.appendChild(modeRow);
         modeToggleSection.appendChild(modeSection);
 
-        // Sort - two selects: Browse sort + Following sort, toggled by mode
+        // Sort - browse sort + following sort chips, toggled by mode
         const mtSortSection = createSection('Sort By');
 
-        const mtBrowseSortSelect = document.createElement('select');
-        mtBrowseSortSelect.className = 'mobile-settings-select';
-        mtBrowseSortSelect.addEventListener('change', () => {
-            const ids = getIds();
-            const real = ids?.sort ? document.getElementById(ids.sort) : null;
-            if (real) {
-                real.value = mtBrowseSortSelect.value;
-                real.dispatchEvent(new Event('change', { bubbles: true }));
-                setTimeout(syncSubSort, 100);
-            }
-        });
-        mtSortSection.appendChild(mtBrowseSortSelect);
+        const mtBrowseSortChip = createSettingsSelectChip(
+            () => { const ids = getIds(); return ids?.sort ? document.getElementById(ids.sort) : null; },
+            'Sort By',
+            () => syncSubSort(),
+        );
+        mtSortSection.appendChild(mtBrowseSortChip);
 
-        // Optional sub-sort extras (eg. botbooru's curated ordering). Mirror the real
-        // filter-bar elements: browse-filter-hidden on them already encodes sort+mode+account gating
-        const mtSubSortSelect = document.createElement('select');
-        mtSubSortSelect.className = 'mobile-settings-select';
-        mtSubSortSelect.style.display = 'none';
-        mtSubSortSelect.style.marginTop = 'var(--space-sm)';
-        mtSubSortSelect.addEventListener('change', () => {
-            const ids = getIds();
-            const real = ids?.subSort ? document.getElementById(ids.subSort) : null;
-            if (real) {
-                real.value = mtSubSortSelect.value;
-                real.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
-        mtSortSection.appendChild(mtSubSortSelect);
-
-        const mtSubSortChip = createChip('');
+        // Optional sub-sort (eg. botbooru): mirror the real select's browse-filter-hidden, which encodes the gating.
+        const mtSubSortChip = createSettingsSelectChip(
+            () => { const ids = getIds(); return ids?.subSort ? document.getElementById(ids.subSort) : null; },
+            'Sort By',
+        );
         mtSubSortChip.style.display = 'none';
         mtSubSortChip.style.marginTop = 'var(--space-sm)';
-        mtSubSortChip.addEventListener('click', () => {
-            const ids = getIds();
-            const realBtn = ids?.subSortBtn ? document.getElementById(ids.subSortBtn) : null;
-            if (realBtn) { realBtn.click(); setTimeout(syncSubSort, 100); }
-        });
         mtSortSection.appendChild(mtSubSortChip);
 
         function syncSubSort() {
             const ids = getIds();
             const real = ids?.subSort ? document.getElementById(ids.subSort) : null;
             const realTarget = real ? (real._customSelect?.container || real) : null;
-            const showSelect = !!realTarget && !realTarget.classList.contains('browse-filter-hidden');
-            if (showSelect) {
-                mtSubSortSelect.innerHTML = real.innerHTML;
-                mtSubSortSelect.value = real.value;
-            }
-            mtSubSortSelect.style.display = showSelect ? '' : 'none';
-            const realBtn = ids?.subSortBtn ? document.getElementById(ids.subSortBtn) : null;
-            const showBtn = !!realBtn && !realBtn.classList.contains('browse-filter-hidden');
-            if (showBtn) {
-                const icon = realBtn.querySelector('i')?.outerHTML || '';
-                mtSubSortChip.innerHTML = icon + ' ' + (realBtn.dataset.mobileLabel || realBtn.title || '');
-                mtSubSortChip.classList.toggle('active', realBtn.classList.contains('active'));
-            }
-            mtSubSortChip.style.display = showBtn ? '' : 'none';
+            const show = !!realTarget && !realTarget.classList.contains('browse-filter-hidden');
+            if (show) mtSubSortChip._syncLabel();
+            mtSubSortChip.style.display = show ? '' : 'none';
         }
 
-        const mtFollowSortSelect = document.createElement('select');
-        mtFollowSortSelect.className = 'mobile-settings-select';
-        mtFollowSortSelect.style.display = 'none';
-        mtFollowSortSelect.addEventListener('change', () => {
-            const ids = getIds();
-            const real = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
-            if (real) {
-                real.value = mtFollowSortSelect.value;
-                real.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
-        mtSortSection.appendChild(mtFollowSortSelect);
+        const mtFollowSortChip = createSettingsSelectChip(
+            () => { const ids = getIds(); return ids?.timelineSort ? document.getElementById(ids.timelineSort) : null; },
+            'Sort By',
+        );
+        mtFollowSortChip.style.display = 'none';
+        mtSortSection.appendChild(mtFollowSortChip);
         modeToggleSection.appendChild(mtSortSection);
 
         // Filters row (Tags, Features, NSFW)
@@ -1918,17 +1877,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         // Sort
         const genericSortSection = createSection('Sort By');
-        const genericSortSelect = document.createElement('select');
-        genericSortSelect.className = 'mobile-settings-select';
-        genericSortSelect.addEventListener('change', () => {
-            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
-            const real = ids?.sort ? document.getElementById(ids.sort) : null;
-            if (real) {
-                real.value = genericSortSelect.value;
-                real.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-        });
-        genericSortSection.appendChild(genericSortSelect);
+        const genericSortChip = createSettingsSelectChip(
+            () => { const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.(); return ids?.sort ? document.getElementById(ids.sort) : null; },
+            'Sort By',
+        );
+        genericSortSection.appendChild(genericSortChip);
         genericSection.appendChild(genericProviderLabel);
         genericSection.appendChild(genericSortSection);
 
@@ -1996,23 +1949,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         // Sort
         const chatsSortSection = createSection('Sort By');
-        const chatsSortSelect = document.createElement('select');
-        chatsSortSelect.className = 'mobile-settings-select';
-        const realChatsSort = document.getElementById('chatsSortSelect');
-        if (realChatsSort) {
-            Array.from(realChatsSort.options).forEach(opt => {
-                const o = document.createElement('option');
-                o.value = opt.value;
-                o.textContent = opt.textContent;
-                o.selected = opt.selected;
-                chatsSortSelect.appendChild(o);
-            });
-            chatsSortSelect.addEventListener('change', () => {
-                realChatsSort.value = chatsSortSelect.value;
-                realChatsSort.dispatchEvent(new Event('change', { bubbles: true }));
-            });
-        }
-        chatsSortSection.appendChild(chatsSortSelect);
+        const chatsSortChip = createSettingsSelectChip(() => document.getElementById('chatsSortSelect'), 'Sort By');
+        chatsSortSection.appendChild(chatsSortChip);
         chatsSection.appendChild(chatsSortSection);
 
         // Grouping toggle
@@ -2080,35 +2018,14 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 if (!hasModeToggle) {
                     const prov = reg?.getActiveProvider?.();
                     genericProviderLabel.textContent = prov ? prov.name : 'Online';
-
-                    const realSort = ids?.sort ? document.getElementById(ids.sort) : null;
-                    if (realSort) {
-                        genericSortSelect.innerHTML = realSort.innerHTML;
-                        genericSortSelect.value = realSort.value;
-                    }
+                    genericSortChip._syncLabel();
                     syncGenericNsfwState();
                 }
 
                 if (hasModeToggle) {
-                    const realBrowseSort = ids?.sort ? document.getElementById(ids.sort) : null;
-                    if (realBrowseSort) {
-                        // DataCat etc rebuild sort options on mode switch, so re-copy every time
-                        mtBrowseSortSelect.innerHTML = realBrowseSort.innerHTML;
-                        mtBrowseSortSelect.value = realBrowseSort.value;
-                    }
-
-                    const realTimelineSort = ids?.timelineSort ? document.getElementById(ids.timelineSort) : null;
-                    if (realTimelineSort) {
-                        mtFollowSortSelect.innerHTML = '';
-                        Array.from(realTimelineSort.options).forEach(opt => {
-                            const o = document.createElement('option');
-                            o.value = opt.value;
-                            o.textContent = opt.textContent;
-                            mtFollowSortSelect.appendChild(o);
-                        });
-                        mtFollowSortSelect.value = realTimelineSort.value;
-                    }
-
+                    // Chips read options live from the real selects at open time; only labels + per-mode visibility refresh here.
+                    mtBrowseSortChip._syncLabel();
+                    mtFollowSortChip._syncLabel();
                     syncMode();
                     syncMtNsfwState();
                     syncSort();
@@ -2116,9 +2033,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 }
             } else if (activeView === 'chats') {
                 syncGrouping();
-                if (realChatsSort) chatsSortSelect.value = realChatsSort.value;
+                chatsSortChip._syncLabel();
             } else {
-                if (realSort) sortSelect.value = realSort.value;
+                sortChip._syncLabel();
                 syncCharFilterChips();
             }
 
@@ -2143,6 +2060,109 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         return chip;
     }
 
+    function createSettingsSelectChip(getRealSelect, title, afterSelect) {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'mobile-settings-select';
+        chip.innerHTML = '<span class="mobile-settings-select-text"></span><i class="fa-solid fa-chevron-down mobile-settings-select-arrow"></i>';
+        chip._syncLabel = () => {
+            const real = getRealSelect();
+            chip.querySelector('.mobile-settings-select-text').textContent =
+                real ? (real.options[real.selectedIndex]?.textContent || '') : '';
+        };
+        chip.addEventListener('click', () => {
+            const real = getRealSelect();
+            if (!real) return;
+            window.openSelectorSheetFromSelect?.(real, {
+                title,
+                onSelect: () => { chip._syncLabel(); afterSelect?.(); },
+            });
+        });
+        return chip;
+    }
+
+    // <label for=id> text (settings rows) as a drawer-title fallback; strips trailing colon.
+    function selectLabelText(select) {
+        if (!select.id) return '';
+        const lbl = document.querySelector(`label[for="${select.id}"]`);
+        return lbl ? lbl.textContent.replace(/\s*:\s*$/, '').trim() : '';
+    }
+
+    let _selectorSheet = null;
+    function openSelectorSheetFromSelect(select, opts = {}) {
+        if (!select) return;
+        if (!_selectorSheet) {
+            _selectorSheet = createBottomSheet();
+            document.body.appendChild(_selectorSheet.overlay);
+        }
+        const { overlay, sheet, close } = _selectorSheet;
+        sheet.innerHTML = '';
+
+        addSheetHandle(sheet);
+
+        const title = opts.title || select.title || select.getAttribute('aria-label') || selectLabelText(select);
+        if (title) {
+            const t = document.createElement('div');
+            t.className = 'mobile-sheet-title';
+            t.textContent = title;
+            sheet.appendChild(t);
+        }
+
+        const current = select.value;
+
+        const addOption = (opt) => {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'mobile-sheet-item';
+            const selected = opt.value === current;
+            if (selected) item.classList.add('active');
+            if (opt.disabled) item.disabled = true;
+            if (opt.dataset.iconUrl) {
+                const img = document.createElement('img');
+                img.src = opt.dataset.iconUrl;
+                img.className = 'item-icon-img';
+                img.alt = '';
+                item.appendChild(img);
+            } else if (opt.dataset.icon) {
+                const i = document.createElement('i');
+                i.className = opt.dataset.icon;
+                item.appendChild(i);
+            }
+            const label = document.createElement('span');
+            label.className = 'mobile-sheet-item-label';
+            label.textContent = opt.textContent;
+            item.appendChild(label);
+            if (selected) {
+                const chk = document.createElement('i');
+                chk.className = 'fa-solid fa-check mobile-sheet-check';
+                item.appendChild(chk);
+            }
+            item.addEventListener('click', () => {
+                if (opt.disabled) return;
+                select.value = opt.value;
+                select.dispatchEvent(new Event('change', { bubbles: true }));
+                close();
+                opts.onSelect?.(select);
+            });
+            sheet.appendChild(item);
+        };
+
+        for (const child of select.children) {
+            if (child.tagName === 'OPTGROUP') {
+                const gt = document.createElement('div');
+                gt.className = 'mobile-sheet-group-title';
+                gt.textContent = child.label;
+                sheet.appendChild(gt);
+                for (const o of child.children) if (o.tagName === 'OPTION') addOption(o);
+            } else if (child.tagName === 'OPTION') {
+                addOption(child);
+            }
+        }
+
+        openSheet(overlay, sheet);
+    }
+    window.openSelectorSheetFromSelect = openSelectorSheetFromSelect;
+
     /* ========================================
        MENU BOTTOM SHEET
        ======================================== */
@@ -2156,9 +2176,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         const { overlay, sheet, close } = createBottomSheet();
 
-        const handle = document.createElement('div');
-        handle.className = 'mobile-sheet-handle';
-        sheet.appendChild(handle);
+        addSheetHandle(sheet);
 
         // Clone items from the desktop menu
         const moreOptionsMenu = document.getElementById('moreOptionsMenu');
@@ -2357,9 +2375,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             const activeId = window.ProviderRegistry.getActiveProviderId();
             sheet.innerHTML = '';
 
-            const handle = document.createElement('div');
-            handle.className = 'mobile-sheet-handle';
-            sheet.appendChild(handle);
+            addSheetHandle(sheet);
 
             const title = document.createElement('div');
             title.className = 'mobile-provider-sheet-title';
@@ -2422,6 +2438,14 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
     /* ========================================
        BOTTOM SHEET HELPERS
        ======================================== */
+    // Separate from createBottomSheet because builders re-clear the sheet after creating it.
+    function addSheetHandle(sheet) {
+        const h = document.createElement('div');
+        h.className = 'mobile-sheet-handle';
+        sheet.appendChild(h);
+        return h;
+    }
+
     function createBottomSheet() {
         const overlay = document.createElement('div');
         overlay.className = 'mobile-sheet-overlay hidden';
@@ -2441,6 +2465,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         }
 
         backdrop.addEventListener('click', close);
+        overlay._closeFn = close;   // drag-to-dismiss routes through the canonical close
 
         return { overlay, sheet, close };
     }
@@ -2616,7 +2641,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (!heroSrc) return heroSrc;
             const m = /\/characters\/([^?#]+)(\?[^#]*)?/.exec(heroSrc);
             if (!m) return heroSrc;
-            return `/thumbnail?type=avatar&file=${m[1]}${m[2] || ''}`;
+            // the hero's ?v= cache-bust has to ride as &v= here or ST's thumbnail file param 403s on the stray '?'
+            return `/thumbnail?type=avatar&file=${m[1]}${m[2] ? '&' + m[2].slice(1) : ''}`;
         };
 
         const injectAvatar = () => {
@@ -2648,9 +2674,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                         return;
                     }
                 }
-                // The header thumbnail loads a low-res variant; open the viewer with the modal hero's full src so the fullscreen image is sharp.
-                const heroSrc = document.getElementById('modalImage')?.src || avatar.src;
-                openAvatarViewer(heroSrc, avatar.src);
+                // View mode: open the gallery viewer with the avatar + gallery images, same helper the desktop hover overlay uses.
+                const char = window.getActiveChar?.();
+                if (char) window.openAvatarInGalleryViewer?.(char);
             });
             // Insert before the title h2
             header.insertBefore(avatar, header.firstChild);
@@ -3459,7 +3485,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 document.querySelector('.modal-overlay:not(.hidden)') ||
                 document.querySelector('.cl-modal.visible') ||
                 document.querySelector('.confirm-modal:not(.hidden)') ||
-                document.querySelector('.mobile-ctx-sheet.visible') ||
                 document.querySelector('.mobile-avatar-viewer') ||
                 document.querySelector('.browse-avatar-viewer') ||
                 document.querySelector('.mobile-search-overlay:not(.hidden)') ||
@@ -3594,35 +3619,29 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         }, { passive: true });
     }
 
-    /* ========== RELOCATE TAG POPUP: move to body + scrim + handle ========== */
-    function relocateTagPopup() {
-        const popup = document.getElementById('tagFilterPopup');
+    /* ===== RELOCATE FILTER POPUP -> bottom sheet ===== */
+    function relocatePopupAsSheet(id, opts = {}) {
+        const popup = document.getElementById(id);
         if (!popup || popup.dataset.relocated) return;
         popup.dataset.relocated = 'true';
-
-        if (popup.closest('.filter-area')) {
-            document.body.appendChild(popup);
-        }
+        document.body.appendChild(popup);
+        popup.classList.add('mobile-fixed-popup');
 
         const scrim = document.createElement('div');
-        scrim.className = 'mobile-tag-scrim';
+        scrim.className = 'mobile-popup-scrim' + (opts.topScrim ? ' is-top' : '');
         scrim.style.display = 'none';
         document.body.appendChild(scrim);
 
         const handle = document.createElement('div');
-        handle.style.cssText = 'display:flex;align-items:center;justify-content:center;padding:10px;cursor:pointer;';
-        const bar = document.createElement('div');
-        bar.style.cssText = 'width:40px;height:4px;border-radius:var(--radius-2xs);background:rgba(255,255,255,0.3);';
-        handle.appendChild(bar);
+        handle.className = 'mobile-sheet-handle';
         popup.insertBefore(handle, popup.firstChild);
 
-        function closeTagPopup() {
+        function close() {
             popup.classList.add('hidden');
             scrim.style.display = 'none';
         }
-
-        scrim.addEventListener('click', closeTagPopup);
-        handle.addEventListener('click', closeTagPopup);
+        scrim.addEventListener('click', close);
+        popup._closeFn = close;   // drag-to-dismiss + scrim tap both route here
 
         const obs = new MutationObserver(() => {
             scrim.style.display = popup.classList.contains('hidden') ? 'none' : 'block';
@@ -3630,79 +3649,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         obs.observe(popup, { attributes: true, attributeFilter: ['class'] });
     }
 
-    /* ========== RELOCATE PLAYLIST POPUP: same pattern as tag popup ========== */
-    function relocatePlaylistPopup() {
-        const popup = document.getElementById('playlistFilterPopup');
-        if (!popup || popup.dataset.relocated) return;
-        popup.dataset.relocated = 'true';
-
-        if (popup.closest('.filter-area')) {
-            document.body.appendChild(popup);
-        }
-
-        const scrim = document.createElement('div');
-        scrim.className = 'mobile-playlist-scrim';
-        scrim.style.display = 'none';
-        document.body.appendChild(scrim);
-
-        const handle = document.createElement('div');
-        handle.className = 'mobile-sheet-handle-wrap';
-        const bar = document.createElement('div');
-        bar.className = 'mobile-sheet-handle';
-        handle.appendChild(bar);
-        popup.insertBefore(handle, popup.firstChild);
-
-        function closePlaylistPopup() {
-            popup.classList.add('hidden');
-            scrim.style.display = 'none';
-        }
-
-        scrim.addEventListener('click', closePlaylistPopup);
-        handle.addEventListener('click', closePlaylistPopup);
-
-        const obs = new MutationObserver(() => {
-            scrim.style.display = popup.classList.contains('hidden') ? 'none' : 'block';
-        });
-        obs.observe(popup, { attributes: true, attributeFilter: ['class'] });
-    }
-
-    /* ========================================
-       RELOCATE ADVANCED FILTER PANEL
-       Same pattern as tag/playlist popup - move to body,
-       add scrim + handle
-       ======================================== */
-    function relocateAdvFilterPanel() {
-        const panel = document.getElementById('advFilterPanel');
-        if (!panel || panel.dataset.relocated) return;
-        panel.dataset.relocated = 'true';
-
-        document.body.appendChild(panel);
-
-        const scrim = document.createElement('div');
-        scrim.className = 'mobile-advfilter-scrim';
-        scrim.style.display = 'none';
-        document.body.appendChild(scrim);
-
-        const handle = document.createElement('div');
-        handle.className = 'mobile-sheet-handle-wrap';
-        const bar = document.createElement('div');
-        bar.className = 'mobile-sheet-handle';
-        handle.appendChild(bar);
-        panel.insertBefore(handle, panel.firstChild);
-
-        function closePanel() {
-            panel.classList.add('hidden');
-            scrim.style.display = 'none';
-        }
-
-        scrim.addEventListener('click', closePanel);
-        handle.addEventListener('click', closePanel);
-
-        const obs = new MutationObserver(() => {
-            scrim.style.display = panel.classList.contains('hidden') ? 'none' : 'block';
-        });
-        obs.observe(panel, { attributes: true, attributeFilter: ['class'] });
-    }
+    function relocateTagPopup() { relocatePopupAsSheet('tagFilterPopup'); }
+    function relocatePlaylistPopup() { relocatePopupAsSheet('playlistFilterPopup'); }
+    function relocateAdvFilterPanel() { relocatePopupAsSheet('advFilterPanel', { topScrim: true }); }
 
     /* ========================================
        MULTI-SELECT CONFIRM SHEETS
@@ -3779,9 +3728,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         function showConfirmSheet(cfg, originalBtn) {
             const { overlay, sheet, close } = createBottomSheet();
 
-            const handle = document.createElement('div');
-            handle.className = 'mobile-sheet-handle';
-            sheet.appendChild(handle);
+            addSheetHandle(sheet);
 
             const body = document.createElement('div');
             body.className = 'mobile-confirm-body';
@@ -4099,46 +4046,25 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
        CONTEXT MENU → BOTTOM SHEET
        ======================================== */
     function setupContextMenu() {
-        // Intercept the context-menu module's show logic.
-        // Long-press on cards fires 'contextmenu' → module renders its popup.
-        // We capture that, hide the popup, and present a bottom-sheet instead.
+        // Long-press fires 'contextmenu' → module renders its popup; we hijack it into a bottom sheet.
 
-        let sheetEl = null, scrimEl = null;
+        let ctxSheet = null; // { overlay, sheet, close } from createBottomSheet, reused
 
-        function buildSheet() {
-            if (sheetEl) return;
-            scrimEl = document.createElement('div');
-            scrimEl.className = 'mobile-ctx-scrim';
-            document.body.appendChild(scrimEl);
+        function showCtxSheet(menuEl) {
+            if (!ctxSheet) {
+                ctxSheet = createBottomSheet();
+                document.body.appendChild(ctxSheet.overlay);
+            }
+            const { overlay, sheet, close } = ctxSheet;
+            sheet.innerHTML = '';
 
-            sheetEl = document.createElement('div');
-            sheetEl.className = 'mobile-ctx-sheet';
-            document.body.appendChild(sheetEl);
+            addSheetHandle(sheet);
 
-            scrimEl.addEventListener('click', closeSheet);
-        }
-
-        function openSheet(menuEl) {
-            buildSheet();
-            // Clone items from desktop context menu into our sheet
-            sheetEl.innerHTML = '';
-
-            // Handle bar
-            const handle = document.createElement('div');
-            handle.className = 'mobile-ctx-handle';
-            handle.innerHTML = '<div class="mobile-ctx-handle-bar"></div>';
-            handle.addEventListener('click', closeSheet);
-            sheetEl.appendChild(handle);
-
-            // Copy every child from the desktop context menu
             const children = Array.from(menuEl.children);
             const clones = children.map(child => {
                 const clone = child.cloneNode(true);
                 if (child.classList.contains('cl-context-menu-item') && !child.classList.contains('disabled')) {
-                    clone.addEventListener('click', () => {
-                        closeSheet();
-                        child.click();
-                    });
+                    clone.addEventListener('click', () => { close(); child.click(); });
                 }
                 clone._origChild = child;
                 return clone;
@@ -4158,16 +4084,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                 clones.splice(1, 0, selectClone, sep);
             }
 
-            clones.forEach(c => { delete c._origChild; sheetEl.appendChild(c); });
+            clones.forEach(c => { delete c._origChild; sheet.appendChild(c); });
 
-            scrimEl.classList.add('visible');
-            sheetEl.classList.add('visible');
-            window.pushOverlayGuard?.();
-        }
-
-        function closeSheet() {
-            if (sheetEl) sheetEl.classList.remove('visible');
-            if (scrimEl) scrimEl.classList.remove('visible');
+            openSheet(overlay, sheet);
         }
 
         // After the desktop context menu module renders and shows its popup,
@@ -4188,11 +4107,11 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         function attachObserver(menuEl) {
             const obs = new MutationObserver(() => {
+                // Check viewport at event time: this observer can outlive a cross to desktop and must no-op there.
+                if (!window.matchMedia('(max-width: 768px)').matches) return;
                 if (menuEl.classList.contains('visible')) {
-                    // Desktop context menu just appeared – hijack it
                     menuEl.classList.remove('visible');
-                    menuEl.style.display = 'none';
-                    openSheet(menuEl);
+                    showCtxSheet(menuEl);
                 }
             });
             obs.observe(menuEl, { attributes: true, attributeFilter: ['class'] });

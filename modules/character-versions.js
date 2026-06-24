@@ -45,7 +45,7 @@ const CARD_FIELDS = [
     'first_mes', 'mes_example', 'system_prompt',
     'post_history_instructions', 'creator_notes', 'creator',
     // 'character_version', // Always "main" on ChubAI - excluded from diffs
-    'tags', 'alternate_greetings', 'character_book'
+    'tags', 'alternate_greetings', 'nickname', 'character_book'
 ];
 
 // --- Low-level File I/O ---
@@ -1004,6 +1004,7 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
         { key: 'creator', label: 'Creator', icon: 'fa-user-pen' },
         { key: 'tags', label: 'Tags', isArray: true, icon: 'fa-tags' },
         { key: 'alternate_greetings', label: 'Alternate Greetings', long: true, isArray: true, icon: 'fa-comments' },
+        { key: 'nickname', label: 'Nickname', icon: 'fa-id-badge', optional: true },
         { key: 'character_book', label: 'Embedded Lorebook', icon: 'fa-book' },
     ];
 
@@ -1455,6 +1456,7 @@ async function handleApplyAvatar(avatarUrl) {
         });
 
         if (resp.ok) {
+            CoreAPI.bumpAvatarCacheBust(currentChar.avatar);
             CoreAPI.showToast('Avatar updated', 'success');
             status.innerHTML = '<i class="fa-solid fa-check" style="color:var(--cl-success);"></i> Avatar applied';
             await CoreAPI.refreshCharacters(true);

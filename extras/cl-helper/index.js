@@ -180,12 +180,7 @@ function resolveCharactersDir() {
     return null;
 }
 
-// Serve thumbnails from the requesting user's own dir (ST provides it on every
-// request) instead of one dir frozen at init. The init-time globals are just a
-// fallback for requests with no user context.
-// resolve() to absolute: DATA_ROOT may be relative (eg. ./data), and the routes'
-// traversal guard compares against absolute paths - a relative dir always fails
-// the startsWith check and 403s. No-op when already absolute.
+// resolve() to absolute: a relative DATA_ROOT (eg. ./data) fails the routes' absolute-path startsWith guard and 403s
 function imagesDirForReq(req) {
     const dir = req.user?.directories?.userImages || _imagesDir;
     return dir ? resolve(dir) : null;
@@ -598,6 +593,70 @@ function registerPygmalionRoutes(router) {
 // =============================================================================
 
 const BOTBOORU_AUTH_URL = 'https://botbooru.com/auth/token';
+const BOTBOORU_BASE = 'https://botbooru.com';
+
+// Allow-list for the botbooru proxy; hostname is pinned to botbooru.com separately.
+const BOTBOORU_ALLOWED_PATHS = [
+    /^\/posts(\/|$)/,
+    /^\/post\/\d+/,
+    /^\/tags\//,
+    /^\/api\/users\//,
+    /^\/auth\/me(\/|$)/,
+    /^\/interactions\//,
+    /^\/download\/(png|json)\//,
+    /^\/images\//,
+    /^\/mini-gallery\//,
+];
+
+async function handleBotbooruProxy(req, res) {
+    const bearer = req.headers['x-cl-botbooru-auth'];
+    if (bearer !== undefined && (typeof bearer !== 'string' || bearer.length > 4096)) {
+        return res.status(400).json({ error: 'Invalid auth header' });
+    }
+
+    const targetPath = '/' + (req.params[0] || '');
+    const normalizedPath = new URL(targetPath, BOTBOORU_BASE).pathname;
+    if (!BOTBOORU_ALLOWED_PATHS.some(re => re.test(normalizedPath))) {
+        console.warn(`[cl-helper] Botbooru proxy blocked: ${normalizedPath}`);
+        return res.status(403).json({ error: 'Proxy path not allowed' });
+    }
+
+    const targetUrl = new URL(targetPath, BOTBOORU_BASE);
+    targetUrl.search = new URL(req.url, 'http://localhost').search;
+    if (targetUrl.hostname !== 'botbooru.com') {
+        return res.status(403).json({ error: 'Proxy target must be botbooru.com' });
+    }
+
+    const headers = { Accept: 'application/json' };
+    if (bearer) headers['Authorization'] = bearer;
+    // Only forward a body when the client actually sent one, so bodyless POSTs
+    // (favorite toggle, follow) match the direct path exactly.
+    const hasBody = ['POST', 'PUT', 'PATCH'].includes(req.method)
+        && req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0;
+    if (hasBody) headers['Content-Type'] = 'application/json';
+
+    try {
+        const response = await fetch(targetUrl.toString(), {
+            method: req.method,
+            headers,
+            body: hasBody ? JSON.stringify(req.body) : undefined,
+            redirect: 'follow',
+        });
+
+        res.status(response.status);
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType) res.set('Content-Type', contentType);
+        if (response.status === 204) return res.end();
+        if (contentType.includes('application/json') || contentType.startsWith('text/')) {
+            res.send(await response.text());
+        } else {
+            res.send(Buffer.from(await response.arrayBuffer()));
+        }
+    } catch (err) {
+        console.error('[cl-helper] Botbooru proxy error:', err.message);
+        res.status(502).json({ error: 'Failed to reach Botbooru' });
+    }
+}
 
 function registerBotbooruRoutes(router) {
     /**
@@ -640,6 +699,12 @@ function registerBotbooruRoutes(router) {
             res.status(502).json({ error: 'Failed to reach Botbooru auth server' });
         }
     });
+
+    // Authed botbooru proxy: injects the user's Bearer server-side to dodge ST's basic-auth gate.
+    router.get('/botbooru-proxy/*', handleBotbooruProxy);
+    router.post('/botbooru-proxy/*', handleBotbooruProxy);
+    router.patch('/botbooru-proxy/*', handleBotbooruProxy);
+    router.delete('/botbooru-proxy/*', handleBotbooruProxy);
 }
 
 // =============================================================================
@@ -1777,6 +1842,7 @@ async function findBundledClHelperDirs(userExtDir) {
 
 export async function init(router) {
     router.get('/health', (req, res) => {
+        const auth = req.headers.authorization;
         res.json({
             ok: true,
             version: _runningVersion,
@@ -1784,6 +1850,7 @@ export async function init(router) {
             linked: _isLinkedInstall,
             installPath: __dirname,
             admin: !!req.user?.profile?.admin,
+            basicAuth: typeof auth === 'string' && auth.startsWith('Basic '),
         });
     });
 

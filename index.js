@@ -274,8 +274,11 @@ function closeAllSTDrawers() {
         if (typeof el.click === 'function') el.click();
     });
 
-    // Final fallback for panes that listen to Escape for close.
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    // st cancels gen on escape so skip this pane-close fallback while a reply is streaming
+    const stopBtn = document.getElementById('mes_stop');
+    if (!stopBtn || stopBtn.getClientRects().length === 0) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
 }
 
 function showEmbedded() {
@@ -366,6 +369,10 @@ function setupPostMessageBridge() {
                     const idx = (context.characters || []).findIndex(c => c.avatar === msg.avatar);
                     if (idx !== -1 && typeof context.selectCharacterById === 'function') {
                         await context.selectCharacterById(idx);
+                        // New chat requested: /newchat (doNewChat) acts on the now-active character.
+                        if (msg.newChat && typeof context.executeSlashCommandsWithOptions === 'function') {
+                            await context.executeSlashCommandsWithOptions('/newchat', { displayCommand: false, showOutput: false });
+                        }
                     }
                 } catch (err) {
                     console.error(`${EXTENSION_NAME}: Failed to open character:`, err);
@@ -383,6 +390,8 @@ function setupPostMessageBridge() {
                         // open the wanted chat in one CHAT_CHANGED (old select-then-openCharacterChat fired two)
                         const alreadyActive = String(context.characterId) === String(idx);
                         if (alreadyActive && typeof context.openCharacterChat === 'function') {
+                            // openCharacterChat re-saves from ST in-memory; refetch first so a just-applied CL link isnt clobbered
+                            if (typeof context.getOneCharacter === 'function') await context.getOneCharacter(msg.avatar);
                             await context.openCharacterChat(msg.chatName);
                         } else {
                             // unshallow first so selectCharacterById's internal getChat->unshallow wont re-fetch

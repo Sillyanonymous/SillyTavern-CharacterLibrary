@@ -8,8 +8,7 @@
 // (the first direct attempt rejects, the origin is cached, ST's /proxy/
 // carries everything after; Authorization survives the proxy).
 
-import { fetchWithProxy } from '../provider-utils.js';
-export { fetchWithProxy };
+import { fetchWithProxy as _rawFetchWithProxy, CL_HELPER_PLUGIN_BASE } from '../provider-utils.js';
 
 // ========================================
 // CONSTANTS
@@ -23,15 +22,19 @@ export const BOTBOORU_BASE = 'https://botbooru.com';
 
 let _getSetting = null;
 let _debugLog = null;
+let _apiRequest = null;     // CoreAPI.apiRequest, for the cl-helper basic-auth reroute
+let _getCSRFToken = null;   // CoreAPI.getCSRFToken, ditto
 
 /**
  * Must be called once before any other export is used.
  * Typically called from BotbooruProvider.init(coreAPI).
- * @param {{ getSetting: Function, debugLog: Function }} deps
+ * @param {{ getSetting: Function, debugLog: Function, apiRequest?: Function, getCSRFToken?: Function }} deps
  */
 export function initBotbooruApi(deps) {
     _getSetting = deps.getSetting;
     _debugLog = deps.debugLog;
+    _apiRequest = deps.apiRequest || null;
+    _getCSRFToken = deps.getCSRFToken || null;
 }
 
 function debugLog(...args) {
@@ -54,6 +57,53 @@ export function getBotbooruHeaders(includeAuth = true) {
         headers['Authorization'] = `Bearer ${token}`;
     }
     return headers;
+}
+
+const BOTBOORU_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/botbooru-proxy`;
+
+let _clHelper = null;       // { available, basicAuth } once definitively probed
+let _clHelperProbe = null;  // in-flight dedupe
+
+async function probeClHelper() {
+    if (_clHelper) return _clHelper;
+    if (_clHelperProbe) return _clHelperProbe;
+    if (!_apiRequest) return { available: false, basicAuth: false };
+    _clHelperProbe = (async () => {
+        try {
+            const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/health`);
+            const data = resp.ok ? await resp.json().catch(() => ({})) : {};
+            _clHelper = { available: !!data.ok, basicAuth: !!data.basicAuth };
+            return _clHelper;
+        } catch {
+            return { available: false, basicAuth: false }; // transient: dont cache, retry next call
+        } finally {
+            _clHelperProbe = null;
+        }
+    })();
+    return _clHelperProbe;
+}
+
+/** fetchWithProxy, signature-compatible, reroutes authed requests via cl-helper under basic auth. @param {string} url @param {Object} [opts] @returns {Promise<Response>} */
+export async function fetchWithProxy(url, opts = {}) {
+    const auth = opts.headers?.Authorization;
+    if (auth && _apiRequest && url.startsWith(BOTBOORU_BASE)) {
+        const { available, basicAuth } = await probeClHelper();
+        if (available && basicAuth) {
+            const path = url.slice(BOTBOORU_BASE.length) || '/';
+            const headers = {
+                'X-CSRF-Token': _getCSRFToken?.() || '',
+                'X-CL-Botbooru-Auth': auth,
+            };
+            if (opts.body != null) headers['Content-Type'] = 'application/json';
+            const r = await _apiRequest(`${BOTBOORU_PROXY_BASE}${path}`, opts.method || 'GET', null, { headers, body: opts.body });
+            if (!r.ok) {
+                const detail = await r.text().catch(() => '');
+                throw new Error(`HTTP ${r.status}${detail ? ': ' + detail.slice(0, 200) : ''}`);
+            }
+            return r;
+        }
+    }
+    return _rawFetchWithProxy(url, opts);
 }
 
 // ========================================

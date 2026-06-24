@@ -69,7 +69,12 @@ class BotbooruProvider extends ProviderBase {
     async init(coreAPI) {
         super.init(coreAPI);
         api = coreAPI;
-        initBotbooruApi({ getSetting: coreAPI.getSetting, debugLog: coreAPI.debugLog });
+        initBotbooruApi({
+            getSetting: coreAPI.getSetting,
+            debugLog: coreAPI.debugLog,
+            apiRequest: coreAPI.apiRequest,
+            getCSRFToken: coreAPI.getCSRFToken,
+        });
     }
 
     async activate(container, options = {}) {

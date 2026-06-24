@@ -3645,6 +3645,12 @@ async function openChubCharPreview(char) {
 
         setChubCreatorNotes(node.description || char.description || char.tagline);
 
+        // Search caps topics at 15; the full-metadata detail has them all, so upgrade the tag list.
+        if (tagsEl && node.topics?.length) {
+            tagsEl.innerHTML = node.topics.map(t => `<span class="browse-tag">${escapeHtml(t)}</span>`).join('');
+            requestAnimationFrame(() => applyChubTagsClamp(tagsEl));
+        }
+
         // ChubAI quirk: def.personality is the main character definition, not a personality field.
         const firstMsg = def.first_message || def.first_mes;
 
@@ -3788,6 +3794,7 @@ async function openChubCharPreview(char) {
                     // Only keep fields actually used in applyDetailData.
                     const stripped = {
                         description: node.description,
+                        topics: node.topics,
                         definition: node.definition ? {
                             personality: node.definition.personality,
                             scenario: node.definition.scenario,
@@ -4198,3 +4205,4 @@ window.openChubCharPreview = openChubCharPreview;
 
 const chubBrowseView = new ChubBrowseView();
 export default chubBrowseView;
+

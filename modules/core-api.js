@@ -611,6 +611,14 @@ export function getListingNameFromExtensions(char) {
     return window.getListingNameFromExtensions?.(char) ?? null;
 }
 
+export function bumpAvatarCacheBust(avatar) {
+    return window.bumpAvatarCacheBust?.(avatar);
+}
+
+export function getDisplayTagline(char) {
+    return window.getDisplayTagline?.(char) ?? '';
+}
+
 export function getCharacterName(char) {
     return window.getCharacterName?.(char) ?? char?.name ?? '';
 }
@@ -1021,10 +1029,11 @@ export function extractCharacterDataFromPng(pngBuffer) {
  *
  * @param {string} avatar - Character avatar filename
  * @param {Object} fieldUpdates - Object with field paths as keys and new values
+ * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write.
  * @returns {Promise<boolean>} Success status
  */
-export function applyCardFieldUpdates(avatar, fieldUpdates) {
-    return window.applyCardFieldUpdates?.(avatar, fieldUpdates) || Promise.resolve(false);
+export function applyCardFieldUpdates(...args) {
+    return window.applyCardFieldUpdates?.(...args) || Promise.resolve(false);
 }
 
 /**
@@ -1359,6 +1368,8 @@ export default {
     getCharacterAvatarUrl,
     getCharacterAvatarStThumbUrl,
     getListingNameFromExtensions,
+    bumpAvatarCacheBust,
+    getDisplayTagline,
     getCharacterName,
     formatRichText,
     

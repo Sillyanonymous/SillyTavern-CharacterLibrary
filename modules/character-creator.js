@@ -1063,6 +1063,68 @@ Behavior rules:
 - If the user gives you a clear, complete vision, reflect it back and ask what else to explore
 - Cover personality, appearance, backstory, mannerisms, speech patterns, motivations as the conversation progresses naturally`;
 
+// ========================================
+// BRAINSTORM INSPIRATION POOL
+// ========================================
+
+// heavy flag = HEAVY_FIELD, needs hydrateCharacter before read
+const CCPOOL_FIELDS = [
+    ['tags', 'Tags', false],
+    ['creator_notes', 'Creator notes', false],
+    ['tagline', 'Tagline', false],
+    ['description', 'Description', true],
+    ['personality', 'Personality', true],
+    ['scenario', 'Scenario', true],
+    ['first_mes', 'First message', true],
+    ['mes_example', 'Example dialogue', true],
+];
+const CCPOOL_HEAVY = new Set(CCPOOL_FIELDS.filter(f => f[2]).map(f => f[0]));
+const CCPOOL_DEFAULT_FIELDS = ['tags', 'creator_notes', 'description'];
+const CCPOOL_MAX_TOKENS_DEFAULT = 2500;
+const CCPOOL_PER_CARD_CHARS = 1400; // per-field slice before the global token budget trims whole cards
+
+let studioPoolPlaylistUid = '';   // per-session selection (reset on openStudio)
+let studioPoolFields = null;      // Set<fieldKey>, lazy-loaded from settings (persisted preference)
+let studioPoolText = '';          // cached built block, injected each turn (no per-turn rebuild)
+let poolAbortController = null;
+
+function getPoolFields() {
+    if (studioPoolFields) return studioPoolFields;
+    const valid = new Set(CCPOOL_FIELDS.map(f => f[0]));
+    const saved = CoreAPI.getSetting('ccpool_fields');
+    const arr = (Array.isArray(saved) ? saved : CCPOOL_DEFAULT_FIELDS).filter(k => valid.has(k));
+    studioPoolFields = new Set(arr);
+    return studioPoolFields;
+}
+
+function getPoolMaxTokens() {
+    const v = parseInt(CoreAPI.getSetting('ccpool_maxInputTokens'), 10);
+    return Number.isFinite(v) && v >= 200 ? v : CCPOOL_MAX_TOKENS_DEFAULT;
+}
+
+const approxTokens = (str) => Math.ceil((str || '').length / 4);
+const fmtTokens = (n) => (n >= 1000 ? `~${(n / 1000).toFixed(1)}k` : `~${n}`);
+
+// local copy: recommender's cleanTextForLLM is module-private
+function cleanPoolText(raw) {
+    if (!raw) return '';
+    let html = raw.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '').replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    let text = html;
+    try { text = new DOMParser().parseFromString(html, 'text/html').body.textContent || html; } catch {}
+    text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // markdown links -> label
+    text = text.replace(/https?:\/\/\S+/g, '');          // bare URLs
+    text = text.replace(/\s+/g, ' ').trim();
+    return text;
+}
+
+function poolTagline(char) {
+    try {
+        const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+        const tl = char.data?.extensions?.[ns]?.tagline;
+        return tl ? cleanPoolText(tl).slice(0, 400) : '';
+    } catch { return ''; }
+}
+
 function gatherContext() {
     return {
         name: document.getElementById('creatorName')?.value?.trim() || '',
@@ -1706,6 +1768,22 @@ function createStudioModal() {
                             <i class="fa-solid fa-times"></i>
                         </button>
                     </div>
+                    <div class="ai-studio-pool" id="studioPool">
+                        <div class="ai-studio-pool-head">
+                            <label for="studioPoolPlaylist"><i class="fa-solid fa-layer-group"></i> Inspiration pool</label>
+                            <select id="studioPoolPlaylist" class="ai-studio-pool-select"></select>
+                            <span class="ai-studio-pool-status" id="studioPoolStatus"></span>
+                        </div>
+                        <div class="ai-studio-pool-fields" id="studioPoolFields"></div>
+                        <div class="ai-studio-pool-foot">
+                            <span class="ai-studio-pool-tokens" id="studioPoolTokens"></span>
+                            <div class="ai-studio-pool-max">
+                                <label for="studioPoolMaxTokens">Max input</label>
+                                <input type="number" id="studioPoolMaxTokens" min="200" max="200000" step="100">
+                                <span>tok</span>
+                            </div>
+                        </div>
+                    </div>
                     <div class="ai-studio-input-meta">
                         <div class="ai-studio-word-target">
                             <label for="studioWordTarget"><i class="fa-solid fa-ruler-horizontal"></i> Target</label>
@@ -1752,6 +1830,25 @@ function attachStudioEvents() {
 
     document.getElementById('studioBrainstormToggle').addEventListener('click', toggleBrainstormMode);
     document.getElementById('studioBrainstormFinalize').addEventListener('click', finalizeBrainstorm);
+
+    const poolSel = document.getElementById('studioPoolPlaylist');
+    poolSel?.addEventListener('change', () => {
+        studioPoolPlaylistUid = poolSel.value || '';
+        syncPoolVisibility();
+        rebuildPoolText();
+    });
+    document.getElementById('studioPoolFields')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-pool-field]');
+        if (btn) togglePoolField(btn.dataset.poolField);
+    });
+    const poolMax = document.getElementById('studioPoolMaxTokens');
+    poolMax?.addEventListener('change', () => {
+        let v = parseInt(poolMax.value, 10);
+        if (!Number.isFinite(v) || v < 200) v = CCPOOL_MAX_TOKENS_DEFAULT;
+        poolMax.value = v;
+        CoreAPI.setSetting('ccpool_maxInputTokens', v);
+        rebuildPoolText();
+    });
 
     document.getElementById('studioUndo').addEventListener('click', studioUndo);
     document.getElementById('studioRedo').addEventListener('click', studioRedo);
@@ -1869,6 +1966,10 @@ function openStudio(fieldKey) {
     studioLockedSelection = null;
     studioBrainstormMode = false;
     studioBrainstormMessages = [];
+    studioPoolPlaylistUid = '';
+    studioPoolText = '';
+    poolAbortController?.abort();
+    poolAbortController = null;
 
     const sourceTextarea = document.getElementById(FIELD_TEXTAREA_MAP[fieldKey]);
     const existingContent = sourceTextarea?.value?.trim() || '';
@@ -2342,6 +2443,138 @@ function retryStudioMessage(entry) {
     else studioGenerate();
 }
 
+async function renderPoolControls() {
+    const sel = document.getElementById('studioPoolPlaylist');
+    if (!sel) return;
+    try { await CoreAPI.playlistsLoadPlaylists(); } catch {}
+    const playlists = CoreAPI.playlistsGetAll() || [];
+    sel.innerHTML = '<option value="">None</option>' + playlists.map(p =>
+        `<option value="${CoreAPI.escapeHtml(p.uid)}">${CoreAPI.escapeHtml(p.name)}</option>`).join('');
+    sel.value = studioPoolPlaylistUid || '';
+    if (sel._customSelect) sel._customSelect.refresh(); else CoreAPI.initCustomSelect(sel);
+    renderPoolFieldPills();
+    const maxEl = document.getElementById('studioPoolMaxTokens');
+    if (maxEl) maxEl.value = getPoolMaxTokens();
+    syncPoolVisibility();
+    refreshPoolReadout();
+}
+
+// Field pills + budget row only make sense once a playlist is chosen; hide them on None.
+function syncPoolVisibility() {
+    document.getElementById('studioPool')?.classList.toggle('pool-active', !!studioPoolPlaylistUid);
+}
+
+function renderPoolFieldPills() {
+    const wrap = document.getElementById('studioPoolFields');
+    if (!wrap) return;
+    const enabled = getPoolFields();
+    wrap.innerHTML = CCPOOL_FIELDS.map(([key, label, heavy]) =>
+        `<button type="button" class="ai-studio-pool-pill${enabled.has(key) ? ' active' : ''}${heavy ? ' heavy' : ''}" data-pool-field="${key}" title="${heavy ? 'Full-card field (loads the card)' : 'Light field (no extra load)'}">${CoreAPI.escapeHtml(label)}</button>`).join('');
+}
+
+function togglePoolField(key) {
+    if (!CCPOOL_FIELDS.some(f => f[0] === key)) return;
+    const f = getPoolFields();
+    if (f.has(key)) f.delete(key); else f.add(key);
+    CoreAPI.setSetting('ccpool_fields', [...f]);
+    renderPoolFieldPills();
+    rebuildPoolText();
+}
+
+function refreshPoolReadout() {
+    const tokEl = document.getElementById('studioPoolTokens');
+    if (!tokEl) return;
+    if (!studioPoolPlaylistUid || getPoolFields().size === 0 || !studioPoolText) { tokEl.textContent = ''; return; }
+    tokEl.textContent = `${fmtTokens(approxTokens(studioPoolText))} / ${fmtTokens(getPoolMaxTokens())} max`;
+}
+
+// rebuilt on playlist/field/token change, not per turn (cached)
+async function rebuildPoolText() {
+    poolAbortController?.abort(); // supersede any in-flight build
+    const statusEl = document.getElementById('studioPoolStatus');
+    const tokEl = document.getElementById('studioPoolTokens');
+    const setStatus = (t) => { if (statusEl) statusEl.textContent = t; };
+    const setTok = (t) => { if (tokEl) tokEl.textContent = t; };
+
+    const fields = getPoolFields();
+    if (!studioPoolPlaylistUid || fields.size === 0) {
+        studioPoolText = ''; setStatus(''); setTok('');
+        return;
+    }
+
+    let chars = [];
+    try { await CoreAPI.playlistsLoadPlaylists(); chars = CoreAPI.playlistsGetCharacters(studioPoolPlaylistUid) || []; } catch {}
+    const total = chars.length;
+    if (!total) { studioPoolText = ''; setStatus('Empty playlist'); setTok(''); return; }
+
+    poolAbortController = new AbortController();
+    const signal = poolAbortController.signal;
+
+    try {
+        // only hydrate when a heavy field is selected
+        if ([...fields].some(k => CCPOOL_HEAVY.has(k))) {
+            const slim = chars.filter(c => c?._slim);
+            const CHUNK = 12;
+            for (let i = 0; i < slim.length; i += CHUNK) {
+                if (signal.aborted) return;
+                setStatus(`Loading ${Math.min(i + CHUNK, slim.length)}/${slim.length}...`);
+                await Promise.all(slim.slice(i, i + CHUNK).map(c => CoreAPI.hydrateCharacter(c)));
+            }
+        }
+        if (signal.aborted) return;
+
+        const max = getPoolMaxTokens();
+        const blocks = [];
+        let used = 0, fit = 0;
+        for (const char of chars) {
+            const block = buildPoolCardBlock(char, fields);
+            if (!block) continue;
+            const t = approxTokens(block);
+            if (fit > 0 && used + t > max) break;
+            blocks.push(block); used += t; fit++;
+            if (used >= max) break;
+        }
+        if (signal.aborted) return;
+
+        studioPoolText = blocks.join('\n\n');
+        setStatus(fit < total ? `${fit} of ${total} cards (trimmed to fit)` : `${fit} card${fit === 1 ? '' : 's'}`);
+        setTok(`${fmtTokens(used)} / ${fmtTokens(max)} max`);
+    } catch (err) {
+        if (!signal.aborted) {
+            console.warn('[Creator] Inspiration pool build failed:', err?.message || err);
+            studioPoolText = ''; setStatus('Pool failed to load'); setTok('');
+        }
+    } finally {
+        if (poolAbortController?.signal === signal) poolAbortController = null;
+    }
+}
+
+function buildPoolCardBlock(char, fields) {
+    if (!char) return '';
+    try {
+        const d = char.data || char;
+        const parts = [`## ${char.name || char.avatar}`];
+        if (fields.has('tags')) {
+            const tags = CoreAPI.getCharacterTags(char) || [];
+            if (tags.length) parts.push(`Tags: ${tags.join(', ')}`);
+        }
+        const pushText = (key, label, v) => {
+            if (!fields.has(key)) return;
+            const t = cleanPoolText((v || '').toString()).slice(0, CCPOOL_PER_CARD_CHARS);
+            if (t) parts.push(`${label}: ${t}`);
+        };
+        pushText('creator_notes', 'Creator notes', char.creator_notes || d.creator_notes);
+        if (fields.has('tagline')) { const tl = poolTagline(char); if (tl) parts.push(`Tagline: ${tl}`); }
+        pushText('description', 'Description', d.description);
+        pushText('personality', 'Personality', d.personality);
+        pushText('scenario', 'Scenario', d.scenario);
+        pushText('first_mes', 'First message', d.first_mes);
+        pushText('mes_example', 'Example dialogue', d.mes_example);
+        if (parts.length < 2) return '';
+        return parts.join('\n');
+    } catch { return ''; }
+}
+
 async function studioBrainstormGenerate() {
     const input = document.getElementById('studioInput');
     const instruction = input?.value?.trim();
@@ -2371,6 +2604,10 @@ async function studioBrainstormGenerate() {
     }
     if (otherFields.length) {
         systemContent += '\nExisting character fields for context:\n' + otherFields.join('\n');
+    }
+
+    if (studioPoolText) {
+        systemContent += '\n\n<inspiration_pool>\nThe user is drawing inspiration from these existing characters. Use them for thematic, tonal, world, and background grounding for the new character. Do not copy them directly.\n\n' + studioPoolText + '\n</inspiration_pool>';
     }
 
     if (studioBrainstormMessages.length === 0) {
@@ -2577,6 +2814,7 @@ function toggleBrainstormMode() {
         studioLlmMessages = [];
         document.getElementById('studioConversation').innerHTML = '';
         renderBrainstormEmptyState();
+        renderPoolControls();
 
         if (input) input.placeholder = 'Describe your character idea...';
     } else {
@@ -2639,7 +2877,8 @@ async function finalizeBrainstorm() {
     });
     distillMessages[0] = {
         role: 'system',
-        content: fieldPrompt + `\n\nCharacter name: ${ctx.name}\n` + (ctx.tags.length ? `Tags: ${ctx.tags.join(', ')}\n` : ''),
+        content: fieldPrompt + `\n\nCharacter name: ${ctx.name}\n` + (ctx.tags.length ? `Tags: ${ctx.tags.join(', ')}\n` : '')
+            + (studioPoolText ? `\n<inspiration_pool>\n${studioPoolText}\n</inspiration_pool>\n` : ''),
     };
 
     abortController = new AbortController();
@@ -3078,6 +3317,7 @@ async function confirmSaveAs() {
                 body: formData,
             });
             if (!avatarResp.ok) throw new Error(`Avatar upload failed: ${avatarResp.status}`);
+            CoreAPI.bumpAvatarCacheBust(saveAsTarget.avatar);
         }
 
         CoreAPI.showToast(`Saved over "${saveAsTarget.name}"`, 'success');

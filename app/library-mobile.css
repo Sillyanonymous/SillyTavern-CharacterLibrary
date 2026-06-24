@@ -201,8 +201,7 @@
         display: none !important;
     }
 
-    /* Tag filter popup – fixed overlay (moved to body via JS) */
-    #tagFilterPopup {
+    .mobile-fixed-popup {
         position: fixed !important;
         left: 0 !important;
         right: 0 !important;
@@ -221,9 +220,11 @@
         flex-direction: column !important;
         padding: 0 !important;
         padding-bottom: var(--safe-bottom) !important;
+        overscroll-behavior: contain;
+        animation: mobileSheetUp 0.28s var(--ease-drawer);
     }
     #tagFilterPopup .tag-search-row {
-        padding: 14px 14px 10px;
+        padding: 8px 14px 10px;
         gap: var(--space-sm);
         border-bottom: 1px solid var(--glass-border);
         position: sticky;
@@ -251,13 +252,14 @@
     .dropdown-item { font-size: var(--font-xs); }
     #tagFilterContent { padding: 4px 0 20px; }
 
-    /* Scrim behind tag popup */
-    .mobile-tag-scrim {
+    /* .is-top raises the scrim above standard filter popups for the advfilter layer. */
+    .mobile-popup-scrim {
         position: fixed;
         inset: 0;
         background: var(--cl-modal-scrim);
         z-index: 1099;
     }
+    .mobile-popup-scrim.is-top { z-index: 1299; }
 
 
     /* Search area: only holds the mobile search btn */
@@ -305,31 +307,9 @@
     }
 
     /* --- Advanced Filter panel → bottom drawer --- */
-    .mobile-advfilter-scrim {
-        position: fixed;
-        inset: 0;
-        background: var(--cl-modal-scrim);
-        z-index: 1299;
-    }
-
     .adv-filter-panel {
-        position: fixed !important;
-        top: auto !important;
-        bottom: 0 !important;
-        left: 0 !important;
-        right: 0 !important;
-        margin-top: 0 !important;
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
         z-index: 1300 !important;
-        max-height: 70vh !important;
-        padding: 0 !important;
-        padding-bottom: var(--safe-bottom) !important;
-        background: var(--cl-glass-bg) !important;
-        box-shadow: 0 -4px 30px rgba(0, 0, 0, 0.5) !important;
-        backdrop-filter: blur(12px) !important;
-        -webkit-backdrop-filter: blur(12px) !important;
-        border: 1px solid var(--glass-border) !important;
-        border-bottom: none !important;
+        margin-top: 0 !important;
     }
 
     .adv-filter-header {
@@ -525,8 +505,9 @@
         border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
         max-height: 88vh;
         overflow-y: auto;
+        overscroll-behavior: contain;
         transform: translateY(100%);
-        transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+        transition: transform 0.28s var(--ease-drawer);
         padding-bottom: max(20px, var(--safe-bottom));
     }
     .mobile-sheet.open { transform: translateY(0); }
@@ -536,17 +517,6 @@
         opacity: 0.4;
         border-radius: var(--radius-2xs);
         margin: 8px auto 12px;
-    }
-    /* Tap target around the sheet handle */
-    .mobile-sheet-handle-wrap {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 10px;
-        cursor: pointer;
-    }
-    .mobile-sheet-handle-wrap .mobile-sheet-handle {
-        margin: 0;
     }
     .mobile-sheet-item {
         display: flex;
@@ -682,12 +652,26 @@
         border-radius: var(--radius-xl);
         color: white;
         font-size: var(--font-pre-base);
-        appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 14px center;
+        display: flex;
+        align-items: center;
+        gap: var(--space-sm);
+        text-align: left;
+        min-height: 44px;
+        cursor: pointer;
     }
-    .mobile-settings-select:focus { outline: none; border-color: var(--accent); }
+    .mobile-settings-select:active { border-color: var(--accent); }
+    .mobile-settings-select-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+    .mobile-settings-select-arrow {
+        flex-shrink: 0;
+        color: var(--text-faint);
+        font-size: var(--font-xs);
+    }
     .mobile-settings-row { display: flex; gap: var(--space-sm); }
     .mobile-filter-chip {
         flex: 1;
@@ -951,16 +935,65 @@
         padding-left: var(--space-md) !important;
     }
 
-    /* Link-lorebook picker: partial-height tap-away drawer (mirrors #chatLoreModal in chats.css). */
+    .cl-modal.cl-modal-drawer .cl-modal-content {
+        position: relative;
+        animation: none !important;
+        transform: translateY(100%);
+        transition: transform 0.28s var(--ease-drawer);
+        overscroll-behavior: contain;
+    }
+    .cl-modal.cl-modal-drawer.visible .cl-modal-content {
+        transform: translateY(0);
+    }
+    /* Shared drag-handle affordance for the tap-away drawers (native iOS/Android sheet look). */
+    .cl-modal.cl-modal-drawer .cl-modal-content::before,
+    .cl-confirm-overlay .confirm-modal-content::before {
+        content: '';
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 40px;
+        height: 4px;
+        border-radius: var(--radius-2xs);
+        background: var(--text-faint);
+        opacity: 0.4;
+        pointer-events: none;
+        z-index: 2;
+    }
+
     .lorebook-link-search { font-size: var(--mobile-input-size); }
     .lorebook-link-row { min-height: 48px; }
-    #linkLorebookModal .cl-modal-content {
+
+    /* Partial-height drawer (lorebook / save-preset pickers): size to content up to 75vh, not full viewport. */
+    .cl-drawer-partial .cl-modal-content {
         height: auto !important;
         max-height: 75vh !important;
         border: 1px solid var(--glass-border) !important;
         border-bottom: none !important;
         padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
     }
+
+    /* Selector-picker additions on the canonical .mobile-sheet. */
+    .mobile-sheet-title {
+        font-size: var(--font-sm);
+        font-weight: 700;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 4px 20px 8px;
+    }
+    .mobile-sheet-group-title {
+        font-size: var(--font-xs);
+        font-weight: 600;
+        color: var(--text-faint);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        padding: 10px 20px 4px;
+    }
+    .mobile-sheet-item.active { color: var(--accent); }
+    .mobile-sheet-item .mobile-sheet-check { margin-left: auto; flex-shrink: 0; }
+    .mobile-sheet-item .mobile-sheet-item-label { flex: 1; min-width: 0; }
 
     /* JS injects kebab + quick-import; cl-browse-quick-import on <html> picks one */
     .browse-char-modal .modal-controls .action-btn:not(.mobile-more-actions-btn):not(.mobile-quick-import-btn) {
@@ -1470,25 +1503,12 @@
         max-width: 100% !important;
         max-height: 88vh !important;
         border-radius: var(--radius-4xl) var(--radius-4xl) 0 0 !important;
-        animation: clConfirmSheetSlideUp 0.28s cubic-bezier(0.32, 0.72, 0, 1) !important;
+        animation: clConfirmSheetSlideUp 0.28s var(--ease-drawer) !important;
         padding-bottom: var(--safe-bottom);
         box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5) !important;
         position: relative;
         touch-action: pan-y;
-    }
-    /* Sheet drag handle: native iOS/Android sheet affordance. */
-    .cl-confirm-overlay .confirm-modal-content::before {
-        content: '';
-        position: absolute;
-        top: 8px;
-        left: 50%;
-        transform: translateX(-50%);
-        width: 40px;
-        height: 4px;
-        border-radius: 2px;
-        background: var(--text-faint);
-        opacity: 0.4;
-        pointer-events: none;
+        overscroll-behavior: contain;
     }
     .cl-confirm-overlay .cl-confirm-main {
         padding: 24px 20px 16px !important;
@@ -1566,14 +1586,6 @@
         border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
         border: none !important;
         animation: mobileSheetUp 0.3s ease-out !important;
-    }
-    /* Save-preset picker: partial-height tap-away drawer, not full-viewport */
-    #savePresetPickerOverlay .cl-modal-content {
-        height: auto !important;
-        max-height: 75vh !important;
-        border: 1px solid var(--glass-border) !important;
-        border-bottom: none !important;
-        padding-bottom: max(8px, var(--safe-bottom));
     }
     .preset-picker-search { font-size: var(--mobile-input-size); }
     .preset-picker-list { max-height: none; }
@@ -1807,22 +1819,48 @@
         min-height: 28px;
     }
 
-    /* Botbooru weighted-tag editor: lift the compact desktop controls to a
-       usable tap size; the weight field stays un-stretched (the basis-100%
-       input rule above would make the number field full-width) */
+    /* Botbooru weighted-tag rows (mobile): wrap to two lines so name and weight+buttons each fit. */
+    .botbooru-weight-row {
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-xs);
+        padding: var(--space-xs) var(--space-sm);
+    }
+    .botbooru-weight-row .bw-name {
+        flex: 1 1 100%;
+        min-width: 0;
+        white-space: normal;
+        overflow: visible;
+        overflow-wrap: anywhere;
+        text-overflow: clip;
+        font-size: var(--font-sm);
+        line-height: 1.3;
+    }
+    /* Tooltip is unreachable on touch, so append the category (in title) faintly inline. */
+    .botbooru-weight-row .bw-name[title]:not([title=""])::after {
+        content: " \00b7 " attr(title);
+        color: var(--text-faint);
+        text-transform: capitalize;
+    }
+    .botbooru-weight-row .bw-weight {
+        flex: 0 0 auto;
+        width: 72px;
+        text-align: center;
+        font-size: var(--mobile-input-size) !important;
+        padding: var(--space-2xs) var(--space-xs) !important;
+    }
     .botbooru-weight-row .glass-btn.icon-only {
+        flex: 0 0 auto;
         width: 36px;
         height: 36px;
         min-width: 36px;
         min-height: 36px;
         font-size: var(--font-sm);
     }
-    .botbooru-weight-row .bw-weight,
-    .settings-input-group .botbooru-weight-input {
-        flex-basis: auto !important;
-        width: 84px !important;
-        font-size: var(--mobile-input-size) !important;
-        padding: var(--space-2xs) var(--space-xs) !important;
+    /* Keep the search input and + button on one line instead of stretching the input full-width. */
+    .botbooru-suggest-anchor .provider-exclude-tags-input {
+        flex: 1 1 auto !important;
+        min-width: 0;
     }
 
     /* Platform-specific settings visibility */
@@ -3012,7 +3050,7 @@
         -webkit-backdrop-filter: blur(12px);
         border-bottom: 1px solid var(--glass-border);
         padding-top: env(safe-area-inset-top, 0px);
-        animation: mobileSheetSlideDown 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+        animation: mobileSheetSlideDown 0.22s var(--ease-drawer);
     }
     @keyframes mobileSheetSlideDown {
         from { transform: translateY(-100%); }
@@ -3183,7 +3221,7 @@
         z-index: 10;
     }
     .char-card.swiping-released {
-        transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1) !important;
+        transition: transform 0.22s var(--ease-drawer) !important;
         position: relative;
         z-index: 10;
     }
@@ -3406,7 +3444,7 @@
         flex-direction: column;
         box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.5);
         padding-bottom: var(--safe-bottom);
-        animation: mobileSheetUp 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+        animation: mobileSheetUp 0.28s var(--ease-drawer);
     }
 
     .tag-editor-sheet-header {

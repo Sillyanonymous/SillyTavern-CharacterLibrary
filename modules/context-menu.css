@@ -7,7 +7,7 @@
     position: fixed;
     background: var(--cl-glass-bg);
     backdrop-filter: blur(16px);
-    border: 1px solid rgba(var(--cl-accent-rgb), 0.2);
+    border: 1px solid rgba(var(--accent-rgb), 0.2);
     border-radius: var(--radius-2xl);
     box-shadow:
         var(--cl-shadow-xl),
@@ -57,7 +57,7 @@
 }
 
 .cl-context-menu-item:hover {
-    background: rgba(var(--cl-accent-rgb), 0.2);
+    background: rgba(var(--accent-rgb), 0.2);
 }
 
 .cl-context-menu-item:hover i {
@@ -109,57 +109,14 @@
         display: none !important;
     }
 
-    /* Mobile context-menu bottom sheet */
-    .mobile-ctx-scrim {
-        display: none;
-        position: fixed;
-        inset: 0;
-        background: var(--cl-modal-scrim);
-        z-index: 9000;
-    }
-    .mobile-ctx-scrim.visible { display: block; }
-
-    .mobile-ctx-sheet {
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: var(--cl-glass-bg);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-top: 1px solid var(--glass-border);
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-        z-index: 9001;
-        max-height: 75vh;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 0 0 max(8px, var(--safe-bottom)) 0;
-        transform: translateY(100%);
-        transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
-    }
-    .mobile-ctx-sheet.visible {
-        transform: translateY(0);
-    }
-
-    .mobile-ctx-handle {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 8px 0 4px;
-        cursor: pointer;
-    }
-    .mobile-ctx-handle-bar {
-        width: 40px; height: 4px;
-        border-radius: var(--radius-2xs);
-        background: var(--text-faint);
-        opacity: 0.4;
-    }
-
-    /* Items inside the sheet inherit context-menu styling */
-    .mobile-ctx-sheet .cl-context-menu-separator {
+    /* Context-menu items cloned into the canonical .mobile-sheet bottom drawer
+       (the sheet shell, slide, handle + scrim all come from .mobile-sheet). */
+    .mobile-sheet .cl-context-menu-separator {
         height: 1px;
         background: var(--glass-border);
         margin: 4px 12px;
     }
-    .mobile-ctx-sheet .cl-context-menu-header {
+    .mobile-sheet .cl-context-menu-header {
         padding: 10px 20px 6px;
         font-size: var(--font-2xs);
         text-transform: uppercase;
@@ -167,7 +124,7 @@
         color: var(--text-secondary, #999);
         font-weight: 600;
     }
-    .mobile-ctx-sheet .cl-context-menu-item {
+    .mobile-sheet .cl-context-menu-item {
         display: flex;
         align-items: center;
         gap: var(--space-md);
@@ -179,16 +136,16 @@
         border-radius: 0;
         transition: background 0.15s;
     }
-    .mobile-ctx-sheet .cl-context-menu-item:active {
+    .mobile-sheet .cl-context-menu-item:active {
         background: rgba(255,255,255,0.08);
     }
-    .mobile-ctx-sheet .cl-context-menu-item i {
+    .mobile-sheet .cl-context-menu-item i {
         width: 22px;
         text-align: center;
         opacity: 0.8;
         font-size: var(--font-base);
     }
-    .mobile-ctx-sheet .cl-context-menu-item.danger {
+    .mobile-sheet .cl-context-menu-item.danger {
         color: var(--cl-danger-text);
     }
 }

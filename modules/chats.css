@@ -1230,15 +1230,7 @@
 @media (max-width: 768px) {
     .chat-lore-search { font-size: var(--mobile-input-size); }
     .chat-lore-row { min-height: 48px; }
-    /* Partial-height tap-away drawer (small picker), honoring the cl-modal-drawer marker
-       instead of the generic full-viewport sheet. */
-    #chatLoreModal .cl-modal-content {
-        height: auto !important;
-        max-height: 75vh !important;
-        border: 1px solid var(--glass-border) !important;
-        border-bottom: none !important;
-        padding-bottom: max(var(--space-sm), env(safe-area-inset-bottom));
-    }
+    /* Partial-height comes from the shared .cl-drawer-partial class (library-mobile.css). */
 
     /* Modal chat button */
     #modalChatBtn {

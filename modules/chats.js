@@ -137,7 +137,12 @@ async function fetchCharacterChats(char) {
         // Keep the list (with chat_metadata) so row actions can resolve the entry by file name.
         _modalChatsList = chats;
 
-        const currentChat = char.chat;
+        // prefer ST's live char.chat over the possibly-stale slim copy
+        let currentChat = char.chat;
+        try {
+            const liveChar = CoreAPI.getSTContext?.()?.characters?.find(c => c.avatar === char.avatar);
+            if (liveChar?.chat) currentChat = liveChar.chat;
+        } catch (_) { /* host context unavailable; fall back to the slim copy */ }
 
         chatsList.innerHTML = chats.map(chat => {
             const isActive = chat.file_name === currentChat + '.jsonl';
@@ -216,6 +221,8 @@ async function openChat(char, chatFile) {
                 // open the wanted chat in one CHAT_CHANGED (old select-then-openCharacterChat fired two)
                 const alreadyActive = String(context.characterId) === String(characterIndex);
                 if (alreadyActive && typeof context.openCharacterChat === 'function') {
+                    // openCharacterChat re-saves from ST in-memory; refetch first so a just-applied CL link isnt clobbered
+                    if (typeof context.getOneCharacter === 'function') await context.getOneCharacter(char.avatar);
                     await context.openCharacterChat(chatName);
                 } else {
                     // unshallow first so selectCharacterById's internal getChat->unshallow wont re-fetch
@@ -2227,7 +2234,7 @@ function closeChatLorePicker() {
 
 function buildChatLoreModal() {
     const html = `
-    <div id="chatLoreModal" class="cl-modal cl-modal-drawer">
+    <div id="chatLoreModal" class="cl-modal cl-modal-drawer cl-drawer-partial">
         <div class="cl-modal-content chat-lore-modal-content">
             <div class="cl-modal-header">
                 <h3><i class="fa-solid fa-book-atlas cl-modal-header-icon"></i> Chat Lorebook</h3>
