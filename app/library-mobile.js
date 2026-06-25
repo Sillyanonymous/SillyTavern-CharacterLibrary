@@ -2472,6 +2472,14 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
     function openSheet(overlay, sheet) {
         overlay.classList.remove('hidden');
+        // lift the sheet above whatever's currently on top (eg. the AI Studio pool selector opens over the 10001 studio overlay) so it isnt buried at the 1200 sheet layer
+        let topZ = 0;
+        document.querySelectorAll('.cl-modal.visible, .modal-glass:not(.hidden), .ai-studio-overlay:not(.hidden), .creator-modal-glass:not(.hidden), .confirm-modal:not(.hidden), .cl-confirm-overlay:not(.hidden), .mobile-sheet-overlay:not(.hidden)').forEach(el => {
+            if (el === overlay) return;
+            const z = parseInt(getComputedStyle(el).zIndex, 10);
+            if (Number.isFinite(z) && z > topZ) topZ = z;
+        });
+        overlay.style.zIndex = topZ >= 1200 ? String(topZ + 1) : '';
         // Force reflow then animate
         sheet.offsetHeight; // eslint-disable-line no-unused-expressions
         requestAnimationFrame(() => sheet.classList.add('open'));

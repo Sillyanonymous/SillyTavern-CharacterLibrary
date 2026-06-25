@@ -12,7 +12,7 @@ export { CL_HELPER_CT_BASE };
 
 export const CT_API_BASE = 'https://character-tavern.com/api';
 export const CT_SITE_BASE = 'https://character-tavern.com';
-export const CT_CARDS_CDN = 'https://cards.character-tavern.com';
+export const CT_CARDS_CDN = 'https://ct-cards.storage.character-tavern.com';
 
 // Sort options accepted by /api/search/cards
 export const CT_SORT_OPTIONS = {
@@ -233,13 +233,12 @@ export async function fetchTopTags() {
 // ========================================
 
 /**
- * Build avatar thumbnail URL via Cloudflare image resizing.
+ * Card image URL. CT moved cards to the storage host and dropped the /cdn-cgi/image resize (404s there now), so this serves the full image direct; browsers get webp via content negotiation.
  * @param {string} path - "author/slug" format
- * @param {number} [width=320]
  * @returns {string}
  */
-export function getAvatarUrl(path, width = 320) {
-    return `${CT_CARDS_CDN}/cdn-cgi/image/format=auto,width=${width},quality=85/${path}.png`;
+export function getAvatarUrl(path) {
+    return `${CT_CARDS_CDN}/${path}.png`;
 }
 
 /**

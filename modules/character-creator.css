@@ -1509,6 +1509,32 @@
 .ai-studio-pool:not(.pool-active) .ai-studio-pool-fields,
 .ai-studio-pool:not(.pool-active) .ai-studio-pool-foot { display: none; }
 
+/* After a brainstorm gen the tuning UI tucks behind a one-line summary chip so the conversation gets room; the head's playlist switcher stays live. */
+.ai-studio-pool-summary { display: none; }
+.ai-studio-pool.pool-active.pool-collapsed .ai-studio-pool-fields,
+.ai-studio-pool.pool-active.pool-collapsed .ai-studio-pool-foot { display: none; }
+.ai-studio-pool.pool-active.pool-collapsed .ai-studio-pool-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    width: 100%;
+    padding: var(--space-2xs) var(--space-sm);
+    background: rgba(var(--accent-rgb), 0.06);
+    border: 1px solid rgba(var(--accent-rgb), 0.15);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    font-size: var(--font-xs);
+    cursor: pointer;
+    text-align: left;
+}
+.ai-studio-pool.pool-active.pool-collapsed .ai-studio-pool-summary:hover {
+    background: rgba(var(--accent-rgb), 0.1);
+    color: var(--text-primary);
+}
+.ai-studio-pool-summary-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-studio-pool-summary-meta { flex-shrink: 0; color: var(--text-faint); }
+.ai-studio-pool-summary-caret { flex-shrink: 0; font-size: var(--font-3xs); opacity: 0.6; }
+
 .ai-studio-pool-head {
     display: flex;
     align-items: center;

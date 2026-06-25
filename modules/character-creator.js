@@ -1783,6 +1783,7 @@ function createStudioModal() {
                                 <span>tok</span>
                             </div>
                         </div>
+                        <button type="button" class="ai-studio-pool-summary" id="studioPoolSummary"></button>
                     </div>
                     <div class="ai-studio-input-meta">
                         <div class="ai-studio-word-target">
@@ -1835,8 +1836,10 @@ function attachStudioEvents() {
     poolSel?.addEventListener('change', () => {
         studioPoolPlaylistUid = poolSel.value || '';
         syncPoolVisibility();
+        setPoolCollapsed(false);
         rebuildPoolText();
     });
+    document.getElementById('studioPoolSummary')?.addEventListener('click', () => setPoolCollapsed(false));
     document.getElementById('studioPoolFields')?.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-pool-field]');
         if (btn) togglePoolField(btn.dataset.poolField);
@@ -2482,10 +2485,29 @@ function togglePoolField(key) {
 }
 
 function refreshPoolReadout() {
+    updatePoolSummary();
     const tokEl = document.getElementById('studioPoolTokens');
     if (!tokEl) return;
     if (!studioPoolPlaylistUid || getPoolFields().size === 0 || !studioPoolText) { tokEl.textContent = ''; return; }
     tokEl.textContent = `${fmtTokens(approxTokens(studioPoolText))} / ${fmtTokens(getPoolMaxTokens())} max`;
+}
+
+// Collapsed-after-gen: tuck the pool tuning UI behind a one-line chip; the head's playlist switcher stays live so pools can still be swapped mid-conversation.
+function setPoolCollapsed(on) {
+    const pool = document.getElementById('studioPool');
+    if (!pool) return;
+    pool.classList.toggle('pool-collapsed', !!on);
+    if (on) updatePoolSummary();
+}
+
+function updatePoolSummary() {
+    const el = document.getElementById('studioPoolSummary');
+    if (!el) return;
+    const sel = document.getElementById('studioPoolPlaylist');
+    const name = sel?.selectedOptions?.[0]?.textContent?.trim() || 'Inspiration pool';
+    const n = getPoolFields().size;
+    const tok = studioPoolText ? fmtTokens(approxTokens(studioPoolText)) : '';
+    el.innerHTML = `<i class="fa-solid fa-layer-group"></i><span class="ai-studio-pool-summary-name">${CoreAPI.escapeHtml(name)}</span><span class="ai-studio-pool-summary-meta"> · ${n} ${n === 1 ? 'field' : 'fields'}${tok ? ' · ~' + tok : ''}</span><i class="fa-solid fa-chevron-down ai-studio-pool-summary-caret"></i>`;
 }
 
 // rebuilt on playlist/field/token change, not per turn (cached)
@@ -2587,6 +2609,7 @@ async function studioBrainstormGenerate() {
 
     addConversationEntry('user', instruction);
     addConversationEntry('thinking', '');
+    if (studioPoolPlaylistUid) setPoolCollapsed(true);
 
     const ctx = gatherContext();
 
