@@ -2619,6 +2619,47 @@ https://jannyai.com/characters/uuid_slug
                                     </div>
                                 </div>
                                 <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-bowl-food"></i> Saucepan Account</div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional. A Saucepan login (or a pasted Bearer token) enables native extraction of open-definition Saucepan characters, without waiting on DataCat's extraction service.</span>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>Handle:</label>
+                                        <div class="settings-input-group">
+                                            <input type="text" id="settingsSaucepanHandle" class="glass-input" placeholder="Saucepan handle" autocomplete="off">
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>Password:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsSaucepanPassword" class="glass-input" placeholder="Password (not stored)" autocomplete="off" data-sensitive="true">
+                                            <button id="saucepanLoginBtn" class="settings-verify-btn" title="Log in and store the session token">
+                                                <i class="fa-solid fa-right-to-bracket"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>Token:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsSaucepanToken" placeholder="No token" autocomplete="off" data-sensitive="true">
+                                            <button id="toggleSaucepanTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                            <button id="saveSaucepanTokenBtn" class="settings-verify-btn" title="Save pasted token">
+                                                <i class="fa-solid fa-floppy-disk"></i>
+                                            </button>
+                                            <button id="validateSaucepanBtn" class="settings-verify-btn" title="Test token">
+                                                <i class="fa-solid fa-check"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row" style="gap: 8px;">
+                                        <button id="saucepanClearTokenBtn" class="settings-action-btn danger">
+                                            <i class="fa-solid fa-trash-can"></i> Clear Token
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-cloud-arrow-down"></i> Extraction</div>
                                     <div class="settings-row">
                                         <label class="settings-checkbox-label">

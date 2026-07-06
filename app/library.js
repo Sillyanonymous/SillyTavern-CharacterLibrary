@@ -490,6 +490,7 @@ const DEFAULT_SETTINGS = {
     wyvernUid: null,
     wyvernRememberCredentials: true,
     datacatToken: null,
+    saucepanToken: null,
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
     datacatFlareSolverrUrl: '',
@@ -1593,6 +1594,10 @@ function setupSettingsModal() {
     const toggleWyvernPasswordVisibility = document.getElementById('toggleWyvernPasswordVisibility');
     const datacatTokenInput = document.getElementById('settingsDatacatToken');
     const toggleDatacatTokenVisibility = document.getElementById('toggleDatacatTokenVisibility');
+    const saucepanHandleInput = document.getElementById('settingsSaucepanHandle');
+    const saucepanPasswordInput = document.getElementById('settingsSaucepanPassword');
+    const saucepanTokenInput = document.getElementById('settingsSaucepanToken');
+    const toggleSaucepanTokenVisibility = document.getElementById('toggleSaucepanTokenVisibility');
     const datacatPluginBanner = document.getElementById('datacatPluginBanner');
     const datacatSettingsFields = document.getElementById('datacatSettingsFields');
     const datacatSessionStatus = document.getElementById('datacatSessionStatus');
@@ -2139,6 +2144,7 @@ function setupSettingsModal() {
         if (wyvernPasswordInput) wyvernPasswordInput.value = getSetting('wyvernPassword') || '';
         if (wyvernRememberCredsCheckbox) wyvernRememberCredsCheckbox.checked = getSetting('wyvernRememberCredentials') || false;
         if (datacatTokenInput) datacatTokenInput.value = getSetting('datacatToken') || '';
+        if (saucepanTokenInput) saucepanTokenInput.value = getSetting('saucepanToken') || '';
         const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
         if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
         const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
@@ -3778,6 +3784,126 @@ function setupSettingsModal() {
                 if (datacatTokenInput) datacatTokenInput.value = '';
                 showToast('DataCat session cleared', 'info');
                 updateDatacatSessionStatus();
+            } catch (err) {
+                showToast(`Clear error: ${err.message}`, 'error');
+            }
+        };
+    }
+
+    // ---- Saucepan Account (native extraction) ----
+    // Token persistence lives in window.saucepanLogin/saucepanSetToken/
+    // saucepanClearSession (datacat-provider.js); handlers here only drive the UI.
+    if (toggleSaucepanTokenVisibility && saucepanTokenInput) {
+        toggleSaucepanTokenVisibility.onclick = () => {
+            const isPassword = saucepanTokenInput.type === 'password';
+            saucepanTokenInput.type = isPassword ? 'text' : 'password';
+            toggleSaucepanTokenVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+
+    const saucepanLoginBtn = document.getElementById('saucepanLoginBtn');
+    if (saucepanLoginBtn) {
+        saucepanLoginBtn.onclick = async () => {
+            const handle = (saucepanHandleInput?.value || '').trim();
+            const password = saucepanPasswordInput?.value || '';
+            if (!handle || !password) {
+                showToast('Enter your Saucepan handle and password', 'warning');
+                return;
+            }
+            if (!window.saucepanLogin) {
+                showToast('DataCat module not ready', 'error');
+                return;
+            }
+            const originalHtml = saucepanLoginBtn.innerHTML;
+            saucepanLoginBtn.disabled = true;
+            saucepanLoginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            try {
+                const result = await window.saucepanLogin(handle, password);
+                if (result?.ok && result.token) {
+                    if (saucepanTokenInput) saucepanTokenInput.value = result.token;
+                    if (saucepanPasswordInput) saucepanPasswordInput.value = '';
+                    showToast('Saucepan login successful', 'success');
+                } else {
+                    showToast(`Saucepan login failed: ${result?.error || 'unknown error'}`, 'error');
+                }
+            } catch (err) {
+                showToast(`Saucepan login error: ${err.message}`, 'error');
+            } finally {
+                saucepanLoginBtn.disabled = false;
+                saucepanLoginBtn.innerHTML = originalHtml;
+            }
+        };
+    }
+
+    const saveSaucepanTokenBtn = document.getElementById('saveSaucepanTokenBtn');
+    if (saveSaucepanTokenBtn) {
+        saveSaucepanTokenBtn.onclick = async () => {
+            const pasted = (saucepanTokenInput?.value || '').trim();
+            if (!pasted) {
+                showToast('Paste a Saucepan token first', 'warning');
+                return;
+            }
+            if (!window.saucepanSetToken) {
+                showToast('DataCat module not ready', 'error');
+                return;
+            }
+            try {
+                const result = await window.saucepanSetToken(pasted);
+                if (result?.ok) {
+                    showToast('Saucepan token saved', 'success');
+                } else {
+                    showToast(result?.error || 'Failed to save token', 'warning');
+                }
+            } catch (err) {
+                showToast(`Save error: ${err.message}`, 'error');
+            }
+        };
+    }
+
+    const validateSaucepanBtn = document.getElementById('validateSaucepanBtn');
+    if (validateSaucepanBtn) {
+        validateSaucepanBtn.onclick = async () => {
+            if (!window.saucepanValidateSession) {
+                showToast('DataCat module not ready', 'error');
+                return;
+            }
+            const originalHtml = validateSaucepanBtn.innerHTML;
+            validateSaucepanBtn.classList.remove('success', 'error');
+            validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validateSaucepanBtn.disabled = true;
+            try {
+                const result = await window.saucepanValidateSession();
+                if (result?.valid) {
+                    validateSaucepanBtn.classList.add('success');
+                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    showToast('Saucepan token is valid', 'success');
+                } else {
+                    validateSaucepanBtn.classList.add('error');
+                    validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    showToast(`Saucepan token invalid: ${result?.reason || 'unknown'}`, 'error');
+                }
+            } catch (err) {
+                validateSaucepanBtn.classList.add('error');
+                validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                showToast(`Validation error: ${err.message}`, 'error');
+            } finally {
+                validateSaucepanBtn.disabled = false;
+                setTimeout(() => {
+                    validateSaucepanBtn.classList.remove('success', 'error');
+                    validateSaucepanBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
+    const saucepanClearTokenBtn = document.getElementById('saucepanClearTokenBtn');
+    if (saucepanClearTokenBtn) {
+        saucepanClearTokenBtn.onclick = async () => {
+            try {
+                if (window.saucepanClearSession) await window.saucepanClearSession();
+                else setSetting('saucepanToken', null);
+                if (saucepanTokenInput) saucepanTokenInput.value = '';
+                showToast('Saucepan token cleared', 'info');
             } catch (err) {
                 showToast(`Clear error: ${err.message}`, 'error');
             }

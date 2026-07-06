@@ -161,7 +161,14 @@ async function errorBodySnippet(resp) {
  * @returns {Promise<Response>}
  */
 export async function fetchWithProxy(url, opts = {}) {
-    const origin = new URL(url).origin;
+    const origin = new URL(url, window.location.origin).origin;
+    // Same-origin URLs (e.g. cl-helper proxy paths like
+    // /api/plugins/cl-helper/saucepan-proxy/cdn/...) never need ST's /proxy/.
+    if (origin === window.location.origin) {
+        const r = await fetch(url, opts);
+        if (!r.ok) throw new Error(`HTTP ${r.status}${await errorBodySnippet(r)}`);
+        return r;
+    }
     if (!_proxyOrigins.has(origin)) {
         let directResponse;
         try {

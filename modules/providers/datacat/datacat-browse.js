@@ -26,14 +26,20 @@ import {
     fetchExtractionStatus,
     searchMeiliJanny,
     fetchHampterCharacters,
-    searchSaucepan,
-    fetchSaucepanCompanion,
-    fetchSaucepanCompanionsOfUser,
     JANNY_TAG_MAP,
     pickRecoveryVariant,
     createFlareSolverrSession,
     destroyFlareSolverrSession,
 } from './datacat-api.js';
+import {
+    searchSaucepan,
+    fetchSaucepanCompanion,
+    fetchSaucepanCompanionsOfUser,
+    fetchSaucepanV2Card,
+    buildSaucepanCharacterFromHit,
+    hasSaucepanToken,
+    resolveSaucepanImageUrl,
+} from './saucepan-api.js';
 
 const {
     onElement: on,
@@ -1664,25 +1670,6 @@ async function lookupExternalCharacter(charId, originalUrl, source = 'janitor') 
     showExtractionPanel(charId, originalUrl, source);
 }
 
-// Saucepan card click: try DataCat lookup without resetting browse state.
-// If found, open preview. If not, prompt extraction in a modal-like overlay
-// so the user can return to their saucepan grid afterwards.
-async function openSaucepanCardPreview(hit) {
-    // Retained for any callers that still want the lookup-then-extract flow.
-    // The standard grid click now goes through openPreviewModal() directly,
-    // which surfaces the inline extraction CTA when the DataCat lookup fails.
-    const charId = String(getCharId(hit));
-    const url = `https://saucepan.ai/companion/${charId}`;
-    try {
-        const character = await fetchDatacatCharacter(charId, 'saucepan');
-        if (character) {
-            openPreviewModal(character);
-            return;
-        }
-    } catch { /* not found on DataCat */ }
-    showExtractionPanel(charId, url, 'saucepan');
-}
-
 function showExtractionPanel(charId, originalUrl, source = 'janitor') {
     const grid = document.getElementById('datacatGrid');
     if (!grid) return;
@@ -2670,9 +2657,18 @@ async function fetchAndPopulateDetails(hit, token) {
     const downloadPromise = fetchDatacatDownload(charId, hitSource).catch(() => null);
 
     try {
-        const character = hit._fullCharacter || await fetchDatacatCharacter(charId, hitSource);
+        let character = hit._fullCharacter || await fetchDatacatCharacter(charId, hitSource);
 
         if (token !== datacatDetailFetchToken) return;
+
+        // DataCat doesn't know this Saucepan character. With a Saucepan token
+        // we can pull the definition natively and render/import it without
+        // DataCat's extraction service.
+        if (!character && isSaucepanHit && hasSaucepanToken()) {
+            const v2Card = await fetchSaucepanV2Card(hit).catch(() => null);
+            if (token !== datacatDetailFetchToken) return;
+            if (v2Card) character = buildSaucepanCharacterFromHit(hit, v2Card);
+        }
 
         // Hide the loading indicator
         const defLoading = document.getElementById('datacatCharDefinitionLoading');
@@ -2827,7 +2823,8 @@ async function fetchAndPopulateDetails(hit, token) {
                 gallerySection.style.display = 'block';
                 if (galleryLabel) galleryLabel.textContent = `(${portraits.length})`;
                 galleryGrid.innerHTML = portraits.map(p => {
-                    const url = p?.image?.highres_url;
+                    // CORP headers block hotlinking; route through cl-helper.
+                    const url = resolveSaucepanImageUrl(p?.image?.highres_url);
                     if (!url) return '';
                     const title = p?.description || p?.name || 'Gallery image';
                     return `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(title)}" title="${escapeHtml(title)}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`;

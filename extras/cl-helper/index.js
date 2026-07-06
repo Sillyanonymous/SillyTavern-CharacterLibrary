@@ -1455,6 +1455,8 @@ const SAUCEPAN_ALLOWED_PATHS = [
     /^\/api\/v1\/search$/,
     /^\/api\/v1\/companions-of-user$/,
     /^\/api\/v1\/companion$/,
+    /^\/api\/v1\/companion\/definition$/,
+    /^\/cdn\/.+$/,
 ];
 const SAUCEPAN_POST_PATH = '/api/v1/search';
 const SAUCEPAN_MAX_SEARCH_LEN = 500;
@@ -1462,6 +1464,63 @@ const SAUCEPAN_MAX_TAG_LEN = 64;
 const SAUCEPAN_MAX_TAGS = 100;
 const SAUCEPAN_MAX_DATE_LEN = 30;
 const SAUCEPAN_MAX_ORDER_LEN = 32;
+
+let saucepanToken = null;
+
+function saucepanHeaders(token) {
+    const headers = {
+        'User-Agent': SAUCEPAN_UA,
+        Accept: '*/*',
+        'Accept-Encoding': 'gzip, deflate, br',
+        Origin: SAUCEPAN_ORIGIN,
+        Referer: SAUCEPAN_ORIGIN + '/',
+        'x-saucepan-client-version': '1',
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return headers;
+}
+
+// The search endpoint is anonymous, so it cannot prove a token is valid.
+// The definition endpoint requires auth: grab any open-definition companion
+// id via search, then request its definition with the token under test.
+async function testSaucepanToken(token) {
+    // The search endpoint 422s unless every field is present.
+    const searchResp = await fetch(`${SAUCEPAN_BASE}/api/v1/search`, {
+        method: 'POST',
+        headers: { ...saucepanHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            text_search: null,
+            tags: [],
+            excluded_tags: [],
+            fandom_tags: [],
+            excluded_fandom_tags: [],
+            match_all_fandom_tags: false,
+            match_all_tags: true,
+            limit: 1,
+            offset: 0,
+            sus: true,
+            extra_spicy: null,
+            order_by: 'created',
+            asc: false,
+            posted_at_from: null,
+            posted_at_to: null,
+            hide_hidden_content: false,
+            open_definition_only: true,
+        }),
+    });
+    if (!searchResp.ok) throw new Error(`Saucepan search HTTP ${searchResp.status} while validating token`);
+    const searchData = JSON.parse(await readSaucepanBody(searchResp));
+    const companionId = searchData?.companions?.[0]?.id;
+    if (!companionId) throw new Error('No companion available to validate token against');
+
+    return fetch(`${SAUCEPAN_BASE}/api/v1/companion/definition?companion_id=${encodeURIComponent(companionId)}`, {
+        method: 'GET',
+        headers: {
+            ...saucepanHeaders(token),
+            Referer: `${SAUCEPAN_ORIGIN}/companion/${companionId}`,
+        },
+    });
+}
 
 function sanitizeSaucepanSearchBody(input) {
     if (!input || typeof input !== 'object') return null;
@@ -1527,7 +1586,242 @@ async function readSaucepanBody(response) {
     return text;
 }
 
+// Saucepan ships companion definitions as a shuffled fragment list padded
+// with decoy fragments, to frustrate naive scrapers (a plain text-join yields
+// garbled prose). Each real fragment carries a `proof` hash; decoys don't
+// validate. Reassembly (ported verbatim from Saucepan's own web bundle):
+//   1. keep only fragments whose proof matches hash(mask, key^mask, text)
+//   2. order the survivors by (key ^ mask) ascending
+//   3. concatenate their text
+// The hash is FNV-1a over the UTF-8 text, seeded from the mask and derived key.
+const SAUCEPAN_FNV_OFFSET = 2166136261;
+const SAUCEPAN_FNV_PRIME = 16777619;
+
+function saucepanRotl(value, bits) {
+    return ((value << bits) | (value >>> (32 - bits))) >>> 0;
+}
+
+function saucepanFragmentHash(mask, derivedKey, text) {
+    const bytes = new TextEncoder().encode(text);
+    let h = (SAUCEPAN_FNV_OFFSET ^ saucepanRotl(mask, 7) ^ saucepanRotl(derivedKey, 13)) >>> 0;
+    for (const b of bytes) {
+        h ^= b;
+        h = Math.imul(h, SAUCEPAN_FNV_PRIME) >>> 0;
+    }
+    return h >>> 0;
+}
+
+function assembleSaucepanFragments(content) {
+    const fragments = Array.isArray(content?.fragments) ? content.fragments : [];
+    const mask = (content?.mask ?? 0) >>> 0;
+    return fragments
+        .filter(f => {
+            if (!f || typeof f.text !== 'string') return false;
+            const derivedKey = (f.key ^ mask) >>> 0;
+            return saucepanFragmentHash(mask, derivedKey, f.text) === (f.proof >>> 0);
+        })
+        .sort((a, b) => ((a.key ^ mask) >>> 0) - ((b.key ^ mask) >>> 0))
+        .map(f => f.text)
+        .join('');
+}
+
+// GET a Saucepan JSON endpoint with auth, decoding the (possibly zstd) body.
+// Returns { ok, status, data } with data === null on non-JSON responses.
+async function fetchSaucepanJson(path, token, companionId) {
+    const response = await fetch(`${SAUCEPAN_BASE}${path}`, {
+        method: 'GET',
+        headers: {
+            ...saucepanHeaders(token),
+            Referer: `${SAUCEPAN_ORIGIN}/companion/${companionId}`,
+        },
+    });
+    const text = await readSaucepanBody(response);
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* leave null */ }
+    return { ok: response.ok, status: response.status, data };
+}
+
 function registerSaucepanRoutes(router) {
+    // Saucepan auth: password login
+    router.post('/saucepan-login', async (req, res) => {
+        const { handle, password } = req.body ?? {};
+        if (!handle || typeof handle !== 'string' || !password || typeof password !== 'string') {
+            return res.status(400).json({ error: 'handle and password are required' });
+        }
+        if (handle.length > 64 || password.length > 128) {
+            return res.status(400).json({ error: 'handle or password too long' });
+        }
+
+        try {
+            const response = await fetch(`${SAUCEPAN_BASE}/api/v1/auth/sign_in_password`, {
+                method: 'POST',
+                headers: {
+                    ...saucepanHeaders(),
+                    'Content-Type': 'application/json',
+                    Referer: `${SAUCEPAN_ORIGIN}/sign-in`,
+                },
+                body: JSON.stringify({ handle: handle.trim(), password }),
+            });
+
+            let data = {};
+            try {
+                data = JSON.parse(await readSaucepanBody(response));
+            } catch { /* non-JSON error body */ }
+            if (!response.ok) {
+                const msg = data?.error?.message || `HTTP ${response.status}`;
+                return res.status(response.status).json({ ok: false, error: msg });
+            }
+
+            const token = data?.token || data?.access_token || data?.session_token || data?.sessionToken;
+            if (!token) {
+                return res.status(502).json({ ok: false, error: 'Login succeeded but no token was returned' });
+            }
+
+            saucepanToken = token;
+            console.log('[cl-helper] Saucepan login succeeded');
+            res.json({ ok: true, token });
+        } catch (err) {
+            console.error('[cl-helper] Saucepan login error:', err.message);
+            res.status(502).json({ ok: false, error: err.message });
+        }
+    });
+
+    // Store a user-provided Saucepan token
+    router.post('/saucepan-set-token', async (req, res) => {
+        const { token } = req.body ?? {};
+        if (!token || typeof token !== 'string' || !token.trim()) {
+            return res.status(400).json({ error: 'token string is required' });
+        }
+        if (token.length > 2048) {
+            return res.status(400).json({ error: 'Token too long' });
+        }
+        saucepanToken = token.trim();
+        console.log('[cl-helper] Saucepan token stored');
+        res.json({ ok: true });
+    });
+
+    // Clear stored Saucepan token
+    router.post('/saucepan-clear-token', (_req, res) => {
+        saucepanToken = null;
+        console.log('[cl-helper] Saucepan token cleared');
+        res.json({ ok: true });
+    });
+
+    // Validate stored Saucepan token
+    router.get('/saucepan-validate', async (_req, res) => {
+        if (!saucepanToken) {
+            return res.json({ valid: false, reason: 'no token stored' });
+        }
+        try {
+            const response = await testSaucepanToken(saucepanToken);
+            if (response.ok) {
+                res.json({ valid: true });
+            } else {
+                const text = await readSaucepanBody(response).catch(() => '');
+                console.warn(`[cl-helper] Saucepan validate failed: HTTP ${response.status}`);
+                res.json({ valid: false, reason: `HTTP ${response.status}: ${text.slice(0, 200)}` });
+            }
+        } catch (err) {
+            console.error('[cl-helper] Saucepan validate error:', err.message);
+            res.json({ valid: false, reason: err.message });
+        }
+    });
+
+    // Native Saucepan extraction: reassemble the companion's obfuscated
+    // fragments into a usable card. Pulls two endpoints:
+    //   /api/v1/companion/definition -> named prose sections (body, example
+    //     dialogue, advanced prompt, response formatting)
+    //   /api/v2/companions/{id}      -> starting scenarios (the greetings that
+    //     become first_mes / alternate_greetings; absent from the definition)
+    router.post('/saucepan-extract', async (req, res) => {
+        const bodyToken = typeof req.body?.token === 'string' && req.body.token.length <= 2048
+            ? req.body.token.trim()
+            : null;
+        const token = bodyToken || saucepanToken;
+        if (!token) {
+            return res.status(401).json({ error: 'No Saucepan token configured' });
+        }
+
+        const { url } = req.body ?? {};
+        if (!url || typeof url !== 'string') {
+            return res.status(400).json({ error: 'url string is required' });
+        }
+        if (url.length > 512) {
+            return res.status(400).json({ error: 'URL too long' });
+        }
+
+        let companionId;
+        try {
+            const parsed = new URL(url);
+            if (!/^(www\.)?saucepan\.ai$/i.test(parsed.hostname)) {
+                return res.status(400).json({ error: 'Only Saucepan companion URLs are supported' });
+            }
+            const m = parsed.pathname.match(/^\/companion\/([a-f0-9-]{8,64})\/?$/i);
+            if (!m) {
+                return res.status(400).json({ error: 'Invalid companion URL path' });
+            }
+            companionId = m[1];
+        } catch {
+            return res.status(400).json({ error: 'Invalid URL' });
+        }
+
+        try {
+            const [defRes, compRes] = await Promise.all([
+                fetchSaucepanJson(`/api/v1/companion/definition?companion_id=${encodeURIComponent(companionId)}`, token, companionId),
+                fetchSaucepanJson(`/api/v2/companions/${encodeURIComponent(companionId)}`, token, companionId),
+            ]);
+
+            // The definition endpoint is authoritative; surface its auth errors.
+            if (!defRes.ok) {
+                const msg = defRes.data?.error?.message || `Saucepan HTTP ${defRes.status}`;
+                return res.status(defRes.status).json({ error: msg });
+            }
+            if (!defRes.data) {
+                return res.status(502).json({ error: 'Invalid JSON from Saucepan' });
+            }
+
+            // Reassemble each definition section's shuffled fragments back into
+            // prose, dropping the decoy fragments Saucepan injects (see
+            // assembleSaucepanFragments).
+            const sections = Array.isArray(defRes.data.sections) ? defRes.data.sections : [];
+            const assembled = {};
+            for (const section of sections) {
+                const title = section?.title;
+                const content = section?.content;
+                if (!title || !content) continue;
+                assembled[title] = assembleSaucepanFragments(content);
+            }
+
+            const companion = compRes.data?.companion || null;
+            if (!compRes.ok || !companion) {
+                console.warn(`[cl-helper] Saucepan extract: greetings unavailable (companions/${companionId} HTTP ${compRes.status})`);
+            }
+
+            // Greetings live only on the v2 companion object as starting
+            // scenarios; each scenario message is fragment-obfuscated too.
+            const greetings = [];
+            const scenarios = Array.isArray(companion?.starting_scenarios_fragments)
+                ? companion.starting_scenarios_fragments
+                : [];
+            for (const scenario of scenarios) {
+                const text = assembleSaucepanFragments(scenario?.message);
+                if (text && text.trim()) {
+                    greetings.push({ title: typeof scenario?.title === 'string' ? scenario.title : '', text });
+                }
+            }
+
+            // Fall back to the v2 body if the definition lacked Companion Core.
+            if (!assembled['Companion Core'] && companion?.full_description_fragments) {
+                assembled['Companion Core'] = assembleSaucepanFragments(companion.full_description_fragments);
+            }
+
+            res.json({ success: true, companionId, assembled, greetings });
+        } catch (err) {
+            console.error('[cl-helper] Saucepan extract error:', err.message);
+            res.status(502).json({ error: `Failed to reach Saucepan: ${err.message}` });
+        }
+    });
+
     const handleProxy = async (req, res) => {
         const targetPath = '/' + req.params[0];
         const normalizedPath = new URL(targetPath, SAUCEPAN_BASE).pathname;
@@ -1542,6 +1836,7 @@ function registerSaucepanRoutes(router) {
             return res.status(403).json({ error: `Proxy target must be ${SAUCEPAN_HOSTNAME}` });
         }
 
+        const isCdn = normalizedPath.startsWith('/cdn/');
         const isPost = req.method === 'POST';
         let bodyStr = null;
         if (isPost) {
@@ -1557,15 +1852,17 @@ function registerSaucepanRoutes(router) {
 
         const headers = {
             'User-Agent': SAUCEPAN_UA,
-            'Accept': '*/*',
+            'Accept': isCdn ? 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8' : '*/*',
             // Deliberately omits zstd: undici auto-decompresses gzip/deflate/br,
             // and Saucepan should respect the negotiated encoding. The zstd
             // fallback in readSaucepanBody covers servers that ignore us.
             'Accept-Encoding': 'gzip, deflate, br',
             'Origin': SAUCEPAN_ORIGIN,
             'Referer': SAUCEPAN_ORIGIN + '/',
+            'x-saucepan-client-version': '1',
         };
         if (isPost) headers['Content-Type'] = 'application/json';
+        if (saucepanToken && !isCdn) headers['Authorization'] = `Bearer ${saucepanToken}`;
 
         try {
             const response = await fetch(targetUrl.toString(), {
@@ -1574,6 +1871,26 @@ function registerSaucepanRoutes(router) {
                 body: bodyStr ?? undefined,
                 redirect: 'follow',
             });
+
+            // CDN images: return binary bytes straight back; do not run through
+            // the zstd/text reader used for API responses.
+            if (isCdn) {
+                const contentLength = parseInt(response.headers.get('content-length'), 10);
+                if (contentLength > SAUCEPAN_MAX_BYTES) {
+                    return res.status(413).json({ error: 'Saucepan image too large' });
+                }
+                const buf = Buffer.from(await response.arrayBuffer());
+                if (buf.length > SAUCEPAN_MAX_BYTES) {
+                    return res.status(413).json({ error: 'Saucepan image too large' });
+                }
+                res.status(response.status);
+                res.set('Content-Type', response.headers.get('content-type') || 'image/jpeg');
+                // Saucepan serves images immutable; keeping its cache headers
+                // stops the browser re-requesting every avatar through us.
+                const cacheControl = response.headers.get('cache-control');
+                if (cacheControl) res.set('Cache-Control', cacheControl);
+                return res.send(buf);
+            }
 
             const text = await readSaucepanBody(response);
             res.status(response.status);

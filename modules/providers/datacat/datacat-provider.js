@@ -6,7 +6,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng, fetchWithProxy } from '../provider-utils.js';
+import { assignGalleryId, importFromPng, fetchWithProxy, CL_HELPER_PLUGIN_BASE } from '../provider-utils.js';
 import datacatBrowseView from './datacat-browse.js';
 import {
     DATACAT_API_BASE,
@@ -28,6 +28,14 @@ import {
     submitExtraction,
     fetchExtractionStatus,
 } from './datacat-api.js';
+import {
+    setApiRequest as setSaucepanApiRequest,
+    setSaucepanTokenGetter,
+    hasSaucepanToken,
+    fetchSaucepanCompanion,
+    submitSaucepanExtraction,
+    buildV2FromSaucepan,
+} from './saucepan-api.js';
 
 let api = null;
 
@@ -78,7 +86,28 @@ class DatacatProvider extends ProviderBase {
         super.init(coreAPI);
         api = coreAPI;
         setApiRequest(coreAPI.apiRequest);
+        setSaucepanApiRequest(coreAPI.apiRequest);
         setSavedTokenGetter(() => coreAPI.getSetting('datacatToken') || null);
+        setSaucepanTokenGetter(() => coreAPI.getSetting('saucepanToken') || null);
+
+        // Push any persisted Saucepan token into cl-helper so search and
+        // other stateless proxy calls are authenticated without requiring a
+        // manual login after every server restart.
+        const saucepanToken = coreAPI.getSetting('saucepanToken');
+        if (saucepanToken) {
+            try {
+                await coreAPI.apiRequest(
+                    `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
+                    'POST',
+                    { token: saucepanToken },
+                );
+            } catch (e) {
+                console.warn(
+                    '[DatacatProvider] Failed to push Saucepan token:',
+                    e.message,
+                );
+            }
+        }
     }
 
     // ── View ────────────────────────────────────────────────
@@ -170,6 +199,39 @@ class DatacatProvider extends ProviderBase {
         if (!linkInfo?.id) return null;
         const sk = linkInfo.sourceKind || null;
         try {
+            // For Saucepan, try native extraction first if a token is available.
+            if (sk === 'saucepan' && hasSaucepanToken()) {
+                const companion = await fetchSaucepanCompanion(linkInfo.id);
+                if (companion) {
+                    const hit = {
+                        id: companion.id || linkInfo.id,
+                        character_id: companion.id || linkInfo.id,
+                        name: companion.name || 'Unknown',
+                        display_name: companion.display_name || companion.name || 'Unknown',
+                        avatar: companion.image?.highres_url || companion.image?.url || '',
+                        description: companion.short_description || '',
+                        tags: Array.isArray(companion.tags) ? companion.tags : [],
+                        creator_name: companion.author_handle || '',
+                        creator_id: companion.author_id || '',
+                    };
+                    const extractResult = await submitSaucepanExtraction(
+                        `https://saucepan.ai/companion/${linkInfo.id}`,
+                    );
+                    if (extractResult.success) {
+                        const result = buildV2FromSaucepan(hit, extractResult);
+                        if (result) {
+                            result._listingName = this.getListingName(hit);
+                            return result;
+                        }
+                    } else {
+                        api?.debugLog?.(
+                            '[DatacatProvider] native Saucepan extraction failed:',
+                            extractResult.error,
+                        );
+                    }
+                }
+            }
+
             // Try the download endpoint first (closest to V2 format)
             const downloadData = await fetchDatacatDownload(linkInfo.id, sk);
             if (downloadData?.data) {
@@ -461,13 +523,20 @@ class DatacatProvider extends ProviderBase {
 
             const characterName = character.chat_name || character.name || 'Unnamed';
 
-            // Try download endpoint for best V2 mapping
+            // Natively-extracted Saucepan cards already carry a fully-built V2
+            // card (body, greetings, example dialogue, prompts). DataCat has no
+            // copy to download, so use it directly rather than rebuilding.
             let characterCard;
-            const downloadData = await fetchDatacatDownload(charId);
-            if (downloadData?.data) {
-                characterCard = buildV2FromDownload(downloadData, character);
+            if (character._source === 'saucepan' && character.chara_card_v2_json?.data) {
+                characterCard = character.chara_card_v2_json;
             } else {
-                characterCard = buildV2FromDatacat(character);
+                // Try download endpoint for best V2 mapping
+                const downloadData = await fetchDatacatDownload(charId);
+                if (downloadData?.data) {
+                    characterCard = buildV2FromDownload(downloadData, character);
+                } else {
+                    characterCard = buildV2FromDatacat(character);
+                }
             }
 
             if (!characterCard?.data) throw new Error('Failed to build character card');
@@ -544,4 +613,102 @@ window.datacatRefreshToken = async () => {
 
 window.datacatClearSession = async () => {
     return clearDcSession();
+};
+
+// Window-exposed Saucepan session management (called by settings panel in library.js).
+// The token is persisted in the 'saucepanToken' setting — that setting is what
+// hasSaucepanToken()/native extraction key off — and mirrored into cl-helper's
+// in-memory store for proxy auth.
+window.saucepanLogin = async (handle, password) => {
+    const pluginOk = await checkDcPluginAvailable();
+    if (!pluginOk) return { ok: false, error: 'cl-helper plugin not available' };
+    try {
+        const resp = await api.apiRequest(
+            `${CL_HELPER_PLUGIN_BASE}/saucepan-login`,
+            'POST',
+            { handle, password },
+        );
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
+        }
+        const data = await resp.json();
+        if (data?.ok && data.token) {
+            CoreAPI.setSetting('saucepanToken', data.token);
+        }
+        return data;
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+};
+
+window.saucepanSetToken = async (token) => {
+    const trimmed = (token || '').trim();
+    if (!trimmed) return { ok: false, error: 'Token is empty' };
+    CoreAPI.setSetting('saucepanToken', trimmed);
+    const pluginOk = await checkDcPluginAvailable();
+    if (!pluginOk) return { ok: false, error: 'Saved locally, but cl-helper plugin not available' };
+    try {
+        const resp = await api.apiRequest(
+            `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
+            'POST',
+            { token: trimmed },
+        );
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
+        }
+        return await resp.json();
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+};
+
+window.saucepanValidateSession = async () => {
+    const pluginOk = await checkDcPluginAvailable();
+    if (!pluginOk)
+        return { valid: false, reason: 'cl-helper plugin not available' };
+    try {
+        // Resync the persisted token first: cl-helper only holds it in
+        // memory, so a plugin reload or ST restart loses it.
+        const saved = CoreAPI.getSetting('saucepanToken');
+        if (saved) {
+            try {
+                await api.apiRequest(
+                    `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
+                    'POST',
+                    { token: saved },
+                );
+            } catch { /* validate reports the failure */ }
+        }
+        const resp = await api.apiRequest(
+            `${CL_HELPER_PLUGIN_BASE}/saucepan-validate`,
+        );
+        if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            return {
+                valid: false,
+                reason: `HTTP ${resp.status}: ${text.slice(0, 200)}`,
+            };
+        }
+        return await resp.json();
+    } catch (e) {
+        return { valid: false, reason: e.message };
+    }
+};
+
+window.saucepanClearSession = async () => {
+    // Drop the persisted token even when cl-helper is unreachable.
+    CoreAPI.setSetting('saucepanToken', null);
+    const pluginOk = await checkDcPluginAvailable();
+    if (!pluginOk) return false;
+    try {
+        const resp = await api.apiRequest(
+            `${CL_HELPER_PLUGIN_BASE}/saucepan-clear-token`,
+            'POST',
+        );
+        return resp.ok;
+    } catch {
+        return false;
+    }
 };
