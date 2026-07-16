@@ -4,6 +4,8 @@
 // and the metadata cache. Initialized once via initWyvernApi() which
 // receives getSetting + debugLog from CoreAPI.
 
+import CoreAPI from '../../core-api.js';
+
 // ========================================
 // CONSTANTS
 // ========================================
@@ -186,8 +188,8 @@ export function getAvatarUrl(char) {
     if (src && src.startsWith('http')) url = src;
     else if (src) url = `${WYVERN_IMAGE_BASE}${src}/public`;
     else return '/img/ai4.png';
-    const safety = window.isUrlSafeForDownload?.(url);
-    if (safety && !safety.ok) return '/img/ai4.png';
+    const safety = CoreAPI.isUrlSafeForDownload(url);
+    if (!safety.ok) return '/img/ai4.png';
     return url;
 }
 

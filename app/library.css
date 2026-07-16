@@ -96,7 +96,7 @@
 
     /* Font size for mobile text fields. Compact everywhere except iOS, which auto-zooms the page
        on focus below 16px. The html.cl-ios override (set at boot) bumps it to 16px there. Consumed
-       only inside @media(max-width:768px) input guards, so it has no desktop effect. */
+       only inside html.cl-mobile input guards, so it has no desktop effect. */
     --mobile-input-size: var(--font-md);
 }
 
@@ -237,7 +237,6 @@ body.modal-size-large .cl-modal-content.creator-saveas-diff-content { max-width:
  *   .cl-loading             - Hero loader (renderLoadingState(): icon + label + progress bar)
  *   .cl-spinner-inline      - Lightweight inline spinner for grid/list slots
  *   .cl-skeleton-card       - Skeleton placeholder card for grids
- *   .cl-skeleton-list       - Skeleton placeholder rows for lists
  *   .cl-empty-state         - Empty-state block (icon + message)
  *
  * SETTINGS CHROME
@@ -4229,15 +4228,13 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 
 /* Mobile: tighter meta block to match browse-card's 8px / 60px sizing */
-@media screen and (max-width: 768px) {
-    .cl-skeleton-card {
-        border-radius: var(--radius-xl);
-    }
-    .cl-skeleton-card .cl-skeleton-meta {
-        padding: var(--space-sm);
-        gap: var(--space-xs-sm);
-        min-height: 60px;
-    }
+html.cl-mobile .cl-skeleton-card {
+    border-radius: var(--radius-xl);
+}
+html.cl-mobile .cl-skeleton-card .cl-skeleton-meta {
+    padding: var(--space-sm);
+    gap: var(--space-xs-sm);
+    min-height: 60px;
 }
 .cl-skeleton-line {
     height: 8px;
@@ -4304,51 +4301,6 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 .cl-empty-state-action {
     margin-top: var(--space-sm);
-}
-
-/* @canonical cl-skeleton-list */
-.cl-skeleton-list {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-}
-.cl-skeleton-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-sm-md);
-    border-radius: var(--radius-md);
-    background: var(--card-bg);
-    border: 1px solid var(--glass-border);
-}
-.cl-skeleton-row .cl-skeleton-avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: var(--radius-circle);
-    background: var(--glass-border);
-    position: relative;
-    overflow: hidden;
-    flex-shrink: 0;
-}
-.cl-skeleton-row .cl-skeleton-avatar::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-        90deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0.08) 50%,
-        rgba(255, 255, 255, 0) 100%
-    );
-    background-size: 200% 100%;
-    animation: cl-skeleton-shimmer 1.6s ease-in-out infinite;
-}
-.cl-skeleton-row .cl-skeleton-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs-sm);
 }
 
 .sprite-item {
@@ -5224,28 +5176,26 @@ input[type="search"]::-webkit-search-results-decoration {
     color: #d32f2f;
 }
 
-@media (max-width: 768px) {
-    /* On mobile the desktop hero portrait is hidden; the visible avatar is the
-       small thumbnail injected into the modal header by library-mobile.js.
-       When edit lock is unlocked, give it an accent-color pulsing glow so the
-       user sees there is something to interact with. */
-    #charModal.editing-unlocked .mobile-header-avatar {
-        box-shadow: 0 0 0 2px var(--accent), 0 0 14px 3px rgba(var(--accent-rgb), 0.55);
-        animation: portrait-edit-pulse 1.8s ease-in-out infinite;
-        cursor: pointer;
-    }
+/* On mobile the desktop hero portrait is hidden; the visible avatar is the
+   small thumbnail injected into the modal header by library-mobile.js.
+   When edit lock is unlocked, give it an accent-color pulsing glow so the
+   user sees there is something to interact with. */
+html.cl-mobile #charModal.editing-unlocked .mobile-header-avatar {
+    box-shadow: 0 0 0 2px var(--accent), 0 0 14px 3px rgba(var(--accent-rgb), 0.55);
+    animation: portrait-edit-pulse 1.8s ease-in-out infinite;
+    cursor: pointer;
+}
 
-    /* Desktop portrait gets the same glow if visible (defensive — sidebar is
-       hidden on mobile but kept in case the layout ever changes). */
-    .char-portrait-container.editing-unlocked .portrait-edit-overlay {
-        opacity: 1;
-        background: rgba(0, 0, 0, 0.45);
-    }
+/* Desktop portrait gets the same glow if visible (defensive — sidebar is
+   hidden on mobile but kept in case the layout ever changes). */
+html.cl-mobile .char-portrait-container.editing-unlocked .portrait-edit-overlay {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.45);
+}
 
-    @keyframes portrait-edit-pulse {
-        0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 12px 2px rgba(var(--accent-rgb), 0.45); }
-        50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 20px 5px rgba(var(--accent-rgb), 0.75); }
-    }
+@keyframes portrait-edit-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent), 0 0 12px 2px rgba(var(--accent-rgb), 0.45); }
+    50%      { box-shadow: 0 0 0 2px var(--accent), 0 0 20px 5px rgba(var(--accent-rgb), 0.75); }
 }
 
 /* Locked input state */
@@ -7333,52 +7283,50 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 
 /* Responsive - desktop only (mobile has its own overrides in library-mobile.css) */
-@media (min-width: 769px) and (max-width: 1250px) {
-    .char-duplicates-modal-content {
+@media (max-width: 1250px) {
+    html:not(.cl-mobile) .char-duplicates-modal-content {
         min-width: unset;
         width: 98vw;
     }
 
-    .char-dup-comparison {
+    html:not(.cl-mobile) .char-dup-comparison {
         grid-template-columns: 1fr;
         gap: var(--space-lg);
     }
 
-    .char-dup-divider {
+    html:not(.cl-mobile) .char-dup-divider {
         flex-direction: row;
         padding: 10px 0;
     }
 
-    .char-dup-divider i {
+    html:not(.cl-mobile) .char-dup-divider i {
         transform: rotate(90deg);
     }
 
-    .char-dup-card {
+    html:not(.cl-mobile) .char-dup-card {
         min-width: unset;
     }
 }
 
-@media (max-width: 768px) {
-    .char-dup-comparison {
-        grid-template-columns: 1fr;
-        gap: var(--space-lg);
-    }
-    
-    .char-dup-divider {
-        flex-direction: row;
-        padding: 10px 0;
-    }
-    
-    .char-dup-divider i {
-        transform: rotate(90deg);
-    }
-    
-    .char-duplicates-modal-content {
-        max-width: 100%;
-        width: 100%;
-        max-height: 100vh;
-        border-radius: 0;
-    }
+html.cl-mobile .char-dup-comparison {
+    grid-template-columns: 1fr;
+    gap: var(--space-lg);
+}
+
+html.cl-mobile .char-dup-divider {
+    flex-direction: row;
+    padding: 10px 0;
+}
+
+html.cl-mobile .char-dup-divider i {
+    transform: rotate(90deg);
+}
+
+html.cl-mobile .char-duplicates-modal-content {
+    max-width: 100%;
+    width: 100%;
+    max-height: 100vh;
+    border-radius: 0;
 }
 
 /* Confirmation Modal */
@@ -7460,6 +7408,63 @@ input[type="search"]::-webkit-search-results-decoration {
 .confirm-modal-body > p {
     margin: 0 0 15px 0;
     color: var(--text-secondary);
+}
+
+/* Delete-character confirm: hero + danger callout */
+.del-confirm-hero {
+    margin-bottom: var(--space-lg);
+}
+
+.del-confirm-avatar {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: var(--radius-2xl);
+    border: 3px solid rgba(var(--cl-error-bright-rgb), 0.5);
+    box-shadow: 0 4px 24px rgba(var(--cl-error-bright-rgb), 0.25);
+    margin-bottom: var(--space-sm-md);
+}
+
+.del-confirm-name {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--font-lg);
+    font-weight: 600;
+}
+
+.del-confirm-meta {
+    margin-top: var(--space-2xs);
+    color: var(--text-faint);
+    font-size: var(--font-sm);
+}
+
+.del-confirm-warning {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm-md);
+    text-align: left;
+    background: rgba(var(--cl-error-bright-rgb), 0.08);
+    border: 1px solid rgba(var(--cl-error-bright-rgb), 0.25);
+    border-radius: var(--radius-lg);
+    padding: var(--space-sm-md) var(--space-md);
+    margin-bottom: 15px;
+}
+
+.del-confirm-warning > i {
+    color: var(--cl-error-bright);
+    font-size: var(--font-lg);
+    flex-shrink: 0;
+}
+
+.del-confirm-warning strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: var(--font-md-lg);
+}
+
+.del-confirm-warning span {
+    color: var(--text-secondary);
+    font-size: var(--font-sm);
 }
 
 .changes-diff {
@@ -8186,8 +8191,7 @@ details.settings-provider-section > .settings-provider-body {
     color: var(--text-primary);
 }
 
-.botbooru-weight-row .bw-weight,
-.botbooru-weight-input {
+.botbooru-weight-row .bw-weight {
     width: 70px;
     flex: 0 0 auto;
     text-align: right;
@@ -8289,9 +8293,7 @@ details.settings-provider-section > .settings-provider-body {
 }
 
 /* @canonical settings-platform-visibility */
-@media (min-width: 769px) {
-    .settings-row[data-platform="mobile"] { display: none !important; }
-}
+html:not(.cl-mobile) .settings-row[data-platform="mobile"] { display: none !important; }
 
 /* @canonical settings-platform-badge */
 .settings-platform-badge {
@@ -8489,6 +8491,8 @@ details.settings-provider-section > .settings-provider-body {
 .provider-order-item .provider-order-defaults {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     gap: var(--space-sm);
     margin-left: auto;
     flex-shrink: 0;
@@ -8514,6 +8518,21 @@ details.settings-provider-section > .settings-provider-body {
 
 .provider-order-item .provider-order-defaults select:focus {
     border-color: var(--accent);
+}
+
+.provider-order-item .provider-default-hide {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--font-xs);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.provider-order-item .provider-default-hide input {
+    cursor: pointer;
+    margin: 0;
 }
 
 
@@ -10506,14 +10525,12 @@ html.cl-initial-loading .mobile-bottom-nav-tab {
     transition: opacity 0.2s ease;
 }
 /* Same lockout for the topbar controls; desktop only, mobile chrome is left alone. */
-@media (min-width: 769px) {
-    html.cl-initial-loading .search-area,
-    html.cl-initial-loading .filter-area {
-        pointer-events: none;
-        opacity: 0.45;
-        cursor: wait;
-        transition: opacity 0.2s ease;
-    }
+html.cl-initial-loading:not(.cl-mobile) .search-area,
+html.cl-initial-loading:not(.cl-mobile) .filter-area {
+    pointer-events: none;
+    opacity: 0.45;
+    cursor: wait;
+    transition: opacity 0.2s ease;
 }
 html.cl-initial-loading .view-toggle-btn,
 html.cl-initial-loading .mobile-bottom-nav-tab {
@@ -11745,6 +11762,18 @@ html.cl-initial-loading .mobile-fab {
     padding: 20px;
     overflow-y: auto;
     flex: 1;
+}
+
+/* Unclassed descriptive/status <p> in modal bodies would inherit the UA 16px (body sets
+   no font-size, the * reset zeroes margin), so they read oversized and cramped next to
+   token-sized controls. Pin them to the descriptive-hint house style. */
+.cl-modal-body > p:not([class]),
+.import-source-panel > p:not([class]),
+.bulk-auto-link-phase > p:not([class]) {
+    font-size: var(--font-md);
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin: 0 0 var(--space-sm) 0;
 }
 
 .cl-modal-footer {

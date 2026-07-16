@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileViewport } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport, proxyEncode } from '../provider-utils.js';
 import {
     CHUB_API_BASE,
     CHUB_GATEWAY_BASE,
@@ -35,14 +35,11 @@ const {
     getCurrentView,
     debounce,
     getCharacterGalleryId,
-    fetchCharacters,
-    fetchAndAddCharacter,
     deleteCharacter,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
-    showImportSummaryModal,
     getProviderExcludeTags,
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
@@ -829,6 +826,17 @@ class ChubBrowseView extends BrowseView {
                 if (el) el.value = defaults.sort;
             }
         }
+        if (defaults.hideOwned) {
+            chubFilterHideOwned = true;
+            const el = document.getElementById('chubFilterHideOwned');
+            if (el) el.checked = true;
+        }
+        if (defaults.hidePossible) {
+            chubFilterHidePossible = true;
+            const el = document.getElementById('chubFilterHidePossible');
+            if (el) el.checked = true;
+        }
+        if (defaults.hideOwned || defaults.hidePossible) updateChubFiltersButtonState();
     }
 
     activate(container, options = {}) {
@@ -1187,7 +1195,7 @@ function initChubView() {
         const chubAvatar = document.getElementById('chubCharAvatar');
         if (chubAvatar) {
             chubAvatar.addEventListener('click', (e) => {
-                if (isMobileViewport()) return;
+                if (isMobileMode()) return;
                 e.stopPropagation();
                 if (!chubAvatar.src) return;
                 const fullSrc = chubAvatar.src.replace(/\/avatar\.webp$/, '/chara_card_v2.png');
@@ -1593,7 +1601,7 @@ function initChubTagsDropdown() {
         if (wasHidden) {
             renderChubTagsDropdownList();
             // Skip auto-focus on mobile - it spawns the virtual keyboard
-            if (!window.matchMedia('(max-width: 768px)').matches) {
+            if (!isMobileMode()) {
                 searchInput?.focus();
             }
         }
@@ -2474,6 +2482,7 @@ function filterByAuthor(authorName) {
     // Set filter state BEFORE mode switch - switchChubViewMode('browse')
     // triggers loadChubCharacters() internally, which must see the author filter
     chubAuthorFilter = authorName;
+    view._cdRef = { name: authorName };
     chubCurrentSearch = '';
     chubCharacters = [];
     chubCurrentPage = 1;
@@ -3409,7 +3418,7 @@ async function openChubCharPreview(char) {
     chubSelectedChar = char;
     
     const modal = document.getElementById('chubCharModal');
-    window.resetBrowseSectionCollapseState?.(modal);
+    CoreAPI.resetBrowseSectionCollapseState(modal);
     const avatarImg = document.getElementById('chubCharAvatar');
     const nameEl = document.getElementById('chubCharName');
     const creatorLink = document.getElementById('chubCharCreator');
@@ -3594,7 +3603,7 @@ async function openChubCharPreview(char) {
             altGreetingsSection.style.display = 'none';
             altGreetingsEl.innerHTML = '';
             if (altGreetingsCountEl) altGreetingsCountEl.textContent = '';
-            window.currentBrowseAltGreetings = [];
+            CoreAPI.setBrowseAltGreetings([]);
             return;
         }
         const buildPreview = (text) => {
@@ -3633,7 +3642,7 @@ async function openChubCharPreview(char) {
             }, { once: true });
         });
         if (altGreetingsCountEl) altGreetingsCountEl.textContent = `(${greetings.length})`;
-        window.currentBrowseAltGreetings = greetings;
+        CoreAPI.setBrowseAltGreetings(greetings);
     };
 
     // Render from basic data if already present
@@ -3758,7 +3767,7 @@ async function openChubCharPreview(char) {
                 try { return await fetch(url, { headers: galleryHeaders, signal: fetchSignal }); }
                 catch (e) {
                     if (e.name === 'AbortError') throw e;
-                    return await fetch(`/proxy/${encodeURIComponent(url)}`, { headers: galleryHeaders, signal: fetchSignal });
+                    return await fetch(`/proxy/${proxyEncode(url)}`, { headers: galleryHeaders, signal: fetchSignal });
                 }
             };
             // Search-result hasGallery is unreliable (returns false for chars whose detail says true),
@@ -4020,7 +4029,7 @@ async function toggleChubCharFavorite() {
  */
 function cleanupChubCharModal() {
     BrowseView.closeAvatarViewer();
-    window.currentBrowseAltGreetings = null;
+    CoreAPI.setBrowseAltGreetings(null);
 
     const defLoading = document.getElementById('chubCharDefinitionLoading');
     if (defLoading) { defLoading.style.display = 'none'; defLoading.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>'; }
@@ -4153,41 +4162,20 @@ async function downloadChubCharacter() {
             }] : []
         };
 
-        // Mobile holds the preview behind the summary while it fades in (small-viewport
-        // fade is too visible). Desktop snaps the preview off first then opens summary,
-        // matching the pre-mobile-pass behaviour.
-        if (showSummary) {
-            if (window.matchMedia?.('(max-width: 768px)').matches) {
-                showImportSummaryModal(summaryArgs);
-                await new Promise(r => setTimeout(r, 220));
-                closeChubCharPreview();
-            } else {
-                closeChubCharPreview();
-                await new Promise(r => requestAnimationFrame(r));
-                showImportSummaryModal(summaryArgs);
-            }
-        } else {
-            downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
-            await new Promise(r => setTimeout(r, 350));
-            closeChubCharPreview();
-        }
-
-        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
-
-        // === REFRESH + SYNC ===
-        await new Promise(r => setTimeout(r, 200));
-        const added = await fetchAndAddCharacter(localAvatarFileName);
-        if (added) {
-            view.addCharToLookup(added);
-        } else {
-            await new Promise(r => setTimeout(r, 500));
-            await fetchCharacters(true);
-        }
-        markChubCardAsImported(fullPath);
+        await finishBrowseImport({
+            view,
+            summaryArgs,
+            showSummary,
+            closePreview: closeChubCharPreview,
+            importBtn: downloadBtn,
+            characterName: result.characterName,
+            avatarFileName: localAvatarFileName,
+            markImported: () => markChubCardAsImported(fullPath),
+        });
 
     } catch (e) {
         console.error('[ChubDownload] Download error:', e);
-        showToast('Download failed: ' + e.message, 'error');
+        showToast('Import failed: ' + e.message, 'error');
     } finally {
         downloadBtn.innerHTML = originalHtml;
         downloadBtn.disabled = false;

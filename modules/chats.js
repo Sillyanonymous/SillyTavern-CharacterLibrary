@@ -77,6 +77,7 @@ function saveChatCache(chats) {
                 charAvatar: c.charAvatar,
                 preview: c.preview,
                 models: c.models || null,
+                modelsResolved: !!c.modelsResolved,
                 isGroup: c.isGroup || false,
                 groupId: c.groupId || null,
                 chat_metadata: c.chat_metadata || null,
@@ -118,12 +119,14 @@ async function fetchCharacterChats(char) {
         const chats = await response.json();
 
         if (chats.error || !chats.length) {
-            chatsList.innerHTML = `
-                <div class="no-chats">
-                    <i class="fa-solid fa-comments"></i>
-                    <p>No chats found for this character</p>
-                </div>
-            `;
+            CoreAPI.renderEmptyState(chatsList, {
+                icon: 'fa-solid fa-comments',
+                title: 'No chats yet',
+                hint: `Start your first conversation with ${char.name || 'this character'}.`,
+                actionLabel: 'Start a chat',
+                actionIcon: 'fa-solid fa-comment-dots',
+                onAction: () => createNewChat(char),
+            });
             return;
         }
 
@@ -277,7 +280,16 @@ async function deleteChat(char, chatFile) {
 
 async function createNewChat(char) {
     try {
-        if (await CoreAPI.loadCharInMain(char, true)) {
+        let hasExistingChats = false;
+        try {
+            // simple:true returns bare file names; metadata would make ST parse every chat JSONL
+            const resp = await CoreAPI.apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { avatar_url: char.avatar, simple: true });
+            if (resp.ok) {
+                const chats = await resp.json();
+                hasExistingChats = Array.isArray(chats) && chats.length > 0;
+            }
+        } catch (_) {}
+        if (await CoreAPI.loadCharInMain(char, hasExistingChats)) {
             CoreAPI.showToast("Creating new chat...", "success");
         }
     } catch (e) {
@@ -288,6 +300,25 @@ async function createNewChat(char) {
 // ========================================
 // TOP-LEVEL CHATS VIEW
 // ========================================
+
+// Read on view enter rather than module init so the settings load cant race us.
+function syncChatCardDensity() {
+    const density = CoreAPI.getSetting('chatCardDensity') || 'comfortable';
+    const view = document.getElementById('chatsView');
+    if (view) {
+        view.classList.toggle('chat-density-spacious', density === 'spacious');
+        view.classList.toggle('chat-density-compact', density === 'compact');
+        view.classList.toggle('chat-density-minimal', density === 'minimal');
+    }
+    const sel = document.getElementById('chatsDensitySelect');
+    if (sel && sel.value !== density) {
+        sel.value = density;
+        sel._customSelect?.update?.();
+    }
+    // Density only styles the flat cards list; hide the control in grouped view.
+    const holder = sel ? (sel._customSelect?.container || sel) : null;
+    if (holder) holder.classList.toggle('hidden', currentGrouping === 'grouped');
+}
 
 function initChatsView() {
     // Capture-phase load delegate populates the seen-Set independent of promoteCachedChatAvatars's per-img listener-add timing, which races with the parser on mobile and would otherwise leak fades into re-renders. Set key is the raw src attribute so it matches what promote reads on detached <template> content.
@@ -305,10 +336,13 @@ function initChatsView() {
 
     // Register chats lazy-load: load on first visit
     CoreAPI.onViewEnter('chats', () => {
+        syncChatCardDensity();
         if (allChats.length === 0) {
             loadAllChats();
         }
     });
+    // Lazy import races switchView's synchronous enter callbacks: the first chats entry fires them before this registration exists, so catch up.
+    if (CoreAPI.getCurrentView() === 'chats') syncChatCardDensity();
 
     CoreAPI.onViewExit('chats', () => {
         disconnectObservers();
@@ -320,12 +354,19 @@ function initChatsView() {
         renderChats();
     });
 
+    // Card density (persisted; class-only, cards restyle via CSS)
+    CoreAPI.onElement('chatsDensitySelect', 'change', (e) => {
+        CoreAPI.setSetting('chatCardDensity', e.target.value);
+        syncChatCardDensity();
+    });
+
     // Grouping Toggle - just re-render, don't reload
     document.querySelectorAll('.grouping-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.grouping-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             currentGrouping = btn.dataset.group;
+            syncChatCardDensity();
             renderChats();
         });
     });
@@ -656,6 +697,7 @@ async function fetchFreshChats(isBackground = false) {
                     charAvatar: null,
                     preview: preview,
                     models: canReuseCache ? (cachedChat.models || null) : null,
+                    modelsResolved: canReuseCache ? !!cachedChat.modelsResolved : false,
                     chat_metadata: chat.chat_metadata || null,
                 });
             } else if (chat.avatar) {
@@ -689,6 +731,7 @@ async function fetchFreshChats(isBackground = false) {
                     charAvatar: chat.avatar,
                     preview: preview,
                     models: canReuseCache ? (cachedChat.models || null) : null,
+                    modelsResolved: canReuseCache ? !!cachedChat.modelsResolved : false,
                     chat_metadata: chat.chat_metadata || null,
                 });
             }
@@ -696,7 +739,7 @@ async function fetchFreshChats(isBackground = false) {
 
         if (signal.aborted) return;
         if (newChats.length === 0 && !isBackground) {
-            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            const isMobile = CoreAPI.isMobileMode();
             if (isMobile) {
                 CoreAPI.renderEmptyState(chatsGrid, {
                     icon: 'fa-solid fa-ghost',
@@ -742,7 +785,7 @@ function closePreviewMarkers(text) {
     let out = text;
     // Strip images from previews: rendered <img> blow out the fixed card layout. Drop markdown
     // images (keep nothing, the alt text is rarely meaningful here) and any raw <img> tags.
-    out = out.replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/<img\b[^>]*>/gi, '');
+    out = out.replace(/!\[[^\]]*\]\((?:(?:[^()]|\([^()]*\))*|[^)]*)\)/g, '').replace(/<img\b[^>]*>/gi, '');
     for (const m of ['```', '~~', '**', '__', '`', '*', '_']) {
         if ((out.split(m).length - 1) % 2 === 1) out += m;
     }
@@ -1064,7 +1107,7 @@ function observeNewCards() {
 
 async function lazyLoadPreview(el) {
     const chat = findChatByElement(el);
-    if (!chat || chat._previewLoading || (chat.preview !== null && chat.models)) return;
+    if (!chat || chat._previewLoading || (chat.preview !== null && (chat.models || chat.modelsResolved))) return;
     chat._previewLoading = true;
 
     el.removeAttribute('data-needs-preview');
@@ -1088,6 +1131,7 @@ async function lazyLoadPreview(el) {
         if (response.ok) {
             const messages = await response.json();
             chat.models = extractModelStats(messages);
+            chat.modelsResolved = true;
 
             if (messages && messages.length > 0) {
                 const lastMsg = [...messages].reverse().find(m => !m.is_system && m.mes);
@@ -1179,11 +1223,6 @@ function buildModelBadgeHtml(models) {
 // CARD / ITEM CREATION
 // ========================================
 
-function getGroupAvatarUrl(group) {
-    if (group.avatar_url) return group.avatar_url;
-    return null;
-}
-
 // Cache-hit promotion: skip the opacity fade when an avatar is already in the browser cache. Uses the raw src attribute (not img.src) as the Set key because on mobile a detached <template>-content img can resolve img.src differently than the attached form, breaking sync lookups across renders.
 function promoteCachedChatAvatars(root) {
     if (!root || !root.querySelectorAll) return;
@@ -1246,7 +1285,7 @@ function createChatCard(chat) {
     const chatName = (chat.file_name || '').replace('.jsonl', '');
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
-    const needsPreview = chat.preview === null || !chat.models;
+    const needsPreview = chat.preview === null || (!chat.models && !chat.modelsResolved);
 
     let previewHtml;
     if (chat.preview === null) {
@@ -1313,7 +1352,7 @@ function createGroupedChatItem(chat) {
     const chatName = (chat.file_name || '').replace('.jsonl', '');
     const lastDate = chat.last_mes ? new Date(chat.last_mes).toLocaleDateString() : 'Unknown';
     const messageCount = chat.chat_items || chat.mes_count || chat.message_count || 0;
-    const needsPreview = chat.preview === null || !chat.models;
+    const needsPreview = chat.preview === null || (!chat.models && !chat.modelsResolved);
 
     let previewText;
     if (chat.preview === null) {
@@ -1450,6 +1489,7 @@ async function openChatPreview(chat) {
         CoreAPI.debugLog(`[ChatPreview] Got ${messages?.length || 0} messages`);
 
         const freshModels = extractModelStats(messages);
+        chat.modelsResolved = true;
         if (freshModels) {
             chat.models = freshModels;
             const mc = document.getElementById('chatPreviewModels');
@@ -2373,8 +2413,6 @@ export default {
 
     // Modal chats tab
     fetchCharacterChats,
-    openChat,
-    deleteChat,
     createNewChat,
 
     // Top-level chats view

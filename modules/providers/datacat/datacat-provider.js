@@ -25,8 +25,14 @@ import {
     buildV2FromDatacat,
     buildV2FromDownload,
     extractCharacterBookFromScripts,
+    hydrateDatacatScripts,
+    hasUnfetchedLorebook,
     submitExtraction,
     fetchExtractionStatus,
+    parseJanitoraiSession,
+    janitoraiRefreshGrant,
+    janitoraiVerifyToken,
+    decodeJanitoraiClaims,
 } from './datacat-api.js';
 import {
     setApiRequest as setSaucepanApiRequest,
@@ -236,16 +242,25 @@ class DatacatProvider extends ProviderBase {
             const downloadData = await fetchDatacatDownload(linkInfo.id, sk);
             if (downloadData?.data) {
                 const character = await fetchDatacatCharacter(linkInfo.id, sk);
+                if (character) await hydrateDatacatScripts(character);
                 const result = buildV2FromDownload(downloadData, character);
-                if (result) result._listingName = this.getListingName(character);
+                if (result) {
+                    result._listingName = this.getListingName(character);
+                    // Unknown-not-removed: stops the update check offering a phantom "lorebook removed"
+                    if (hasUnfetchedLorebook(character)) result._lorebookUnavailable = true;
+                }
                 return result;
             }
 
             // Fallback to building from character metadata
             const character = await fetchDatacatCharacter(linkInfo.id, sk);
             if (character) {
+                await hydrateDatacatScripts(character);
                 const result = buildV2FromDatacat(character);
-                if (result) result._listingName = this.getListingName(character);
+                if (result) {
+                    result._listingName = this.getListingName(character);
+                    if (hasUnfetchedLorebook(character)) result._lorebookUnavailable = true;
+                }
                 return result;
             }
 
@@ -258,13 +273,16 @@ class DatacatProvider extends ProviderBase {
 
     normalizeRemoteCard(rawData) {
         if (rawData?.spec === 'chara_card_v2') return rawData;
-        return buildV2FromDatacat(rawData);
+        const card = buildV2FromDatacat(rawData);
+        if (card && hasUnfetchedLorebook(rawData)) card._lorebookUnavailable = true;
+        return card;
     }
 
     async fetchLorebook(linkInfo) {
         if (!linkInfo?.id) return null;
         try {
             const character = await fetchDatacatCharacter(linkInfo.id, linkInfo.sourceKind || null);
+            if (character) await hydrateDatacatScripts(character);
             return extractCharacterBookFromScripts(character);
         } catch (e) {
             console.error('[DatacatProvider] fetchLorebook failed:', linkInfo.id, e);
@@ -424,8 +442,8 @@ class DatacatProvider extends ProviderBase {
             const character = await fetchDatacatCharacter(charId, linkInfo.sourceKind || null);
             if (!character) return null;
 
-            return {
-                id: character.character_id,
+            const preview = {
+                id: character.character_id || character.characterId,
                 name: character.name,
                 chat_name: character.chat_name,
                 description: character.description,
@@ -436,9 +454,13 @@ class DatacatProvider extends ProviderBase {
                 creator_id: character.creator_id,
                 creator_name: character.creator_name,
                 created_at: character.created_at,
-                chat_count: character.chat_count,
-                message_count: character.message_count,
+                chat_count: character.chat_count ?? character.chatCount ?? character.stats?.chat,
+                message_count: character.message_count ?? character.messageCount ?? character.stats?.message,
+                primary_content_source_kind: character.primary_content_source_kind || null,
             };
+            // Full row rides along so the preview skips its refetch and keeps the right source kind.
+            preview._fullCharacter = character;
+            return preview;
         } catch (e) {
             console.warn('[DatacatProvider] buildPreviewObject failed:', e.message);
         }
@@ -522,21 +544,31 @@ class DatacatProvider extends ProviderBase {
         try {
             const charId = String(identifier);
 
-            // Fetch full character data
-            let character = hitData || await fetchDatacatCharacter(charId);
+            // Fetch full character data; browse hits carry the full row as _fullCharacter.
+            let character = hitData?._fullCharacter || hitData || await fetchDatacatCharacter(charId);
             if (!character) throw new Error('Could not fetch character data from DataCat');
 
-            const characterName = character.chat_name || character.name || 'Unnamed';
+            const characterName = character.chat_name || character.chatName || character.name || 'Unnamed';
 
-            // Natively-extracted Saucepan cards already carry a fully-built V2
-            // card (body, greetings, example dialogue, prompts). DataCat has no
-            // copy to download, so use it directly rather than rebuilding.
             let characterCard;
+            const sourceKind = character.primary_content_source_kind
+                ? (character.primary_content_source_kind === 'saucepan' ? 'saucepan' : 'janitor')
+                : null;
             if (character._source === 'saucepan' && character.chara_card_v2_json?.data) {
+                // Natively-extracted Saucepan cards already carry a fully-built V2
+                // card (body, greetings, example dialogue, prompts). DataCat has no
+                // copy to download, so use it directly rather than rebuilding.
                 characterCard = character.chara_card_v2_json;
             } else {
-                // Try download endpoint for best V2 mapping
-                const downloadData = await fetchDatacatDownload(charId);
+                // Download-first for the best V2 mapping; the sourceKind hint keeps
+                // freshly-extracted chars from 404ing into the metadata fallback.
+                const downloadData = await fetchDatacatDownload(charId, sourceKind);
+                // Listing-shaped hits carry no body source at all; the metadata build needs the full row.
+                if (!downloadData?.data && !character.chara_card_v2_json && !character.content_variants && !character.personality) {
+                    character = await fetchDatacatCharacter(charId, sourceKind) || character;
+                }
+                // Lorebook content moved behind a per-script hampter fetch; hydrate before building.
+                await hydrateDatacatScripts(character);
                 if (downloadData?.data) {
                     characterCard = buildV2FromDownload(downloadData, character);
                 } else {
@@ -546,14 +578,14 @@ class DatacatProvider extends ProviderBase {
 
             if (!characterCard?.data) throw new Error('Failed to build character card');
 
-            // Ensure datacat extension is set
+            // Ensure datacat extension is set. sourceKind persists normalized ('janitor'/'saucepan', the API hint values), not the raw row kind.
             if (!characterCard.data.extensions) characterCard.data.extensions = {};
             characterCard.data.extensions.datacat = {
                 ...(characterCard.data.extensions.datacat || {}),
                 id: charId,
-                sourceKind: character.primary_content_source_kind || characterCard.data.extensions.datacat?.sourceKind || null,
-                creatorId: character.creator_id || null,
-                creatorName: character.creator_name || null,
+                sourceKind: sourceKind || characterCard.data.extensions.datacat?.sourceKind || null,
+                creatorId: character.creator_id || character.creatorId || null,
+                creatorName: character.creator_name || character.creatorName || null,
                 pageName: this.getListingName(character),
                 linkedAt: new Date().toISOString()
             };
@@ -716,4 +748,90 @@ window.saucepanClearSession = async () => {
     } catch {
         return false;
     }
+};
+
+// ── JanitorAI account session (Supabase; unlocks Hampter pagination) ──────────
+// Stateful layer over the pure grant helpers: persists the access token + rotating
+// refresh token in settings, refreshes proactively, and shares one in-flight refresh
+// so concurrent Hampter loads cant race the single-use refresh token.
+let _janitoraiRefreshInFlight = null;
+
+async function janitoraiDoRefresh() {
+    if (_janitoraiRefreshInFlight) return _janitoraiRefreshInFlight;
+    _janitoraiRefreshInFlight = (async () => {
+        const rt = CoreAPI.getSetting('janitoraiRefreshToken');
+        const res = await janitoraiRefreshGrant(rt);
+        if (res.access_token) {
+            CoreAPI.setSetting('janitoraiToken', res.access_token);
+            if (res.refresh_token) CoreAPI.setSetting('janitoraiRefreshToken', res.refresh_token);
+            return res.access_token;
+        }
+        // Only wipe the stored session when the refresh token is definitively dead,
+        // never on a transient network blip (keeps the user logged in across hiccups).
+        if (res.dead) {
+            CoreAPI.setSetting('janitoraiToken', null);
+            CoreAPI.setSetting('janitoraiRefreshToken', null);
+        }
+        return '';
+    })();
+    try { return await _janitoraiRefreshInFlight; }
+    finally { _janitoraiRefreshInFlight = null; }
+}
+
+// Current valid access token, refreshing within 2min of expiry. '' when logged out / refresh failed.
+window.getValidJanitoraiToken = async () => {
+    const tok = CoreAPI.getSetting('janitoraiToken') || '';
+    if (!tok) return '';
+    const { expMs } = decodeJanitoraiClaims(tok);
+    if (expMs && expMs - Date.now() > 120000) return tok;
+    return (await janitoraiDoRefresh()) || '';
+};
+
+// Force a refresh (reactive path after an unexpected 401). Returns the new token or ''.
+window.janitoraiForceRefresh = async () => janitoraiDoRefresh();
+
+// Seed the session from a pasted sb-auth-auth-token cookie (or session JSON / bare JWT).
+// Verification stays off Cloudflare-gated hampter: its preflight can 403 on a perfectly
+// good token, and failing after the up-front rotation would strand the fresh pair.
+window.janitoraiSetSession = async (pasted) => {
+    const pair = parseJanitoraiSession(pasted);
+    if (!pair) return { ok: false, error: 'Could not find a session in that value. Copy the whole sb-auth-auth-token cookie.' };
+    const { email, expMs } = decodeJanitoraiClaims(pair.access_token);
+    let token = pair.access_token;
+    // If the pasted access token is already stale but a refresh token came with it, rotate up front.
+    if ((!expMs || expMs - Date.now() < 120000) && pair.refresh_token) {
+        const r = await janitoraiRefreshGrant(pair.refresh_token);
+        if (!r.access_token) {
+            return { ok: false, error: r.dead
+                ? 'That session is expired or invalid. Copy a fresh cookie after logging in again.'
+                : 'Could not reach the JanitorAI auth service. Try again in a moment.' };
+        }
+        // A successful grant is itself the proof; the rotation consumed the single-use pasted
+        // token, so proceed straight to persist.
+        token = r.access_token;
+        pair.refresh_token = r.refresh_token;
+    } else {
+        // No rotation ran, nothing consumed yet: confirm the pasted token before storing.
+        const v = await janitoraiVerifyToken(token);
+        if (!v.valid) {
+            return { ok: false, error: v.transient
+                ? 'Could not reach the JanitorAI auth service. Try again in a moment.'
+                : 'That session is expired or invalid. Copy a fresh cookie after logging in again.' };
+        }
+    }
+    CoreAPI.setSetting('janitoraiToken', token);
+    CoreAPI.setSetting('janitoraiRefreshToken', pair.refresh_token || null);
+    return { ok: true, email: decodeJanitoraiClaims(token).email || email, hasRefresh: !!pair.refresh_token };
+};
+
+window.janitoraiLogout = () => {
+    CoreAPI.setSetting('janitoraiToken', null);
+    CoreAPI.setSetting('janitoraiRefreshToken', null);
+};
+
+window.janitoraiSessionStatus = () => {
+    const tok = CoreAPI.getSetting('janitoraiToken') || '';
+    if (!tok) return { loggedIn: false };
+    const { email, expMs } = decodeJanitoraiClaims(tok);
+    return { loggedIn: true, email, expMs, hasRefresh: !!CoreAPI.getSetting('janitoraiRefreshToken') };
 };

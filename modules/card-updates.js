@@ -492,6 +492,8 @@ function compareCards(localData, remoteCard, allowedFields = null) {
         const remoteValue = getFieldValue(remoteData, field);
 
         if (field === 'character_book') {
+            // Remote source knows a lorebook exists but couldnt include its content: unknown, not removed.
+            if (remoteCard?._lorebookUnavailable) continue;
             const remoteEntries = remoteValue?.entries || [];
             const localEntries = localValue?.entries || [];
 

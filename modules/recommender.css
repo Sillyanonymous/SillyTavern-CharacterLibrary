@@ -1466,470 +1466,468 @@ body.modal-size-large .recommender-chat-modal .cl-modal-content { max-width: 112
  * Mobile Overrides
  * ======================================== */
 
-@media (max-width: 768px) {
-    /* --- Card Recommender --- */
-
-    .recommender-modal-content {
-        height: 100dvh !important;
-        max-height: 100dvh !important;
-        overflow: hidden;
-        box-shadow: none !important;
-    }
-
-    .recommender-modal-content .cl-modal-header {
-        flex-shrink: 0;
-    }
-
-    .recommender-body {
-        flex: 1 1 0% !important;
-        min-height: 0 !important;
-        overflow-y: auto !important;
-        overflow-x: hidden;
-        -webkit-overflow-scrolling: touch;
-        padding: 12px 14px max(16px, var(--safe-bottom));
-        overscroll-behavior: contain;
-        justify-content: flex-start;
-    }
-
-    /* --- Input area --- */
-
-    .recommender-input-area {
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--space-sm);
-        margin-bottom: 10px;
-    }
-
-    .recommender-prompt {
-        font-size: var(--font-md);
-        min-height: 80px;
-        padding: 12px 14px;
-        border-radius: var(--radius-xl);
-    }
-    .recommender-prompt::placeholder { font-size: var(--font-xs); }
-
-    .recommender-submit-btn {
-        width: 100%;
-        height: var(--touch-target-min);
-        min-width: unset;
-        min-height: var(--touch-target-min);
-        border-radius: var(--radius-xl);
-        flex-shrink: 0;
-        touch-action: manipulation;
-        gap: var(--space-sm);
-        font-size: var(--font-sm);
-        font-weight: 600;
-    }
-
-    .recommender-submit-label {
-        display: inline;
-    }
-
-    .recommender-modal-content .cl-modal-close {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        touch-action: manipulation;
-    }
-
-    /* --- Toolbar --- */
-
-    .recommender-toolbar {
-        margin-bottom: 10px;
-        gap: var(--space-xs-sm);
-    }
-
-    .recommender-profile-area {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-    }
-
-    .recommender-profile-area .custom-select-container {
-        max-width: 140px;
-        flex-shrink: 1;
-        min-width: 0;
-    }
-
-    .recommender-profile-area .custom-select-trigger {
-        max-width: 140px;
-    }
-
-    .recommender-profile-area .trigger-text {
-        max-width: 100px;
-    }
-
-    .recommender-profile-status {
-        min-width: 0;
-        overflow: hidden;
-        flex-shrink: 0;
-    }
-
-    .recommender-connection-text {
-        display: none;
-    }
-
-    .recommender-toolbar-btn {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        flex-shrink: 0;
-        touch-action: manipulation;
-    }
-
-    /* --- Settings panel --- */
-
-    /* Keep the panel a contained scrollbox on mobile (like desktop). A full-height inline panel
-       scrolls the only toggle (the sliders button above it) out of reach, so it gets stuck open. */
-    .recommender-settings-panel {
-        max-height: 60vh;
-        margin-bottom: 10px;
-    }
-
-    .recommender-settings-inner {
-        padding: 12px;
-        gap: var(--space-md);
-    }
-
-    .recommender-setting-section {
-        gap: var(--space-sm-md);
-    }
-
-    .recommender-setting-section-title {
-        font-size: var(--font-3xs);
-    }
-
-    /* --- Filter rows --- */
-
-    .recommender-filter-row {
-        gap: var(--space-sm);
-    }
-
-    .recommender-filter-label {
-        font-size: var(--font-xs);
-    }
-
-    .recommender-tristate {
-        flex-shrink: 0;
-    }
-
-    .recommender-tristate-btn {
-        min-height: 38px;
-        padding: 6px 12px;
-        font-size: var(--font-2xs);
-        touch-action: manipulation;
-    }
-
-    .recommender-date-range {
-        gap: var(--space-xs-sm);
-    }
-
-    .recommender-date-range input[type="date"] {
-        flex: 1;
-        min-width: 0;
-    }
-
-    /* --- LLM Context chips --- */
-
-    .recommender-toggles-row {
-        gap: var(--space-xs);
-    }
-
-    .recommender-toggle-chip span {
-        min-height: 38px;
-        padding: 6px 10px;
-        font-size: var(--font-2xs);
-        touch-action: manipulation;
-    }
-
-    /* --- Generation sliders --- */
-
-    .recommender-slider-row {
-        grid-template-columns: 48px 1fr 36px;
-        gap: var(--space-sm);
-        min-height: 36px;
-    }
-
-    .recommender-slider-row label {
-        font-size: var(--font-xs);
-    }
-
-    .recommender-slider-row input[type="range"] {
-        height: 6px;
-    }
-
-    /* --- Batch mode toggle --- */
-
-    .recommender-batch-toggle {
-        margin-top: 6px;
-    }
-
-    .recommender-batch-toggle span {
-        min-height: 38px;
-        touch-action: manipulation;
-    }
-
-    .recommender-batch-slider-row {
-        grid-template-columns: 52px 1fr 28px;
-        gap: var(--space-sm);
-        min-height: 36px;
-        padding-left: 10px;
-    }
-
-    .recommender-batch-slider-row label {
-        font-size: var(--font-2xs);
-    }
-
-    .recommender-batch-slider-row input[type="range"] {
-        height: 6px;
-    }
-
-    /* --- API toggle (in toolbar) --- */
-
-    .recommender-api-toggle {
-        flex-shrink: 0;
-    }
-
-    .recommender-api-mode-btn {
-        min-height: 32px;
-        padding: 4px 8px;
-        font-size: var(--font-3xs);
-        touch-action: manipulation;
-    }
-
-    .recommender-custom-api {
-        margin-bottom: 10px;
-    }
-
-    /* --- Mobile input fields: sized via --mobile-input-size (iOS zoom guard) --- */
-
-    .recommender-field {
-        font-size: var(--mobile-input-size);
-        padding: 10px 12px;
-    }
-
-    .recommender-field-sm {
-        font-size: var(--mobile-input-size);
-        padding: 8px 10px;
-    }
-
-    /* --- Tag pills & autocomplete --- */
-
-    .recommender-pill {
-        min-height: 32px;
-        padding: 4px 10px;
-        font-size: var(--font-2xs);
-        touch-action: manipulation;
-    }
-
-    .recommender-tag-autocomplete {
-        max-height: 200px;
-    }
-
-    .recommender-tag-ac-item {
-        min-height: var(--touch-target-min);
-        display: flex;
-        align-items: center;
-        padding: 10px 14px;
-        font-size: var(--font-md);
-        touch-action: manipulation;
-    }
-
-    /* --- Result cards --- */
-
-    .recommender-results-grid {
-        gap: var(--space-xs-sm);
-    }
-
-    .recommender-result-card {
-        gap: var(--space-sm-md);
-        padding: 10px 12px;
-        border-radius: var(--radius-xl);
-        transform: none !important;
-        box-shadow: none !important;
-    }
-
-    .recommender-result-card:hover {
-        transform: none !important;
-        box-shadow: none !important;
-    }
-
-    .recommender-result-rank {
-        width: 14px;
-        height: 14px;
-        font-size: var(--font-4xs);
-        top: 5px;
-        left: 5px;
-    }
-
-    .recommender-result-avatar {
-        width: 44px;
-        height: 44px;
-        border-radius: var(--radius-lg);
-        flex-shrink: 0;
-    }
-
-    .recommender-result-card:hover .recommender-result-avatar {
-        border-color: rgba(255, 255, 255, 0.06) !important;
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
-    }
-
-    .recommender-result-info {
-        min-width: 0;
-    }
-
-    .recommender-result-header {
-        flex-direction: column;
-        gap: 1px;
-    }
-
-    .recommender-result-name-link {
-        font-size: var(--font-sm);
-        white-space: normal;
-        overflow: visible;
-        text-overflow: unset;
-        touch-action: manipulation;
-    }
-
-    .recommender-result-creator {
-        font-size: var(--font-3xs);
-    }
-
-    .recommender-result-reason {
-        font-size: var(--font-2xs);
-        -webkit-line-clamp: unset;
-        -webkit-box-orient: unset;
-        display: block;
-        overflow: visible;
-        line-height: 1.5;
-    }
-
-    .recommender-result-tags {
-        gap: var(--space-2xs);
-        margin-top: 4px;
-    }
-
-    .recommender-tag {
-        font-size: var(--font-4xs);
-        padding: 1px 5px;
-    }
-
-    /* --- Status & raw response --- */
-
-    .recommender-status {
-        font-size: var(--font-xs);
-        padding: 10px 12px;
-        border-radius: var(--radius-lg);
-    }
-
-    .recommender-status-row {
-        gap: var(--space-sm);
-    }
-
-    .recommender-status-message {
-        min-width: 0;
-    }
-
-    .recommender-error-detail {
-        font-size: var(--font-3xs);
-    }
-
-    .recommender-copy-debug {
-        width: 36px;
-        height: 36px;
-        min-width: 36px;
-        min-height: 36px;
-        touch-action: manipulation;
-    }
-
-    .recommender-raw-response {
-        font-size: var(--font-xs);
-        padding: 12px;
-        max-height: none;
-        border-radius: var(--radius-lg);
-    }
-
-    /* Character chat: mirror css-assistant mobile layout (full-viewport comes from the core .cl-modal-content rule) */
-    .cl-modal-body.recommender-chat-body {
-        padding: var(--space-md);
-        gap: var(--space-md);
-    }
-
-    .recommender-chat-settings {
-        padding: var(--space-md);
-    }
-    .recommender-chat-settings-head {
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--space-xs);
-    }
-    .recommender-chat-preset-row {
-        width: 100%;
-    }
-    .recommender-chat-preset-row .custom-select-container {
-        flex: 1;
-        width: auto;
-        max-width: none;
-        min-width: 0;
-    }
-    .recommender-chat-prompt-editor {
-        font-size: var(--mobile-input-size);
-    }
-    .recommender-chat-icon-btn {
-        width: 38px;
-        height: 38px;
-    }
-
-    .recommender-chat-messages {
-        padding: var(--space-sm);
-        gap: var(--space-sm);
-    }
-
-    .recommender-chat-empty {
-        justify-content: flex-start;
-        padding-top: var(--space-xl);
-    }
-
-    .recommender-chat-empty i {
-        font-size: var(--font-xl);
-    }
-
-    .cl-modal-footer.recommender-chat-footer {
-        flex-direction: row;
-        align-items: flex-end;
-        gap: var(--space-sm);
-        padding: var(--space-md);
-    }
-
-    .recommender-chat-input {
-        flex: 1;
-        font-size: var(--mobile-input-size);
-        min-height: var(--touch-target-min);
-        max-height: 120px;
-        resize: none;
-    }
-
-    .recommender-chat-footer-actions {
-        flex-direction: column;
-        flex-shrink: 0;
-    }
-
-    .recommender-chat-footer-actions .cl-btn {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        padding: 0;
-        gap: 0;
-        font-size: 0;
-        justify-content: center;
-    }
-
-    .recommender-chat-footer-actions .cl-btn i {
-        font-size: var(--font-md);
-    }
-
-    /* Reveal the card action buttons on touch (no hover) */
-    .recommender-playlist-btn,
-    .recommender-chat-btn,
-    .recommender-result-card:hover .recommender-playlist-btn,
-    .recommender-result-card:hover .recommender-chat-btn {
-        opacity: 0.7;
-    }
+/* --- Card Recommender --- */
+
+html.cl-mobile .recommender-modal-content {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden;
+    box-shadow: none !important;
+}
+
+html.cl-mobile .recommender-modal-content .cl-modal-header {
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-body {
+    flex: 1 1 0% !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 12px 14px max(16px, var(--safe-bottom));
+    overscroll-behavior: contain;
+    justify-content: flex-start;
+}
+
+/* --- Input area --- */
+
+html.cl-mobile .recommender-input-area {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+    margin-bottom: 10px;
+}
+
+html.cl-mobile .recommender-prompt {
+    font-size: var(--font-md);
+    min-height: 80px;
+    padding: 12px 14px;
+    border-radius: var(--radius-xl);
+}
+html.cl-mobile .recommender-prompt::placeholder { font-size: var(--font-xs); }
+
+html.cl-mobile .recommender-submit-btn {
+    width: 100%;
+    height: var(--touch-target-min);
+    min-width: unset;
+    min-height: var(--touch-target-min);
+    border-radius: var(--radius-xl);
+    flex-shrink: 0;
+    touch-action: manipulation;
+    gap: var(--space-sm);
+    font-size: var(--font-sm);
+    font-weight: 600;
+}
+
+html.cl-mobile .recommender-submit-label {
+    display: inline;
+}
+
+html.cl-mobile .recommender-modal-content .cl-modal-close {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    touch-action: manipulation;
+}
+
+/* --- Toolbar --- */
+
+html.cl-mobile .recommender-toolbar {
+    margin-bottom: 10px;
+    gap: var(--space-xs-sm);
+}
+
+html.cl-mobile .recommender-profile-area {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+
+html.cl-mobile .recommender-profile-area .custom-select-container {
+    max-width: 140px;
+    flex-shrink: 1;
+    min-width: 0;
+}
+
+html.cl-mobile .recommender-profile-area .custom-select-trigger {
+    max-width: 140px;
+}
+
+html.cl-mobile .recommender-profile-area .trigger-text {
+    max-width: 100px;
+}
+
+html.cl-mobile .recommender-profile-status {
+    min-width: 0;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-connection-text {
+    display: none;
+}
+
+html.cl-mobile .recommender-toolbar-btn {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    flex-shrink: 0;
+    touch-action: manipulation;
+}
+
+/* --- Settings panel --- */
+
+/* Keep the panel a contained scrollbox on mobile (like desktop). A full-height inline panel
+   scrolls the only toggle (the sliders button above it) out of reach, so it gets stuck open. */
+html.cl-mobile .recommender-settings-panel {
+    max-height: 60vh;
+    margin-bottom: 10px;
+}
+
+html.cl-mobile .recommender-settings-inner {
+    padding: 12px;
+    gap: var(--space-md);
+}
+
+html.cl-mobile .recommender-setting-section {
+    gap: var(--space-sm-md);
+}
+
+html.cl-mobile .recommender-setting-section-title {
+    font-size: var(--font-3xs);
+}
+
+/* --- Filter rows --- */
+
+html.cl-mobile .recommender-filter-row {
+    gap: var(--space-sm);
+}
+
+html.cl-mobile .recommender-filter-label {
+    font-size: var(--font-xs);
+}
+
+html.cl-mobile .recommender-tristate {
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-tristate-btn {
+    min-height: 38px;
+    padding: 6px 12px;
+    font-size: var(--font-2xs);
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-date-range {
+    gap: var(--space-xs-sm);
+}
+
+html.cl-mobile .recommender-date-range input[type="date"] {
+    flex: 1;
+    min-width: 0;
+}
+
+/* --- LLM Context chips --- */
+
+html.cl-mobile .recommender-toggles-row {
+    gap: var(--space-xs);
+}
+
+html.cl-mobile .recommender-toggle-chip span {
+    min-height: 38px;
+    padding: 6px 10px;
+    font-size: var(--font-2xs);
+    touch-action: manipulation;
+}
+
+/* --- Generation sliders --- */
+
+html.cl-mobile .recommender-slider-row {
+    grid-template-columns: 48px 1fr 36px;
+    gap: var(--space-sm);
+    min-height: 36px;
+}
+
+html.cl-mobile .recommender-slider-row label {
+    font-size: var(--font-xs);
+}
+
+html.cl-mobile .recommender-slider-row input[type="range"] {
+    height: 6px;
+}
+
+/* --- Batch mode toggle --- */
+
+html.cl-mobile .recommender-batch-toggle {
+    margin-top: 6px;
+}
+
+html.cl-mobile .recommender-batch-toggle span {
+    min-height: 38px;
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-batch-slider-row {
+    grid-template-columns: 52px 1fr 28px;
+    gap: var(--space-sm);
+    min-height: 36px;
+    padding-left: 10px;
+}
+
+html.cl-mobile .recommender-batch-slider-row label {
+    font-size: var(--font-2xs);
+}
+
+html.cl-mobile .recommender-batch-slider-row input[type="range"] {
+    height: 6px;
+}
+
+/* --- API toggle (in toolbar) --- */
+
+html.cl-mobile .recommender-api-toggle {
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-api-mode-btn {
+    min-height: 32px;
+    padding: 4px 8px;
+    font-size: var(--font-3xs);
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-custom-api {
+    margin-bottom: 10px;
+}
+
+/* --- Mobile input fields: sized via --mobile-input-size (iOS zoom guard) --- */
+
+html.cl-mobile .recommender-field {
+    font-size: var(--mobile-input-size);
+    padding: 10px 12px;
+}
+
+html.cl-mobile .recommender-field-sm {
+    font-size: var(--mobile-input-size);
+    padding: 8px 10px;
+}
+
+/* --- Tag pills & autocomplete --- */
+
+html.cl-mobile .recommender-pill {
+    min-height: 32px;
+    padding: 4px 10px;
+    font-size: var(--font-2xs);
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-tag-autocomplete {
+    max-height: 200px;
+}
+
+html.cl-mobile .recommender-tag-ac-item {
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    font-size: var(--font-md);
+    touch-action: manipulation;
+}
+
+/* --- Result cards --- */
+
+html.cl-mobile .recommender-results-grid {
+    gap: var(--space-xs-sm);
+}
+
+html.cl-mobile .recommender-result-card {
+    gap: var(--space-sm-md);
+    padding: 10px 12px;
+    border-radius: var(--radius-xl);
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+html.cl-mobile .recommender-result-card:hover {
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+html.cl-mobile .recommender-result-rank {
+    width: 14px;
+    height: 14px;
+    font-size: var(--font-4xs);
+    top: 5px;
+    left: 5px;
+}
+
+html.cl-mobile .recommender-result-avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-lg);
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-result-card:hover .recommender-result-avatar {
+    border-color: rgba(255, 255, 255, 0.06) !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3) !important;
+}
+
+html.cl-mobile .recommender-result-info {
+    min-width: 0;
+}
+
+html.cl-mobile .recommender-result-header {
+    flex-direction: column;
+    gap: 1px;
+}
+
+html.cl-mobile .recommender-result-name-link {
+    font-size: var(--font-sm);
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-result-creator {
+    font-size: var(--font-3xs);
+}
+
+html.cl-mobile .recommender-result-reason {
+    font-size: var(--font-2xs);
+    -webkit-line-clamp: unset;
+    -webkit-box-orient: unset;
+    display: block;
+    overflow: visible;
+    line-height: 1.5;
+}
+
+html.cl-mobile .recommender-result-tags {
+    gap: var(--space-2xs);
+    margin-top: 4px;
+}
+
+html.cl-mobile .recommender-tag {
+    font-size: var(--font-4xs);
+    padding: 1px 5px;
+}
+
+/* --- Status & raw response --- */
+
+html.cl-mobile .recommender-status {
+    font-size: var(--font-xs);
+    padding: 10px 12px;
+    border-radius: var(--radius-lg);
+}
+
+html.cl-mobile .recommender-status-row {
+    gap: var(--space-sm);
+}
+
+html.cl-mobile .recommender-status-message {
+    min-width: 0;
+}
+
+html.cl-mobile .recommender-error-detail {
+    font-size: var(--font-3xs);
+}
+
+html.cl-mobile .recommender-copy-debug {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    touch-action: manipulation;
+}
+
+html.cl-mobile .recommender-raw-response {
+    font-size: var(--font-xs);
+    padding: 12px;
+    max-height: none;
+    border-radius: var(--radius-lg);
+}
+
+/* Character chat: mirror css-assistant mobile layout (full-viewport comes from the core .cl-modal-content rule) */
+html.cl-mobile .cl-modal-body.recommender-chat-body {
+    padding: var(--space-md);
+    gap: var(--space-md);
+}
+
+html.cl-mobile .recommender-chat-settings {
+    padding: var(--space-md);
+}
+html.cl-mobile .recommender-chat-settings-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-xs);
+}
+html.cl-mobile .recommender-chat-preset-row {
+    width: 100%;
+}
+html.cl-mobile .recommender-chat-preset-row .custom-select-container {
+    flex: 1;
+    width: auto;
+    max-width: none;
+    min-width: 0;
+}
+html.cl-mobile .recommender-chat-prompt-editor {
+    font-size: var(--mobile-input-size);
+}
+html.cl-mobile .recommender-chat-icon-btn {
+    width: 38px;
+    height: 38px;
+}
+
+html.cl-mobile .recommender-chat-messages {
+    padding: var(--space-sm);
+    gap: var(--space-sm);
+}
+
+html.cl-mobile .recommender-chat-empty {
+    justify-content: flex-start;
+    padding-top: var(--space-xl);
+}
+
+html.cl-mobile .recommender-chat-empty i {
+    font-size: var(--font-xl);
+}
+
+html.cl-mobile .cl-modal-footer.recommender-chat-footer {
+    flex-direction: row;
+    align-items: flex-end;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+}
+
+html.cl-mobile .recommender-chat-input {
+    flex: 1;
+    font-size: var(--mobile-input-size);
+    min-height: var(--touch-target-min);
+    max-height: 120px;
+    resize: none;
+}
+
+html.cl-mobile .recommender-chat-footer-actions {
+    flex-direction: column;
+    flex-shrink: 0;
+}
+
+html.cl-mobile .recommender-chat-footer-actions .cl-btn {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+}
+
+html.cl-mobile .recommender-chat-footer-actions .cl-btn i {
+    font-size: var(--font-md);
+}
+
+/* Reveal the card action buttons on touch (no hover) */
+html.cl-mobile .recommender-playlist-btn,
+html.cl-mobile .recommender-chat-btn,
+html.cl-mobile .recommender-result-card:hover .recommender-playlist-btn,
+html.cl-mobile .recommender-result-card:hover .recommender-chat-btn {
+    opacity: 0.7;
 }

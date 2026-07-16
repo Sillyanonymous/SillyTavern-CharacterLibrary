@@ -29,6 +29,7 @@
 
 import { registerExtractor } from './extractor-registry.js';
 import CoreAPI from '../core-api.js';
+import { proxyEncode } from '../providers/provider-utils.js';
 
 const CIVITAI_PATTERNS = [
     /civitai\.(?:com|red)\/posts\/\d+/i,
@@ -233,7 +234,7 @@ async function fetchRaw(host, path, { signal, authActive, accept }) {
     try {
         return await fetch(target, { signal, headers: { Accept: accept } });
     } catch (_) {
-        const fallback = `/proxy/${encodeURIComponent(target)}`;
+        const fallback = `/proxy/${proxyEncode(target)}`;
         return fetch(fallback, { signal, headers: { Accept: accept } });
     }
 }

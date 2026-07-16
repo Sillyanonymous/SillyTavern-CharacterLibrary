@@ -154,9 +154,7 @@
     color: var(--cl-success);
 }
 
-@media (max-width: 768px) {
-    .mdq-job-btn {
-        min-width: 32px;
-        min-height: 32px;
-    }
+html.cl-mobile .mdq-job-btn {
+    min-width: 32px;
+    min-height: 32px;
 }

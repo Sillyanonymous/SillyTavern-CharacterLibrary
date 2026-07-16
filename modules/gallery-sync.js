@@ -32,81 +32,6 @@ export function auditGalleryIntegrity() {
     return result;
 }
 
-export async function assignMissingGalleryIds(options = {}) {
-    const { onProgress } = options;
-    const audit = auditGalleryIntegrity();
-    const toFix = audit.missingGalleryId;
-
-    const result = { success: 0, failed: 0, errors: [] };
-
-    for (let i = 0; i < toFix.length; i++) {
-        const { avatar, name } = toFix[i];
-        if (onProgress) onProgress(i + 1, toFix.length, { avatar, name });
-
-        try {
-            const ok = await assignGalleryIdToCharacter(avatar);
-            if (ok) result.success++;
-            else { result.failed++; result.errors.push({ avatar, name, error: 'Assignment returned false' }); }
-        } catch (err) {
-            result.failed++;
-            result.errors.push({ avatar, name, error: err.message });
-        }
-
-        await sleep(50);
-    }
-
-    return result;
-}
-
-function getSTContext() {
-    try {
-        const host = CoreAPI.getHostWindow();
-        if (host?.SillyTavern?.getContext) return host.SillyTavern.getContext();
-    } catch { /* cross-origin or unavailable */ }
-    return null;
-}
-
-function generateGalleryId() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 12; i++) result += chars.charAt(Math.floor(Math.random() * chars.length));
-    return result;
-}
-
-async function assignGalleryIdToCharacter(avatar) {
-    const char = CoreAPI.getCharacterByAvatar(avatar);
-    if (!char) return false;
-    if (CoreAPI.getCharacterGalleryId(char)) return true;
-
-    const galleryId = generateGalleryId();
-    if (CoreAPI.applyCardFieldUpdates) {
-        return await CoreAPI.applyCardFieldUpdates(avatar, { 'extensions.gallery_id': galleryId });
-    }
-
-    try {
-        const existingExtensions = char.data?.extensions || {};
-        const response = await CoreAPI.apiRequest('/characters/edit', 'POST', {
-            avatar_url: avatar,
-            extensions: { ...existingExtensions, gallery_id: galleryId },
-        });
-        if (response.ok) {
-            if (char.data) {
-                if (!char.data.extensions) char.data.extensions = {};
-                char.data.extensions.gallery_id = galleryId;
-            }
-            return true;
-        }
-        return false;
-    } catch (err) {
-        console.error('[GallerySync] Failed to assign gallery_id:', err);
-        return false;
-    }
-}
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 // Section status consumed by the notifications shell (library.js); kept in
 // sync by updateWarningIndicator and read back via getStatus
 let _sectionStatus = { visible: false, level: 'none', badge: '', title: '' };
@@ -301,6 +226,5 @@ export async function init() {
 export default {
     init,
     auditGalleryIntegrity,
-    assignMissingGalleryIds,
     updateWarningIndicator,
 };

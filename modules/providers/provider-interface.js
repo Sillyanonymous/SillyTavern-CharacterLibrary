@@ -679,18 +679,6 @@ export class ProviderBase {
     // ── Import Duplicate Detection ──────────────────────────
 
     /**
-     * Search the provider for a character that matches a local card being imported.
-     * Used during the import pipeline to auto-discover remote matches (e.g., for
-     * gallery ID, duplicate detection). More thorough than searchForBulkLink().
-     *
-     * @param {string} name    - character name
-     * @param {string} creator - creator name
-     * @param {Object} [localChar] - full local character for content comparison
-     * @returns {Promise<{id: string|number, fullPath: string, hasGallery: boolean}|null>}
-     */
-    async searchForImportMatch(name, creator, localChar) { return null; }
-
-    /**
      * Detect and enrich a locally-imported PNG card.
      * Called during local import with extracted V2 card data. Each provider:
      *   1. Checks if the card has this provider's extension metadata (instant)

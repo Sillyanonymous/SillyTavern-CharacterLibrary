@@ -162,13 +162,6 @@ async function deleteSnippetById(id) {
     await saveSnippetsFile();
 }
 
-async function clearAllSnippets() {
-    await loadSnippets();
-    snippetsData.snippets = [];
-    snippetsData.order = [];
-    await saveSnippetsFile();
-}
-
 // Pause all enabled snippets in one load+save. Used by Apply Raw.
 async function disableAllEnabledSnippets() {
     await loadSnippets();
@@ -229,9 +222,7 @@ function formatKB(bytes) {
 }
 
 function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, ch => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[ch]);
+    return CoreAPI.escapeHtml(String(str));
 }
 
 // ========================================
@@ -346,8 +337,9 @@ function buildModalHTML() {
                         <div class="ccss-editor">
                             <!-- Mobile-only drawer trigger; shows the active snippet name -->
                             <button class="ccss-drawer-trigger" id="ccssDrawerTrigger" type="button">
-                                <i class="fa-solid fa-bars"></i>
+                                <i class="fa-solid fa-layer-group"></i>
                                 <span class="ccss-drawer-trigger-label" id="ccssDrawerTriggerLabel">Snippets</span>
+                                <i class="fa-solid fa-chevron-down ccss-drawer-trigger-caret"></i>
                             </button>
                             <div class="ccss-editor-form" id="ccssEditorForm" hidden>
                                 <div class="ccss-editor-meta">
@@ -428,6 +420,7 @@ function setActiveMode(mode) {
     });
     modal.querySelector('.ccss-pane-snippets').hidden = mode !== MODE_SNIPPETS;
     modal.querySelector('.ccss-pane-raw').hidden = mode !== MODE_RAW;
+    modal.classList.toggle('ccss-mode-raw', mode === MODE_RAW);
     if (mode !== MODE_SNIPPETS) closeDrawer();
 
     const isSnippets = mode === MODE_SNIPPETS;
@@ -694,8 +687,9 @@ function injectModal() {
             }
             // Close the mobile snippets drawer if open so the assistant modal isn't buried under it
             closeDrawer({ immediate: true });
-            if (typeof window.openCssAssistant === 'function') {
-                window.openCssAssistant({ snippetId: id });
+            const cssAssistant = CoreAPI.getModule('css-assistant');
+            if (cssAssistant?.openModal) {
+                cssAssistant.openModal({ snippetId: id });
             } else {
                 CoreAPI.showToast?.('AI assistant not loaded yet, try again in a moment', 'warning');
             }
@@ -823,10 +817,9 @@ function injectModal() {
     document.getElementById('ccssDrawerCloseBtn')?.addEventListener('click', () => closeDrawer());
     document.getElementById('ccssDrawerScrim')?.addEventListener('click', () => closeDrawer());
 
-    // Crossing back to desktop while the drawer is open at body level needs a force-restore.
-    const mqMobile = window.matchMedia('(max-width: 768px)');
-    mqMobile.addEventListener('change', (e) => {
-        if (!e.matches && drawerIsOpen) closeDrawer({ immediate: true });
+    // Flipping back to desktop while the drawer is open at body level needs a force-restore.
+    document.addEventListener('cl-mobile-mode-change', (e) => {
+        if (!e.detail?.mobile && drawerIsOpen) closeDrawer({ immediate: true });
     });
 
     const nameInput = document.getElementById('ccssSnippetName');
@@ -975,5 +968,5 @@ function getActiveSnippetId() {
     return activeSnippetId;
 }
 
-export { openModal, closeModal, loadSnippets, buildEnabledBundle, clearAllSnippets, createSnippet, updateSnippet, renderSidebar, setSnippetsDirty, loadSnippetIntoEditor, getActiveSnippetId };
+export { openModal, closeModal, loadSnippets, createSnippet, updateSnippet, renderSidebar, setSnippetsDirty, loadSnippetIntoEditor, getActiveSnippetId };
 export default { init, openModal, closeModal };

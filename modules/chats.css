@@ -518,6 +518,39 @@
 
 /* Size variants matching existing avatar sizes */
 .chat-card-avatar-size { width: 50px; height: 50px; }
+
+/* --- Card density variants (chatCardDensity setting, class stamped on #chatsView) --- */
+
+.chat-density-spacious .chat-card-header { padding: 16px; }
+.chat-density-spacious .chat-card-avatar,
+.chat-density-spacious .chat-card-avatar-fallback,
+.chat-density-spacious .chat-card-avatar-size,
+.chat-density-spacious .chat-card-header > .chat-avatar-wrap { width: 60px; height: 60px; }
+.chat-density-spacious .chat-card-body { padding: 16px; }
+.chat-density-spacious .chat-card-preview {
+    -webkit-line-clamp: 5;
+    line-clamp: 5;
+    min-height: 100px;
+    padding: 12px;
+}
+.chat-density-spacious .chat-card-footer { padding: 12px 16px; }
+
+.chat-density-compact .chat-card-header { padding: 8px 10px; }
+.chat-density-compact .chat-card-avatar,
+.chat-density-compact .chat-card-avatar-fallback,
+.chat-density-compact .chat-card-avatar-size,
+.chat-density-compact .chat-card-header > .chat-avatar-wrap { width: 40px; height: 40px; }
+.chat-density-compact .chat-card-body { padding: 8px 10px; }
+.chat-density-compact .chat-card-preview {
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    min-height: 0;
+    padding: 6px 8px;
+}
+.chat-density-compact .chat-card-footer { padding: 6px 10px; }
+
+/* Minimal: header + footer only */
+.chat-density-minimal .chat-card-body { display: none; }
 .chat-group-avatar-size { width: 45px; height: 45px; }
 .chat-preview-avatar-size { width: 50px; height: 50px; }
 
@@ -1227,321 +1260,333 @@
 /* ========================================
    Mobile Overrides
    ======================================== */
-@media (max-width: 768px) {
-    .chat-lore-search { font-size: var(--mobile-input-size); }
-    .chat-lore-row { min-height: 48px; }
-    /* Partial-height comes from the shared .cl-drawer-partial class (library-mobile.css). */
+html.cl-mobile .chat-lore-search { font-size: var(--mobile-input-size); }
+html.cl-mobile .chat-lore-row { min-height: 48px; }
+/* Partial-height comes from the shared .cl-drawer-partial class (library-mobile.css). */
 
-    /* Modal chat button */
-    #modalChatBtn {
-        padding: 6px 8px;
-        font-size: 0;
-        gap: 0;
-        border-radius: var(--radius-xl);
-        margin-right: 10px;
-        background: transparent;
-        border: 1px solid rgba(var(--accent-rgb), 0.85);
-        box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45), inset 0 0 6px rgba(var(--accent-rgb), 0.25);
-    }
-    #modalChatBtn i {
-        font-size: var(--font-base);
-        color: var(--accent);
-    }
-    .mobile-chat-hidden {
-        display: none !important;
-    }
-
-    /* Chats tab (inside character modal) */
-    .chats-header { display: none !important; }
-    .chats-list { max-height: none; gap: var(--space-xs-sm); }
-    .chat-item { padding: 10px; gap: var(--space-sm-md); flex-wrap: wrap; }
-    .chat-item-icon { width: 32px; height: 32px; font-size: var(--font-sm); border-radius: var(--radius-lg); margin-right: 0; }
-    .chat-item-info { min-width: 0; }
-    .chat-item-name { font-size: var(--font-md); }
-    .chat-item-meta { font-size: var(--font-2xs); gap: var(--space-sm); flex-wrap: wrap; }
-    /* The action row collapses behind the kebab; tapping it reveals the buttons as a full-width row. */
-    .chat-item-kebab {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 40px; height: 40px;
-        min-width: 40px; min-height: 40px;
-        flex-shrink: 0;
-        border-radius: var(--radius-lg);
-        border: 1px solid var(--glass-border);
-        background: rgba(0, 0, 0, 0.3);
-        color: var(--text-secondary);
-        cursor: pointer;
-    }
-    .chat-item-actions {
-        display: none;
-        opacity: 1;
-        flex-basis: 100%;
-        justify-content: flex-end;
-        gap: var(--space-xs);
-    }
-    .chat-item.menu-open .chat-item-actions { display: flex; }
-    .chat-action-btn { width: 40px; height: 40px; min-width: 40px; min-height: 40px; border-radius: var(--radius-lg); }
-
-    /* Let gallery-content own the scroll; nested overflow left a 40px gap */
-    .chats-view {
-        padding: 8px;
-        padding-bottom: 0;
-        height: auto;
-        overflow-y: visible;
-    }
-    .chats-grid {
-        grid-template-columns: 1fr;
-        gap: var(--space-sm);
-    }
-
-    /* Flat chat cards */
-    .chat-card {
-        border-radius: var(--radius-xl);
-        overflow: hidden;
-    }
-    .chat-card:hover {
-        transform: none;
-        box-shadow: none;
-    }
-    .chat-card-header {
-        padding: 8px 10px;
-        gap: var(--space-sm);
-    }
-    .chat-card-avatar,
-    .chat-card-avatar-fallback {
-        width: 36px;
-        height: 36px;
-    }
-    .chat-card-avatar-size,
-    .chat-card-header > .chat-avatar-wrap { width: 36px; height: 36px; }
-    .chat-card-char-name {
-        font-size: var(--font-md);
-    }
-    .chat-card.active .chat-card-char-info {
-        padding-right: 60px;
-    }
-    .chat-card-chat-name {
-        font-size: var(--font-2xs);
-    }
-    .chat-card-body {
-        padding: 0 10px 8px;
-        gap: var(--space-xs);
-    }
-    .chat-card-preview {
-        font-size: var(--font-xs) !important;
-        line-height: 1.4 !important;
-        padding: 6px 8px !important;
-        min-height: 0 !important;
-        max-height: 3.2em !important;
-        display: block !important;
-        -webkit-line-clamp: unset !important;
-        line-clamp: unset !important;
-        -webkit-box-orient: unset !important;
-        overflow: hidden !important;
-        border-radius: var(--radius-md);
-        word-break: break-word;
-    }
-    .chat-card-footer {
-        padding: 6px 10px;
-        font-size: var(--font-2xs);
-    }
-    .chat-card-meta {
-        gap: var(--space-sm);
-        /* inherits base flex-wrap:nowrap so the model badge truncates instead of wrapping the
-           footer to a second line (single-column cards have room for the truncated badge). */
-    }
-    .chat-card-actions {
-        opacity: 1;
-        gap: var(--space-xs);
-    }
-    .chat-card-action {
-        padding: 6px 10px;
-        font-size: var(--font-2xs);
-        min-height: 32px;
-        display: flex;
-        align-items: center;
-        border-radius: var(--radius-md);
-    }
-    .chat-lore-btn {
-        width: 28px;
-        height: 28px;
-        font-size: var(--font-2xs);
-    }
-    .chat-card.active::before {
-        font-size: var(--font-4xs);
-        top: 4px;
-        right: 4px;
-        padding: 2px 5px;
-    }
-    .chat-model-badge {
-        max-width: 100px;
-        font-size: var(--font-3xs);
-        padding: 1px 5px;
-    }
-
-    /* Grouped chats view */
-    .chats-grouped-view { gap: var(--space-sm); }
-    .chat-group {
-        border-radius: var(--radius-xl);
-        overflow: hidden;
-    }
-    .chat-group-header {
-        padding: 10px 12px;
-        gap: var(--space-sm-md);
-        min-height: var(--touch-target-min);
-    }
-    .chat-group-header:hover { background: rgba(0, 0, 0, 0.25); }
-    .chat-group-avatar,
-    .chat-group-avatar-fallback { width: 36px; height: 36px; }
-    .chat-group-avatar-size,
-    .chat-group-header > .chat-avatar-wrap { width: 36px; height: 36px; }
-    .chat-group-name { font-size: var(--font-md); }
-    .chat-group-count { font-size: var(--font-xs); }
-    .chat-group-toggle { font-size: var(--font-sm); }
-    .chat-group-item {
-        padding: 10px 12px 10px 16px;
-        gap: var(--space-sm-md);
-        min-height: var(--touch-target-min);
-    }
-    .chat-group-item:hover { background: none; }
-    .chat-group-item-icon { font-size: var(--font-md); }
-    .chat-group-item-name { font-size: var(--font-xs); }
-    .chat-group-item-preview {
-        display: none;
-    }
-    .chat-group-item-meta {
-        font-size: var(--font-2xs);
-        gap: var(--space-2xs) var(--space-sm);
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        min-width: 0;
-    }
-    .chat-group-item-meta > span {
-        display: inline-flex;
-        align-items: center;
-        flex-shrink: 0;
-        gap: var(--space-2xs);
-    }
-    .chat-group-item-actions {
-        opacity: 1;
-        gap: var(--space-xs);
-    }
-    .chat-group-item-actions .chat-card-action {
-        min-height: 32px;
-        padding: 6px 10px;
-    }
-    .chat-group-item .chat-model-badge {
-        display: inline-block;
-        max-width: 80px;
-        height: 1.1rem;
-        line-height: 1.1rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: middle;
-    }
-
-    .chat-preview-modal {
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-    }
-
-    .chat-preview-modal .modal-header {
-        flex-wrap: nowrap;
-        gap: var(--space-sm);
-        min-height: var(--chrome-h-mobile);
-        padding: 8px 12px;
-    }
-    .chat-preview-header-info {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        display: flex;
-        align-items: center;
-        gap: var(--space-sm);
-    }
-    .chat-preview-header-info > div {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-    }
-    .chat-preview-avatar,
-    .chat-preview-avatar-size {
-        width: 36px;
-        height: 36px;
-        flex-shrink: 0;  /* prevents the title squeezing the avatar */
-    }
-    .chat-preview-header-info h2 {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: var(--font-md-lg) !important;
-    }
-    .chat-preview-meta {
-        display: none !important;
-    }
-    .chat-preview-modal .modal-controls {
-        display: flex;
-        flex-shrink: 0;
-    }
-
-    #chatPreviewDeleteBtn {
-        min-height: var(--touch-target-min);
-        min-width: var(--touch-target-min);
-        padding: 0;
-        gap: 0;
-        font-size: 0;
-        justify-content: center;
-    }
-    #chatPreviewDeleteBtn i {
-        font-size: var(--font-lg);
-    }
-
-    #chatPreviewOpenBtn {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        min-height: var(--chrome-h-mobile);
-        padding: var(--space-md) var(--space-lg) calc(var(--space-md) + var(--safe-bottom)) !important;
-        gap: var(--space-sm);
-        font-size: var(--btn-font-lg) !important;
-        border-radius: var(--radius-3xl) var(--radius-3xl) 0 0 !important;
-        z-index: 50;
-        justify-content: center;
-        box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
-    }
-    #chatPreviewOpenBtn i {
-        font-size: var(--font-lg);
-    }
-    #chatPreviewOpenBtn:active {
-        transform: none;
-        filter: brightness(0.92);
-    }
-
-    /* Padding-bottom clears the sticky footer */
-    .chat-preview-body {
-        flex: 1;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: calc(var(--chrome-h-mobile) + var(--safe-bottom));
-    }
-    .chat-preview-messages { padding: 12px; gap: var(--space-sm-md); }
-    .chat-message { max-width: 90%; }
-    .chat-message-avatar { width: 28px; height: 28px; }
-    .chat-message-content { padding: 8px 12px; font-size: var(--font-md); }
-    .chat-message-name { font-size: var(--font-xs); }
-    .chat-message-actions { opacity: 1; }
-    .chat-msg-action-btn { width: 28px; height: 28px; }
-    .chat-swipe-btn { min-width: var(--touch-target-min); min-height: var(--touch-target-min); width: 28px; height: 28px; touch-action: manipulation; }
-    .chat-model-badge { max-width: 120px; font-size: var(--font-3xs); padding: 1px 6px; }
-
-    /* Chats empty/loading states */
-    .chats-empty { padding: 40px 16px; }
-    .chats-empty i { font-size: 2.5rem; }
-    .chats-empty h3 { font-size: var(--font-base); }
-    .chats-empty p { font-size: var(--font-md); }
-    .chats-view .chats-loading { padding: 40px; font-size: var(--font-base); }
+/* Modal chat button */
+html.cl-mobile #modalChatBtn {
+    padding: 6px 8px;
+    font-size: 0;
+    gap: 0;
+    border-radius: var(--radius-xl);
+    margin-right: 10px;
+    background: transparent;
+    border: 1px solid rgba(var(--accent-rgb), 0.85);
+    box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.45), inset 0 0 6px rgba(var(--accent-rgb), 0.25);
 }
+html.cl-mobile #modalChatBtn i {
+    font-size: var(--font-base);
+    color: var(--accent);
+}
+html.cl-mobile .mobile-chat-hidden {
+    display: none !important;
+}
+
+/* Chats tab (inside character modal) */
+html.cl-mobile .chats-header { display: none !important; }
+html.cl-mobile .chats-list { max-height: none; gap: var(--space-xs-sm); }
+html.cl-mobile .chat-item { padding: 10px; gap: var(--space-sm-md); flex-wrap: wrap; }
+html.cl-mobile .chat-item-icon { width: 32px; height: 32px; font-size: var(--font-sm); border-radius: var(--radius-lg); margin-right: 0; }
+html.cl-mobile .chat-item-info { min-width: 0; }
+html.cl-mobile .chat-item-name { font-size: var(--font-md); }
+html.cl-mobile .chat-item-meta { font-size: var(--font-2xs); gap: var(--space-sm); flex-wrap: wrap; }
+/* The action row collapses behind the kebab; tapping it reveals the buttons as a full-width row. */
+html.cl-mobile .chat-item-kebab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    min-width: 40px; min-height: 40px;
+    flex-shrink: 0;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--glass-border);
+    background: rgba(0, 0, 0, 0.3);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+html.cl-mobile .chat-item-actions {
+    display: none;
+    opacity: 1;
+    flex-basis: 100%;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+}
+html.cl-mobile .chat-item.menu-open .chat-item-actions { display: flex; }
+html.cl-mobile .chat-action-btn { width: 40px; height: 40px; min-width: 40px; min-height: 40px; border-radius: var(--radius-lg); }
+
+/* Let gallery-content own the scroll; nested overflow left a 40px gap */
+html.cl-mobile .chats-view {
+    padding: 8px;
+    padding-bottom: 0;
+    height: auto;
+    overflow-y: visible;
+}
+html.cl-mobile .chats-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-sm);
+}
+
+/* Flat chat cards */
+html.cl-mobile .chat-card {
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+}
+html.cl-mobile .chat-card:hover {
+    transform: none;
+    box-shadow: none;
+}
+html.cl-mobile .chat-card-header {
+    padding: 8px 10px;
+    gap: var(--space-sm);
+}
+html.cl-mobile .chat-card-avatar,
+html.cl-mobile .chat-card-avatar-fallback {
+    width: 36px;
+    height: 36px;
+}
+html.cl-mobile .chat-card-avatar-size,
+html.cl-mobile .chat-card-header > .chat-avatar-wrap { width: 36px; height: 36px; }
+html.cl-mobile .chat-card-char-name {
+    font-size: var(--font-md);
+}
+html.cl-mobile .chat-card.active .chat-card-char-info {
+    padding-right: 60px;
+}
+html.cl-mobile .chat-card-chat-name {
+    font-size: var(--font-2xs);
+}
+html.cl-mobile .chat-card-body {
+    padding: 8px 10px;
+    gap: var(--space-xs);
+}
+html.cl-mobile .chat-card-preview {
+    font-size: var(--font-xs) !important;
+    line-height: 1.4 !important;
+    padding: 6px 8px !important;
+    min-height: 0 !important;
+    /* Inherits the desktop -webkit-box clamp; 2 whole lines instead of the old 3.2em mid-glyph clip. */
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    border-radius: var(--radius-md);
+    word-break: break-word;
+}
+/* Compact density tightens further on phones: one preview line. */
+html.cl-mobile .chat-density-compact .chat-card-preview {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+}
+/* Spacious on phones: bigger avatar and header, four preview lines. */
+html.cl-mobile .chat-density-spacious .chat-card-header {
+    padding: 10px 12px;
+}
+html.cl-mobile .chat-density-spacious .chat-card-avatar,
+html.cl-mobile .chat-density-spacious .chat-card-avatar-fallback,
+html.cl-mobile .chat-density-spacious .chat-card-avatar-size,
+html.cl-mobile .chat-density-spacious .chat-card-header > .chat-avatar-wrap { width: 44px; height: 44px; }
+html.cl-mobile .chat-density-spacious .chat-card-preview {
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+}
+html.cl-mobile .chat-card-footer {
+    padding: 6px 10px;
+    font-size: var(--font-2xs);
+}
+html.cl-mobile .chat-card-meta {
+    gap: var(--space-sm);
+    /* inherits base flex-wrap:nowrap so the model badge truncates instead of wrapping the
+       footer to a second line (single-column cards have room for the truncated badge). */
+}
+html.cl-mobile .chat-card-actions {
+    opacity: 1;
+    gap: var(--space-xs);
+}
+html.cl-mobile .chat-card-action {
+    padding: 6px 10px;
+    font-size: var(--font-2xs);
+    min-height: 32px;
+    display: flex;
+    align-items: center;
+    border-radius: var(--radius-md);
+}
+html.cl-mobile .chat-lore-btn {
+    width: 28px;
+    height: 28px;
+    font-size: var(--font-2xs);
+}
+html.cl-mobile .chat-card.active::before {
+    font-size: var(--font-4xs);
+    top: 4px;
+    right: 4px;
+    padding: 2px 5px;
+}
+html.cl-mobile .chat-model-badge {
+    max-width: 100px;
+    font-size: var(--font-3xs);
+    padding: 1px 5px;
+}
+
+/* Grouped chats view */
+html.cl-mobile .chats-grouped-view { gap: var(--space-sm); }
+html.cl-mobile .chat-group {
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+}
+html.cl-mobile .chat-group-header {
+    padding: 10px 12px;
+    gap: var(--space-sm-md);
+    min-height: var(--touch-target-min);
+}
+html.cl-mobile .chat-group-header:hover { background: rgba(0, 0, 0, 0.25); }
+html.cl-mobile .chat-group-avatar,
+html.cl-mobile .chat-group-avatar-fallback { width: 36px; height: 36px; }
+html.cl-mobile .chat-group-avatar-size,
+html.cl-mobile .chat-group-header > .chat-avatar-wrap { width: 36px; height: 36px; }
+html.cl-mobile .chat-group-name { font-size: var(--font-md); }
+html.cl-mobile .chat-group-count { font-size: var(--font-xs); }
+html.cl-mobile .chat-group-toggle { font-size: var(--font-sm); }
+html.cl-mobile .chat-group-item {
+    padding: 10px 12px 10px 16px;
+    gap: var(--space-sm-md);
+    min-height: var(--touch-target-min);
+}
+html.cl-mobile .chat-group-item:hover { background: none; }
+html.cl-mobile .chat-group-item-icon { font-size: var(--font-md); }
+html.cl-mobile .chat-group-item-name { font-size: var(--font-xs); }
+html.cl-mobile .chat-group-item-preview {
+    display: none;
+}
+html.cl-mobile .chat-group-item-meta {
+    font-size: var(--font-2xs);
+    gap: var(--space-2xs) var(--space-sm);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+html.cl-mobile .chat-group-item-meta > span {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+    gap: var(--space-2xs);
+}
+html.cl-mobile .chat-group-item-actions {
+    opacity: 1;
+    gap: var(--space-xs);
+}
+html.cl-mobile .chat-group-item-actions .chat-card-action {
+    min-height: 32px;
+    padding: 6px 10px;
+}
+html.cl-mobile .chat-group-item .chat-model-badge {
+    display: inline-block;
+    max-width: 80px;
+    height: 1.1rem;
+    line-height: 1.1rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+html.cl-mobile .chat-preview-modal {
+    border-radius: 0 !important;
+}
+
+html.cl-mobile .chat-preview-modal .modal-header {
+    flex-wrap: nowrap;
+    gap: var(--space-sm);
+    min-height: var(--chrome-h-mobile);
+    padding: 8px 12px;
+}
+html.cl-mobile .chat-preview-header-info {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+html.cl-mobile .chat-preview-header-info > div {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+}
+html.cl-mobile .chat-preview-avatar,
+html.cl-mobile .chat-preview-avatar-size {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;  /* prevents the title squeezing the avatar */
+}
+html.cl-mobile .chat-preview-header-info h2 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-md-lg) !important;
+}
+html.cl-mobile .chat-preview-meta {
+    display: none !important;
+}
+html.cl-mobile .chat-preview-modal .modal-controls {
+    display: flex;
+    flex-shrink: 0;
+}
+
+html.cl-mobile #chatPreviewDeleteBtn {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+}
+html.cl-mobile #chatPreviewDeleteBtn i {
+    font-size: var(--font-lg);
+}
+
+html.cl-mobile #chatPreviewOpenBtn {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    min-height: var(--chrome-h-mobile);
+    padding: var(--space-md) var(--space-lg) calc(var(--space-md) + var(--safe-bottom)) !important;
+    gap: var(--space-sm);
+    font-size: var(--btn-font-lg) !important;
+    border-radius: var(--radius-3xl) var(--radius-3xl) 0 0 !important;
+    z-index: 50;
+    justify-content: center;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.35);
+}
+html.cl-mobile #chatPreviewOpenBtn i {
+    font-size: var(--font-lg);
+}
+html.cl-mobile #chatPreviewOpenBtn:active {
+    transform: none;
+    filter: brightness(0.92);
+}
+
+/* Padding-bottom clears the sticky footer */
+html.cl-mobile .chat-preview-body {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(var(--chrome-h-mobile) + var(--safe-bottom));
+}
+html.cl-mobile .chat-preview-messages { padding: 12px; gap: var(--space-sm-md); }
+html.cl-mobile .chat-message { max-width: 90%; }
+html.cl-mobile .chat-message-avatar { width: 28px; height: 28px; }
+html.cl-mobile .chat-message-content { padding: 8px 12px; font-size: var(--font-md); }
+html.cl-mobile .chat-message-name { font-size: var(--font-xs); }
+html.cl-mobile .chat-message-actions { opacity: 1; }
+html.cl-mobile .chat-msg-action-btn { width: 28px; height: 28px; }
+html.cl-mobile .chat-swipe-btn { min-width: var(--touch-target-min); min-height: var(--touch-target-min); width: 28px; height: 28px; touch-action: manipulation; }
+html.cl-mobile .chat-model-badge { max-width: 120px; font-size: var(--font-3xs); padding: 1px 6px; }
+
+/* Chats empty/loading states */
+html.cl-mobile .chats-empty { padding: 40px 16px; }
+html.cl-mobile .chats-empty i { font-size: 2.5rem; }
+html.cl-mobile .chats-empty h3 { font-size: var(--font-base); }
+html.cl-mobile .chats-empty p { font-size: var(--font-md); }
+html.cl-mobile .chats-view .chats-loading { padding: 40px; font-size: var(--font-base); }

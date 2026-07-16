@@ -900,33 +900,15 @@ async function loadProfiles() {
     else selectEl.classList.add('hidden');
 
     try {
-        const response = await CoreAPI.apiRequest('/settings/get', 'POST', {});
-        if (!response.ok) throw new Error('Could not fetch settings');
+        const s = await CoreAPI.getLlmSettings();
+        if (s.error) throw new Error('Could not fetch settings');
 
-        const data = await response.json();
-        const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+        activeSource = s.activeSource;
+        activeModel = s.activeModel;
+        activePreset = s.activePreset;
+        const ccProfiles = s.profiles;
 
-        activeSource = '';
-        activeModel = '';
-        activePreset = null;
-        const presetName = settings?.preset_settings_openai;
-        if (presetName && Array.isArray(data.openai_setting_names) && Array.isArray(data.openai_settings)) {
-            const idx = data.openai_setting_names.indexOf(presetName);
-            if (idx >= 0) {
-                try {
-                    const preset = typeof data.openai_settings[idx] === 'string'
-                        ? JSON.parse(data.openai_settings[idx])
-                        : data.openai_settings[idx];
-                    activePreset = preset;
-                    activeSource = preset?.chat_completion_source || '';
-                    activeModel = CoreAPI.resolvePresetModel(preset);
-                } catch { /* corrupt preset */ }
-            }
-        }
-
-        const cm = settings?.extension_settings?.connectionManager;
-
-        if (!cm?.profiles?.length) {
+        if (!s.hasProfiles) {
             dot.className = activeSource ? 'creator-connection-dot connected' : 'creator-connection-dot neutral';
             label.textContent = activeSource
                 ? `${activeSource}${activeModel ? ' / ' + activeModel : ''}`
@@ -935,7 +917,6 @@ async function loadProfiles() {
             return;
         }
 
-        const ccProfiles = cm.profiles.filter(p => p.mode === 'cc');
         if (!ccProfiles.length) {
             dot.className = activeSource ? 'creator-connection-dot connected' : 'creator-connection-dot neutral';
             label.textContent = activeSource
@@ -956,8 +937,8 @@ async function loadProfiles() {
         const savedId = getOpt('stProfileId');
         if (savedId && ccProfiles.some(p => p.id === savedId)) {
             selectEl.value = savedId;
-        } else if (cm.selectedProfile && ccProfiles.some(p => p.id === cm.selectedProfile)) {
-            selectEl.value = cm.selectedProfile;
+        } else if (s.selectedProfileId && ccProfiles.some(p => p.id === s.selectedProfileId)) {
+            selectEl.value = s.selectedProfileId;
         } else {
             selectEl.value = ccProfiles[0].id;
         }
@@ -1119,8 +1100,7 @@ function cleanPoolText(raw) {
 
 function poolTagline(char) {
     try {
-        const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
-        const tl = char.data?.extensions?.[ns]?.tagline;
+        const tl = CoreAPI.getDisplayTagline(char);
         return tl ? cleanPoolText(tl).slice(0, 400) : '';
     } catch { return ''; }
 }
@@ -1182,11 +1162,18 @@ async function loadSavedPrompts() {
 }
 
 async function saveSavedPrompts(data) {
-    const jsonStr = JSON.stringify(data, null, 2);
-    await CoreAPI.apiRequest('/files/upload', 'POST', {
-        name: PROMPTS_FILE,
-        data: CoreAPI.utf8ToBase64(jsonStr),
-    });
+    try {
+        const resp = await CoreAPI.apiRequest('/files/upload', 'POST', {
+            name: PROMPTS_FILE,
+            data: CoreAPI.utf8ToBase64(JSON.stringify(data, null, 2)),
+        });
+        if (!resp.ok) throw new Error(`upload failed (${resp.status})`);
+        return true;
+    } catch (e) {
+        console.error('[Creator] Failed to save prompt presets:', e.message);
+        CoreAPI.showToast('Failed to save prompt preset', 'error');
+        return false;
+    }
 }
 
 function populateStudioSettings() {
@@ -1295,7 +1282,7 @@ async function saveCurrentPrompt() {
         presets.push({ name: result.name, prompt: promptText });
         savedIdx = presets.length - 1;
     }
-    await saveSavedPrompts(data);
+    if (!(await saveSavedPrompts(data))) return;
     await loadPromptPresetList();
 
     // Auto-select the saved preset
@@ -1340,7 +1327,7 @@ async function deleteSelectedPreset() {
     const name = presets[idx].name;
     presets.splice(idx, 1);
     data[studioFieldKey] = presets;
-    await saveSavedPrompts(data);
+    if (!(await saveSavedPrompts(data))) return;
     CoreAPI.showToast(`"${name}" deleted`, 'info', 2000);
     await loadPromptPresetList();
 }
@@ -1491,7 +1478,7 @@ async function importCharacterFromLibrary(avatar) {
     document.getElementById('creatorPostHistory').value = data.post_history_instructions || '';
     document.getElementById('creatorNotes').value = data.creator_notes || '';
     // Read tagline from the active namespace so the imported source carries its tagline forward whatever its origin.
-    const importTaglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    const importTaglineNs = CoreAPI.getActiveTaglineNamespace(char) ?? 'cl';
     document.getElementById('creatorTagline').value = data.extensions?.[importTaglineNs]?.tagline || '';
 
     // Alt greetings
@@ -3170,7 +3157,7 @@ function collectCreatorValues() {
 function extractOriginalValues(char) {
     const d = char.data || {};
     // Read tagline from the target's active namespace so the diff sees no change when the value already matches.
-    const taglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
+    const taglineNs = CoreAPI.getActiveTaglineNamespace(char) ?? 'cl';
     return {
         name: char.name || '',
         description: d.description || '',
@@ -3300,7 +3287,7 @@ async function confirmSaveAs() {
         const current = collectCreatorValues();
         const hasAvatarChange = avatarBuffer && avatarSourceAvatar !== saveAsTarget.avatar;
         // Tagline as a dot-path leaf write so the namespace's sibling fields (id, full_path, linkedAt) survive the spread.
-        const taglineNs = window.ProviderRegistry?.getActiveTaglineNamespace?.(saveAsTarget) ?? 'cl';
+        const taglineNs = CoreAPI.getActiveTaglineNamespace(saveAsTarget) ?? 'cl';
         const updates = {
             name: current.name,
             description: current.description,

@@ -73,8 +73,5 @@
 
 
 /* Mobile overrides */
-@media screen and (max-width: 768px) {
 
-    .pyg-plugin-status { font-size: var(--font-sm); }
-
-}
+html.cl-mobile .pyg-plugin-status { font-size: var(--font-sm); }

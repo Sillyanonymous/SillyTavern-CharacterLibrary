@@ -5,7 +5,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng } from '../provider-utils.js';
+import { assignGalleryId, importFromPng, proxyEncode } from '../provider-utils.js';
 import jannyBrowseView from './janny-browse.js';
 import {
     JANNY_SEARCH_URL,
@@ -175,7 +175,7 @@ function isPuterAvailable() {
 // ── SillyTavern proxy helper ────────────────────────────────
 
 async function stProxyFetchHtml(url) {
-    const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+    const proxyUrl = `/proxy/${proxyEncode(url)}`;
     const r = await fetch(proxyUrl, {
         headers: {
             'Accept': 'text/html,application/xhtml+xml,*/*',
@@ -368,7 +368,6 @@ async function fetchCharacterDetails(characterId, slug) {
 function buildV2FromDetails(charData) {
     const char = charData.character || charData;
     const rawDesc = char.description || '';
-    const plainDesc = stripHtml(rawDesc) || '';
 
     return {
         spec: 'chara_card_v2',
@@ -390,8 +389,7 @@ function buildV2FromDetails(charData) {
             extensions: {
                 jannyai: {
                     id: char.id,
-                    creatorId: char.creatorId || null,
-                    tagline: plainDesc
+                    creatorId: char.creatorId || null
                 }
             },
             character_book: undefined
@@ -550,7 +548,7 @@ class JannyProvider extends ProviderBase {
         return [
             {
                 path: 'extensions.jannyai.tagline',
-                label: "Creator's Notes",
+                label: 'Tagline',
                 icon: 'fa-solid fa-quote-left',
                 optional: true,
                 group: 'tagline',
@@ -672,9 +670,6 @@ class JannyProvider extends ProviderBase {
             // The user's local PNG is the source of truth for description, scenario,
             // first_mes, alternate_greetings, etc. Replacing those would silently
             // overwrite the user's card with a same-named character's data.
-            const enrichedCard = buildV2FromDetails(data);
-            const tagline = stripHtml(enrichedCard?.data?.creator_notes || '') || '';
-
             if (!cardData.data.extensions) cardData.data.extensions = {};
             cardData.data.extensions.jannyai = {
                 ...(cardData.data.extensions.jannyai || {}),
@@ -683,7 +678,6 @@ class JannyProvider extends ProviderBase {
                 creatorUsername: char.creatorUsername || null,
                 slug,
                 linkedAt: new Date().toISOString(),
-                tagline,
                 pageName: this.getListingName(char),
             };
 
@@ -805,7 +799,6 @@ class JannyProvider extends ProviderBase {
                 creatorUsername: char.creatorUsername || null,
                 slug: slug,
                 linkedAt: new Date().toISOString(),
-                tagline: stripHtml(characterCard.data.creator_notes) || existingJanny.tagline || '',
                 pageName: this.getListingName(char),
             };
 

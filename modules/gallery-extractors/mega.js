@@ -14,6 +14,7 @@
  */
 
 import { registerExtractor } from './extractor-registry.js';
+import { proxyEncode } from '../providers/provider-utils.js';
 
 const MEGA_PATTERNS = [
     /mega\.nz\/folder\/[A-Za-z0-9_-]+#[A-Za-z0-9_-]+/,
@@ -337,7 +338,7 @@ async function megaApi(folderId, commands, signal) {
         resp = await fetch(url, { method: 'POST', body: JSON.stringify(commands), signal });
     } catch (err) {
         if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;
-        const proxy = `/proxy/${encodeURIComponent(url)}`;
+        const proxy = `/proxy/${proxyEncode(url)}`;
         resp = await fetch(proxy, { method: 'POST', body: JSON.stringify(commands), signal });
     }
     if (!resp.ok) throw new Error(`MEGA API HTTP ${resp.status}`);
@@ -442,7 +443,7 @@ async function extractImages(url, opts = {}) {
                         resp = await fetch(dlUrl, { signal: dlSignal });
                     } catch (err) {
                         if (err.name === 'AbortError' || err.name === 'TimeoutError') throw err;
-                        resp = await fetch(`/proxy/${encodeURIComponent(dlUrl)}`, { signal: dlSignal });
+                        resp = await fetch(`/proxy/${proxyEncode(dlUrl)}`, { signal: dlSignal });
                     }
                     if (!resp.ok) return { success: false, error: `HTTP ${resp.status}` };
 

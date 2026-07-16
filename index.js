@@ -25,21 +25,29 @@ function getCookie(name) {
 
 let _csrfToken = null;
 
-async function getCsrfToken() {
+// Always hits the network and refreshes the cache; use getCsrfToken() instead unless a
+// fresh token is required (the tab-open launcher re-fetches so it recovers after an ST restart).
+async function fetchCsrfToken() {
+    let token = null;
     try {
         const response = await fetch('/csrf-token');
         if (response.ok) {
             const data = await response.json();
-            return data.token;
+            token = data.token;
         }
     } catch (e) {
         console.error('Failed to fetch CSRF token', e);
     }
-    return getCookie('X-CSRF-Token');
+    _csrfToken = token || getCookie('X-CSRF-Token');
+    return _csrfToken;
+}
+
+async function getCsrfToken() {
+    return _csrfToken || fetchCsrfToken();
 }
 
 // Pre-fetch at load time; token is stable for the session
-getCsrfToken().then(t => { _csrfToken = t; });
+fetchCsrfToken();
 
 function clDebug(...args) {
     try {
@@ -418,6 +426,20 @@ function setupPostMessageBridge() {
 // Open Gallery (branches on display mode)
 // ==============================================
 
+// Popup-blocked fallback: the toast click is a fresh user gesture, so its
+// window.open carries new transient activation (gesture-less contexts like
+// STscript chains cant open tabs directly).
+function showOpenBlockedToast(url) {
+    if (typeof toastr !== 'undefined' && toastr?.info) {
+        toastr.info('Popup blocked. Click here to open the Character Library.', EXTENSION_NAME, {
+            timeOut: 10000,
+            onclick: () => window.open(url, '_blank'),
+        });
+    } else {
+        console.warn('[CharLibrary] Popup blocked; open manually:', url);
+    }
+}
+
 function openGallery() {
     const mode = getDisplayMode();
 
@@ -430,7 +452,7 @@ function openGallery() {
     const baseUrl = getExtensionUrl();
     if (_csrfToken) {
         const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(_csrfToken)}`;
-        window.open(url, '_blank');
+        if (!window.open(url, '_blank')) showOpenBlockedToast(url);
         return;
     }
     // Token not yet available (rare)
@@ -452,13 +474,13 @@ function openGallery() {
             tab.document.close();
         } catch { /* cross-origin write blocked */ }
     }
-    getCsrfToken().then(token => {
-        _csrfToken = token;
+    fetchCsrfToken().then(token => {
         const url = `${baseUrl}/app/library.html?csrf=${encodeURIComponent(token)}`;
         if (tab) {
             tab.location.href = url;
         } else {
-            window.open(url, '_blank');
+            // inside a fetch .then there is provably no transient activation left
+            showOpenBlockedToast(url);
         }
     });
 }
@@ -978,17 +1000,20 @@ jQuery(async () => {
         ensureStandaloneGalleryButton(true);
     }
     
-    // Slash command fallback
-    if (window.SlashCommandParser) {
-        try {
-            window.SlashCommandParser.addCommandObject(window.SlashCommandParser.SlashCommand?.fromProps?.({
-                name: 'gallery',
+    // SlashCommandParser/SlashCommand live on getContext().
+    try {
+        const ctx = SillyTavern?.getContext?.();
+        const parser = ctx?.SlashCommandParser;
+        const SlashCommand = ctx?.SlashCommand;
+        if (parser?.addCommandObject && SlashCommand?.fromProps) {
+            parser.addCommandObject(SlashCommand.fromProps({
+                name: 'characterlibrary',
                 helpString: 'Open the Character Library',
-                callback: openGallery
-            }) ?? { name: 'gallery', callback: openGallery, helpString: 'Open the Character Library' });
-        } catch (e) {
-            console.warn('[CharLibrary] Could not register /gallery slash command:', e.message);
+                callback: () => { openGallery(); return ''; },
+            }));
         }
+    } catch (e) {
+        console.warn('[CharLibrary] Could not register /characterlibrary slash command:', e.message);
     }
     
     // ==============================================

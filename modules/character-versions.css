@@ -405,144 +405,142 @@
 .vt-input:focus { border-color: var(--accent); box-shadow: 0 0 6px rgba(var(--accent-rgb),0.2); }
 
 /* ===== Mobile ===== */
-@media (max-width: 768px) {
-    #editPaneVersionsBtn {
-        background: rgba(var(--accent-rgb), 0.12);
-        border-color: rgba(var(--accent-rgb), 0.3);
-        color: var(--accent);
-    }
-
-    .vt-container { gap: var(--space-sm); }
-
-    .vt-back-btn { display: none !important; }
-    .vt-container.vt-detail-open .vt-back-btn {
-        display: flex !important;
-        min-height: 36px;
-        color: var(--accent);
-        border-color: rgba(var(--accent-rgb), 0.3);
-        background: rgba(var(--accent-rgb), 0.08);
-        touch-action: manipulation;
-    }
-
-    .vt-toolbar { flex-wrap: wrap; gap: var(--space-xs-sm); }
-    .vt-sub-tabs { flex: 1 1 100%; order: -1; }
-    .vt-sub-tab {
-        flex: 1;
-        justify-content: center;
-        padding: 8px 10px;
-        font-size: var(--font-sm);
-        min-height: 36px;
-    }
-    .vt-toolbar-right { flex: 1 1 100%; justify-content: stretch; }
-    .vt-toolbar-right .vt-btn {
-        flex: 1;
-        justify-content: center;
-        min-height: 36px;
-    }
-
-    .vt-status { font-size: var(--font-sm); padding: 6px 10px; }
-
-    .vt-body { flex-direction: column; overflow: visible; }
-
-    .vt-list {
-        min-width: unset;
-        max-width: 100%;
-        max-height: none;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-        padding: 4px;
-        gap: var(--space-xs-sm);
-    }
-
-    .vt-item { padding: 10px 12px; min-height: var(--touch-target-min); }
-    .vt-item-header { gap: var(--space-xs); }
-    .vt-item-id { font-size: var(--font-xs); }
-    .vt-item-label { font-size: var(--font-sm); }
-    .vt-item-title { font-size: var(--font-xs); }
-    .vt-item-date { font-size: var(--font-2xs); }
-
-    .vt-container.vt-detail-open .vt-toolbar { display: none; }
-    .vt-container.vt-detail-open .vt-status { display: none; }
-    .vt-container.vt-detail-open .vt-list { display: none; }
-
-    .vt-container:not(.vt-detail-open) .vt-preview { display: none !important; }
-    .vt-container:not(.vt-detail-open) .vt-actions { display: none !important; }
-
-    .vt-preview {
-        flex: 1;
-        min-height: 0;
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
-    }
-    .vt-preview-header { font-size: var(--font-sm); padding: 6px 8px; margin-bottom: 8px; }
-
-    .vt-diff-list { gap: var(--space-xs-sm); }
-    .vt-diff-item.short {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-xs);
-        padding: 8px 10px;
-    }
-    .vt-diff-label { font-size: var(--font-xs); min-width: unset; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
-    .vt-diff-vals { width: 100%; font-size: var(--font-xs); }
-    .vt-diff-header { padding: 8px 10px; min-height: var(--touch-target-min); flex-wrap: wrap; gap: var(--space-xs-sm); }
-    .vt-diff-stats { max-width: 100%; gap: var(--space-2xs) var(--space-xs); }
-    .vt-stat { font-size: var(--font-3xs); padding: 1px 4px; }
-    .vt-lb-header { gap: var(--space-2xs); }
-    .vt-lb-stat-row { padding-left: 0; gap: var(--space-2xs) var(--space-xs); }
-    .vt-lb-counts { font-size: var(--font-sm); margin-left: 4px; gap: var(--space-2xs); }
-    .vt-diff-content { max-height: 220px; font-size: var(--font-xs); }
-    .vt-diff-line { padding: 2px 8px 2px 4px; }
-
-    .vt-lb-content { padding: 6px 8px; gap: var(--space-2xs); }
-    .vt-lb-section { border-radius: var(--radius-sm-alt); }
-    .vt-lb-section-header {
-        padding: 6px 8px; min-height: var(--touch-target-min);
-        font-size: var(--font-xs); gap: var(--space-xs-sm);
-        touch-action: manipulation;
-    }
-    .vt-lb-section-body { padding: 3px 4px; }
-    .vt-lb-entry {
-        flex-wrap: wrap;
-        gap: var(--space-2xs) var(--space-xs-sm);
-        padding: 4px 6px;
-        font-size: var(--font-xs);
-    }
-    .vt-lb-badge { width: 18px; height: 18px; font-size: 10px; }
-    .vt-lb-name { max-width: 50%; }
-    .vt-lb-world-check { margin-left: 0; }
-    .vt-lb-keys { font-size: var(--font-xs); flex-basis: 100%; padding-left: 4px; }
-    .vt-lb-changes { font-size: var(--font-2xs); }
-
-    .vt-lb-meta-row { flex-wrap: wrap; gap: var(--space-2xs) var(--space-xs-sm); font-size: var(--font-xs); }
-    .vt-lb-meta-key { min-width: unset; }
-    .vt-lb-unchanged-row { padding: 3px 6px; }
-
-    .vt-page-version-banner { font-size: var(--font-xs); padding: 6px 10px; gap: var(--space-xs-sm); }
-
-    .vt-tag-content { padding: 8px; }
-    .vt-tag-pills { gap: var(--space-xs); }
-    .vt-tag-pill { font-size: var(--font-xs); padding: 3px 8px; }
-
-    .vt-greeting-header { padding: 8px 10px; min-height: 40px; font-size: var(--font-xs); }
-    .vt-greeting-body { max-height: 180px; font-size: var(--font-xs); }
-
-    .vt-avatar-preview { padding: 8px; gap: var(--space-sm-md); }
-    .vt-avatar-thumb { width: 48px; height: 48px; }
-    .vt-apply-avatar { width: 36px; height: 36px; }
-
-    .vt-actions { flex-wrap: wrap; gap: var(--space-xs-sm); padding-top: 8px; flex-shrink: 0; }
-    .vt-actions-left, .vt-actions-right { gap: var(--space-xs-sm); }
-    .vt-actions .vt-btn { min-height: 40px; padding: 8px 12px; font-size: var(--font-sm); }
-
-    .vt-btn { min-height: 36px; font-size: var(--font-sm); touch-action: manipulation; }
-
-    .vt-dialog { width: 95vw; max-width: 95vw; padding: 18px; border-radius: var(--radius-2xl); }
-    .vt-dialog-title { font-size: var(--font-base); }
-    .vt-dialog-msg { font-size: var(--font-md); }
-    .vt-dialog-btns { gap: var(--space-sm); }
-    .vt-dialog-btn { min-height: 40px; padding: 8px 14px; font-size: var(--font-md); }
-    .vt-input { font-size: var(--mobile-input-size); padding: 10px 12px; }
-
-    .vt-loading, .vt-error { padding: 20px 12px; font-size: var(--font-sm); }
+html.cl-mobile #editPaneVersionsBtn {
+    background: rgba(var(--accent-rgb), 0.12);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    color: var(--accent);
 }
+
+html.cl-mobile .vt-container { gap: var(--space-sm); }
+
+html.cl-mobile .vt-back-btn { display: none !important; }
+html.cl-mobile .vt-container.vt-detail-open .vt-back-btn {
+    display: flex !important;
+    min-height: 36px;
+    color: var(--accent);
+    border-color: rgba(var(--accent-rgb), 0.3);
+    background: rgba(var(--accent-rgb), 0.08);
+    touch-action: manipulation;
+}
+
+html.cl-mobile .vt-toolbar { flex-wrap: wrap; gap: var(--space-xs-sm); }
+html.cl-mobile .vt-sub-tabs { flex: 1 1 100%; order: -1; }
+html.cl-mobile .vt-sub-tab {
+    flex: 1;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: var(--font-sm);
+    min-height: 36px;
+}
+html.cl-mobile .vt-toolbar-right { flex: 1 1 100%; justify-content: stretch; }
+html.cl-mobile .vt-toolbar-right .vt-btn {
+    flex: 1;
+    justify-content: center;
+    min-height: 36px;
+}
+
+html.cl-mobile .vt-status { font-size: var(--font-sm); padding: 6px 10px; }
+
+html.cl-mobile .vt-body { flex-direction: column; overflow: visible; }
+
+html.cl-mobile .vt-list {
+    min-width: unset;
+    max-width: 100%;
+    max-height: none;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+    gap: var(--space-xs-sm);
+}
+
+html.cl-mobile .vt-item { padding: 10px 12px; min-height: var(--touch-target-min); }
+html.cl-mobile .vt-item-header { gap: var(--space-xs); }
+html.cl-mobile .vt-item-id { font-size: var(--font-xs); }
+html.cl-mobile .vt-item-label { font-size: var(--font-sm); }
+html.cl-mobile .vt-item-title { font-size: var(--font-xs); }
+html.cl-mobile .vt-item-date { font-size: var(--font-2xs); }
+
+html.cl-mobile .vt-container.vt-detail-open .vt-toolbar { display: none; }
+html.cl-mobile .vt-container.vt-detail-open .vt-status { display: none; }
+html.cl-mobile .vt-container.vt-detail-open .vt-list { display: none; }
+
+html.cl-mobile .vt-container:not(.vt-detail-open) .vt-preview { display: none !important; }
+html.cl-mobile .vt-container:not(.vt-detail-open) .vt-actions { display: none !important; }
+
+html.cl-mobile .vt-preview {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+}
+html.cl-mobile .vt-preview-header { font-size: var(--font-sm); padding: 6px 8px; margin-bottom: 8px; }
+
+html.cl-mobile .vt-diff-list { gap: var(--space-xs-sm); }
+html.cl-mobile .vt-diff-item.short {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+    padding: 8px 10px;
+}
+html.cl-mobile .vt-diff-label { font-size: var(--font-xs); min-width: unset; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; }
+html.cl-mobile .vt-diff-vals { width: 100%; font-size: var(--font-xs); }
+html.cl-mobile .vt-diff-header { padding: 8px 10px; min-height: var(--touch-target-min); flex-wrap: wrap; gap: var(--space-xs-sm); }
+html.cl-mobile .vt-diff-stats { max-width: 100%; gap: var(--space-2xs) var(--space-xs); }
+html.cl-mobile .vt-stat { font-size: var(--font-3xs); padding: 1px 4px; }
+html.cl-mobile .vt-lb-header { gap: var(--space-2xs); }
+html.cl-mobile .vt-lb-stat-row { padding-left: 0; gap: var(--space-2xs) var(--space-xs); }
+html.cl-mobile .vt-lb-counts { font-size: var(--font-sm); margin-left: 4px; gap: var(--space-2xs); }
+html.cl-mobile .vt-diff-content { max-height: 220px; font-size: var(--font-xs); }
+html.cl-mobile .vt-diff-line { padding: 2px 8px 2px 4px; }
+
+html.cl-mobile .vt-lb-content { padding: 6px 8px; gap: var(--space-2xs); }
+html.cl-mobile .vt-lb-section { border-radius: var(--radius-sm-alt); }
+html.cl-mobile .vt-lb-section-header {
+    padding: 6px 8px; min-height: var(--touch-target-min);
+    font-size: var(--font-xs); gap: var(--space-xs-sm);
+    touch-action: manipulation;
+}
+html.cl-mobile .vt-lb-section-body { padding: 3px 4px; }
+html.cl-mobile .vt-lb-entry {
+    flex-wrap: wrap;
+    gap: var(--space-2xs) var(--space-xs-sm);
+    padding: 4px 6px;
+    font-size: var(--font-xs);
+}
+html.cl-mobile .vt-lb-badge { width: 18px; height: 18px; font-size: 10px; }
+html.cl-mobile .vt-lb-name { max-width: 50%; }
+html.cl-mobile .vt-lb-world-check { margin-left: 0; }
+html.cl-mobile .vt-lb-keys { font-size: var(--font-xs); flex-basis: 100%; padding-left: 4px; }
+html.cl-mobile .vt-lb-changes { font-size: var(--font-2xs); }
+
+html.cl-mobile .vt-lb-meta-row { flex-wrap: wrap; gap: var(--space-2xs) var(--space-xs-sm); font-size: var(--font-xs); }
+html.cl-mobile .vt-lb-meta-key { min-width: unset; }
+html.cl-mobile .vt-lb-unchanged-row { padding: 3px 6px; }
+
+html.cl-mobile .vt-page-version-banner { font-size: var(--font-xs); padding: 6px 10px; gap: var(--space-xs-sm); }
+
+html.cl-mobile .vt-tag-content { padding: 8px; }
+html.cl-mobile .vt-tag-pills { gap: var(--space-xs); }
+html.cl-mobile .vt-tag-pill { font-size: var(--font-xs); padding: 3px 8px; }
+
+html.cl-mobile .vt-greeting-header { padding: 8px 10px; min-height: 40px; font-size: var(--font-xs); }
+html.cl-mobile .vt-greeting-body { max-height: 180px; font-size: var(--font-xs); }
+
+html.cl-mobile .vt-avatar-preview { padding: 8px; gap: var(--space-sm-md); }
+html.cl-mobile .vt-avatar-thumb { width: 48px; height: 48px; }
+html.cl-mobile .vt-apply-avatar { width: 36px; height: 36px; }
+
+html.cl-mobile .vt-actions { flex-wrap: wrap; gap: var(--space-xs-sm); padding-top: 8px; flex-shrink: 0; }
+html.cl-mobile .vt-actions-left, html.cl-mobile .vt-actions-right { gap: var(--space-xs-sm); }
+html.cl-mobile .vt-actions .vt-btn { min-height: 40px; padding: 8px 12px; font-size: var(--font-sm); }
+
+html.cl-mobile .vt-btn { min-height: 36px; font-size: var(--font-sm); touch-action: manipulation; }
+
+html.cl-mobile .vt-dialog { width: 95vw; max-width: 95vw; padding: 18px; border-radius: var(--radius-2xl); }
+html.cl-mobile .vt-dialog-title { font-size: var(--font-base); }
+html.cl-mobile .vt-dialog-msg { font-size: var(--font-md); }
+html.cl-mobile .vt-dialog-btns { gap: var(--space-sm); }
+html.cl-mobile .vt-dialog-btn { min-height: 40px; padding: 8px 14px; font-size: var(--font-md); }
+html.cl-mobile .vt-input { font-size: var(--mobile-input-size); padding: 10px 12px; }
+
+html.cl-mobile .vt-loading, html.cl-mobile .vt-error { padding: 20px 12px; font-size: var(--font-sm); }

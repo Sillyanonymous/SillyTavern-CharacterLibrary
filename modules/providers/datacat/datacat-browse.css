@@ -76,12 +76,10 @@
 
 
 /* Mobile overrides */
-@media screen and (max-width: 768px) {
 
-    #datacatCreatorSortSelect, [data-select-id="datacatCreatorSortSelect"] { min-width: 0; flex: 1; font-size: var(--font-sm); }
-    [data-select-id="datacatCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
+html.cl-mobile #datacatCreatorSortSelect, html.cl-mobile [data-select-id="datacatCreatorSortSelect"] { min-width: 0; flex: 1; font-size: var(--font-sm); }
+html.cl-mobile [data-select-id="datacatCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
 
-}
 
 
 /* ============================================
@@ -377,57 +375,54 @@
 
 
 /* Mobile: extraction panel + in-modal CTA */
-@media screen and (max-width: 768px) {
 
-    .datacat-extract-panel {
-        padding: var(--space-lg) var(--space-md);
-        max-width: 100%;
-    }
-
-    .datacat-extract-actions {
-        flex-direction: column;
-        width: 100%;
-    }
-
-    .datacat-extract-actions .action-btn {
-        width: 100%;
-        justify-content: center;
-    }
-
-    .datacat-modal-extract-cta {
-        max-width: 100%;
-        padding: var(--space-xl) 0 var(--space-sm);
-    }
-
-    .datacat-modal-extract-icon-wrap {
-        width: 48px;
-        height: 48px;
-        margin-bottom: var(--space-md);
-    }
-
-    .datacat-modal-extract-icon {
-        font-size: var(--font-lg);
-    }
-
-    .datacat-modal-extract-message {
-        font-size: var(--font-sm);
-    }
-
-    .datacat-modal-extract-hint {
-        font-size: var(--font-xs);
-        max-width: 100%;
-        margin-bottom: var(--space-lg);
-    }
-
-    .datacat-modal-extract-btn {
-        width: 100%;
-        min-width: 0;
-        justify-content: center;
-    }
-
-    .datacat-lorebooks-note { font-size: var(--font-xs); padding: var(--space-xs) var(--space-sm); }
-    .datacat-lorebook-row { padding: var(--space-sm) var(--space-sm-md); }
-    .datacat-lorebook-author { font-size: var(--font-xs); }
-    .datacat-lorebook-desc { font-size: var(--font-xs); }
-
+html.cl-mobile .datacat-extract-panel {
+    padding: var(--space-lg) var(--space-md);
+    max-width: 100%;
 }
+
+html.cl-mobile .datacat-extract-actions {
+    flex-direction: column;
+    width: 100%;
+}
+
+html.cl-mobile .datacat-extract-actions .action-btn {
+    width: 100%;
+    justify-content: center;
+}
+
+html.cl-mobile .datacat-modal-extract-cta {
+    max-width: 100%;
+    padding: var(--space-xl) 0 var(--space-sm);
+}
+
+html.cl-mobile .datacat-modal-extract-icon-wrap {
+    width: 48px;
+    height: 48px;
+    margin-bottom: var(--space-md);
+}
+
+html.cl-mobile .datacat-modal-extract-icon {
+    font-size: var(--font-lg);
+}
+
+html.cl-mobile .datacat-modal-extract-message {
+    font-size: var(--font-sm);
+}
+
+html.cl-mobile .datacat-modal-extract-hint {
+    font-size: var(--font-xs);
+    max-width: 100%;
+    margin-bottom: var(--space-lg);
+}
+
+html.cl-mobile .datacat-modal-extract-btn {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+}
+
+html.cl-mobile .datacat-lorebooks-note { font-size: var(--font-xs); padding: var(--space-xs) var(--space-sm); }
+html.cl-mobile .datacat-lorebook-row { padding: var(--space-sm) var(--space-sm-md); }
+html.cl-mobile .datacat-lorebook-author { font-size: var(--font-xs); }
+html.cl-mobile .datacat-lorebook-desc { font-size: var(--font-xs); }

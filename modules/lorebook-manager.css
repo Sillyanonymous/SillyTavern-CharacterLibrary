@@ -1238,6 +1238,26 @@
     gap: var(--space-md);
 }
 
+/* Fluid select (no width lock): the trigger ellipsizes long playlist names instead of pushing the row. */
+.lb-link-playlist-wrap {
+    display: flex;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.lb-link-playlist-wrap .custom-select-container {
+    min-width: 0;
+}
+.lb-link-playlist-wrap .custom-select-trigger {
+    min-width: 0;
+    max-width: 220px;
+}
+.lb-link-playlist-wrap .custom-select-trigger .trigger-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .lb-link-filter-toggle {
     display: inline-flex;
     align-items: center;
@@ -1398,258 +1418,268 @@
  * Mobile
  * ======================================== */
 
-@media (max-width: 768px) {
-    .lb-modal-glass {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: 0 !important;
-    }
+html.cl-mobile .lb-modal-glass {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+}
 
-    /* split "New" button: touch-friendly caret + menu items */
-    .lb-split-caret { min-height: var(--touch-target-min, 44px); }
-    .lb-split-menu .dropdown-item { min-height: var(--touch-target-min, 44px); }
+/* split "New" button: touch-friendly caret + menu items */
+html.cl-mobile .lb-split-caret { min-height: var(--touch-target-min, 44px); }
+html.cl-mobile .lb-split-menu .dropdown-item { min-height: var(--touch-target-min, 44px); }
 
-    .lb-body {
-        flex-direction: column;
-        position: relative;
-    }
+html.cl-mobile .lb-body {
+    flex-direction: column;
+    position: relative;
+}
 
-    /* Two-screen flow: the world list fills the screen until a world is opened, then the editor takes
-       over full-height. The sidebar itself scrolls (vertical padding zeroed) so the tools bar pins +
-       auto-hides; the world list flows instead of nesting a second scroller. */
-    .lb-sidebar {
-        width: 100%;
-        min-width: 0;
-        flex: 1;
-        border-right: none;
-        overflow-y: auto;
-        padding-top: 0;
-        padding-bottom: 0;
-    }
-    /* Restores the sidebar's removed top padding; scrolls away with the actions. */
-    .lb-sidebar-actions { padding-top: var(--space-lg); }
-    .lb-sidebar-tools {
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        background: var(--bg-primary);
-        transition: transform 0.25s ease;
-    }
-    /* Breathing room above the search only when pinned, so it doesn't stack on the normal gap. */
-    .lb-sidebar-tools.lb-pinned { padding-top: var(--space-xs); }
-    .lb-sidebar-tools.lb-toolbar-hidden { transform: translateY(-100%); }
-    .lb-world-list { overflow: visible; flex: 0 0 auto; }
+/* Two-screen flow: the world list fills the screen until a world is opened, then the editor takes
+   over full-height. The sidebar itself scrolls (vertical padding zeroed) so the tools bar pins +
+   auto-hides; the world list flows instead of nesting a second scroller. */
+html.cl-mobile .lb-sidebar {
+    width: 100%;
+    min-width: 0;
+    flex: 1;
+    border-right: none;
+    overflow-y: auto;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+/* Restores the sidebar's removed top padding; scrolls away with the actions. */
+html.cl-mobile .lb-sidebar-actions { padding-top: var(--space-lg); }
+/* In flow by default (scrolls away naturally); .lb-pinned floats it back in on scroll-up. */
+html.cl-mobile .lb-sidebar-tools {
+    background: var(--bg-primary);
+}
+/* The floating state shared by all three bars: sticky, slide-in on arrival, slide-out via
+   .lb-toolbar-hidden before the JS unfloats. Breathing room on top so it doesn't sit flush. */
+html.cl-mobile .lb-sidebar-tools.lb-pinned,
+html.cl-mobile .lb-entries-toolbar.lb-pinned,
+html.cl-mobile .lb-link-head.lb-pinned {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding-top: var(--space-xs);
+    animation: lbToolbarIn 0.2s ease;
+    transition: transform 0.2s ease;
+}
+html.cl-mobile .lb-sidebar-tools.lb-toolbar-hidden,
+html.cl-mobile .lb-entries-toolbar.lb-toolbar-hidden,
+html.cl-mobile .lb-link-head.lb-toolbar-hidden { transform: translateY(-100%); }
+@keyframes lbToolbarIn {
+    from { transform: translateY(-100%); }
+    to { transform: translateY(0); }
+}
+html.cl-mobile .lb-world-list { overflow: visible; flex: 0 0 auto; }
 
-    .lb-content {
-        display: none;
-    }
+html.cl-mobile .lb-content {
+    display: none;
+}
 
-    .lb-body.lb-editing .lb-sidebar {
-        display: none;
-    }
+html.cl-mobile .lb-body.lb-editing .lb-sidebar {
+    display: none;
+}
 
-    .lb-body.lb-editing .lb-content {
-        display: flex;
-        overflow-y: auto;
-    }
+html.cl-mobile .lb-body.lb-editing .lb-content {
+    display: flex;
+    overflow-y: auto;
+}
 
-    .lb-editor-head,
-    .lb-entries-toolbar,
-    .lb-entries {
-        padding-left: var(--space-md);
-        padding-right: var(--space-md);
-    }
+html.cl-mobile .lb-editor-head,
+html.cl-mobile .lb-entries-toolbar,
+html.cl-mobile .lb-entries {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+}
 
-    /* Mobile: the whole editor scrolls (in .lb-content) so the head scrolls away. The toolbar is
-       sticky AND auto-hides on scroll-down / reveals on scroll-up (class toggled by JS), so it
-       gets out of the way too. .lb-editor/.lb-entries flow at natural height so .lb-content scrolls
-       them and the toolbar stays sticky across the full content. */
-    .lb-editor { flex: 0 0 auto; overflow: visible; }
-    .lb-entries { flex: 0 0 auto; overflow: visible; }
-    .lb-entries-toolbar {
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        /* Opaque (not the translucent --modal-bg) so entries scrolling under the pinned toolbar
-           don't bleed through; --bg-primary is the closest solid tone to the modal background. */
-        background: var(--bg-primary);
-        transition: transform 0.25s ease;
-    }
-    .lb-entries-toolbar.lb-toolbar-hidden { transform: translateY(-100%); }
+/* Mobile: the whole editor scrolls (in .lb-content) so the head and toolbar scroll away
+   naturally; scrolling up floats the toolbar back in (.lb-pinned, shared rules above).
+   .lb-editor/.lb-entries flow at natural height so .lb-content scrolls them. */
+html.cl-mobile .lb-editor { flex: 0 0 auto; overflow: visible; }
+html.cl-mobile .lb-entries { flex: 0 0 auto; overflow: visible; }
+html.cl-mobile .lb-entries-toolbar {
+    /* Opaque (not the translucent --modal-bg) so entries scrolling under the floated toolbar
+       don't bleed through; --bg-primary is the closest solid tone to the modal background. */
+    background: var(--bg-primary);
+}
 
-    /* Slim the outer "Lorebooks" bar so it doesn't double up with the editor's own head. */
-    .lb-header { padding: var(--space-sm) var(--space-md); }
-    .lb-header h2 { font-size: var(--font-lg); }
+/* Slim the outer "Lorebooks" bar so it doesn't double up with the editor's own head. */
+html.cl-mobile .lb-header { padding: var(--space-sm) var(--space-md); }
 
-    /* Tighter editor head so title + actions + meta don't eat the viewport. */
-    .lb-editor-head { padding-top: var(--space-md); padding-bottom: var(--space-sm); gap: var(--space-xs); }
+/* Tighter editor head so title + actions + meta don't eat the viewport. */
+html.cl-mobile .lb-editor-head { padding-top: var(--space-md); padding-bottom: var(--space-sm); gap: var(--space-xs); }
 
-    /* Editor header: back + title + Save + overflow kebab, all on a single row. */
-    .lb-editor-title-row {
-        flex-wrap: nowrap;
-    }
+/* Editor header: back + title + Save + overflow kebab, all on a single row. */
+html.cl-mobile .lb-editor-title-row {
+    flex-wrap: nowrap;
+}
 
-    .lb-editor-title {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
+html.cl-mobile .lb-editor-title {
+    flex: 1 1 auto;
+    min-width: 0;
+}
 
-    .lb-editor-actions {
-        flex-wrap: nowrap;
-        flex-basis: auto;
-        gap: var(--space-xs);
-    }
+html.cl-mobile .lb-editor-actions {
+    flex-wrap: nowrap;
+    flex-basis: auto;
+    gap: var(--space-xs);
+}
 
-    /* Secondary actions live in the kebab menu; Save stays compact (not full-width). */
-    .lb-action-desktop { display: none; }
-    .lb-action-mobile { display: inline-flex; }
+/* Secondary actions live in the kebab menu; Save stays compact (not full-width). */
+html.cl-mobile .lb-action-desktop { display: none; }
+html.cl-mobile .lb-action-mobile { display: inline-flex; }
 
-    .lb-save-btn {
-        flex: 0 0 auto;
-        justify-content: center;
-        min-height: 40px;
-        padding: var(--btn-pad-v-sm) var(--space-md);
-    }
+html.cl-mobile .lb-save-btn {
+    flex: 0 0 auto;
+    justify-content: center;
+    min-height: 40px;
+    padding: var(--btn-pad-v-sm) var(--space-md);
+}
 
-    .lb-entries-toolbar {
-        flex-wrap: wrap;
-    }
+html.cl-mobile .lb-entries-toolbar {
+    flex-wrap: wrap;
+}
 
-    .lb-entries-toolbar .lb-search-wrap {
-        max-width: none;
-        flex-basis: 100%;
-        order: -1;
-    }
+html.cl-mobile .lb-entries-toolbar .lb-search-wrap {
+    max-width: none;
+    flex-basis: 100%;
+    order: -1;
+}
 
-    /* Row 2 stays a single line: search owns row 1, then sort fills and the three actions go
-       compact (toggle + AI icon-only, "Add Entry" -> "Add"); the desktop spacer is dead weight. */
-    .lb-toolbar-spacer { display: none; }
-    .lb-entries-toolbar .lb-sort-select { flex: 1 1 auto; width: auto; min-width: 0; }
-    .lb-ai-entry-label,
-    .lb-add-full { display: none; }
-    .lb-add-short { display: inline; }
-    .lb-ai-entry-btn { min-height: 40px; }
-    .lb-entries-toolbar .lb-add-entry-btn {
-        min-height: 40px;
-        padding-left: var(--space-md);
-        padding-right: var(--space-md);
-    }
+/* Row 2 stays a single line: search owns row 1, then sort fills and the three actions go
+   compact (toggle + AI icon-only, "Add Entry" -> "Add"); the desktop spacer is dead weight. */
+html.cl-mobile .lb-toolbar-spacer { display: none; }
+html.cl-mobile .lb-entries-toolbar .lb-sort-select { flex: 1 1 auto; width: auto; min-width: 0; }
+html.cl-mobile .lb-ai-entry-label,
+html.cl-mobile .lb-add-full { display: none; }
+html.cl-mobile .lb-add-short { display: inline; }
+html.cl-mobile .lb-ai-entry-btn { min-height: 40px; }
+html.cl-mobile .lb-entries-toolbar .lb-add-entry-btn {
+    min-height: 40px;
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+}
 
-    .lb-field-grid.two,
-    .lb-field-grid.three,
-    .lb-keys-row {
-        grid-template-columns: 1fr;
-    }
-    /* Stacked single-column: the alignment spacer is dead weight, drop it. */
-    .lb-field-label-spacer { display: none; }
+html.cl-mobile .lb-field-grid.two,
+html.cl-mobile .lb-field-grid.three,
+html.cl-mobile .lb-keys-row {
+    grid-template-columns: 1fr;
+}
+/* Stacked single-column: the alignment spacer is dead weight, drop it. */
+html.cl-mobile .lb-field-label-spacer { display: none; }
 
-    .lb-state-seg {
-        width: 100%;
-    }
+html.cl-mobile .lb-state-seg {
+    width: 100%;
+}
 
-    .lb-state-opt {
-        flex: 1;
-        justify-content: center;
-        min-height: 44px;
-    }
+html.cl-mobile .lb-state-opt {
+    flex: 1;
+    justify-content: center;
+    min-height: 44px;
+}
 
-    .lb-usedby-opt {
-        min-height: 44px;
-        width: 48px;
-    }
+html.cl-mobile .lb-usedby-opt {
+    min-height: 44px;
+    width: 48px;
+}
 
-    .lb-toggle-grid {
-        grid-template-columns: 1fr;
-    }
+html.cl-mobile .lb-toggle-grid {
+    grid-template-columns: 1fr;
+}
 
-    .lb-toggle-row {
-        flex-direction: column;
-        gap: var(--space-sm);
-    }
+html.cl-mobile .lb-toggle-row {
+    flex-direction: column;
+    gap: var(--space-sm);
+}
 
-    /* iOS zoom guard for the remaining bespoke inputs (cl-input is guarded globally). */
-    .lb-pill-input,
-    .lb-newbook-input,
-    .lb-rename-input {
-        font-size: var(--mobile-input-size);
-    }
+/* iOS zoom guard for the remaining bespoke inputs (cl-input is guarded globally). */
+html.cl-mobile .lb-pill-input,
+html.cl-mobile .lb-newbook-input,
+html.cl-mobile .lb-rename-input {
+    font-size: var(--mobile-input-size);
+}
 
-    .lb-icon-btn {
-        width: 40px;
-        height: 40px;
-    }
+html.cl-mobile .lb-icon-btn {
+    width: 40px;
+    height: 40px;
+}
 
-    /* Per-entry action buttons must still clear the touch-target floor. */
-    .lb-icon-btn.small {
-        width: 36px;
-        height: 36px;
-        font-size: var(--font-xs);
-    }
+/* Per-entry action buttons must still clear the touch-target floor. */
+html.cl-mobile .lb-icon-btn.small {
+    width: 36px;
+    height: 36px;
+    font-size: var(--font-xs);
+}
 
-    .lb-entry-head {
-        padding: var(--space-md);
-        gap: var(--space-sm);
-    }
+html.cl-mobile .lb-entry-head {
+    padding: var(--space-md);
+    gap: var(--space-sm);
+}
 
-    /* The entry row is too squeezed on mobile for the position/order badges (long labels, no room).
-       They live in the expanded editor; here just show the keys (the trigger), full width. */
-    .lb-entry-pos,
-    .lb-entry-order { display: none; }
-    .lb-entry-keys { max-width: 100%; }
+/* The entry row is too squeezed on mobile for the position/order badges (long labels, no room).
+   They live in the expanded editor; here just show the keys (the trigger), full width. */
+html.cl-mobile .lb-entry-pos,
+html.cl-mobile .lb-entry-order { display: none; }
+html.cl-mobile .lb-entry-keys { max-width: 100%; }
 
-    /* Roomier tap target for the whole row + clear the home indicator. */
-    .lb-world-row {
-        min-height: 52px;
-    }
+/* Roomier tap target for the whole row + clear the home indicator. */
+html.cl-mobile .lb-world-row {
+    min-height: 52px;
+}
 
-    .lb-entries {
-        padding-bottom: max(var(--space-xl), env(safe-area-inset-bottom));
-    }
+html.cl-mobile .lb-entries {
+    padding-bottom: max(var(--space-xl), env(safe-area-inset-bottom));
+}
 
-    .lb-world-list {
-        padding-bottom: max(var(--space-lg), env(safe-area-inset-bottom));
-    }
+html.cl-mobile .lb-world-list {
+    padding-bottom: max(var(--space-lg), env(safe-area-inset-bottom));
+}
 
-    /* The modal body scrolls (vertical padding zeroed so the sticky header pins flush) and the list
-       flows inside it. The header is a sticky overlay that auto-hides on scroll-down / reveals on
-       scroll-up via translateY, so showing/hiding it never reflows the list: rows scroll under it. */
-    .lb-link-body {
-        overflow-y: auto;
-        padding-top: 0;
-        padding-bottom: 0;
-    }
-    .lb-link-mode-hint { margin-top: var(--space-md); }
-    .lb-link-head {
-        position: sticky;
-        top: 0;
-        z-index: 5;
-        background: var(--bg-secondary); /* match the mobile cl-modal body so the pinned bar blends in */
-        transition: transform 0.25s ease;
-    }
-    .lb-link-head.lb-link-head-hidden { transform: translateY(-100%); }
-    /* Breathing room above the search only when pinned (bg fills it), matching the world list. */
-    .lb-link-head.lb-pinned { padding-top: var(--space-xs); }
+/* The modal body scrolls (vertical padding zeroed so the floated header pins flush) and the list
+   flows inside it. The header scrolls away naturally on the way down and floats back in on
+   scroll-up (.lb-pinned, shared rules in the world-list section). */
+html.cl-mobile .lb-link-body {
+    overflow-y: auto;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+html.cl-mobile .lb-link-mode-hint { margin-top: var(--space-md); }
+html.cl-mobile .lb-link-head {
+    background: var(--bg-secondary); /* match the mobile cl-modal body so the floated bar blends in */
+}
 
-    /* Link picker: let the tools row wrap so search + filter don't crowd. */
-    .lb-link-tools {
-        flex-wrap: wrap;
-    }
+/* Link picker: let the tools row wrap so search + filter don't crowd. */
+html.cl-mobile .lb-link-tools {
+    flex-wrap: wrap;
+}
 
-    .lb-link-tools .lb-search-wrap {
-        flex-basis: 100%;
-    }
+html.cl-mobile .lb-link-tools .lb-search-wrap {
+    flex-basis: 100%;
+}
 
-    .lb-link-list {
-        overflow: visible;
-        flex: 0 0 auto;
-        padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
-    }
+/* Playlist filter takes its own full row under the search; trigger opens the selector sheet. */
+html.cl-mobile .lb-link-playlist-wrap,
+html.cl-mobile .lb-link-playlist-wrap .custom-select-container {
+    flex: 1 1 auto;
+    width: 100%;
+}
+html.cl-mobile .lb-link-playlist-wrap .custom-select-trigger {
+    max-width: none;
+    width: 100%;
+    min-height: var(--touch-target-min);
+    justify-content: space-between;
+}
 
-    .lb-link-row {
-        min-height: 48px;
-    }
+html.cl-mobile .lb-link-list {
+    overflow: visible;
+    flex: 0 0 auto;
+    padding-bottom: max(var(--space-md), env(safe-area-inset-bottom));
+}
+
+html.cl-mobile .lb-link-row {
+    min-height: 48px;
 }
 
 /* ============================================================
@@ -2218,60 +2248,62 @@ body.modal-size-large .cl-modal-content.lb-ai-staging-content { max-width: 1100p
 .lb-ai-stage-content:focus { outline: none; border-color: var(--accent); }
 
 /* --- Mobile --- */
-@media (max-width: 768px) {
-    .lb-ai-textarea-tall { min-height: 160px; }
-    .lb-ai-src-opt { font-size: var(--font-xs); min-height: 44px; }
-    .lb-ai-src-opt i { font-size: var(--font-xs); }
-    .lb-ai-staging-list { max-height: none; }
-    .lb-ai-st-row { min-height: 48px; }
-    .lb-ai-st-mode { min-height: 44px; }
-    .lb-ai-st-scope-opt,
-    .lb-ai-st-field-opt { min-height: 32px; }
-    .lb-ai-cat-row { min-height: 44px; }
-    .lb-ai-cat-list { max-height: 40vh; }
-    .lb-ai-textarea, .lb-ai-stage-title, .lb-ai-stage-keys, .lb-ai-stage-content,
-    .lb-ai-url-input, .lb-ai-num { font-size: var(--mobile-input-size); }
-    /* name field wraps to its own line; Max + Context share the next */
-    .lb-ai-settings-row { flex-wrap: wrap; }
-    .lb-ai-settings-row .lb-ai-field { flex: 1 1 100%; }
-    .lb-ai-settings-row .lb-ai-field-narrow { flex: 1 1 calc(50% - var(--space-md)); }
+html.cl-mobile .lb-ai-textarea-tall { min-height: 160px; }
+html.cl-mobile .lb-ai-src-opt { font-size: var(--font-xs); min-height: 44px; }
+html.cl-mobile .lb-ai-src-opt i { font-size: var(--font-xs); }
+html.cl-mobile .lb-ai-staging-list { max-height: none; }
+html.cl-mobile .lb-ai-st-row { min-height: 48px; }
+html.cl-mobile .lb-ai-st-mode { min-height: 44px; }
+html.cl-mobile .lb-ai-st-scope-opt,
+html.cl-mobile .lb-ai-st-field-opt { min-height: 32px; }
+html.cl-mobile .lb-ai-cat-row { min-height: 44px; }
+html.cl-mobile .lb-ai-cat-list { max-height: 40vh; }
+html.cl-mobile .lb-ai-textarea,
+html.cl-mobile .lb-ai-stage-title,
+html.cl-mobile .lb-ai-stage-keys,
+html.cl-mobile .lb-ai-stage-content,
+html.cl-mobile .lb-ai-url-input,
+html.cl-mobile .lb-ai-num { font-size: var(--mobile-input-size); }
+/* name field wraps to its own line; Max + Context share the next */
+html.cl-mobile .lb-ai-settings-row { flex-wrap: wrap; }
+html.cl-mobile .lb-ai-settings-row .lb-ai-field { flex: 1 1 100%; }
+html.cl-mobile .lb-ai-settings-row .lb-ai-field-narrow { flex: 1 1 calc(50% - var(--space-md)); }
 
-    /* --- holistic mobile layout (the rules above were piecemeal touch fixes) --- */
-    /* Body: edge-appropriate padding (the desktop 2xl wastes a phone's width) + tighter rhythm. */
-    .lb-ai-body { padding: var(--space-md); gap: var(--space-lg); }
-    /* Step cards: lighter so the double-inset (body + card) doesn't crush the content. */
-    .lb-ai-section { padding: var(--space-md); gap: var(--space-sm); }
-    .lb-ai-section-head { font-size: var(--font-xs); }
-    /* Source tabs (where labels show, 481-768): let them shrink instead of overflowing. */
-    .lb-ai-src-opt { min-width: 0; }
-    /* URL + Fetch stack so neither is cramped on a narrow row; action buttons go full-width. */
-    .lb-ai-url-row { flex-direction: column; }
-    .lb-ai-fetch-btn { width: 100%; }
-    .lb-ai-cat-load { width: 100%; }
-    .lb-ai-detail-opt { flex: 1; min-height: 40px; }
-    .lb-ai-cat-detail { gap: var(--space-xs); }
-    /* Picker list capped to a viewport fraction like the category list. */
-    .lb-ai-st-list { max-height: 40vh; }
-    /* Footer: full-width split actions so Generate is a big, reachable target. */
-    .lb-ai-modal-content .cl-modal-footer { gap: var(--space-sm); }
-    .lb-ai-modal-content .cl-modal-footer .cl-btn { flex: 1; }
+/* --- holistic mobile layout (the rules above were piecemeal touch fixes) --- */
+/* Body: edge-appropriate padding (the desktop 2xl wastes a phone's width) + tighter rhythm. */
+html.cl-mobile .lb-ai-body { padding: var(--space-md); gap: var(--space-lg); }
+/* Step cards: lighter so the double-inset (body + card) doesn't crush the content. */
+html.cl-mobile .lb-ai-section { padding: var(--space-md); gap: var(--space-sm); }
+html.cl-mobile .lb-ai-section-head { font-size: var(--font-xs); }
+/* Source tabs (where labels show, above the 480px icon-only tier): let them shrink instead of overflowing. */
+html.cl-mobile .lb-ai-src-opt { min-width: 0; }
+/* URL + Fetch stack so neither is cramped on a narrow row; action buttons go full-width. */
+html.cl-mobile .lb-ai-url-row { flex-direction: column; }
+html.cl-mobile .lb-ai-fetch-btn { width: 100%; }
+html.cl-mobile .lb-ai-cat-load { width: 100%; }
+html.cl-mobile .lb-ai-detail-opt { flex: 1; min-height: 40px; }
+html.cl-mobile .lb-ai-cat-detail { gap: var(--space-xs); }
+/* Picker list capped to a viewport fraction like the category list. */
+html.cl-mobile .lb-ai-st-list { max-height: 40vh; }
+/* Footer: full-width split actions so Generate is a big, reachable target. */
+html.cl-mobile .lb-ai-modal-content .cl-modal-footer { gap: var(--space-sm); }
+html.cl-mobile .lb-ai-modal-content .cl-modal-footer .cl-btn { flex: 1; }
 
-    /* The custom-select trigger has no font-size of its own, so it inherits the 16px browser
-       default (modal-glass sets no base font, unlike recommender-body). That makes the sort and
-       connection dropdowns tower over the tightened scale. Pin them down; the body-appended menu
-       items already carry their own small font. */
-    .lb-sort-select .custom-select-trigger { font-size: var(--font-xs); }
+/* The custom-select trigger has no font-size of its own, so it inherits the 16px browser
+   default (modal-glass sets no base font, unlike recommender-body). That makes the sort and
+   connection dropdowns tower over the tightened scale. Pin them down; the body-appended menu
+   items already carry their own small font. */
+html.cl-mobile .lb-sort-select .custom-select-trigger { font-size: var(--font-xs); }
 
-    /* Placeholder "hints" inherit the field size (16px on iOS for the focus-zoom guard) and read
-       as huge. Shrink only the placeholder; the field keeps its size so iOS still doesn't zoom. */
-    .lb-modal-glass input::placeholder,
-    .lb-modal-glass textarea::placeholder,
-    .lb-ai-modal-content input::placeholder,
-    .lb-ai-modal-content textarea::placeholder {
-        font-size: var(--font-xs);
-    }
+/* Placeholder "hints" inherit the field size (16px on iOS for the focus-zoom guard) and read
+   as huge. Shrink only the placeholder; the field keeps its size so iOS still doesn't zoom. */
+html.cl-mobile .lb-modal-glass input::placeholder,
+html.cl-mobile .lb-modal-glass textarea::placeholder,
+html.cl-mobile .lb-ai-modal-content input::placeholder,
+html.cl-mobile .lb-ai-modal-content textarea::placeholder {
+    font-size: var(--font-xs);
 }
 /* phones: source tab labels are tight next to three buttons, drop to icon-only */
 @media (max-width: 480px) {
-    .lb-ai-src-opt span { display: none; }
+    html.cl-mobile .lb-ai-src-opt span { display: none; }
 }

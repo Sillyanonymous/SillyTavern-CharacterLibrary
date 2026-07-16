@@ -243,8 +243,8 @@ function injectMultiSelectToolbar() {
     });
 
     document.getElementById('multiSelectExportBtn')?.addEventListener('click', () => {
-        const contextMenu = CoreAPI.getModule('context-menu');
-        contextMenu?.bulkExport?.();
+        const batchTransfer = CoreAPI.getModule('batch-transfer');
+        batchTransfer?.openExportChooser?.();
     });
 
     document.getElementById('multiSelectDeleteBtn')?.addEventListener('click', () => {

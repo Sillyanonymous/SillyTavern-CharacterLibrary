@@ -185,75 +185,73 @@ body.multi-select-mode .char-card:hover .char-card-checkbox {
 }
 
 /* =========================================================
-   Mobile overrides (max-width: 768px)
+   Mobile-mode overrides (html.cl-mobile)
    ========================================================= */
-@media (max-width: 768px) {
-    .ms-btn {
-        touch-action: manipulation;
-    }
+html.cl-mobile .ms-btn {
+    touch-action: manipulation;
+}
 
-    .multi-select-toolbar {
-        flex-wrap: nowrap;
-        padding: var(--space-xs) var(--space-sm);
-        gap: var(--space-xs);
-        flex-shrink: 0;
-        overflow-x: auto;
-        backdrop-filter: none !important;
-        transition: none !important;
-    }
-    .multi-select-toolbar.hidden {
-        display: none !important;
-    }
+html.cl-mobile .multi-select-toolbar {
+    flex-wrap: nowrap;
+    padding: var(--space-xs) var(--space-sm);
+    gap: var(--space-xs);
+    flex-shrink: 0;
+    overflow-x: auto;
+    backdrop-filter: none !important;
+    transition: none !important;
+}
+html.cl-mobile .multi-select-toolbar.hidden {
+    display: none !important;
+}
 
-    /* Kill per-card checkbox transition */
-    body.multi-select-mode .char-card .char-card-checkbox {
-        transition: none !important;
-    }
-    body.multi-select-mode .char-card .char-card-checkbox i {
-        transition: none !important;
-    }
-    .multi-select-left {
-        gap: var(--space-xs);
-        flex-shrink: 0;
-    }
-    .multi-select-badge {
-        padding: var(--space-2xs) var(--space-sm);
-        font-size: var(--font-sm);
-        gap: var(--space-xs);
-    }
-    .multi-select-label {
-        display: none;
-    }
-    .multi-select-actions {
-        display: flex;
-        flex-wrap: nowrap;
-        gap: var(--space-xs);
-        justify-content: center;
-        min-width: 0;
-    }
-    .ms-btn {
-        padding: 0;
-        gap: 0;
-        min-width: 32px;
-        min-height: 32px;
-        width: 32px;
-        height: 32px;
-        flex-shrink: 0;
-        justify-content: center;
-    }
-    .ms-btn i {
-        font-size: var(--font-base);
-    }
-    .ms-btn span {
-        display: none;
-    }
-    .ms-divider {
-        display: none;
-    }
-    .multi-select-right {
-        gap: var(--space-xs);
-    }
-    .ms-btn-exit {
-        padding: 0;
-    }
+/* Kill per-card checkbox transition */
+html.cl-mobile body.multi-select-mode .char-card .char-card-checkbox {
+    transition: none !important;
+}
+html.cl-mobile body.multi-select-mode .char-card .char-card-checkbox i {
+    transition: none !important;
+}
+html.cl-mobile .multi-select-left {
+    gap: var(--space-xs);
+    flex-shrink: 0;
+}
+html.cl-mobile .multi-select-badge {
+    padding: var(--space-2xs) var(--space-sm);
+    font-size: var(--font-sm);
+    gap: var(--space-xs);
+}
+html.cl-mobile .multi-select-label {
+    display: none;
+}
+html.cl-mobile .multi-select-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--space-xs);
+    justify-content: center;
+    min-width: 0;
+}
+html.cl-mobile .ms-btn {
+    padding: 0;
+    gap: 0;
+    min-width: 32px;
+    min-height: 32px;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    justify-content: center;
+}
+html.cl-mobile .ms-btn i {
+    font-size: var(--font-base);
+}
+html.cl-mobile .ms-btn span {
+    display: none;
+}
+html.cl-mobile .ms-divider {
+    display: none;
+}
+html.cl-mobile .multi-select-right {
+    gap: var(--space-xs);
+}
+html.cl-mobile .ms-btn-exit {
+    padding: 0;
 }

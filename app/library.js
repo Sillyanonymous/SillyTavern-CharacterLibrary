@@ -4,8 +4,8 @@
 // elsewhere in this file. library-mobile.js (loaded after this script) reuses
 // this same array via `window._overlayRegistry = window._overlayRegistry || []`.
 window._overlayRegistry = window._overlayRegistry || [];
-// Replace-by-id: mobile setup re-registers its overlays on every breakpoint
-// crossing, and duplicate ids would make stale configs race the fresh ones.
+// Replace-by-id: mobile setup re-registers its overlays on every mode
+// flip, and duplicate ids would make stale configs race the fresh ones.
 window.registerOverlay = window.registerOverlay || function(cfg) {
     const i = window._overlayRegistry.findIndex(r => r.id === cfg.id);
     if (i !== -1) window._overlayRegistry[i] = cfg;
@@ -81,6 +81,16 @@ let showFavoritesOnly = false;
         if (el) showScrollbar(el);
     }, { passive: true });
 })();
+
+// ========================================
+// MOBILE MODE
+// ========================================
+
+// Read of html.cl-mobile (owned by the boot policy computeMobileMode + the library-mobile
+// lifecycle). Evaluate at event time, never cache at attach time: the mode flips live mid-session.
+function isMobileMode() {
+    return document.documentElement.classList.contains('cl-mobile');
+}
 
 // ========================================
 // PERFORMANCE UTILITIES
@@ -319,8 +329,8 @@ function initCustomSelect(select) {
     // --- Event listeners ---
     trigger.addEventListener('click', (e) => {
         e.stopPropagation();
-        // Decided at click time, not attach time, so a live breakpoint cross switches sheet/menu.
-        if (window.matchMedia('(max-width: 768px)').matches) {
+        // Decided at click time, not attach time, so a live mode flip switches sheet/menu.
+        if (isMobileMode()) {
             window.openSelectorSheetFromSelect?.(select);
             return;
         }
@@ -380,8 +390,8 @@ function initCustomSelect(select) {
     });
     widthObserver.observe(trigger);
 
-    // Viewport crossings invalidate the locked width (measured under the old
-    // breakpoint's fonts/layout, it persists as an inline style and overflows
+    // Mode flips invalidate the locked width (measured under the old
+    // mode's fonts/layout, it persists as an inline style and overflows
     // eg. the author-banner sort on mobile). Clears + re-measures on reveal.
     function relockWidth() {
         if (skipWidthLock) return;
@@ -437,6 +447,35 @@ function getRandomSortKey(char) {
     }
     return v;
 }
+// Comparator for the grid's sortSelect value; favorites float first when grouping is on.
+// Reads the select + setting once per sort. Pre-computed _dateAdded/_createDate keys keep
+// parseDateValue (regex + Date constructor) out of the hot comparator.
+function makeCharSortComparator() {
+    const sortSelect = document.getElementById('sortSelect');
+    const sortType = sortSelect ? sortSelect.value : 'name_asc';
+    const groupFavs = getSetting('groupFavoritesFirst') || false;
+    return (a, b) => {
+        if (groupFavs) {
+            const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
+            if (favA !== favB) return favA ? -1 : 1;
+        }
+        if (sortType === 'name_asc') return a.name.localeCompare(b.name);
+        if (sortType === 'name_desc') return b.name.localeCompare(a.name);
+        if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
+        if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
+        if (sortType === 'created_new') return b._createDate - a._createDate;
+        if (sortType === 'created_old') return a._createDate - b._createDate;
+        if (sortType === 'tokens_high' || sortType === 'tokens_low') {
+            const ta = a._tokenEstimate, tb = b._tokenEstimate;
+            const ua = ta == null, ub = tb == null;
+            // Unknown sorts last either direction.
+            if (ua || ub) return (ua && ub) ? 0 : (ua ? 1 : -1);
+            return sortType === 'tokens_high' ? tb - ta : ta - tb;
+        }
+        if (sortType === 'random') return getRandomSortKey(a) - getRandomSortKey(b);
+        return 0;
+    };
+}
 function reshuffleRandomSort() {
     _randomSortKeys.clear();
     if (Array.isArray(allCharacters)) {
@@ -465,6 +504,13 @@ function prepareCharacterKeys(chars) {
         c._createDate = getCharacterCreateDate(c);
         const lastChat = c.date_last_chat;
         c._dateLastChat = lastChat ? (parseDateValue(lastChat)?.getTime() || 0) : 0;
+        // Shallow cards have no heavy text; undefined = "not known yet" (sorts last / filters out) until recovery fills it.
+        if (c.shallow) {
+            c._tokenEstimate = _tokenEstimateCache.has(c.avatar) ? _tokenEstimateCache.get(c.avatar) : undefined;
+        } else {
+            c._tokenEstimate = computeTokenEstimate(c);
+            _tokenEstimateCache.set(c.avatar, c._tokenEstimate);
+        }
     }
 }
 
@@ -494,6 +540,8 @@ const DEFAULT_SETTINGS = {
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
     datacatFlareSolverrUrl: '',
+    janitoraiToken: null,
+    janitoraiRefreshToken: null,
     botbooruToken: null,
     botbooruUsername: null,
     botbooruPassword: null,
@@ -505,6 +553,7 @@ const DEFAULT_SETTINGS = {
     botbooruUseTagWeights: false,
     ctCookie: null,
     civitaiApiKey: null,
+    pixivCookie: null,
 
     // ---- NSFW Toggles ----
     chubNsfw: false,
@@ -551,6 +600,7 @@ const DEFAULT_SETTINGS = {
     galleryThumbPrewarm: true,
 
     // ---- UI & Display ----
+    chatCardDensity: 'comfortable',
     buttonStyle: 'glass',
     uiScale: 3,
     modalSize: 2,
@@ -807,10 +857,10 @@ function extractLlmContent(data, { checkFinishReason = false } = {}) {
 // Fetch ST settings: the active CC source/model/preset + the list of CC connection profiles.
 // Each AI module calls this, then populates its own <select> from `profiles`.
 async function getLlmSettings() {
-    const out = { profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '' };
+    const out = { profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '', hasProfiles: false, error: false };
     try {
         const response = await apiRequest('/settings/get', 'POST', {});
-        if (!response.ok) return out;
+        if (!response.ok) { out.error = true; return out; }
         const data = await response.json();
         const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
 
@@ -827,10 +877,12 @@ async function getLlmSettings() {
             }
         }
         const cm = settings?.extension_settings?.connectionManager;
+        out.hasProfiles = (cm?.profiles || []).length > 0;
         out.profiles = (cm?.profiles || []).filter(p => p.mode === 'cc');
         out.selectedProfileId = cm?.selectedProfile || '';
     } catch (e) {
         console.error('[LLM] getLlmSettings failed:', e);
+        out.error = true;
     }
     return out;
 }
@@ -1086,10 +1138,14 @@ async function loadGallerySettings() {
                     }
                 } catch (_) { /* ignore */ }
                 debugLog('[Settings] Loaded fresh from disk via /api/settings/get', gallerySettings);
-                // Also sync to opener's in-memory state so saves work correctly
+                // Live namespace keys win over the disk read (they may carry another CL
+                // instance's not-yet-flushed changes); defaults+disk fill the gaps so
+                // ST-side readers keep seeing the full key set.
                 const context = getSTContext();
                 if (context && context.extensionSettings) {
-                    context.extensionSettings[SETTINGS_KEY] = { ...gallerySettings };
+                    const merged = { ...gallerySettings, ...(context.extensionSettings[SETTINGS_KEY] || {}) };
+                    context.extensionSettings[SETTINGS_KEY] = merged;
+                    gallerySettings = { ...merged };
                 }
                 return;
             }
@@ -1150,11 +1206,19 @@ function migrateSettings() {
  * Save settings to SillyTavern's extension settings (server-side)
  * Also saves to localStorage as backup
  */
-function saveGallerySettings() {
+function saveGallerySettings(changedKeys = null) {
     // Try to save to SillyTavern extension settings first
     const context = getSTContext();
     if (context && context.extensionSettings) {
-        context.extensionSettings[SETTINGS_KEY] = { ...gallerySettings };
+        const ns = context.extensionSettings[SETTINGS_KEY];
+        if (changedKeys && ns) {
+            // Surgical per-key write: a concurrent CL instance (embedded pane + tab)
+            // may hold newer values for OTHER keys; a wholesale stamp would revert them.
+            for (const key of changedKeys) ns[key] = gallerySettings[key];
+        } else {
+            // Wholesale, for boot migrations that delete keys (deletion must propagate).
+            context.extensionSettings[SETTINGS_KEY] = { ...gallerySettings };
+        }
         // Trigger ST's debounced save to persist to disk
         if (typeof context.saveSettingsDebounced === 'function') {
             context.saveSettingsDebounced();
@@ -1176,12 +1240,12 @@ function getSetting(key) {
 
 function setSetting(key, value) {
     gallerySettings[key] = value;
-    saveGallerySettings();
+    saveGallerySettings([key]);
 }
 
 function setSettings(settings) {
     Object.assign(gallerySettings, settings);
-    saveGallerySettings();
+    saveGallerySettings(Object.keys(settings));
 }
 
 // Respects mobileHaptics setting and silently no-ops on unsupported devices.
@@ -1668,6 +1732,7 @@ function setupSettingsModal() {
     const gridThumbPurgeBtn = document.getElementById('settingsGridThumbPurge');
     
     // Appearance
+    const mobileModeSelect = document.getElementById('settingsMobileMode');
     const uiScaleSelect = document.getElementById('settingsUiScale');
     const modalSizeSelect = document.getElementById('settingsModalSize');
     const buttonStyleSelect = document.getElementById('settingsButtonStyle');
@@ -1802,6 +1867,10 @@ function setupSettingsModal() {
             const isDisabled = disabledProviders.has(provider.id);
             if (isDisabled) item.classList.add('provider-disabled');
 
+            const hideToggles = `
+                <label class="provider-default-hide" title="Hide cards already in your library by default"><input type="checkbox" class="provider-default-hide-owned"${defaults.hideOwned ? ' checked' : ''}>Hide Owned</label>
+                <label class="provider-default-hide" title="Hide possible-match cards by default"><input type="checkbox" class="provider-default-hide-possible"${defaults.hidePossible ? ' checked' : ''}>Hide Possible</label>`;
+
             item.innerHTML = `
                 <i class="fa-solid fa-grip-vertical drag-handle"></i>
                 <button type="button" class="provider-toggle-btn${isDisabled ? ' disabled' : ''}" data-provider="${provider.id}" title="${isDisabled ? 'Enable' : 'Disable'} in Online tab">
@@ -1812,7 +1881,7 @@ function setupSettingsModal() {
                 ${provider.beta ? '<span class="provider-beta-badge">Beta</span>' : ''}
                 <span class="provider-order-badge">Default</span>
                 <div class="provider-order-defaults">
-                    ${viewSelect}${sortSelect}
+                    ${viewSelect}${sortSelect}${hideToggles}
                 </div>
             `;
 
@@ -1940,11 +2009,15 @@ function setupSettingsModal() {
             const sortSel = item.querySelector('.provider-default-sort');
             const viewVal = viewSel?.value || '';
             const sortVal = sortSel?.value || '';
+            const hideOwned = !!item.querySelector('.provider-default-hide-owned')?.checked;
+            const hidePossible = !!item.querySelector('.provider-default-hide-possible')?.checked;
 
-            if (viewVal || sortVal) {
+            if (viewVal || sortVal || hideOwned || hidePossible) {
                 defaults[pid] = {};
                 if (viewVal) defaults[pid].view = viewVal;
                 if (sortVal) defaults[pid].sort = sortVal;
+                if (hideOwned) defaults[pid].hideOwned = true;
+                if (hidePossible) defaults[pid].hidePossible = true;
             }
         });
 
@@ -2001,6 +2074,8 @@ function setupSettingsModal() {
                 <span class="provider-order-badge">Default</span>
                 <div class="provider-order-defaults">
                     ${viewSelect}${sortSelect}
+                    <label class="provider-default-hide" title="Hide cards already in your library by default"><input type="checkbox" class="provider-default-hide-owned">Hide Owned</label>
+                    <label class="provider-default-hide" title="Hide possible-match cards by default"><input type="checkbox" class="provider-default-hide-possible">Hide Possible</label>
                 </div>
             `;
             container.appendChild(item);
@@ -2147,6 +2222,8 @@ function setupSettingsModal() {
         if (saucepanTokenInput) saucepanTokenInput.value = getSetting('saucepanToken') || '';
         const civitaiApiKeyInput = document.getElementById('settingsCivitaiApiKey');
         if (civitaiApiKeyInput) civitaiApiKeyInput.value = getSetting('civitaiApiKey') || '';
+        const pixivCookieInput = document.getElementById('settingsPixivCookie');
+        if (pixivCookieInput) pixivCookieInput.value = getSetting('pixivCookie') || '';
         const datacatPublicFeedCheckbox = document.getElementById('datacatPublicFeedCheckbox');
         if (datacatPublicFeedCheckbox) {
             datacatPublicFeedCheckbox.checked = getSetting('datacatPublicFeed') === true;
@@ -2782,6 +2859,10 @@ function setupSettingsModal() {
         }
         
         // Appearance
+        if (mobileModeSelect) {
+            mobileModeSelect.value = window.getMobileModeOverride?.() || 'auto';
+            if (mobileModeSelect._customSelect) mobileModeSelect._customSelect.refresh();
+        }
         if (uiScaleSelect) {
             uiScaleSelect.value = String(getSetting('uiScale') ?? 3);
             if (uiScaleSelect._customSelect) uiScaleSelect._customSelect.refresh();
@@ -3014,6 +3095,21 @@ function setupSettingsModal() {
         });
     }
     
+    // Mobile layout override: per-device (localStorage, not ST settings, so a desktop and an
+    // iPad on the same account can diverge), applied live via the mode writer.
+    if (mobileModeSelect) {
+        mobileModeSelect.addEventListener('change', () => {
+            const v = mobileModeSelect.value;
+            // Session copy applies even when persistence fails (private mode), so the select never lies.
+            window.clMobileModeOverrideMem = (v === 'mobile' || v === 'desktop') ? v : null;
+            try {
+                if (v === 'mobile' || v === 'desktop') localStorage.setItem('clMobileModeOverride', v);
+                else localStorage.removeItem('clMobileModeOverride');
+            } catch { /* storage blocked: the session copy above still applies */ }
+            document.dispatchEvent(new CustomEvent('cl-mobile-override-changed'));
+        });
+    }
+
     // UI Scale: apply immediately on change
     if (uiScaleSelect) {
         uiScaleSelect.addEventListener('change', () => {
@@ -3979,9 +4075,12 @@ function setupSettingsModal() {
                 const resp = await apiRequest('/plugins/cl-helper/civitai-validate');
                 const data = resp ? await resp.json() : null;
                 if (data?.valid) {
+                    // Persist on a successful test so the key isnt left only in cl-helper RAM
+                    // (Validate alone used to skip setSetting, leaving the setting empty).
+                    if (key) setSetting('civitaiApiKey', key);
                     validateCivitaiKeyBtn.classList.add('success');
                     validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                    showToast('Civitai key is valid', 'success');
+                    showToast('Civitai key is valid and saved', 'success');
                 } else {
                     validateCivitaiKeyBtn.classList.add('error');
                     validateCivitaiKeyBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
@@ -3998,6 +4097,161 @@ function setupSettingsModal() {
                     validateCivitaiKeyBtn.innerHTML = originalHtml;
                 }, 3000);
             }
+        };
+    }
+
+    // ---- Pixiv Login (PHPSESSID) ----
+    const pixivCookieInputEl = document.getElementById('settingsPixivCookie');
+    const togglePixivCookieVisibilityBtn = document.getElementById('togglePixivCookieVisibility');
+    const savePixivCookieBtn = document.getElementById('savePixivCookieBtn');
+    const clearPixivCookieBtn = document.getElementById('clearPixivCookieBtn');
+    const validatePixivCookieBtn = document.getElementById('validatePixivCookieBtn');
+
+    if (togglePixivCookieVisibilityBtn && pixivCookieInputEl) {
+        togglePixivCookieVisibilityBtn.onclick = () => {
+            const isPassword = pixivCookieInputEl.type === 'password';
+            pixivCookieInputEl.type = isPassword ? 'text' : 'password';
+            togglePixivCookieVisibilityBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+
+    if (savePixivCookieBtn && pixivCookieInputEl) {
+        savePixivCookieBtn.onclick = async () => {
+            const cookie = (pixivCookieInputEl.value || '').trim();
+            if (!cookie) {
+                showToast('Paste your PHPSESSID first', 'warning');
+                return;
+            }
+            setSetting('pixivCookie', cookie);
+            try {
+                const resp = await apiRequest('/plugins/cl-helper/pixiv-set-cookie', 'POST', { cookie });
+                if (resp?.ok) {
+                    window.invalidatePixivAuthCache?.();
+                    showToast('Pixiv login saved', 'success');
+                } else {
+                    showToast('Saved locally, cl-helper unavailable', 'warning');
+                }
+            } catch {
+                showToast('Saved locally, cl-helper unreachable', 'warning');
+            }
+        };
+    }
+
+    if (clearPixivCookieBtn) {
+        clearPixivCookieBtn.onclick = async () => {
+            setSetting('pixivCookie', null);
+            if (pixivCookieInputEl) pixivCookieInputEl.value = '';
+            try {
+                await apiRequest('/plugins/cl-helper/pixiv-logout', 'POST', {});
+            } catch {}
+            window.invalidatePixivAuthCache?.();
+            showToast('Pixiv login cleared', 'info');
+        };
+    }
+
+    if (validatePixivCookieBtn) {
+        validatePixivCookieBtn.onclick = async () => {
+            const originalHtml = validatePixivCookieBtn.innerHTML;
+            validatePixivCookieBtn.classList.remove('success', 'error');
+            validatePixivCookieBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+            validatePixivCookieBtn.disabled = true;
+            try {
+                // Resync the stored cookie to cl-helper before validating (covers a
+                // plugin reload / ST restart that dropped the RAM copy).
+                const inputCookie = (pixivCookieInputEl?.value || '').trim();
+                const savedCookie = getSetting('pixivCookie') || '';
+                const cookie = inputCookie || savedCookie;
+                if (cookie) {
+                    try { await apiRequest('/plugins/cl-helper/pixiv-set-cookie', 'POST', { cookie }); } catch {}
+                    window.invalidatePixivAuthCache?.();
+                }
+                const resp = await apiRequest('/plugins/cl-helper/pixiv-validate');
+                const data = resp ? await resp.json() : null;
+                if (data?.valid) {
+                    // Persist on a successful test so the cookie isnt left only in cl-helper
+                    // RAM (Validate alone used to skip setSetting, leaving the setting empty).
+                    if (cookie) setSetting('pixivCookie', cookie);
+                    validatePixivCookieBtn.classList.add('success');
+                    validatePixivCookieBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
+                    showToast('Pixiv login is valid and saved (R-18 access confirmed)', 'success');
+                } else {
+                    validatePixivCookieBtn.classList.add('error');
+                    validatePixivCookieBtn.innerHTML = '<i class="fa-solid fa-times"></i>';
+                    showToast(data?.reason || 'Pixiv login invalid', 'error');
+                }
+            } catch (err) {
+                validatePixivCookieBtn.classList.add('error');
+                validatePixivCookieBtn.innerHTML = '<i class="fa-solid fa-exclamation"></i>';
+                showToast(`Validation error: ${err.message}`, 'error');
+            } finally {
+                validatePixivCookieBtn.disabled = false;
+                setTimeout(() => {
+                    validatePixivCookieBtn.classList.remove('success', 'error');
+                    validatePixivCookieBtn.innerHTML = originalHtml;
+                }, 3000);
+            }
+        };
+    }
+
+    // ---- JanitorAI Login (session cookie; unlocks Hampter pagination) ----
+    // Password login is Turnstile-gated (domain-locked, unsolvable from CL), so the session is
+    // seeded from the sb-auth-auth-token cookie and kept alive by the captcha-free refresh grant.
+    // Parse / verify / refresh all live in datacat-provider (window.janitorai*).
+    const janitoraiTokenInputEl = document.getElementById('settingsJanitoraiToken');
+    const toggleJanitoraiTokenBtn = document.getElementById('toggleJanitoraiTokenVisibility');
+    const saveJanitoraiTokenBtn = document.getElementById('saveJanitoraiTokenBtn');
+    const clearJanitoraiTokenBtn = document.getElementById('clearJanitoraiTokenBtn');
+    const janitoraiTokenStatusEl = document.getElementById('janitoraiTokenStatus');
+
+    function updateJanitoraiStatus() {
+        if (!janitoraiTokenStatusEl) return;
+        const set = (cls, icon, text) => { janitoraiTokenStatusEl.className = `settings-status-badge ${cls}`; janitoraiTokenStatusEl.innerHTML = `<i class="fa-solid ${icon}"></i> ${text}`; };
+        const status = window.janitoraiSessionStatus?.() || { loggedIn: !!getSetting('janitoraiToken') };
+        if (!status.loggedIn) return set('inactive', 'fa-circle', 'Not logged in');
+        // A refresh token keeps the session alive; without one it lapses in ~3h (bare-JWT paste).
+        if (status.hasRefresh === false) return set('active', 'fa-triangle-exclamation', `Logged in${status.email ? ' as ' + status.email : ''} (expires in ~3h; paste the full cookie for a lasting session)`);
+        set('active', 'fa-circle-check', `Logged in${status.email ? ' as ' + status.email : ''}`);
+    }
+    updateJanitoraiStatus();
+
+    if (toggleJanitoraiTokenBtn && janitoraiTokenInputEl) {
+        toggleJanitoraiTokenBtn.onclick = () => {
+            const isPassword = janitoraiTokenInputEl.type === 'password';
+            janitoraiTokenInputEl.type = isPassword ? 'text' : 'password';
+            toggleJanitoraiTokenBtn.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+    if (saveJanitoraiTokenBtn && janitoraiTokenInputEl) {
+        saveJanitoraiTokenBtn.onclick = async () => {
+            const raw = (janitoraiTokenInputEl.value || '').trim();
+            if (!raw) { showToast('Paste your sb-auth-auth-token cookie value first', 'warning'); return; }
+            const original = saveJanitoraiTokenBtn.innerHTML;
+            saveJanitoraiTokenBtn.disabled = true;
+            saveJanitoraiTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
+            try {
+                const res = await window.janitoraiSetSession?.(raw);
+                if (res?.ok) {
+                    janitoraiTokenInputEl.value = '';
+                    updateJanitoraiStatus();
+                    if (res.hasRefresh) showToast(`Logged in to JanitorAI${res.email ? ' as ' + res.email : ''}`, 'success');
+                    else showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-auth-auth-token cookie for a lasting login.', 'warning', 9000);
+                } else {
+                    showToast(res?.error || 'Could not save the session', 'error');
+                }
+            } catch (err) {
+                showToast(`Login error: ${err.message}`, 'error');
+            } finally {
+                saveJanitoraiTokenBtn.disabled = false;
+                saveJanitoraiTokenBtn.innerHTML = original;
+            }
+        };
+    }
+    if (clearJanitoraiTokenBtn) {
+        clearJanitoraiTokenBtn.onclick = () => {
+            window.janitoraiLogout?.();
+            if (janitoraiTokenInputEl) janitoraiTokenInputEl.value = '';
+            updateJanitoraiStatus();
+            showToast('Logged out of JanitorAI', 'info');
         };
     }
 
@@ -4479,7 +4733,7 @@ function hide(id) {
 }
 
 function findCardElement(avatar) {
-    return document.querySelector(`.char-card[data-avatar="${avatar}"]`);
+    return document.querySelector(`.char-card[data-avatar="${CSS.escape(avatar)}"]`);
 }
 
 function getCharacterByAvatar(avatar) {
@@ -4738,7 +4992,7 @@ function renderSimpleEmpty(container, message, className = 'empty-state') {
  * @param {string} [desktopLabel='Loading…'] hero spinner text on desktop
  */
 function renderSkeletonGrid(container, count = 12, desktopLabel = 'Loading…') {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const isMobile = isMobileMode();
     if (!isMobile) {
         renderLoadingState(container, desktopLabel, 'browse-loading');
         return;
@@ -4765,7 +5019,7 @@ function renderSkeletonGrid(container, count = 12, desktopLabel = 'Loading…') 
  *          onAction?:Function, actionIcon?:string, desktopText?:string}} opts
  */
 function renderEmptyState(container, opts = {}) {
-    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const isMobile = isMobileMode();
     if (!isMobile) {
         renderSimpleEmpty(container, opts.desktopText || opts.title || '');
         return;
@@ -4788,27 +5042,6 @@ function renderEmptyState(container, opts = {}) {
     if (actionLabel && onAction) {
         el.querySelector('.cl-empty-state-action')?.addEventListener('click', onAction);
     }
-}
-
-/**
- * Render a shimmering skeleton list of rows. For chats and other row-based
- * surfaces.
- * @param {HTMLElement|string} container
- * @param {number} count - row count, default 6
- */
-function renderSkeletonList(container, count = 6) {
-    const el = typeof container === 'string' ? document.getElementById(container) : container;
-    if (!el) return;
-    const rows = Array.from({ length: count }, () => `
-        <div class="cl-skeleton-row">
-            <div class="cl-skeleton-avatar"></div>
-            <div class="cl-skeleton-content">
-                <div class="cl-skeleton-line"></div>
-                <div class="cl-skeleton-line shorter"></div>
-            </div>
-        </div>
-    `).join('');
-    el.innerHTML = `<div class="cl-skeleton-list">${rows}</div>`;
 }
 
 // ========================================
@@ -5852,7 +6085,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         currentFolder.files = currentFolder.files.filter(f => !selectedFiles.has(f));
         selectedFiles.clear();
 
-        const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${escapeHtml(currentFolder.name)}"]`);
+        const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${CSS.escape(currentFolder.name)}"]`);
         if (folderItem) {
             const countEl = folderItem.querySelector('.orphaned-folder-count');
             if (countEl) countEl.textContent = `${currentFolder.files.length} file${currentFolder.files.length !== 1 ? 's' : ''}`;
@@ -5924,7 +6157,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
         addDismissedFolder(currentFolder.name);
         cleanupThumbCache(currentFolder.name);
 
-        const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${escapeHtml(currentFolder.name)}"]`);
+        const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${CSS.escape(currentFolder.name)}"]`);
         if (folderItem) {
             folderItem.remove();
             const idx = orphanedFolders.indexOf(currentFolder);
@@ -6263,7 +6496,7 @@ async function showOrphanedFoldersModal(initialMode = 'legacy') {
             const updatedFiles = currentFolder.files.filter(f => !selectedFiles.has(f));
             currentFolder.files = updatedFiles;
             
-            const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${escapeHtml(currentFolder.name)}"]`);
+            const folderItem = body.querySelector(`.orphaned-folder-item[data-folder="${CSS.escape(currentFolder.name)}"]`);
             if (folderItem) {
                 const countEl = folderItem.querySelector('.orphaned-folder-count');
                 if (countEl) {
@@ -7158,17 +7391,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     applyHighlightColor(getSetting('highlightColor'));
 
     // Apply UI scale (desktop only)
-    if (!window.matchMedia('(max-width: 768px)').matches) {
+    if (!isMobileMode()) {
         applyUiScale(getSetting('uiScale'));
         applyModalSize(getSetting('modalSize'));
         // Self-correct XL if saved alongside a non-80% ui scale.
         syncXlModalSizeAvailability();
     }
-    // Re-apply on a live breakpoint cross: UI scale + modal size are desktop-only chrome (mobile runs
-    // unzoomed), so a session that loaded on one side of 768px would keep the wrong chrome after crossing.
-    const uiScaleMq = window.matchMedia('(max-width: 768px)');
+    // Re-apply on a live mode flip: UI scale + modal size are desktop-only chrome (mobile runs
+    // unzoomed). The writer fires this after run/teardown and before its synthetic resize, so the
+    // zoom change lands before the grid re-measures.
     function applyViewportChrome() {
-        if (uiScaleMq.matches) {
+        if (isMobileMode()) {
             document.body.style.zoom = '';
             document.body.style.height = '';
         } else {
@@ -7177,13 +7410,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             syncXlModalSizeAvailability();
         }
         // Width-locked custom-select triggers were measured under the old
-        // breakpoint; re-measure them all for the new one
+        // mode; re-measure them all for the new one
         document.querySelectorAll('.glass-select, .glass-select-small').forEach(s => {
             s._customSelect?.relockWidth?.();
         });
     }
-    if (uiScaleMq.addEventListener) uiScaleMq.addEventListener('change', applyViewportChrome);
-    else if (uiScaleMq.addListener) uiScaleMq.addListener(applyViewportChrome); // older Safari/iOS
+    document.addEventListener('cl-mobile-mode-change', applyViewportChrome);
 
 
     // Apply button style
@@ -7418,31 +7650,52 @@ function _savePresetCommit() {
     else _resolveSavePreset({ name, overwriteIndex: -1 });
 }
 
-function _filterSavePresetList() {
-    const list = document.getElementById('savePresetPickerList');
+// Search-filter a row list and maintain an inline "Create <query>" row while the query has no
+// exact name match. Shared by the save-preset picker and both playlist lists; createRowHtml
+// receives the raw trimmed query and must escape it itself. emptyId (optional) is shown only
+// when the list is empty with no query.
+function filterListWithInlineCreate({ searchId, listId, rowSel, nameOf, createRowClass, createRowHtml, onCreate, emptyId }) {
+    const list = document.getElementById(listId);
     if (!list) return;
-    const query = (document.getElementById('savePresetPickerInput')?.value || '').trim();
-    const qLower = query.toLowerCase();
+    const raw = (document.getElementById(searchId)?.value || '').trim();
+    const query = raw.toLowerCase();
     let exactMatch = false;
-    list.querySelectorAll('.preset-picker-row').forEach(row => {
-        const name = row.querySelector('.preset-picker-name')?.textContent || '';
-        const show = !qLower || name.toLowerCase().includes(qLower);
+    const rows = list.querySelectorAll(rowSel);
+    rows.forEach(row => {
+        const name = (nameOf(row) || '').toLowerCase();
+        const show = !query || name.includes(query);
         row.style.display = show ? '' : 'none';
-        if (qLower && name.toLowerCase() === qLower) exactMatch = true;
+        if (query && name === query) exactMatch = true;
     });
-    let createRow = list.querySelector('.preset-picker-create-row');
+    if (emptyId) {
+        const emptyEl = document.getElementById(emptyId);
+        if (emptyEl) emptyEl.style.display = rows.length === 0 && !query ? '' : 'none';
+    }
+    let createRow = list.querySelector('.' + createRowClass);
     if (query && !exactMatch) {
         if (!createRow) {
             createRow = document.createElement('div');
-            createRow.className = 'preset-picker-create-row';
-            createRow.addEventListener('click', _savePresetCommit);
+            createRow.className = createRowClass;
+            createRow.addEventListener('click', onCreate);
             list.appendChild(createRow);
         }
-        createRow.innerHTML = `<i class="fa-solid fa-plus preset-picker-create-icon"></i><span>Create <strong>${escapeHtml(query)}</strong></span>`;
+        createRow.innerHTML = createRowHtml(raw);
         createRow.style.display = '';
     } else if (createRow) {
         createRow.style.display = 'none';
     }
+}
+
+function _filterSavePresetList() {
+    filterListWithInlineCreate({
+        searchId: 'savePresetPickerInput',
+        listId: 'savePresetPickerList',
+        rowSel: '.preset-picker-row',
+        nameOf: (row) => row.querySelector('.preset-picker-name')?.textContent,
+        createRowClass: 'preset-picker-create-row',
+        createRowHtml: (q) => `<i class="fa-solid fa-plus preset-picker-create-icon"></i><span>Create <strong>${escapeHtml(q)}</strong></span>`,
+        onCreate: _savePresetCommit,
+    });
 }
 
 function _renderSavePresetList() {
@@ -7829,6 +8082,7 @@ function slimCharacter(char) {
         _dateAdded: char._dateAdded,
         _createDate: char._createDate,
         _dateLastChat: char._dateLastChat,
+        _tokenEstimate: char._tokenEstimate,
         _slim: true
     };
 
@@ -7894,6 +8148,10 @@ async function hydrateCharacter(char) {
         if (full.spec) char.spec = full.spec;
         if (full.spec_version) char.spec_version = full.spec_version;
 
+        // Refresh now the heavy text is present (a save may have changed it).
+        char._tokenEstimate = computeTokenEstimate(char);
+        _tokenEstimateCache.set(char.avatar, char._tokenEstimate);
+
         char._slim = false;
         return char;
     } catch (e) {
@@ -7904,6 +8162,19 @@ async function hydrateCharacter(char) {
 
 let _recoveryGeneration = 0;
 let _extensionsCache = new Map();
+// avatar -> token estimate, so a lazy-loading re-render restores it instead of recomputing 0 (like _extensionsCache).
+let _tokenEstimateCache = new Map();
+
+// mes_example deliberately excluded, matching the original modal estimate.
+const TOKEN_ESTIMATE_FIELDS = ['description', 'personality', 'scenario', 'first_mes', 'system_prompt'];
+
+// Sums field lengths / 4 without concat, keeping the prepare loop allocation-free.
+function computeTokenEstimate(src) {
+    if (!src) return 0;
+    let total = 0;
+    for (const field of TOKEN_ESTIMATE_FIELDS) total += getCharField(src, field).length;
+    return Math.round(total / 4);
+}
 
 /**
  * Recover data.extensions for characters received with ST lazy loading (shallow mode).
@@ -7948,7 +8219,14 @@ async function recoverShallowExtensions(generation) {
                         const response = await apiRequest(ENDPOINTS.CHARACTERS_GET, 'POST', { avatar_url: char.avatar });
                         if (!response.ok) return;
                         const full = await response.json();
-                        if (!full?.data?.extensions) return;
+                        if (!full) return;
+
+                        // Piggyback the estimate on this full fetch, before the extensions guard so extension-less cards still get it.
+                        const tok = computeTokenEstimate(full);
+                        char._tokenEstimate = tok;
+                        _tokenEstimateCache.set(char.avatar, tok);
+
+                        if (!full.data?.extensions) return;
 
                         if (!char.data) char.data = {};
                         char.data.extensions = full.data.extensions;
@@ -8085,23 +8363,7 @@ function processAndRender(data) {
     } else {
         // Still sort currentCharacters so the data is ready when the user switches views,
         // but don't render to a hidden grid (avoids wrong dimensions / stale virtual scroll).
-        const sortSelect = document.getElementById('sortSelect');
-        const sortType = sortSelect ? sortSelect.value : 'name_asc';
-        const groupFavs = getSetting('groupFavoritesFirst') || false;
-        currentCharacters.sort((a, b) => {
-            if (groupFavs) {
-                const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
-                if (favA !== favB) return favA ? -1 : 1;
-            }
-            if (sortType === 'name_asc') return a.name.localeCompare(b.name);
-            if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-            if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
-            if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
-            if (sortType === 'created_new') return b._createDate - a._createDate;
-            if (sortType === 'created_old') return a._createDate - b._createDate;
-            if (sortType === 'random') return getRandomSortKey(a) - getRandomSortKey(b);
-            return 0;
-        });
+        currentCharacters.sort(makeCharSortComparator());
     }
     
     document.getElementById('loading').style.display = 'none';
@@ -8391,10 +8653,6 @@ function refreshPlaylistFilterIfActive(uid) {
     }
 }
 
-function clearPlaylistFilter() {
-    setPlaylistFilter(null);
-}
-
 function updatePlaylistFilterLabel() {
     const label = document.getElementById('playlistFilterLabel');
     if (!label) return;
@@ -8658,7 +8916,7 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
     
     const { cols, cardHeight, gap } = getGridMetrics(gridWidth);
     
-    const _isMobileMetrics = window.matchMedia?.('(max-width: 768px)').matches;
+    const _isMobileMetrics = isMobileMode();
     const RENDER_BUFFER_PX = clientHeight * 2.5;
     const PRELOAD_BUFFER_PX = clientHeight * 6;
     
@@ -8824,11 +9082,11 @@ function updateVisibleCards(grid, scrollContainer, force = false) {
 // card path picks (gated on the same setting) so the cache key lines up.
 const inFlightPreloads = new Set();
 function preloadImages(indices) {
-    const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+    const isMobile = isMobileMode();
     const cap = isMobile ? 10 : 12;
     if (inFlightPreloads.size >= cap) return;
     // Match the card path's URL choice exactly so the browser cache hits. Single source of truth for the
-    // viewport-aware thumb decision; isMobile above is still needed for the concurrency cap.
+    // mode-aware thumb decision; isMobile above is still needed for the concurrency cap.
     const useThumbs = gridUsesThumbnails();
     for (const i of indices) {
         if (inFlightPreloads.size >= cap) break;
@@ -9273,18 +9531,79 @@ const GALLERY_PAGE_SIZE = 100;
 const GALLERY_THUMB_SIZE = 384;
 const GALLERY_THUMB_CONCURRENCY = 6;
 const GALLERY_PREWARM_CONCURRENCY = 4;
-const PREWARM_EXTENSIONS = /\.(png|jpe?g|webp|bmp)$/i;
+const PREWARM_EXTENSIONS = /\.(png|jpe?g|webp)$/i;
 let _galleryState = null;
 let _galleryThumbsAvailable = false;
 let _galleryThumbObserver = null;
-let _thumbActive = 0;
-let _thumbQueue = [];
-let _thumbBlobUrls = new Set();
-let _thumbAbort = null;
+// Per-surface thumbnail loader: capped-concurrency FIFO over <img> elements
+// carrying dataset.thumbUrl/.fullUrl. The gallery tab and the fullscreen
+// viewer each own an instance; they run concurrently (viewer stacks over the
+// tab) so queue state must never be shared. reset() aborts in-flight loads
+// and revokes issued blob URLs; callers replace their grid DOM wholesale in
+// the same task before re-enqueueing, so revocation cant blank a visible image.
+function createThumbLoader({ concurrency, onSettled = null } = {}) {
+    let active = 0;
+    let queue = [];
+    let blobUrls = new Set();
+    let abort = new AbortController();
+
+    async function load(img) {
+        try {
+            const resp = await apiRequest(img.dataset.thumbUrl, 'GET', null, { signal: abort.signal });
+            if (!resp.ok) throw new Error(resp.status);
+            const blob = await resp.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            blobUrls.add(blobUrl);
+            img.src = blobUrl;
+        } catch (err) {
+            // reset() already zeroed the counter; draining here would double-decrement
+            if (err?.name === 'AbortError') return;
+            img.src = img.dataset.fullUrl || '';
+        }
+        onSettled?.(img);
+        drain();
+    }
+
+    function drain() {
+        active = Math.max(0, active - 1);
+        if (queue.length > 0) {
+            active++;
+            load(queue.shift());
+        }
+    }
+
+    return {
+        enqueue(img) {
+            if (active < concurrency) {
+                active++;
+                load(img);
+            } else {
+                queue.push(img);
+            }
+        },
+        reset() {
+            abort.abort();
+            abort = new AbortController();
+            queue = [];
+            active = 0;
+            blobUrls.forEach(u => URL.revokeObjectURL(u));
+            blobUrls.clear();
+        },
+    };
+}
+
+const _tabThumbLoader = createThumbLoader({
+    concurrency: GALLERY_THUMB_CONCURRENCY,
+    onSettled: (img) => img.closest('.sprite-item')?.classList.remove('sprite-thumb-loading'),
+});
+
+function buildGalleryThumbUrl(folderName, fileName) {
+    return `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}?s=${GALLERY_THUMB_SIZE}`;
+}
 
 function getGalleryThumbUrl(folderName, fileName) {
     if (!_galleryThumbsAvailable || getSetting('galleryThumbnails') === false) return null;
-    return `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(folderName)}/${encodeURIComponent(fileName)}?s=${GALLERY_THUMB_SIZE}`;
+    return buildGalleryThumbUrl(folderName, fileName);
 }
 
 function cleanupThumbCache(folderName) {
@@ -9304,7 +9623,7 @@ function prewarmThumbnails(folderName, fileNames) {
         while (active < GALLERY_PREWARM_CONCURRENCY && idx < imageFiles.length) {
             const file = imageFiles[idx++];
             active++;
-            const url = `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(folderName)}/${encodeURIComponent(file)}?s=${GALLERY_THUMB_SIZE}`;
+            const url = buildGalleryThumbUrl(folderName, file);
             apiRequest(url).then(() => { active--; drain(); }).catch(() => { active--; drain(); });
         }
     }
@@ -9394,7 +9713,7 @@ function _populateGalleryGridThumb(startIndex, endIndex) {
                 if (!entry.isIntersecting) continue;
                 const img = entry.target;
                 _galleryThumbObserver.unobserve(img);
-                _enqueueThumb(img);
+                _tabThumbLoader.enqueue(img);
             }
         }, { rootMargin: '200px' });
     }
@@ -9418,7 +9737,10 @@ function _populateGalleryGridThumb(startIndex, endIndex) {
                 </div>
             `;
         } else {
-            const thumbUrl = `/plugins/cl-helper/gallery-thumb/${encodeURIComponent(state.safeFolderName)}/${encodeURIComponent(fileName)}?s=${GALLERY_THUMB_SIZE}`;
+            // types cl-helper's Jimp cant decode go straight to the full URL
+            const thumbUrl = /\.(bmp|avif|tiff?)$/i.test(fileName)
+                ? mediaUrl
+                : buildGalleryThumbUrl(state.safeFolderName, fileName);
             const img = document.createElement('img');
             img.decoding = 'async';
             img.title = fileName;
@@ -9436,49 +9758,12 @@ function _populateGalleryGridThumb(startIndex, endIndex) {
     state.imagesGrid.appendChild(fragment);
 }
 
-function _enqueueThumb(img) {
-    if (_thumbActive < GALLERY_THUMB_CONCURRENCY) {
-        _thumbActive++;
-        _loadThumb(img);
-    } else {
-        _thumbQueue.push(img);
-    }
-}
-
-function _drainThumbQueue() {
-    _thumbActive = Math.max(0, _thumbActive - 1);
-    if (_thumbQueue.length > 0) {
-        _thumbActive++;
-        _loadThumb(_thumbQueue.shift());
-    }
-}
-
-async function _loadThumb(img) {
-    try {
-        const resp = await apiRequest(img.dataset.thumbUrl, 'GET', null, _thumbAbort ? { signal: _thumbAbort.signal } : {});
-        if (!resp.ok) throw new Error(resp.status);
-        const blob = await resp.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        _thumbBlobUrls.add(blobUrl);
-        img.src = blobUrl;
-    } catch (err) {
-        if (err?.name === 'AbortError') return;
-        img.src = img.dataset.fullUrl;
-    }
-    img.closest('.sprite-item')?.classList.remove('sprite-thumb-loading');
-    _drainThumbQueue();
-}
-
 function renderGalleryImages(files, folderName) {
     const grid = document.getElementById('spritesGrid');
     grid.innerHTML = '';
     if (_galleryImageObserver) { _galleryImageObserver.disconnect(); }
     if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
-    if (_thumbAbort) _thumbAbort.abort();
-    _thumbAbort = new AbortController();
-    _thumbQueue = []; _thumbActive = 0;
-    _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
-    _thumbBlobUrls.clear();
+    _tabThumbLoader.reset();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
     _galleryState = null;
     // Reset grid class - we'll manage layout with sections inside
@@ -9515,7 +9800,7 @@ function renderGalleryImages(files, folderName) {
         const audioSection = document.createElement('div');
         audioSection.className = 'gallery-audio-section';
         
-        const collapseThreshold = window.innerWidth <= 768 ? 2 : 4;
+        const collapseThreshold = isMobileMode() ? 2 : 4;
         const shouldCollapse = audioFiles.length > collapseThreshold;
         
         const titleEl = document.createElement('div');
@@ -9662,11 +9947,7 @@ function _renderGalleryPage(page, scroll = true) {
     state.imagesGrid.innerHTML = '';
     if (_galleryImageObserver) _galleryImageObserver.disconnect();
     if (_galleryThumbObserver) { _galleryThumbObserver.disconnect(); _galleryThumbObserver = null; }
-    if (_thumbAbort) _thumbAbort.abort();
-    _thumbAbort = new AbortController();
-    _thumbQueue = []; _thumbActive = 0;
-    _thumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
-    _thumbBlobUrls.clear();
+    _tabThumbLoader.reset();
     if (_gifFreezePending) { cancelAnimationFrame(_gifFreezePending); _gifFreezePending = null; }
 
     const start = page * GALLERY_PAGE_SIZE;
@@ -9985,22 +10266,14 @@ async function showLegacyFolderModal(char) {
     const closeModal = () => {
         modal.remove();
     };
-    
+    modal._closeFn = closeModal;
+
     modal.querySelector('#closeLegacyModal').addEventListener('click', closeModal);
     modal.querySelector('#cancelLegacyBtn').addEventListener('click', closeModal);
     modal.addEventListener('click', (e) => {
         if (e.target === modal) closeModal();
     });
-    
-    // Escape key handler
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            closeModal();
-            document.removeEventListener('keydown', escHandler);
-        }
-    };
-    document.addEventListener('keydown', escHandler);
-    
+
     // Update selected count
     const updateSelectedCount = () => {
         const checkboxes = modal.querySelectorAll('.legacy-file-checkbox');
@@ -10150,7 +10423,7 @@ function navigateModal(direction) {
 // Mirror the preload path's thumb gate so the modal-hero prefetch agrees on cache-warmth.
 function gridUsesThumbnails() {
     if (getSetting('useGridThumbnails') !== true) return false;
-    const isMobile = window.matchMedia?.('(max-width: 768px)').matches;
+    const isMobile = isMobileMode();
     return !!(isMobile || getSetting('gridThumbnailsDesktop') === true);
 }
 
@@ -10229,7 +10502,7 @@ async function openModal(char, { navList } = {}) {
         clearPendingAvatar();
     }
 
-    if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+    if (isMobileMode()) {
         const modal = document.getElementById('charModal');
         if (modal) {
             const modalBody = modal.querySelector('.modal-body');
@@ -10338,18 +10611,14 @@ async function openModal(char, { navList } = {}) {
     else setProviderLinkIndicatorLoading();
 
     // Tagline lives in the active namespace (provider id when linked, cl when unlinked).
-    const taglineRow = document.getElementById('modalProviderTaglineRow');
-    if (taglineRow) {
-        taglineRow.classList.remove('expanded');
-        taglineRow.setAttribute('aria-expanded', 'false');
-        taglineRow.setAttribute('role', 'button');
-        taglineRow.onclick = () => {
-            const isExpanded = taglineRow.classList.toggle('expanded');
-            taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
-        };
+    // Wire unconditionally: a lazy-loading card's hidden row must be clickable once hydrate reveals it.
+    wireProviderTaglineExpand();
+    if (extensionsReady(char)) {
+        renderProviderTaglineRow(char);
+    } else {
+        const taglineRow = document.getElementById('modalProviderTaglineRow');
+        if (taglineRow) taglineRow.style.display = 'none';
     }
-    if (extensionsReady(char)) renderProviderTaglineRow(char);
-    else if (taglineRow) taglineRow.style.display = 'none';
 
     // Creator Notes - Secure rendering with DOMPurify + sandboxed iframe
     const creatorNotes = char.creator_notes || (char.data ? char.data.creator_notes : "") || "";
@@ -10388,61 +10657,6 @@ async function openModal(char, { navList } = {}) {
         const skLb = document.getElementById('modalLorebookBox');
         if (skLb) skLb.style.display = 'none';
     }
-
-    const paintModalHeavyContent = () => {
-        // Description/First Message
-        const desc = char.description || (char.data ? char.data.description : "") || "";
-        const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
-
-        // Store raw content for fullscreen expand feature
-        window.currentDescriptionContent = desc || null;
-        window.currentFirstMesContent = firstMes || null;
-
-        // Details tab uses rich HTML rendering (initially without localization for instant display)
-        document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
-        document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
-
-        // Alternate Greetings
-        const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
-        const altBox = document.getElementById('modalAltGreetingsBox');
-
-        // Store raw content for fullscreen expand feature
-        window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
-
-        if (altBox) {
-            if (altGreetings && altGreetings.length > 0) {
-                document.getElementById('altGreetingsCount').innerText = altGreetings.length;
-                const listHTML = altGreetings.map((g, i) =>
-                    `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
-                ).join('');
-                document.getElementById('modalAltGreetings').innerHTML = listHTML;
-                altBox.style.display = 'block';
-            } else {
-                altBox.style.display = 'none';
-            }
-        }
-
-        initContentExpandHandlers();
-
-        // Apply media localization asynchronously (if enabled)
-        // This updates the already-rendered content with localized URLs
-        applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
-
-        // Embedded Lorebook
-        const characterBook = char.character_book || (char.data ? char.data.character_book : null);
-        const lorebookBox = document.getElementById('modalLorebookBox');
-
-        if (lorebookBox) {
-            if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
-                document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-                const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
-                document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
-                lorebookBox.style.display = 'block';
-            } else {
-                lorebookBox.style.display = 'none';
-            }
-        }
-    };
 
     // Linked Lorebook (external world file via extensions.world) - async, shown below embedded.
     // Extensions may be absent on open under ST lazy loading; hide until hydrate, then re-populate.
@@ -10596,6 +10810,7 @@ async function openModal(char, { navList } = {}) {
             }
             if (char.spec) activeChar.spec = char.spec;
             if (char.spec_version) activeChar.spec_version = char.spec_version;
+            activeChar._tokenEstimate = char._tokenEstimate;
             activeChar._slim = false;
             char = activeChar;
         }
@@ -10607,7 +10822,7 @@ async function openModal(char, { navList } = {}) {
         }
     }
 
-    paintModalHeavyContent();
+    paintModalHeavyContent(char, creatorNotes, gen);
 
     // Warm the prev/next neighbors so the next navigation lands on a hydrated card (no skeleton flash).
     if (gen === _modalOpenGen) prefetchModalNeighbors(char);
@@ -10814,7 +11029,6 @@ function closeModal() {
     
     // Release window globals holding rich text content (can be large)
     window.currentCreatorNotesContent = null;
-    window.currentDescriptionContent = null;
     window.currentFirstMesContent = null;
     window.currentAltGreetingsContent = null;
     
@@ -11793,8 +12007,8 @@ function openRelatedCharacter(avatar) {
 async function showDeleteConfirmation(char) {
     const charName = getCharacterName(char);
     const avatar = char.avatar || '';
+    const creatorName = char.data?.creator || char.creator || '';
     const uniqueFoldersEnabled = getSetting('uniqueGalleryFolders') || false;
-    const hasUniqueGallery = !!getCharacterGalleryId(char);
     
     // Show modal immediately with a loading placeholder for gallery info
     const deleteModal = document.createElement('div');
@@ -11810,25 +12024,29 @@ async function showDeleteConfirmation(char) {
                 <button class="close-confirm-btn" id="closeDeleteModal">&times;</button>
             </div>
             <div class="confirm-modal-body" style="text-align: center;">
-                <div style="margin-bottom: 20px;">
-                    <img src="${getCharacterAvatarUrl(avatar)}" 
-                         alt="${escapeHtml(charName)}" 
-                         style="width: 100px; height: 100px; object-fit: cover; border-radius: var(--radius-2xl); border: 3px solid rgba(var(--cl-error-bright-rgb), 0.5); margin-bottom: 15px;"
-                         onerror="this.src='/img/ai4.png'">
-                    <h4 style="margin: 0; color: var(--text-primary);">${escapeHtml(charName)}</h4>
+                <div class="del-confirm-hero">
+                    <img class="del-confirm-avatar" src="${getSetting('useGridThumbnails') ? getCharacterAvatarThumbUrl(avatar) : getCharacterAvatarUrl(avatar)}"
+                         alt="${escapeHtml(charName)}"
+                         onerror="if(!this.dataset.f){this.dataset.f=1;this.src='${getCharacterAvatarUrl(avatar)}';}else{this.src='/img/ai4.png';}">
+                    <h4 class="del-confirm-name">${escapeHtml(charName)}</h4>
+                    ${creatorName ? `<div class="del-confirm-meta">by ${escapeHtml(creatorName)}</div>` : ''}
                 </div>
                 <div id="deleteGallerySection">
                     <div style="color: var(--text-secondary); font-size: 0.85rem; padding: 8px 0;">
                         <i class="fa-solid fa-spinner fa-spin"></i> Checking gallery...
                     </div>
                 </div>
-                <p style="color: var(--text-secondary); margin-bottom: 15px;">
-                    Are you sure you want to delete this character? This action cannot be undone.
-                </p>
-                <div style="background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
+                <div class="del-confirm-warning">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <div>
+                        <strong>This cannot be undone</strong>
+                        <span>The character card will be permanently removed from your library.</span>
+                    </div>
+                </div>
+                <div id="deleteChatsSection" style="display: none; background: rgba(var(--cl-error-bright-rgb), 0.1); border: 1px solid rgba(var(--cl-error-bright-rgb), 0.3); border-radius: var(--radius-lg); padding: 12px; margin-bottom: 15px;">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-primary);">
                         <input type="checkbox" id="deleteChatsCheckbox" style="accent-color: var(--cl-error-bright);">
-                        <span>Also delete all chat history with this character</span>
+                        <span id="deleteChatsLabel">Also delete all chat history with this character</span>
                     </label>
                 </div>
             </div>
@@ -11860,11 +12078,28 @@ async function showDeleteConfirmation(char) {
         if (e.target === deleteModal) closeDeleteModal();
     });
     
-    // Fetch gallery info in background and inject when ready
+    // Chats checkbox only shows for characters that actually have chats
+    apiRequest(ENDPOINTS.CHARACTERS_CHATS, 'POST', { avatar_url: avatar, simple: true }).then(async resp => {
+        if (!resp.ok) return;
+        const chats = await resp.json().catch(() => null);
+        if (Array.isArray(chats) && chats.length > 0) {
+            const label = deleteModal.querySelector('#deleteChatsLabel');
+            if (label) label.textContent = `Also delete all chat history (${chats.length} chat${chats.length === 1 ? '' : 's'})`;
+            const section = deleteModal.querySelector('#deleteChatsSection');
+            if (section) section.style.display = '';
+        }
+    }).catch(() => {});
+
+    // gallery_id sits in extensions; hydrate first under lazy loading or the option never shows
     let galleryInfo = { folder: '', files: [], count: 0 };
     let canDeleteGallery = false;
-    
-    getCharacterGalleryInfo(char).then(info => {
+
+    (async () => {
+        if (window.extensionsRecoveryInProgress) {
+            try { await hydrateCharacter(char); } catch (_) {}
+        }
+        const hasUniqueGallery = !!getCharacterGalleryId(char);
+        const info = await getCharacterGalleryInfo(char);
         galleryInfo = info;
         const hasImages = info.count > 0;
         canDeleteGallery = uniqueFoldersEnabled && hasImages && hasUniqueGallery;
@@ -11908,8 +12143,8 @@ async function showDeleteConfirmation(char) {
         } else {
             section.innerHTML = '';
         }
-    });
-    
+    })();
+
     confirmBtn.addEventListener('click', async () => {
         const deleteChats = deleteModal.querySelector('#deleteChatsCheckbox').checked;
         const galleryAction = deleteModal.querySelector('input[name="galleryAction"]:checked')?.value || 'keep';
@@ -12006,8 +12241,9 @@ async function deleteCharacter(char, deleteChats = false) {
             }
         }
 
-        // Evict from extensions cache (ST lazy loading)
+        // Evict from the per-avatar caches (ST lazy loading restore path)
         if (avatar) _extensionsCache.delete(avatar);
+        if (avatar) _tokenEstimateCache.delete(avatar);
         
         // Trigger character refresh in the ST window. Best-effort with a timeout:
         // on mobile the opener tab may be suspended and cross-window awaits hang.
@@ -12034,12 +12270,6 @@ async function deleteCharacter(char, deleteChats = false) {
                                 { id: charIndex, character: char }
                             );
                         }
-                    }
-                    
-                    // Method 3: Call printCharactersDebounced to refresh the UI
-                    if (typeof host.printCharactersDebounced === 'function') {
-                        debugLog('[Delete] Calling printCharactersDebounced()...');
-                        host.printCharactersDebounced();
                     }
                 }
             } catch (e) {
@@ -12510,12 +12740,8 @@ async function performSave() {
                 if (headerAvatar) headerAvatar.src = getCharacterAvatarStThumbUrl(activeChar.avatar);
                 // Repaint the edited card's grid image now, in case the re-render below reuses the node.
                 const gridUrl = gridUsesThumbnails() ? getCharacterAvatarThumbUrl(activeChar.avatar) : getCharacterAvatarUrl(activeChar.avatar);
-                document.querySelectorAll('.char-card').forEach(card => {
-                    if (card.dataset.avatar === activeChar.avatar) {
-                        const cardImg = card.querySelector('.card-image');
-                        if (cardImg) cardImg.src = gridUrl;
-                    }
-                });
+                const cardImg = findCardElement(activeChar.avatar)?.querySelector('.card-image');
+                if (cardImg) cardImg.src = gridUrl;
                 clearPendingAvatar();
             }
             
@@ -12548,6 +12774,63 @@ async function performSave() {
         showToast("Network error saving character: " + e.message, "error");
     } finally {
         _saveInProgress = false;
+    }
+}
+
+// Heavy Details-tab fields: description, first message, alt greetings, embedded lorebook,
+// plus the async media-localization repaint (gen-guarded so a stale pass from a previous
+// open never lands). Shared by openModal's post-hydrate paint and the post-save refresh.
+function paintModalHeavyContent(char, creatorNotes, gen) {
+    // Description/First Message
+    const desc = char.description || (char.data ? char.data.description : "") || "";
+    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
+
+    // Store raw content for fullscreen expand feature
+    window.currentFirstMesContent = firstMes || null;
+
+    // Details tab uses rich HTML rendering (initially without localization for instant display)
+    document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
+    document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
+
+    // Alternate Greetings
+    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
+    const altBox = document.getElementById('modalAltGreetingsBox');
+
+    // Store raw content for fullscreen expand feature
+    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
+
+    if (altBox) {
+        if (altGreetings && altGreetings.length > 0) {
+            document.getElementById('altGreetingsCount').innerText = altGreetings.length;
+            const listHTML = altGreetings.map((g, i) =>
+                `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
+            ).join('');
+            document.getElementById('modalAltGreetings').innerHTML = listHTML;
+            altBox.style.display = 'block';
+        } else {
+            altBox.style.display = 'none';
+        }
+    }
+
+    initContentExpandHandlers();
+
+    // Apply media localization asynchronously (if enabled)
+    // This updates the already-rendered content with localized URLs
+    applyMediaLocalizationToModal(char, desc, firstMes, altGreetings, creatorNotes, gen);
+
+    // Embedded Lorebook
+    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
+    const lorebookBox = document.getElementById('modalLorebookBox');
+
+    if (lorebookBox) {
+        if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
+            document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
+            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
+            document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
+            lorebookBox.style.display = 'block';
+        } else {
+            lorebookBox.style.display = 'none';
+        }
     }
 }
 
@@ -12601,73 +12884,10 @@ function refreshModalDisplay() {
     }
 
     // Tagline (from active namespace: provider id when linked, 'cl' when unlinked).
-    const taglineRow = document.getElementById('modalProviderTaglineRow');
-    const taglineEl = document.getElementById('modalProviderTagline');
-    const providerTagline = getDisplayTagline(char);
-    if (taglineRow && taglineEl) {
-        taglineRow.classList.remove('expanded');
-        taglineRow.setAttribute('aria-expanded', 'false');
-        taglineRow.setAttribute('role', 'button');
-        taglineRow.onclick = () => {
-            const isExpanded = taglineRow.classList.toggle('expanded');
-            taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
-        };
-        const showTagline = getSetting('showProviderTagline') !== false;
-        if (showTagline && providerTagline) {
-            taglineEl.innerHTML = sanitizeTaglineHtml(providerTagline, char.name);
-            taglineRow.style.display = 'block';
-        } else {
-            taglineEl.textContent = '';
-            taglineRow.style.display = 'none';
-        }
-    }
+    wireProviderTaglineExpand();
+    renderProviderTaglineRow(char);
     
-    // Update Description/First Message
-    const desc = char.description || (char.data ? char.data.description : "") || "";
-    const firstMes = char.first_mes || (char.data ? char.data.first_mes : "") || "";
-    
-    // Store raw content for fullscreen expand feature
-    window.currentDescriptionContent = desc || null;
-    window.currentFirstMesContent = firstMes || null;
-    
-    document.getElementById('modalDescription').innerHTML = formatRichText(desc, char.name);
-    document.getElementById('modalFirstMes').innerHTML = formatRichText(firstMes, char.name);
-    
-    // Update Alternate Greetings
-    const altGreetings = char.alternate_greetings || (char.data ? char.data.alternate_greetings : []) || [];
-    const altBox = document.getElementById('modalAltGreetingsBox');
-    
-    // Store raw content for fullscreen expand feature
-    window.currentAltGreetingsContent = (altGreetings && altGreetings.length > 0) ? altGreetings : null;
-    
-    if (altBox) {
-        if (altGreetings && altGreetings.length > 0) {
-            document.getElementById('altGreetingsCount').innerText = altGreetings.length;
-            const listHTML = altGreetings.map((g, i) => 
-                `<div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px dashed rgba(255,255,255,0.1);"><strong style="color:var(--accent);">#${i+1}:</strong> <span>${formatRichText((g || '').trim(), char.name)}</span></div>`
-            ).join('');
-            document.getElementById('modalAltGreetings').innerHTML = listHTML;
-            altBox.style.display = 'block';
-        } else {
-            altBox.style.display = 'none';
-        }
-    }
-    
-    initContentExpandHandlers();
-    
-    // Update Embedded Lorebook
-    const characterBook = char.character_book || (char.data ? char.data.character_book : null);
-    const lorebookBox = document.getElementById('modalLorebookBox');
-    if (lorebookBox) {
-        if (characterBook && characterBook.entries && characterBook.entries.length > 0) {
-            document.getElementById('lorebookEntryCount').innerText = characterBook.entries.length;
-            const lorebookHTML = renderLorebookEntriesHtml(characterBook.entries)
-            document.getElementById('modalLorebookContent').innerHTML = lorebookHTML;
-            lorebookBox.style.display = 'block';
-        } else {
-            lorebookBox.style.display = 'none';
-        }
-    }
+    paintModalHeavyContent(char, creatorNotes, _modalOpenGen);
 
     // Linked Lorebook (external world file via extensions.world) - async, shown below embedded
     populateLinkedLorebookBox(char);
@@ -13141,27 +13361,21 @@ function updateFavoriteButtonUI(isFavorite) {
  * @param {boolean} isFavorite - Whether the character is a favorite
  */
 function updateCharacterCardFavoriteStatus(avatar, isFavorite) {
-    const cards = document.querySelectorAll('.char-card');
-    cards.forEach(card => {
-        // Find the card for this character by checking the onclick
-        const img = card.querySelector('.card-image');
-        if (img && img.src.includes(encodeURIComponent(avatar))) {
-            if (isFavorite) {
-                card.classList.add('is-favorite');
-                // Add star indicator if not present
-                if (!card.querySelector('.favorite-indicator')) {
-                    const indicator = document.createElement('div');
-                    indicator.className = 'favorite-indicator';
-                    indicator.innerHTML = '<i class="fa-solid fa-star"></i>';
-                    card.appendChild(indicator);
-                }
-            } else {
-                card.classList.remove('is-favorite');
-                const indicator = card.querySelector('.favorite-indicator');
-                if (indicator) indicator.remove();
-            }
+    const card = findCardElement(avatar);
+    if (!card) return;
+    if (isFavorite) {
+        card.classList.add('is-favorite');
+        if (!card.querySelector('.favorite-indicator')) {
+            const indicator = document.createElement('div');
+            indicator.className = 'favorite-indicator';
+            indicator.innerHTML = '<i class="fa-solid fa-star"></i>';
+            card.appendChild(indicator);
         }
-    });
+    } else {
+        card.classList.remove('is-favorite');
+        const indicator = card.querySelector('.favorite-indicator');
+        if (indicator) indicator.remove();
+    }
 }
 
 /**
@@ -14508,6 +14722,13 @@ function resetBrowseSectionCollapseState(modal) {
 }
 window.resetBrowseSectionCollapseState = resetBrowseSectionCollapseState;
 
+// Alt greetings of the currently-open browse preview; browse views publish via CoreAPI.
+let _browseAltGreetings = null;
+function setBrowseAltGreetings(greetings) {
+    _browseAltGreetings = greetings;
+}
+window.setBrowseAltGreetings = setBrowseAltGreetings;
+
 /**
  * Delegated click handler for browse section titles (expand modal).
  * Uses event delegation since sections are injected dynamically by provider browse views.
@@ -14557,7 +14778,7 @@ function initBrowseExpandButtons() {
         e.preventDefault();
         e.stopPropagation();
         if (sectionId === 'browseAltGreetings') {
-            const greetings = window.currentBrowseAltGreetings || [];
+            const greetings = _browseAltGreetings || [];
             const modal = title.closest('.browse-char-modal');
             const charName = modal?.querySelector('.modal-header h2')?.textContent || 'Character';
             openAltGreetingsFullscreen(greetings, charName);
@@ -14583,6 +14804,7 @@ const ADV_FILTER_FIELDS = {
     dateCreated: { label: 'Date Created', type: 'date', operators: ['before', 'after', 'in_the_last'] },
     lastChat: { label: 'Last Chat', type: 'date', operators: ['before', 'after', 'in_the_last', 'never'] },
     version: { label: 'Version', type: 'text', operators: ['contains', 'is_empty', 'is_not_empty'] },
+    tokens: { label: 'Token Count', type: 'number', operators: ['more_than', 'less_than', 'equals'] },
     playlist: { label: 'Playlist', type: 'playlist', operators: ['in', 'not_in', 'in_any', 'not_in_any'] },
     nameOverride: { label: 'Name Override', type: 'nameOverride', operators: ['has_override', 'no_override', 'set_to_card', 'set_to_listing'] },
 };
@@ -14798,7 +15020,7 @@ function openAdvFilterPresetsPanel() {
         rerenderAdvFilterPresets();
         document.getElementById('advFilterPresetsPanel')?.classList.remove('hidden');
         document.getElementById('advFilterPresetsBtn')?.classList.add('active');
-        if (!window.matchMedia('(max-width: 768px)').matches) {
+        if (!isMobileMode()) {
             setTimeout(() => document.getElementById('advFilterPresetNameInput')?.focus(), 50);
         }
     });
@@ -15038,6 +15260,7 @@ function evaluateAdvFilterRule(c, rule) {
             return evalTextOp(ver, op, val);
         }
         case 'playlist': return evalPlaylistOp(c, op, rule.value);
+        case 'tokens': return c._tokenEstimate == null ? false : evalNumberOp(c._tokenEstimate, op, rule.value);
         case 'nameOverride': return evalNameOverrideOp(c, op);
     }
     return true;
@@ -15396,25 +15619,7 @@ function performSearch() {
         return matchesSearch;
     });
     
-    // Also apply current sort - pre-computed _dateAdded / _createDate avoid
-    // parseDateValue() (regex + Date constructor) inside the comparator
-    const sortSelect = document.getElementById('sortSelect');
-    const sortType = sortSelect ? sortSelect.value : 'name_asc';
-    const groupFavs = getSetting('groupFavoritesFirst') || false;
-    const sorted = [...filtered].sort((a, b) => {
-        if (groupFavs) {
-            const favA = isCharacterFavorite(a), favB = isCharacterFavorite(b);
-            if (favA !== favB) return favA ? -1 : 1;
-        }
-        if (sortType === 'name_asc') return a.name.localeCompare(b.name);
-        if (sortType === 'name_desc') return b.name.localeCompare(a.name);
-        if (sortType === 'date_new') return b._dateAdded - a._dateAdded;
-        if (sortType === 'date_old') return a._dateAdded - b._dateAdded;
-        if (sortType === 'created_new') return b._createDate - a._createDate;
-        if (sortType === 'created_old') return a._createDate - b._createDate;
-        if (sortType === 'random') return getRandomSortKey(a) - getRandomSortKey(b);
-        return 0;
-    });
+    const sorted = [...filtered].sort(makeCharSortComparator());
     
     // Keep currentCharacters in sync with sorted/filtered result
     // This ensures the sort change handler (and any other consumer) works with 
@@ -15428,7 +15633,7 @@ function updateMobileChatButtonVisibility() {
     const chatBtn = document.getElementById('modalChatBtn');
     if (!chatBtn) return;
 
-    const isMobile = window.matchMedia && window.matchMedia('(max-width: 768px)').matches;
+    const isMobile = isMobileMode();
     if (!isMobile) {
         chatBtn.classList.remove('mobile-chat-hidden');
         return;
@@ -16583,15 +16788,26 @@ function getCharacterAvatarUrl(avatar) {
         : `/characters/${encodeURIComponent(avatar)}`;
 }
 
-// Tagline lives in the active provider namespace (cl when unlinked); jannyai excluded since its tagline mirrors creator_notes.
+// Tagline lives in the active provider namespace (cl when unlinked).
 function getDisplayTagline(char) {
     if (!char?.data?.extensions) return '';
     const activeId = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
-    if (activeId === 'jannyai') return '';
     return char?.data?.extensions?.[activeId]?.tagline || '';
 }
 
-/** Tagline row, data part only; expand wiring lives in openModal. */
+// Collapses and (re)wires the tagline row's expand toggle. onclick assignment replaces, never stacks.
+function wireProviderTaglineExpand() {
+    const taglineRow = document.getElementById('modalProviderTaglineRow');
+    if (!taglineRow) return;
+    taglineRow.classList.remove('expanded');
+    taglineRow.setAttribute('aria-expanded', 'false');
+    taglineRow.setAttribute('role', 'button');
+    taglineRow.onclick = () => {
+        const isExpanded = taglineRow.classList.toggle('expanded');
+        taglineRow.setAttribute('aria-expanded', isExpanded ? 'true' : 'false');
+    };
+}
+
 function renderProviderTaglineRow(char) {
     const taglineRow = document.getElementById('modalProviderTaglineRow');
     const taglineEl = document.getElementById('modalProviderTagline');
@@ -16840,7 +17056,7 @@ function extractPlainText(html, maxLength = 200) {
         // Remove all HTML tags
         .replace(/<[^>]+>/g, ' ')
         // Remove markdown images: ![alt](url) or ![alt]
-        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+        .replace(/!\[[^\]]*\]\((?:(?:[^()]|\([^()]*\))*|[^)]*)\)/g, '')
         .replace(/!\[[^\]]*\]/g, '')
         // Remove markdown links but keep text: [text](url) -> text
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
@@ -16901,7 +17117,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         // Ultra CSS mode: <style> tag at START with substantial CSS - touch almost nothing
         if (hasStyleTagAtStart) {
             // Only convert markdown images (safe - won't be in CSS)
-            processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
+            processedText = processedText.replace(/!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+|[^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
                 // Allow http/https URLs and local paths (starting with /)
                 if (!src.match(/^(https?:\/\/|\/)/i)) return match;
                 const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
@@ -16934,7 +17150,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         // Convert markdown images and links (safe for all modes):
         
         // Convert linked images: [![alt](img-url)](link-url)
-        processedText = processedText.replace(/\[\!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
+        processedText = processedText.replace(/\[\!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+|[^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
             // Allow http/https URLs and local paths (starting with /)
             if (!imgSrc.match(/^(https?:\/\/|\/)/i)) return match;
             const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
@@ -16943,7 +17159,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
         });
         
         // Convert standalone markdown images: ![alt](url) or ![alt](url =WxH) or ![alt](url "title")
-        processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
+        processedText = processedText.replace(/!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+|[^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
             // Allow http/https URLs and local paths (starting with /)
             if (!src.match(/^(https?:\/\/|\/)/i)) return match;
             const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
@@ -17030,7 +17246,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     });
     
     // 2. Convert linked images: [![alt](img-url)](link-url)
-    processedText = processedText.replace(/\[\!\[([^\]]*)\]\(([^)]+)\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
+    processedText = processedText.replace(/\[\!\[([^\]]*)\]\(((?:[^()]|\([^()]*\))+|[^)]+)\)\]\(([^)]+)\)/g, (match, alt, imgSrc, linkHref) => {
         // Allow http/https URLs and local paths (starting with /)
         if (!imgSrc.match(/^(https?:\/\/|\/)/i)) return match;
         const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
@@ -17039,7 +17255,7 @@ function formatRichText(text, charName = '', preserveHtml = false) {
     });
     
     // 3. Convert standalone markdown images: ![alt](url) or ![alt](url "title")
-    processedText = processedText.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
+    processedText = processedText.replace(/!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+|[^)\s]+)(?:\s+"[^"]*")?\)/g, (match, alt, src) => {
         // Allow http/https URLs and local paths (starting with /)
         if (!src.match(/^(https?:\/\/|\/)/i)) return match;
         const altAttr = alt ? ` alt="${alt.replace(/"/g, '&quot;')}"` : '';
@@ -17402,6 +17618,16 @@ function formatImportFileSize(bytes) {
  * @param {FileList|File[]} files
  */
 function addImportLocalFiles(files) {
+    // A CL bundle zip takes over the whole drop; the bundle importer has its own review flow.
+    const bundle = [...files].find(f => f.name.toLowerCase().endsWith('.zip'));
+    if (bundle) {
+        if (files.length > 1) {
+            showToast('Importing the bundle; other dropped files were ignored', 'info');
+        }
+        importModal?.classList.remove('visible');
+        window.openBatchImportReview?.(bundle);
+        return;
+    }
     for (const file of files) {
         // Only accept PNG files
         if (!file.name.toLowerCase().endsWith('.png')) {
@@ -17704,6 +17930,19 @@ for (let i = 0; i < 256; i++) {
         c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
     }
     crc32Table[i] = c;
+}
+
+// Anchor-click download for a Blob. Revoke is deferred: an immediate revoke can
+// abort a still-starting download in some engines.
+function downloadBlobAsFile(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /**
@@ -18627,26 +18866,31 @@ function buildImportSummaryJobs(mediaCharacters, galleryCharacters) {
     return jobs;
 }
 
+function queueImportMediaJobs({ galleryCharacters = [], mediaCharacters = [] }) {
+    const jobs = buildImportSummaryJobs(mediaCharacters, galleryCharacters);
+    let queued = 0;
+    for (const job of jobs) {
+        const ok = window.enqueueMediaDownloadJob?.({
+            avatar: job.charInfo.avatar,
+            name: job.charInfo.name,
+            folderName: job.folderName,
+            phases: job.phases,
+            embeddedUrls: job.charInfo.mediaUrls || [],
+            lorebookUrls: [],
+            galleryPageUrls: job.charInfo.galleryPageUrls || [],
+            providerOverride: job.charInfo.provider ? { provider: job.charInfo.provider, linkInfo: job.charInfo.linkInfo } : undefined,
+            pseudoChar: job.pseudoChar,
+        });
+        if (ok) queued++;
+    }
+    return queued;
+}
+
 function showImportSummaryModal({ galleryCharacters = [], mediaCharacters = [] }) {
     // Background mode: queue everything silently instead of offering the
     // blocking download step; the modal never opens.
     if (getSetting('importMediaAction') === 'background') {
-        const jobs = buildImportSummaryJobs(mediaCharacters, galleryCharacters);
-        let queued = 0;
-        for (const job of jobs) {
-            const ok = window.enqueueMediaDownloadJob?.({
-                avatar: job.charInfo.avatar,
-                name: job.charInfo.name,
-                folderName: job.folderName,
-                phases: job.phases,
-                embeddedUrls: job.charInfo.mediaUrls || [],
-                lorebookUrls: [],
-                galleryPageUrls: job.charInfo.galleryPageUrls || [],
-                providerOverride: job.charInfo.provider ? { provider: job.charInfo.provider, linkInfo: job.charInfo.linkInfo } : undefined,
-                pseudoChar: job.pseudoChar,
-            });
-            if (ok) queued++;
-        }
+        const queued = queueImportMediaJobs({ galleryCharacters, mediaCharacters });
         if (queued > 0) {
             showToast(`Media downloads queued in background (${queued} character${queued === 1 ? '' : 's'})`, 'info');
         }
@@ -21126,12 +21370,16 @@ function extractMediaUrls(text) {
     
     const urls = [];
     
-    // Match ![](url) markdown format - stop at whitespace or ) to exclude sizing params
-    // Supports: ![alt](url), ![alt](url =WxH), ![alt](url "title")
-    const markdownPattern = /!\[.*?\]\((https?:\/\/[^\s\)]+)/g;
+    // Match ![](url) markdown - allow one level of balanced parens in the path so
+    // postimg "(1)" filenames dont truncate at the first ), still stop at whitespace
+    // (sizing params/titles). Single-char first branch keeps the alternation disjoint, so linear time.
+    const markdownPattern = /!\[.*?\]\((https?:\/\/(?:[^\s()]|\([^\s()]*\))+)/g;
     let match;
     while ((match = markdownPattern.exec(text)) !== null) {
-        urls.push(match[1]);
+        let url = match[1];
+        // An unbalanced-paren URL makes the balanced branch swallow the markdown closer; give it back.
+        if (url.endsWith(')') && text[markdownPattern.lastIndex] !== ')') url = url.slice(0, -1);
+        urls.push(url);
     }
     
     // Match <img src="url"> HTML format
@@ -21161,19 +21409,22 @@ function extractMediaUrls(text) {
     while ((match = urlPattern.exec(text)) !== null) {
         urls.push(match[1]);
     }
-    
-    return [...new Set(urls)]; // Remove duplicates
+
+    const unique = [...new Set(urls)];
+    // a proper prefix of a longer capture continuing with / is a truncated twin the raw pattern makes of ext-mid-path urls
+    return unique.filter(u => !unique.some(o => o !== u && o.startsWith(u) && o[u.length] === '/'));
 }
 
-/**
- * Find all remote media URLs in a character card
- */
-function findCharacterMediaUrls(character, { split = false } = {}) {
-    if (!character) return split ? { embeddedUrls: [], lorebookUrls: [] } : [];
-    
-    const mediaUrls = new Set();
-    
-    // Fields to scan for media
+// Single source of truth for which card surfaces carry scannable text; media
+// localization and gallery-URL discovery both walk this. Lorebook chunks come
+// back separate so each consumer applies its own gating. Character must be
+// hydrated (slim cards have the heavy fields stripped).
+function collectCardTextChunks(character) {
+    const chunks = { main: [], lorebook: [] };
+    if (!character) return chunks;
+
+    const data = character.data || character;
+
     const fieldsToCheck = [
         'description',
         'personality',
@@ -21184,73 +21435,65 @@ function findCharacterMediaUrls(character, { split = false } = {}) {
         'system_prompt',
         'post_history_instructions'
     ];
-    
-    // Check main fields - character data might be nested or flat
-    const data = character.data || character;
-    
-    fieldsToCheck.forEach(field => {
+    for (const field of fieldsToCheck) {
         const value = data[field];
-        if (value && typeof value === 'string') {
-            const urls = extractMediaUrls(value);
-            urls.forEach(url => {
-                if (url.startsWith('http://') || url.startsWith('https://')) {
-                    mediaUrls.add(url);
-                }
-            });
-        }
-    });
+        if (value && typeof value === 'string') chunks.main.push(value);
+    }
 
-    // Scan provider tagline fields for embedded media
     const extensions = data.extensions;
     if (extensions && typeof extensions === 'object') {
         for (const providerData of Object.values(extensions)) {
             const tagline = providerData?.tagline;
-            if (tagline && typeof tagline === 'string') {
-                const urls = extractMediaUrls(tagline);
-                urls.forEach(url => {
-                    if (url.startsWith('http://') || url.startsWith('https://')) {
-                        mediaUrls.add(url);
-                    }
-                });
-            }
+            if (tagline && typeof tagline === 'string') chunks.main.push(tagline);
         }
     }
-    
-    // Check alternate greetings
+
     const altGreetings = data.alternate_greetings;
-    if (altGreetings && Array.isArray(altGreetings)) {
-        altGreetings.forEach(greeting => {
-            if (greeting && typeof greeting === 'string') {
-                const urls = extractMediaUrls(greeting);
-                urls.forEach(url => {
-                    if (url.startsWith('http://') || url.startsWith('https://')) {
-                        mediaUrls.add(url);
-                    }
-                });
-            }
-        });
+    if (Array.isArray(altGreetings)) {
+        for (const greeting of altGreetings) {
+            if (greeting && typeof greeting === 'string') chunks.main.push(greeting);
+        }
     }
 
-    // Scan lorebook entries
-    const lorebookUrls = new Set();
-    const includeLorebook = getSetting('includeLorebook') || false;
-    const entries = includeLorebook ? data.character_book?.entries : null;
+    const entries = data.character_book?.entries;
     if (entries) {
         const entryList = Array.isArray(entries) ? entries : Object.values(entries);
         for (const entry of entryList) {
-            if (entry?.content && typeof entry.content === 'string') {
-                const urls = extractMediaUrls(entry.content);
-                urls.forEach(url => {
-                    if (url.startsWith('http://') || url.startsWith('https://')) {
-                        if (!mediaUrls.has(url)) {
-                            lorebookUrls.add(url);
-                        }
-                    }
-                });
+            if (entry?.content && typeof entry.content === 'string') chunks.lorebook.push(entry.content);
+        }
+    }
+
+    return chunks;
+}
+
+/**
+ * Find all remote media URLs in a character card
+ */
+function findCharacterMediaUrls(character, { split = false } = {}) {
+    if (!character) return split ? { embeddedUrls: [], lorebookUrls: [] } : [];
+
+    const { main, lorebook } = collectCardTextChunks(character);
+
+    const mediaUrls = new Set();
+    for (const chunk of main) {
+        for (const url of extractMediaUrls(chunk)) {
+            if (url.startsWith('http://') || url.startsWith('https://')) {
+                mediaUrls.add(url);
             }
         }
     }
-    
+
+    const lorebookUrls = new Set();
+    if (getSetting('includeLorebook')) {
+        for (const chunk of lorebook) {
+            for (const url of extractMediaUrls(chunk)) {
+                if ((url.startsWith('http://') || url.startsWith('https://')) && !mediaUrls.has(url)) {
+                    lorebookUrls.add(url);
+                }
+            }
+        }
+    }
+
     if (split) {
         debugLog(`[Localize] Found ${mediaUrls.size} embedded + ${lorebookUrls.size} lorebook media URLs`);
         return { embeddedUrls: Array.from(mediaUrls), lorebookUrls: Array.from(lorebookUrls) };
@@ -21638,6 +21881,12 @@ async function readBodyWithCap(response, maxBytes) {
     return merged.buffer;
 }
 
+// encodeURIComponent leaves !'()* literal; strict reverse proxies/WAFs 403 literal
+// parens (postimg "(1)" filenames are the common trigger), so escape them for /proxy/
+function proxyEncode(url) {
+    return encodeURIComponent(url).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+}
+
 async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null) {
     try {
         const safety = isUrlSafeForDownload(url);
@@ -21676,7 +21925,7 @@ async function downloadMediaToMemory(url, timeoutMs = 30000, abortSignal = null)
                 if (directError.name === 'AbortError') throw directError;
                 // fetch() rejected (CORS/network) — try proxy
                 usedProxy = true;
-                const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+                const proxyUrl = `/proxy/${proxyEncode(url)}`;
                 response = await fetch(proxyUrl, { signal: controller.signal });
             }
 
@@ -23137,7 +23386,7 @@ document.getElementById('clearBulkLocalizeHistoryBtn')?.addEventListener('click'
         return;
     }
     
-    if (confirm(`This will clear the history of ${count} processed characters.\\n\\nThe next bulk localize will scan all characters again. Continue?`)) {
+    if (confirm(`This will clear the history of ${count} processed characters.\n\nThe next bulk localize will scan all characters again. Continue?`)) {
         clearCompletedMediaLocalizations();
         showToast(`Cleared history of ${count} processed characters`, 'success');
     }
@@ -23351,7 +23600,7 @@ function replaceMediaUrlsInText(text, urlMap) {
     let result = text;
     
     // Replace markdown images: ![alt](url)
-    result = result.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, url) => {
+    result = result.replace(/!\[([^\]]*)\]\(((?:[^\s()]|\([^\s()]*\))+|[^)\s]+)(?:\s*=[^)]*)?(?:\s+"[^"]*")?\)/g, (match, alt, url) => {
         const localPath = lookupLocalizedMedia(urlMap, url);
         if (localPath) {
             return `![${alt}](${localPath})`;
@@ -24012,27 +24261,10 @@ function getCharField(char, field) {
     return typeof val === 'string' ? val : String(val);
 }
 
-/**
- * Calculate token count estimate from character data (cached)
- */
+// Slim chars read the precomputed key (definition fields are stripped); hydrated compute fresh.
 function estimateTokens(char) {
-    // Use avatar as cache key since it's unique per character
-    const cacheKey = `tokens_${char?.avatar || char?.name || ''}`;
-    const cached = getCached(cacheKey);
-    if (cached !== undefined) return cached;
-    
-    const desc = getCharField(char, 'description') || '';
-    const personality = getCharField(char, 'personality') || '';
-    const scenario = getCharField(char, 'scenario') || '';
-    const firstMes = getCharField(char, 'first_mes') || '';
-    const sysprompt = getCharField(char, 'system_prompt') || '';
-    
-    const totalText = desc + personality + scenario + firstMes + sysprompt;
-    // Rough estimate: ~4 chars per token
-    const tokens = Math.round(totalText.length / 4);
-    
-    setCached(cacheKey, tokens);
-    return tokens;
+    if (char?._slim) return char._tokenEstimate ?? _tokenEstimateCache.get(char.avatar) ?? 0;
+    return computeTokenEstimate(char);
 }
 
 /**
@@ -25652,10 +25884,13 @@ async function deleteDuplicateChar(avatar) {
     const name = getCharField(char, 'name') || avatar;
     const avatarPath = getCharacterAvatarUrl(avatar);
     
-    // Get gallery info for this character
+    // Get gallery info for this character (hydrate first if extensions arent recovered yet)
+    if (window.extensionsRecoveryInProgress) {
+        try { await hydrateCharacter(char); } catch (_) {}
+    }
     const galleryInfo = await getCharacterGalleryInfo(char);
     const hasImages = galleryInfo.count > 0;
-    
+
     // Only offer gallery deletion/transfer for unique galleries (with gallery_id)
     // Shared galleries should NOT be modified as they may contain other characters' images
     const hasUniqueGallery = !!getCharacterGalleryId(char);
@@ -27534,7 +27769,7 @@ window.registerOverlay?.({ id: 'confirmSaveModal', tier: 7, close: (el) => el?.c
 // Dynamic confirm-modals (created/removed each invocation; registry entry persists).
 window.registerOverlay?.({ id: 'deleteConfirmModal',  tier: 7, static: false, close: (el) => el?.remove() });
 window.registerOverlay?.({ id: 'deleteDuplicateModal', tier: 7, static: false, close: (el) => el?.remove() });
-window.registerOverlay?.({ id: 'legacyFolderModal',    tier: 7, static: false, close: (el) => el?.remove() });
+window.registerOverlay?.({ id: 'legacyFolderModal',    tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 window.registerOverlay?.({ id: 'folderMappingModal',   tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 window.registerOverlay?.({ id: 'orphanedFoldersModal', tier: 7, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
 
@@ -27661,19 +27896,20 @@ window.initCustomSelect = initCustomSelect;
 window.closeAllTopbarDropdowns = closeAllTopbarDropdowns;
 window.debounce = debounce;
 window.truncate = truncate;
+window.isMobileMode = isMobileMode;
+window.downloadBlobAsFile = downloadBlobAsFile;
+window.crc32 = crc32;
+window.filterListWithInlineCreate = filterListWithInlineCreate;
 window.sanitizeTaglineHtml = sanitizeTaglineHtml;
 
 // Character Data
 window.getAllCharacters = function() { return allCharacters; };
 window.getCurrentCharacters = function() { return currentCharacters; };
 window.getActiveChar = function() { return activeChar; };
-window.setActiveChar = function(c) { activeChar = c; };
 window.openAvatarInGalleryViewer = openAvatarInGalleryViewer;
 window.fetchCharacters = fetchCharacters;
 window.fetchAndAddCharacter = fetchAndAddCharacter;
 window.notifySTCharacterAdded = notifySTCharacterAdded;
-window.notifySTCharacterEdited = notifySTCharacterEdited;
-window.removeCharacterFromList = removeCharacterFromList;
 window.hydrateCharacter = hydrateCharacter;
 window.getTags = getTags;
 window.getAllAvailableTags = getAllAvailableTags;
@@ -27682,8 +27918,10 @@ window.isMediaLocalizationEnabled = isMediaLocalizationEnabled;
 window.buildMediaLocalizationMap = buildMediaLocalizationMap;
 window.replaceMediaUrlsInText = replaceMediaUrlsInText;
 window.getGalleryThumbUrl = getGalleryThumbUrl;
+window.createThumbLoader = createThumbLoader;
 window.getCharacterGalleryInfo = getCharacterGalleryInfo;
 window.getCharacterGalleryId = getCharacterGalleryId;
+window.getExistingImageFolders = getExistingImageFolders;
 window.deleteCharacter = deleteCharacter;
 window.showDeleteConfirmation = showDeleteConfirmation;
 window.generateGalleryId = generateGalleryId;
@@ -27699,10 +27937,10 @@ window.maybeCloseModal = maybeCloseModal;
 window.navigateModal = navigateModal;
 window.openProviderLinkModal = openProviderLinkModal;
 window.hideModal = hideModal;
-window.checkCharacterForDuplicates = checkCharacterForDuplicates;
 window.checkCharacterForDuplicatesAsync = checkCharacterForDuplicatesAsync;
 window.showPreImportDuplicateWarning = showPreImportDuplicateWarning;
 window.showImportSummaryModal = showImportSummaryModal;
+window.queueImportMediaJobs = queueImportMediaJobs;
 
 // View Management
 window.switchView = switchView;
@@ -27713,11 +27951,9 @@ window.onViewExit = onViewExit;
 // DOM / Rendering helpers
 window.renderLoadingState = renderLoadingState;
 window.renderSkeletonGrid = renderSkeletonGrid;
-window.renderSkeletonList = renderSkeletonList;
 window.renderEmptyState = renderEmptyState;
 window.updateMobileFilterIndicator = updateMobileFilterIndicator;
 window.getActiveFilterState = getActiveFilterState;
-window.getCharacterAvatarUrl = getCharacterAvatarUrl;
 window.getCharacterAvatarStThumbUrl = getCharacterAvatarStThumbUrl;
 window.getListingNameFromExtensions = getListingNameFromExtensions;
 window.bumpAvatarCacheBust = bumpAvatarCacheBust;
@@ -27729,13 +27965,12 @@ window.debugLog = debugLog;
 window.performSearch = performSearch;
 window.toggleFavoritesFilter = toggleFavoritesFilter;
 window.toggleCharacterFavorite = toggleCharacterFavorite;
+window.updateCharacterCardFavoriteStatus = updateCharacterCardFavoriteStatus;
 window.toggleAdvFilterPanel = toggleAdvFilterPanel;
 window.closeAdvFilterPanel = closeAdvFilterPanel;
 window.evaluateChatAdvancedFilters = evaluateChatAdvancedFilters;
 window.resetChatFilterCaches = resetChatFilterCaches;
 window.getAdvFilterRulesForChats = getAdvFilterRulesForChats;
-window.setPlaylistFilter = setPlaylistFilter;
-window.clearPlaylistFilter = clearPlaylistFilter;
 window.refreshPlaylistFilterIfActive = refreshPlaylistFilterIfActive;
 window.populatePlaylistDropdown = populatePlaylistDropdown;
 window.renderSidebarPlaylists = renderSidebarPlaylists;
@@ -27750,12 +27985,10 @@ window.isMultiSelectEnabled = isMultiSelectEnabled;
 window.getHostWindow = getHostWindow;
 window.getSTContext = getSTContext;
 window.resolveProxyForProfile = resolveProxyForProfile;
-window.flattenContentBlocks = flattenContentBlocks;
 window.callLLM = callLLM;
 window.callCustomLLM = callCustomLLM;
 window.getLlmSettings = getLlmSettings;
 window.extractLlmContent = extractLlmContent;
-window.resolvePresetModel = resolvePresetModel;
 window.isEmbedded = isEmbedded;
 window.embeddedShowTopBar = embeddedShowTopBar;
 window.closeEmbeddedPanel = closeEmbeddedPanel;
@@ -27775,6 +28008,7 @@ window.extractCharacterDataFromPng = extractCharacterDataFromPng;
 window.convertImageToPng = convertImageToPng;
 window.embedCharacterDataInPng = embedCharacterDataInPng;
 window.findCharacterMediaUrls = findCharacterMediaUrls;
+window.collectCardTextChunks = collectCardTextChunks;
 
 // Generic import pipeline utilities - used by provider importCharacter() implementations
 window.downloadMediaToMemory = downloadMediaToMemory;
@@ -27796,8 +28030,6 @@ window.ENDPOINTS = ENDPOINTS;
 // Creator Notes - shared between local modal and browse preview
 window.renderCreatorNotesSecure = renderCreatorNotesSecure;
 window.cleanupCreatorNotesContainer = cleanupCreatorNotesContainer;
-window.initCreatorNotesHandlers = initCreatorNotesHandlers;
-window.initContentExpandHandlers = initContentExpandHandlers;
 
 // Provider System - hooks set by provider modules at load time
 // (openChubTokenModal, etc. are set by provider modules)
@@ -28136,7 +28368,7 @@ window.mergeRemoteLorebookIntoWorldFile = async function(avatar, remoteBook) {
  * @param {Object<string, *>} fieldUpdates - dot-path keys to values. Pass ST_UNSET_SENTINEL as value to delete an extension key (e.g. {'extensions.chub': ST_UNSET_SENTINEL}).
  * @returns {Promise<{ok: boolean, response?: Response}>}
  */
-async function writeCardFields(char, fieldUpdates) {
+async function writeCardFields(char, fieldUpdates, opts = {}) {
     if (!char) {
         console.error('[writeCardFields] No char provided');
         return { ok: false };
@@ -28227,6 +28459,9 @@ async function writeCardFields(char, fieldUpdates) {
             character_book: updatedData.character_book,
             create_date: existingCreateDate,
             data: updatedData,
+            // Root-only fields (chat, fav, create_date) live outside data; ST's
+            // import strips them and dot-path updates cant reach them.
+            ...(opts.rootFields || {}),
         };
 
         const response = await apiRequest('/characters/merge-attributes', 'POST', payload);
@@ -28250,14 +28485,23 @@ async function writeCardFields(char, fieldUpdates) {
         for (const [field, value] of Object.entries(fieldUpdates)) {
             if (!field.includes('.') && value !== ST_UNSET_SENTINEL) char[field] = value;
         }
+        for (const [field, value] of Object.entries(opts.rootFields || {})) char[field] = value;
         const charIndex = allCharacters.findIndex(c => c.avatar === char.avatar);
         if (charIndex !== -1 && allCharacters[charIndex] !== char) {
             allCharacters[charIndex].data = updatedData;
             for (const [field, value] of Object.entries(fieldUpdates)) {
                 if (!field.includes('.') && value !== ST_UNSET_SENTINEL) allCharacters[charIndex][field] = value;
             }
+            for (const [field, value] of Object.entries(opts.rootFields || {})) allCharacters[charIndex][field] = value;
         }
         if (updatedData.extensions) _extensionsCache.set(char.avatar, updatedData.extensions);
+        // Under ST lazy loading the post-save refetch restores the cached estimate, so refresh it at the write.
+        if (TOKEN_ESTIMATE_FIELDS.some(f => f in fieldUpdates)) {
+            const tok = computeTokenEstimate(char);
+            char._tokenEstimate = tok;
+            if (charIndex !== -1) allCharacters[charIndex]._tokenEstimate = tok;
+            _tokenEstimateCache.set(char.avatar, tok);
+        }
 
         // The Online In-Library lookup base is keyed on name+creator; a surgical write that
         // changes either must invalidate it (other edit paths refresh via fetchCharacters).
@@ -28284,7 +28528,7 @@ async function writeCardFields(char, fieldUpdates) {
  *
  * @param {string} avatar - Character avatar filename
  * @param {Object} fieldUpdates - Object with field paths as keys (supports dot notation)
- * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write.
+ * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write. rootFields: payload-root key/values for fields ST keeps outside data (chat, fav, create_date).
  * @returns {Promise<boolean>} Success status
  */
 window.applyCardFieldUpdates = async function(avatar, fieldUpdates, opts = {}) {
@@ -28297,7 +28541,7 @@ window.applyCardFieldUpdates = async function(avatar, fieldUpdates, opts = {}) {
     // Capture name BEFORE write for gallery-rename comparison. writeCardFields will mutate char.data in place.
     const oldName = char.data?.name || char.name || '';
 
-    const result = await writeCardFields(char, fieldUpdates);
+    const result = await writeCardFields(char, fieldUpdates, { rootFields: opts.rootFields });
     if (!result.ok) return false;
 
     // Convenience side effects. Failure here doesn't roll back the write.

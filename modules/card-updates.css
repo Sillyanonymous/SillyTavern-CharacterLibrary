@@ -1177,493 +1177,496 @@ body.char-modal-above .gv-modal.visible {
 /* ========================================
    MOBILE OVERRIDES
    ======================================== */
-@media (max-width: 768px) {
-    /* Card updates modal (mobile) */
-    .card-update-modal .cl-modal-header {
-        gap: var(--space-sm);
-        flex-wrap: wrap;
-    }
-    .card-update-source-badge { font-size: var(--font-4xs); padding: 1px 5px; margin-left: 5px; }
-    .card-update-modal .cl-modal-body {
-        font-size: var(--font-md);
-    }
-    .card-update-status { font-size: var(--font-sm); padding: 10px 12px; gap: var(--space-sm); }
-    .card-update-select-all { font-size: var(--font-sm); }
-    .card-update-diff-values { font-size: var(--font-sm); }
-    .card-update-diff-expand { font-size: var(--font-sm); }
-    .card-update-empty { font-size: var(--font-xs); }
-    .card-update-apply-text { font-size: var(--font-sm); }
-    .card-update-array-count { font-size: var(--font-xs); }
+/* Card updates modal (mobile) */
+html.cl-mobile .card-update-modal .cl-modal-header {
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+html.cl-mobile .card-update-source-badge { font-size: var(--font-4xs); padding: 1px 5px; margin-left: 5px; }
+html.cl-mobile .card-update-modal .cl-modal-body {
+    font-size: var(--font-md);
+}
+html.cl-mobile .card-update-status { font-size: var(--font-sm); padding: 10px 12px; gap: var(--space-sm); }
+html.cl-mobile .card-update-select-all { font-size: var(--font-sm); }
+html.cl-mobile .card-update-diff-values { font-size: var(--font-sm); }
+html.cl-mobile .card-update-diff-expand { font-size: var(--font-sm); }
+html.cl-mobile .card-update-empty { font-size: var(--font-xs); }
+html.cl-mobile .card-update-apply-text { font-size: var(--font-sm); }
+html.cl-mobile .card-update-array-count { font-size: var(--font-xs); }
 
-    .card-update-field-select {
-        padding: 12px;
-        border-radius: var(--radius-2xl-alt);
-        background: linear-gradient(140deg, rgba(40, 50, 90, 0.55), rgba(20, 20, 30, 0.75));
-        border: 1px solid rgba(90, 140, 210, 0.35);
-    }
-    .card-update-field-header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-sm-md);
-    }
-    .card-update-field-actions {
-        width: 100%;
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: var(--space-sm);
-    }
-    .card-update-field-actions .cl-btn {
-        padding: 6px 8px;
-        font-size: var(--font-sm);
-    }
-    .card-update-field-count {
-        grid-column: 1 / -1;
-        text-align: center;
-        font-size: var(--font-xs);
-    }
-    .card-update-field-grid {
-        grid-template-columns: 1fr;
-        gap: var(--space-sm-md);
-    }
-    .card-update-field-title i { font-size: var(--font-md); }
-    .card-update-field-heading { font-size: var(--font-md); }
-    .card-update-field-sub { font-size: var(--font-xs); }
-    .card-update-field-label { font-size: var(--font-sm); }
-    .card-update-field-option {
-        padding: 10px 12px;
-        border-radius: var(--radius-2xl);
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-    }
+html.cl-mobile .card-update-field-select {
+    padding: 12px;
+    border-radius: var(--radius-2xl-alt);
+    background: linear-gradient(140deg, rgba(40, 50, 90, 0.55), rgba(20, 20, 30, 0.75));
+    border: 1px solid rgba(90, 140, 210, 0.35);
+}
+html.cl-mobile .card-update-field-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm-md);
+}
+html.cl-mobile .card-update-field-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: var(--space-sm);
+}
+html.cl-mobile .card-update-field-actions .cl-btn {
+    padding: 6px 8px;
+    font-size: var(--font-sm);
+}
+html.cl-mobile .card-update-field-count {
+    grid-column: 1 / -1;
+    text-align: center;
+    font-size: var(--font-xs);
+}
+html.cl-mobile .card-update-field-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-sm-md);
+}
+html.cl-mobile .card-update-field-title i { font-size: var(--font-md); }
+html.cl-mobile .card-update-field-heading { font-size: var(--font-md); }
+html.cl-mobile .card-update-field-sub { font-size: var(--font-xs); }
+html.cl-mobile .card-update-field-label { font-size: var(--font-sm); }
+html.cl-mobile .card-update-field-option {
+    padding: 10px 12px;
+    border-radius: var(--radius-2xl);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
 
-    /* Batch list */
-    .card-update-batch-list {
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-        overflow-x: hidden;
-        max-height: none;
-        overflow-y: visible;
-        background: rgba(255, 255, 255, 0.04);
-        border-radius: var(--radius-2xl);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-    }
+/* Batch list */
+html.cl-mobile .card-update-batch-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    overflow-x: hidden;
+    max-height: none;
+    overflow-y: visible;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: var(--radius-2xl);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
 
-    .card-update-batch-item {
-        flex-direction: row;
-        align-items: center;
-        gap: var(--space-sm-md);
-        padding: 9px 12px;
-        border-radius: 0;
-        background: rgba(255, 255, 255, 0.02);
-        border: none;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-        width: auto;
-        min-height: var(--touch-target-min);
-        box-sizing: border-box;
-    }
-    .card-update-batch-item:last-child {
-        border-bottom: none;
-    }
-    .card-update-batch-item:first-child {
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-    }
-    .card-update-batch-item:last-child {
-        border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
-    }
-    .card-update-batch-item:only-child {
-        border-radius: var(--radius-2xl);
-    }
+/* the bare .card-update-batch-list.hidden hide loses to the prefixed display:flex above without this */
+html.cl-mobile .card-update-batch-list.hidden {
+    display: none;
+}
 
-    /* Info column - name + path, single lines, truncated */
-    .card-update-batch-item-info {
-        width: auto;
-        flex: 1;
-        min-width: 0;
-        gap: 1px;
-    }
-    .card-update-batch-item-name {
-        font-size: var(--font-md);
-        font-weight: 600;
-        line-height: 1.25;
-    }
-    .card-update-batch-item-path {
-        font-size: var(--font-2xs);
-        opacity: 0.5;
-        line-height: 1.2;
-    }
-    .card-update-batch-item-name,
-    .card-update-batch-item-path {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        word-break: normal;
-        overflow-wrap: normal;
-    }
+html.cl-mobile .card-update-batch-item {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm-md);
+    padding: 9px 12px;
+    border-radius: 0;
+    background: rgba(255, 255, 255, 0.02);
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    width: auto;
+    min-height: var(--touch-target-min);
+    box-sizing: border-box;
+}
+html.cl-mobile .card-update-batch-item:last-child {
+    border-bottom: none;
+}
+html.cl-mobile .card-update-batch-item:first-child {
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+}
+html.cl-mobile .card-update-batch-item:last-child {
+    border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
+}
+html.cl-mobile .card-update-batch-item:only-child {
+    border-radius: var(--radius-2xl);
+}
 
-    /* Status area - compact inline badges */
-    .card-update-batch-item-status {
-        width: auto;
-        justify-content: flex-end;
-        gap: var(--space-xs-sm);
-        flex-wrap: nowrap;
-        flex-shrink: 0;
-        font-size: var(--font-xs);
-        white-space: nowrap;
-    }
+/* Info column - name + path, single lines, truncated */
+html.cl-mobile .card-update-batch-item-info {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    gap: 1px;
+}
+html.cl-mobile .card-update-batch-item-name {
+    font-size: var(--font-md);
+    font-weight: 600;
+    line-height: 1.25;
+}
+html.cl-mobile .card-update-batch-item-path {
+    font-size: var(--font-2xs);
+    opacity: 0.5;
+    line-height: 1.2;
+}
+html.cl-mobile .card-update-batch-item-name,
+html.cl-mobile .card-update-batch-item-path {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: normal;
+    overflow-wrap: normal;
+}
 
-    /* Status badge - "3 updates" pill */
-    .card-update-batch-item-status .has-updates {
-        padding: 2px 8px;
-        border-radius: var(--radius-xl);
-        font-size: var(--font-xs);
-        font-weight: 600;
-        letter-spacing: 0.01em;
-    }
+/* Status area - compact inline badges */
+html.cl-mobile .card-update-batch-item-status {
+    width: auto;
+    justify-content: flex-end;
+    gap: var(--space-xs-sm);
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+    font-size: var(--font-xs);
+    white-space: nowrap;
+}
 
-    /* View button - compact pill instead of full-width block */
-    .card-update-batch-view-btn {
-        width: auto;
-        padding: 3px 10px;
-        border-radius: var(--radius-xl);
-        font-size: var(--font-xs);
-        font-weight: 600;
-    }
+/* Status badge - "3 updates" pill */
+html.cl-mobile .card-update-batch-item-status .has-updates {
+    padding: 2px 8px;
+    border-radius: var(--radius-xl);
+    font-size: var(--font-xs);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
 
-    /* Card update lorebook header - prevent overflow on mobile */
-    .card-update-diff-item.long-text .card-update-diff-header {
-        flex-wrap: wrap;
-        gap: var(--space-sm);
-        padding: 8px 10px;
-    }
-    .card-update-diff-item.long-text .card-update-diff-header label { flex-shrink: 1; min-width: 0; }
-    .card-update-diff-stats { font-size: var(--font-xs); white-space: nowrap; }
-    .lorebook-entry-counts { font-size: var(--font-xs); margin-left: 4px; gap: var(--space-2xs); }
+/* View button - compact pill instead of full-width block */
+html.cl-mobile .card-update-batch-view-btn {
+    width: auto;
+    padding: 3px 10px;
+    border-radius: var(--radius-xl);
+    font-size: var(--font-xs);
+    font-weight: 600;
+}
 
-    /* --- Card update lorebook diff entries (mobile) --- */
-    .lorebook-diff-entries { padding: 6px 8px; gap: var(--space-2xs); }
-    .lorebook-diff-info-box {
-        flex-direction: column;
-        gap: var(--space-xs-sm);
-        padding: 8px 10px;
-        margin: 4px 6px;
-        font-size: var(--font-xs);
-        line-height: 1.4;
-    }
-    .lorebook-diff-entry {
-        flex-wrap: wrap;
-        gap: var(--space-xs) var(--space-xs-sm);
-        padding: 5px 8px;
-        font-size: var(--font-sm);
-    }
-    .lorebook-diff-badge { width: 18px; height: 18px; font-size: 10px; }
-    .lorebook-diff-entry-name { max-width: 45%; }
-    .lorebook-diff-entry-tag {
-        font-size: var(--font-2xs);
-        padding: 1px 5px;
-        order: 10;
-    }
-    .lorebook-world-check { margin-left: 0; }
-    .lorebook-diff-entry-keys { font-size: var(--font-xs); flex-basis: 100%; padding-left: 26px; }
-    .lorebook-diff-entry-changes { font-size: var(--font-xs); }
-    .lorebook-diff-meta-row { flex-wrap: wrap; gap: var(--space-xs) var(--space-xs-sm); font-size: var(--font-sm); }
-    .lorebook-diff-meta-key { min-width: unset; }
+/* Card update lorebook header - prevent overflow on mobile */
+html.cl-mobile .card-update-diff-item.long-text .card-update-diff-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: 8px 10px;
+}
+html.cl-mobile .card-update-diff-item.long-text .card-update-diff-header label { flex-shrink: 1; min-width: 0; }
+html.cl-mobile .card-update-diff-stats { font-size: var(--font-xs); white-space: nowrap; }
+html.cl-mobile .lorebook-entry-counts { font-size: var(--font-xs); margin-left: 4px; gap: var(--space-2xs); }
 
-    .card-update-diff-item.short {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-sm);
-    }
-    .card-update-diff-values {
-        width: 100%;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-        align-items: center;
-        gap: var(--space-xs-sm);
-    }
-    .card-update-diff-values .local-value,
-    .card-update-diff-values .remote-value {
-        white-space: normal;
-        max-width: none;
-        width: auto;
-        display: block;
-    }
+/* --- Card update lorebook diff entries (mobile) --- */
+html.cl-mobile .lorebook-diff-entries { padding: 6px 8px; gap: var(--space-2xs); }
+html.cl-mobile .lorebook-diff-info-box {
+    flex-direction: column;
+    gap: var(--space-xs-sm);
+    padding: 8px 10px;
+    margin: 4px 6px;
+    font-size: var(--font-xs);
+    line-height: 1.4;
+}
+html.cl-mobile .lorebook-diff-entry {
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-xs-sm);
+    padding: 5px 8px;
+    font-size: var(--font-sm);
+}
+html.cl-mobile .lorebook-diff-badge { width: 18px; height: 18px; font-size: 10px; }
+html.cl-mobile .lorebook-diff-entry-name { max-width: 45%; }
+html.cl-mobile .lorebook-diff-entry-tag {
+    font-size: var(--font-2xs);
+    padding: 1px 5px;
+    order: 10;
+}
+html.cl-mobile .lorebook-world-check { margin-left: 0; }
+html.cl-mobile .lorebook-diff-entry-keys { font-size: var(--font-xs); flex-basis: 100%; padding-left: 26px; }
+html.cl-mobile .lorebook-diff-entry-changes { font-size: var(--font-xs); }
+html.cl-mobile .lorebook-diff-meta-row { flex-wrap: wrap; gap: var(--space-xs) var(--space-xs-sm); font-size: var(--font-sm); }
+html.cl-mobile .lorebook-diff-meta-key { min-width: unset; }
 
-    .card-update-array-diff {
-        grid-template-columns: 1fr;
-    }
-    .card-update-array-list {
-        max-height: none;
-        overflow: visible;
-    }
-    .card-update-pill {
-        font-size: var(--font-xs);
-        padding: 3px 8px;
-    }
+html.cl-mobile .card-update-diff-item.short {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+}
+html.cl-mobile .card-update-diff-values {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--space-xs-sm);
+}
+html.cl-mobile .card-update-diff-values .local-value,
+html.cl-mobile .card-update-diff-values .remote-value {
+    white-space: normal;
+    max-width: none;
+    width: auto;
+    display: block;
+}
 
-    .card-update-diff-sidebyside {
-        grid-template-columns: 1fr;
-    }
-    .card-update-diff-panel.local {
-        border-right: none;
-        border-bottom: 1px solid rgba(80,80,80,0.3);
-    }
-    .card-update-diff-panel-content {
-        max-height: none;
-        overflow: visible;
-        font-size: var(--font-xs);
-    }
-    /* Batch footer */
-    .card-update-modal .cl-modal-footer {
-        padding: 12px;
-        gap: var(--space-sm);
-        display: flex;
-        flex-wrap: wrap;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
-        background: var(--cl-glass-bg);
-        flex-shrink: 0;
-    }
+html.cl-mobile .card-update-array-diff {
+    grid-template-columns: 1fr;
+}
+html.cl-mobile .card-update-array-list {
+    max-height: none;
+    overflow: visible;
+}
+html.cl-mobile .card-update-pill {
+    font-size: var(--font-xs);
+    padding: 3px 8px;
+}
 
-    /* Uniform button sizing - every button in the footer */
-    .card-update-modal .cl-modal-footer .cl-btn,
-    .card-update-modal .cl-modal-footer .card-update-pause-btn {
-        height: var(--touch-target-min);
-        padding: 0 16px;
-        border-radius: var(--radius-2xl);
-        font-size: var(--font-md);
-        font-weight: 500;
-        box-sizing: border-box;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-sm);
-        flex: 1 1 0;
-        min-width: 0;
-    }
+html.cl-mobile .card-update-diff-sidebyside {
+    grid-template-columns: 1fr;
+}
+html.cl-mobile .card-update-diff-panel.local {
+    border-right: none;
+    border-bottom: 1px solid rgba(80,80,80,0.3);
+}
+html.cl-mobile .card-update-diff-panel-content {
+    max-height: none;
+    overflow: visible;
+    font-size: var(--font-xs);
+}
+/* Batch footer */
+html.cl-mobile .card-update-modal .cl-modal-footer {
+    padding: 12px;
+    gap: var(--space-sm);
+    display: flex;
+    flex-wrap: wrap;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--cl-glass-bg);
+    flex-shrink: 0;
+}
 
-    /* Apply progress bar - full width row */
-    .card-update-modal .cl-modal-footer .card-update-apply-progress {
-        flex: 0 0 100%;
-        order: -2;
-    }
+/* Uniform button sizing - every button in the footer */
+html.cl-mobile .card-update-modal .cl-modal-footer .cl-btn,
+html.cl-mobile .card-update-modal .cl-modal-footer .card-update-pause-btn {
+    height: var(--touch-target-min);
+    padding: 0 16px;
+    border-radius: var(--radius-2xl);
+    font-size: var(--font-md);
+    font-weight: 500;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    flex: 1 1 0;
+    min-width: 0;
+}
 
-    /* Apply All wrapper - full width, primary CTA row */
-    .card-update-batch-actions {
-        flex: 0 0 100% !important;
-        order: -1;
-        padding-top: 0;
-        border-top: none;
-        margin-top: 0;
-        gap: 0;
-    }
-    .card-update-batch-actions .cl-btn {
-        width: 100%;
-        height: 48px;          /* slightly taller - primary action */
-        font-size: var(--font-base);
-        font-weight: 600;
-        border-radius: var(--radius-2xl);
-        letter-spacing: 0.01em;
-    }
+/* Apply progress bar - full width row */
+html.cl-mobile .card-update-modal .cl-modal-footer .card-update-apply-progress {
+    flex: 0 0 100%;
+    order: -2;
+}
 
-    /* Pause / Resume - colour variants */
-    .card-update-pause-btn {
-        font-weight: 600 !important;
-    }
-    .card-update-pause-btn.pause {
-        background: rgba(var(--cl-warning-rgb), 0.18) !important;
-        border: 1px solid rgba(var(--cl-warning-rgb), 0.4) !important;
-        color: var(--cl-warning-pale) !important;
-    }
-    .card-update-pause-btn.resume {
-        background: rgba(var(--cl-success-rgb), 0.18) !important;
-        border: 1px solid rgba(var(--cl-success-rgb), 0.4) !important;
-        color: var(--cl-success-pale) !important;
-    }
+/* Apply All wrapper - full width, primary CTA row */
+html.cl-mobile .card-update-batch-actions {
+    flex: 0 0 100% !important;
+    order: -1;
+    padding-top: 0;
+    border-top: none;
+    margin-top: 0;
+    gap: 0;
+}
+html.cl-mobile .card-update-batch-actions .cl-btn {
+    width: 100%;
+    height: 48px;          /* slightly taller - primary action */
+    font-size: var(--font-base);
+    font-weight: 600;
+    border-radius: var(--radius-2xl);
+    letter-spacing: 0.01em;
+}
 
-    /* Batch progress text - mobile */
-    .card-update-batch-progress {
-        padding: 12px 14px;
-        font-size: var(--font-md);
-        font-weight: 500;
-        color: rgba(255, 255, 255, 0.75);
-        background: rgba(255, 255, 255, 0.03);
-        border-radius: var(--radius-xl);
-        border: 1px solid rgba(255, 255, 255, 0.06);
-        margin-top: 8px;
-    }
+/* Pause / Resume - colour variants */
+html.cl-mobile .card-update-pause-btn {
+    font-weight: 600 !important;
+}
+html.cl-mobile .card-update-pause-btn.pause {
+    background: rgba(var(--cl-warning-rgb), 0.18) !important;
+    border: 1px solid rgba(var(--cl-warning-rgb), 0.4) !important;
+    color: var(--cl-warning-pale) !important;
+}
+html.cl-mobile .card-update-pause-btn.resume {
+    background: rgba(var(--cl-success-rgb), 0.18) !important;
+    border: 1px solid rgba(var(--cl-success-rgb), 0.4) !important;
+    color: var(--cl-success-pale) !important;
+}
 
-    /* =============================================
-       Batch filter bar, checkboxes, field pills,
-       selection controls, pre-apply summary
-       ============================================= */
+/* Batch progress text - mobile */
+html.cl-mobile .card-update-batch-progress {
+    padding: 12px 14px;
+    font-size: var(--font-md);
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.75);
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius-xl);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    margin-top: 8px;
+}
 
-    /* Filter bar - stacked on mobile: pills row + selection row */
-    .card-update-batch-filter-bar {
-        flex-direction: column;
-        align-items: stretch;
-        gap: var(--space-xs-sm);
-        margin-bottom: 10px;
-        flex-wrap: nowrap;
-        overflow-x: visible;
-    }
+/* =============================================
+   Batch filter bar, checkboxes, field pills,
+   selection controls, pre-apply summary
+   ============================================= */
 
-    .card-update-filter-pills {
-        flex-wrap: nowrap;
-        gap: var(--space-xs);
-        flex-shrink: 0;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        padding-bottom: 2px;
-    }
+/* Filter bar - stacked on mobile: pills row + selection row */
+html.cl-mobile .card-update-batch-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-xs-sm);
+    margin-bottom: 10px;
+    flex-wrap: nowrap;
+    overflow-x: visible;
+}
 
-    /* Touch-friendly pills */
-    .card-update-filter-pill {
-        padding: 6px 10px;
-        font-size: var(--font-xs);
-        min-height: 32px;
-        white-space: nowrap;
-        touch-action: manipulation;
-    }
-    .card-update-filter-pill:hover {
-        border-color: rgba(255, 255, 255, 0.12);
-        background: rgba(255, 255, 255, 0.05);
-        color: var(--cl-text-secondary);
-    }
-    .card-update-filter-pill.active:hover {
-        border-color: var(--accent);
-        background: rgba(var(--accent-rgb), 0.15);
-        color: var(--accent);
-    }
+html.cl-mobile .card-update-filter-pills {
+    flex-wrap: nowrap;
+    gap: var(--space-xs);
+    flex-shrink: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 2px;
+}
 
-    .filter-count {
-        font-size: var(--font-sm);
-        padding: 0 4px;
-        min-width: 14px;
-    }
+/* Touch-friendly pills */
+html.cl-mobile .card-update-filter-pill {
+    padding: 6px 10px;
+    font-size: var(--font-xs);
+    min-height: 32px;
+    white-space: nowrap;
+    touch-action: manipulation;
+}
+html.cl-mobile .card-update-filter-pill:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--cl-text-secondary);
+}
+html.cl-mobile .card-update-filter-pill.active:hover {
+    border-color: var(--accent);
+    background: rgba(var(--accent-rgb), 0.15);
+    color: var(--accent);
+}
 
-    /* Selection controls - subtle centered row below pills */
-    .card-update-batch-selection-controls {
-        font-size: var(--font-2xs);
-        flex-shrink: 0;
-        gap: var(--space-xs);
-        justify-content: center;
-        opacity: 0.7;
-    }
-    .card-update-select-link {
-        padding: 2px 6px;
-        min-height: 28px;
-        display: inline-flex;
-        align-items: center;
-        touch-action: manipulation;
-        font-size: inherit;
-    }
-    .card-update-select-divider {
-        opacity: 0.4;
-    }
+html.cl-mobile .filter-count {
+    font-size: var(--font-sm);
+    padding: 0 4px;
+    min-width: 14px;
+}
 
-    /* Batch item checkbox - 44px touch target */
-    .card-update-batch-item-check {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: -9px -6px -9px -8px;
-    }
-    .card-update-batch-checkbox {
-        width: 18px;
-        height: 18px;
-    }
+/* Selection controls - subtle centered row below pills */
+html.cl-mobile .card-update-batch-selection-controls {
+    font-size: var(--font-2xs);
+    flex-shrink: 0;
+    gap: var(--space-xs);
+    justify-content: center;
+    opacity: 0.7;
+}
+html.cl-mobile .card-update-select-link {
+    padding: 2px 6px;
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    touch-action: manipulation;
+    font-size: inherit;
+}
+html.cl-mobile .card-update-select-divider {
+    opacity: 0.4;
+}
 
-    /* Inline field icons in status area */
-    .card-update-batch-item-fields {
-        gap: var(--space-2xs);
-    }
-    .batch-field-icon {
-        width: 20px;
-        height: 20px;
-        font-size: var(--font-3xs);
-    }
+/* Batch item checkbox - 44px touch target */
+html.cl-mobile .card-update-batch-item-check {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: -9px -6px -9px -8px;
+}
+html.cl-mobile .card-update-batch-checkbox {
+    width: 18px;
+    height: 18px;
+}
 
-    /* Pre-apply summary - full-width mobile layout */
-    .batch-summary-header {
-        padding: 10px 12px;
-        border-radius: var(--radius-lg);
-        margin-bottom: 10px;
-        gap: var(--space-sm);
-        font-size: var(--font-md);
-    }
+/* Inline field icons in status area */
+html.cl-mobile .card-update-batch-item-fields {
+    gap: var(--space-2xs);
+}
+html.cl-mobile .batch-field-icon {
+    width: 20px;
+    height: 20px;
+    font-size: var(--font-3xs);
+}
 
-    .batch-summary-fields {
-        gap: var(--space-xs);
-        margin-bottom: 12px;
-    }
-    .batch-summary-field-count {
-        font-size: var(--font-xs);
-    }
+/* Pre-apply summary - full-width mobile layout */
+html.cl-mobile .batch-summary-header {
+    padding: 10px 12px;
+    border-radius: var(--radius-lg);
+    margin-bottom: 10px;
+    gap: var(--space-sm);
+    font-size: var(--font-md);
+}
 
-    .batch-summary-chars-header {
-        padding: 6px 0;
-        margin-bottom: 4px;
-        font-size: var(--font-md);
-    }
+html.cl-mobile .batch-summary-fields {
+    gap: var(--space-xs);
+    margin-bottom: 12px;
+}
+html.cl-mobile .batch-summary-field-count {
+    font-size: var(--font-xs);
+}
 
-    .batch-summary-toggle-all {
-        font-size: var(--font-sm);
-        min-height: var(--touch-target-min);
-        display: flex;
-        align-items: center;
-        touch-action: manipulation;
-    }
-    .batch-summary-toggle-all input {
-        width: 18px;
-        height: 18px;
-    }
+html.cl-mobile .batch-summary-chars-header {
+    padding: 6px 0;
+    margin-bottom: 4px;
+    font-size: var(--font-md);
+}
 
-    .batch-summary-char-list {
-        max-height: 55vh;
-        gap: 1px;
-    }
+html.cl-mobile .batch-summary-toggle-all {
+    font-size: var(--font-sm);
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+    touch-action: manipulation;
+}
+html.cl-mobile .batch-summary-toggle-all input {
+    width: 18px;
+    height: 18px;
+}
 
-    .batch-summary-char-item {
-        gap: var(--space-sm-md);
-        padding: 10px 10px;
-        min-height: var(--touch-target-min);
-        border-radius: var(--radius-sm);
-        touch-action: manipulation;
-    }
-    .batch-summary-char-item:hover {
-        background: rgba(0, 0, 0, 0.15);
-    }
+html.cl-mobile .batch-summary-char-list {
+    max-height: 55vh;
+    gap: 1px;
+}
 
-    .batch-summary-char-cb {
-        width: 18px;
-        height: 18px;
-    }
+html.cl-mobile .batch-summary-char-item {
+    gap: var(--space-sm-md);
+    padding: 10px 10px;
+    min-height: var(--touch-target-min);
+    border-radius: var(--radius-sm);
+    touch-action: manipulation;
+}
+html.cl-mobile .batch-summary-char-item:hover {
+    background: rgba(0, 0, 0, 0.15);
+}
 
-    .batch-summary-char-name {
-        font-size: var(--font-md);
-    }
-    .batch-summary-char-fields {
-        gap: var(--space-2xs);
-    }
-    .batch-summary-char-fields .batch-field-icon {
-        width: 18px;
-        height: 18px;
-        font-size: var(--font-3xs);
-    }
+html.cl-mobile .batch-summary-char-cb {
+    width: 18px;
+    height: 18px;
+}
 
-    /* Summary footer buttons - match existing batch footer styling */
-    #cardUpdateBatchSummaryBackBtn,
-    #cardUpdateBatchSummaryConfirmBtn {
-        height: var(--touch-target-min);
-        border-radius: var(--radius-2xl);
-        font-size: var(--font-md);
-        font-weight: 500;
-        touch-action: manipulation;
-    }
-    #cardUpdateBatchSummaryConfirmBtn {
-        height: 48px;
-        font-weight: 600;
-    }
+html.cl-mobile .batch-summary-char-name {
+    font-size: var(--font-md);
+}
+html.cl-mobile .batch-summary-char-fields {
+    gap: var(--space-2xs);
+}
+html.cl-mobile .batch-summary-char-fields .batch-field-icon {
+    width: 18px;
+    height: 18px;
+    font-size: var(--font-3xs);
+}
+
+/* Summary footer buttons - match existing batch footer styling */
+html.cl-mobile #cardUpdateBatchSummaryBackBtn,
+html.cl-mobile #cardUpdateBatchSummaryConfirmBtn {
+    height: var(--touch-target-min);
+    border-radius: var(--radius-2xl);
+    font-size: var(--font-md);
+    font-weight: 500;
+    touch-action: manipulation;
+}
+html.cl-mobile #cardUpdateBatchSummaryConfirmBtn {
+    height: 48px;
+    font-weight: 600;
 }

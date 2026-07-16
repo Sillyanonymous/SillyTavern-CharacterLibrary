@@ -145,19 +145,17 @@
 }
 
 /* Mobile overrides */
-@media screen and (max-width: 768px) {
 
-    /* The manual-token input sits outside .browse-login-form (in the details
-       block), so the shared mobile zoom guard doesnt reach it */
-    #botbooruManualTokenInput { font-size: var(--mobile-input-size); }
+/* The manual-token input sits outside .browse-login-form (in the details
+   block), so the shared mobile zoom guard doesnt reach it */
+html.cl-mobile #botbooruManualTokenInput { font-size: var(--mobile-input-size); }
 
-    /* Widen the footer uploader icon's tap area without changing the layout */
-    .botbooru-uploader-btn {
-        padding: 8px;
-        margin: -8px -8px -8px auto;
-    }
-
+/* Widen the footer uploader icon's tap area without changing the layout */
+html.cl-mobile .botbooru-uploader-btn {
+    padding: 8px;
+    margin: -8px -8px -8px auto;
 }
+
 
 /* The curated sub-sort select claims topbar space only while shown, so it
    display:none when hidden rather than the shared visibility-hide, which would otherwise

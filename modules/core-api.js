@@ -26,14 +26,10 @@ export function resolveProxyForProfile(profile) {
     return window.resolveProxyForProfile?.(profile);
 }
 
-export function flattenContentBlocks(blocks) {
-    return window.flattenContentBlocks?.(blocks) ?? '';
-}
-
 // Shared LLM client (see library.js "SHARED LLM CLIENT"). Each AI module passes its own
 // resolved profile + the per-feature options; the body/proxy/parse logic is centralized.
 export function getLlmSettings() {
-    return window.getLlmSettings?.() ?? Promise.resolve({ profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '' });
+    return window.getLlmSettings?.() ?? Promise.resolve({ profiles: [], activeSource: '', activeModel: '', activePreset: null, selectedProfileId: '', hasProfiles: false, error: true });
 }
 
 export function callLLM(messages, opts) {
@@ -46,10 +42,6 @@ export function callCustomLLM(messages, opts) {
 
 export function extractLlmContent(data, opts) {
     return window.extractLlmContent?.(data, opts);
-}
-
-export function resolvePresetModel(preset) {
-    return window.resolvePresetModel?.(preset) ?? '';
 }
 
 // ========================================
@@ -173,8 +165,8 @@ export function setProviderExcludeTags(providerId, tags) {
  * Open the character detail modal
  * @param {Object} char - Character object
  */
-export function openCharacterModal(char) {
-    return window.openModal?.(char);
+export function openCharacterModal(...args) {
+    return window.openModal?.(...args);
 }
 
 /**
@@ -186,35 +178,12 @@ export function openCharModalElevated(char, navList) {
 }
 
 /**
- * Close the character detail modal
- */
-export function closeCharacterModal() {
-    window.closeModal?.();
-}
-
-/**
  * Open the provider link modal for a character
  * Sets the active character and opens the modal
  * @param {Object} char - Character object
  */
 export function openProviderLinkModal(char) {
     window.openProviderLinkModal?.(char);
-}
-
-/**
- * Get the currently active character (in modal view)
- * @returns {Object|null} Active character or null
- */
-export function getActiveChar() {
-    return window.getActiveChar?.() || null;
-}
-
-/**
- * Set the active character (for modal operations)
- * @param {Object} char - Character object
- */
-export function setActiveChar(char) {
-    window.setActiveChar?.(char);
 }
 
 /**
@@ -285,6 +254,15 @@ export function getGalleryThumbUrl(folderName, fileName) {
     return window.getGalleryThumbUrl?.(folderName, fileName) ?? null;
 }
 
+/**
+ * Capped-concurrency thumbnail loader factory; each surface owns its instance
+ * @param {Object} opts - { concurrency, onSettled }
+ * @returns {{ enqueue: Function, reset: Function }|undefined}
+ */
+export function createThumbLoader(...args) {
+    return window.createThumbLoader?.(...args);
+}
+
 export function isMediaLocalizationEnabled(avatar) {
     return window.isMediaLocalizationEnabled?.(avatar) ?? false;
 }
@@ -323,6 +301,14 @@ export function getCharacterGalleryInfo(char) {
  */
 export function getCharacterGalleryId(char) {
     return window.getCharacterGalleryId?.(char) ?? null;
+}
+
+/**
+ * List existing gallery folder names without the IMAGES_LIST mkdir side effect
+ * @returns {Promise<Set<string>>} Folder names on disk
+ */
+export function getExistingImageFolders() {
+    return window.getExistingImageFolders?.() || Promise.resolve(new Set());
 }
 
 // ========================================
@@ -492,6 +478,14 @@ export function truncate(str, max) {
 }
 
 /**
+ * Live mobile-mode check (html.cl-mobile). Evaluate at event time; the mode can flip mid-session.
+ * @returns {boolean} Whether mobile mode is active
+ */
+export function isMobileMode() {
+    return window.isMobileMode?.() ?? false;
+}
+
+/**
  * Get tags for a character (normalized)
  * @param {Object} char - Character object
  * @returns {Array<string>} Tags array
@@ -578,25 +572,12 @@ export function renderLoadingState(container, message, className = 'loading-spin
     window.renderLoadingState?.(container, message, className);
 }
 
-export function renderSkeletonGrid(container, count = 12) {
-    window.renderSkeletonGrid?.(container, count);
-}
-
-export function renderSkeletonList(container, count = 6) {
-    window.renderSkeletonList?.(container, count);
+export function renderSkeletonGrid(...args) {
+    window.renderSkeletonGrid?.(...args);
 }
 
 export function renderEmptyState(container, opts) {
     window.renderEmptyState?.(container, opts);
-}
-
-/**
- * Get avatar URL for a character
- * @param {string} avatar - Avatar filename
- * @returns {string} Avatar URL
- */
-export function getCharacterAvatarUrl(avatar) {
-    return window.getCharacterAvatarUrl?.(avatar) ?? '';
 }
 
 export function getCharacterAvatarStThumbUrl(avatar) {
@@ -611,16 +592,16 @@ export function getListingNameFromExtensions(char) {
     return window.getListingNameFromExtensions?.(char) ?? null;
 }
 
-export function bumpAvatarCacheBust(avatar) {
-    return window.bumpAvatarCacheBust?.(avatar);
+export function bumpAvatarCacheBust(...args) {
+    return window.bumpAvatarCacheBust?.(...args);
 }
 
-export function getDisplayTagline(char) {
-    return window.getDisplayTagline?.(char) ?? '';
+export function getDisplayTagline(...args) {
+    return window.getDisplayTagline?.(...args) ?? '';
 }
 
-export function getCharacterName(char) {
-    return window.getCharacterName?.(char) ?? char?.name ?? '';
+export function getCharacterName(...args) {
+    return window.getCharacterName?.(...args) ?? args[0]?.name ?? '';
 }
 
 /**
@@ -691,20 +672,6 @@ export function notifySTCharacterAdded(avatar) {
 }
 
 /**
- * @param {string} avatar
- */
-export function notifySTCharacterEdited(avatar) {
-    return window.notifySTCharacterEdited?.(avatar);
-}
-
-/**
- * @param {string} avatar
- */
-export function removeCharacterFromList(avatar) {
-    window.removeCharacterFromList?.(avatar);
-}
-
-/**
  * Fetch heavy fields for a slim character object (no-op if already hydrated).
  * @param {Object} char - Character object (may be slim)
  * @returns {Promise<Object>} The same char with heavy fields populated
@@ -718,6 +685,56 @@ export function hydrateCharacter(char) {
  */
 export function performSearch() {
     window.performSearch?.();
+}
+
+/**
+ * Which grid filters are active: { fav, tag, playlist } booleans
+ */
+export function getActiveFilterState(...args) {
+    return window.getActiveFilterState?.(...args) ?? { fav: false, tag: false, playlist: false };
+}
+
+/**
+ * Toggle a character's favorite status (write + ST sync + grid badge + toasts)
+ * @param {Object} char - Character object
+ */
+export function toggleCharacterFavorite(...args) {
+    return window.toggleCharacterFavorite?.(...args);
+}
+
+/**
+ * Set the favorite star badge on a character's grid card
+ * @param {string} avatar - Character avatar filename
+ * @param {boolean} isFavorite - Whether the character is a favorite
+ */
+export function updateCharacterCardFavoriteStatus(...args) {
+    return window.updateCharacterCardFavoriteStatus?.(...args);
+}
+
+/**
+ * Download a Blob as a file via anchor click
+ * @param {Blob} blob - Content to download
+ * @param {string} filename - Suggested filename
+ */
+export function downloadBlobAsFile(...args) {
+    return window.downloadBlobAsFile?.(...args);
+}
+
+/**
+ * CRC32 checksum of a byte array
+ * @param {Uint8Array} data - Bytes to checksum
+ * @returns {number} Unsigned 32-bit CRC
+ */
+export function crc32(...args) {
+    return window.crc32?.(...args) ?? 0;
+}
+
+/**
+ * Search-filter a row list with an inline "Create <query>" row on no exact match
+ * @param {Object} cfg - { searchId, listId, rowSel, nameOf, createRowClass, createRowHtml, onCreate, emptyId? }
+ */
+export function filterListWithInlineCreate(...args) {
+    return window.filterListWithInlineCreate?.(...args);
 }
 
 export function evaluateChatAdvancedFilters(chat) {
@@ -745,8 +762,8 @@ export function setGallerySyncAuditDone(v) {
  * @param {Object} char - Character object
  * @returns {string} Gallery ID
  */
-export function generateGalleryId(char) {
-    return window.generateGalleryId?.(char) || '';
+export function generateGalleryId(...args) {
+    return window.generateGalleryId?.(...args) || '';
 }
 
 // ========================================
@@ -783,42 +800,13 @@ export function cleanupCreatorNotesContainer(container) {
     window.cleanupCreatorNotesContainer?.(container);
 }
 
-export function openCharacterCreator() {
-    window.openCharacterCreator?.();
-}
-
 export async function autoSnapshotBeforeChange(char, reason, opts) {
     return window.autoSnapshotBeforeChange?.(char, reason, opts);
-}
-
-/**
- * Initialize creator notes interaction handlers (copy, links, etc.)
- * @param {HTMLElement} container - Container element
- */
-export function initCreatorNotesHandlers(container) {
-    window.initCreatorNotesHandlers?.(container);
-}
-
-/**
- * Initialize content expand/collapse handlers for long text sections
- * @param {HTMLElement} container - Container element
- */
-export function initContentExpandHandlers(container) {
-    window.initContentExpandHandlers?.(container);
 }
 
 // ========================================
 // IMPORT / DOWNLOAD PIPELINE
 // ========================================
-
-/**
- * Check if a character (by name/content) already exists in the local library
- * @param {Object} card - Character card to check
- * @returns {Array} Duplicate info array
- */
-export function checkCharacterForDuplicates(card) {
-    return window.checkCharacterForDuplicates?.(card) || [];
-}
 
 /**
  * Async duplicate check with hydration for cross-provider matching
@@ -844,8 +832,34 @@ export function showPreImportDuplicateWarning(newCharInfo, matches) {
  * @param {Object} card - Character card
  * @returns {Array<string>} Media URLs found
  */
-export function findCharacterMediaUrls(card) {
-    return window.findCharacterMediaUrls?.(card) || [];
+export function findCharacterMediaUrls(...args) {
+    return window.findCharacterMediaUrls?.(...args) || [];
+}
+
+/**
+ * All scannable text chunks of a hydrated card, lorebook separate
+ * @param {Object} character
+ * @returns {{ main: string[], lorebook: string[] }}
+ */
+export function collectCardTextChunks(...args) {
+    return window.collectCardTextChunks?.(...args) ?? { main: [], lorebook: [] };
+}
+
+/**
+ * Lazy-load the gallery extractors (no-op once loaded)
+ * @returns {Promise<void>}
+ */
+export function ensureExtractorsLoaded(...args) {
+    return window.ensureExtractorsLoaded?.(...args) ?? Promise.resolve();
+}
+
+/**
+ * Gallery page URLs found in a card's text (empty until extractors are loaded)
+ * @param {Object} character
+ * @returns {Array<string>}
+ */
+export function findCharacterGalleryUrls(...args) {
+    return window.findCharacterGalleryUrls?.(...args) ?? [];
 }
 
 /**
@@ -854,6 +868,31 @@ export function findCharacterMediaUrls(card) {
  */
 export function showImportSummaryModal(summaryData) {
     window.showImportSummaryModal?.(summaryData);
+}
+
+/**
+ * Queue background media-download jobs for freshly imported characters
+ * @param {Object} summaryData - Same {galleryCharacters, mediaCharacters} shape as the summary modal
+ * @returns {number} count of queued jobs
+ */
+export function queueImportMediaJobs(...args) {
+    return window.queueImportMediaJobs?.(...args) ?? 0;
+}
+
+/**
+ * Collapse all sections of a browse preview modal (fresh-open state)
+ * @param {HTMLElement} modal
+ */
+export function resetBrowseSectionCollapseState(...args) {
+    return window.resetBrowseSectionCollapseState?.(...args);
+}
+
+/**
+ * Publish the open browse preview's alt greetings for the fullscreen expander
+ * @param {Array<string>|null} greetings
+ */
+export function setBrowseAltGreetings(...args) {
+    return window.setBrowseAltGreetings?.(...args);
 }
 
 /**
@@ -937,11 +976,6 @@ export function registerNotificationSection(...args) {
 /** Recompute the notifications button icon/badge/visibility from all sections. */
 export function refreshNotificationsUI(...args) {
     return window.refreshNotificationsUI?.(...args);
-}
-
-/** Open the notifications dropdown and render every visible section. */
-export function openNotificationsDropdown(...args) {
-    return window.openNotificationsDropdown?.(...args);
 }
 
 /** @returns {Set<string>} avatars with completed media localization */
@@ -1029,7 +1063,7 @@ export function extractCharacterDataFromPng(pngBuffer) {
  *
  * @param {string} avatar - Character avatar filename
  * @param {Object} fieldUpdates - Object with field paths as keys and new values
- * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write.
+ * @param {Object} [opts] - awaitNotify: await the ST resync before returning, so a follow-on implicit card save cannot clobber this write. rootFields: payload-root key/values for fields ST keeps outside data (chat, fav, create_date).
  * @returns {Promise<boolean>} Success status
  */
 export function applyCardFieldUpdates(...args) {
@@ -1046,10 +1080,11 @@ export function applyCardFieldUpdates(...args) {
  *
  * @param {Object} char - the character object (live ref, mutated in place)
  * @param {Object} fieldUpdates - Object with dot-path keys to values
+ * @param {Object} [opts] - rootFields: payload-root key/values for fields ST keeps outside data
  * @returns {Promise<{ok: boolean, response?: Response}>}
  */
-export function writeCardFields(char, fieldUpdates) {
-    return window.writeCardFields?.(char, fieldUpdates) || Promise.resolve({ ok: false });
+export function writeCardFields(...args) {
+    return window.writeCardFields?.(...args) || Promise.resolve({ ok: false });
 }
 
 /**
@@ -1181,14 +1216,6 @@ export function listAllChatsWithMeta() {
 // ========================================
 
 /**
- * Get the provider registry module.
- * @returns {Object} ProviderRegistry
- */
-export function getProviderRegistry() {
-    return ProviderRegistry;
-}
-
-/**
  * Get all registered providers.
  * @returns {import('./providers/provider-interface.js').ProviderBase[]}
  */
@@ -1233,12 +1260,12 @@ export function getAllLinkedCharacters() {
 }
 
 /**
- * Find which provider can handle a URL.
- * @param {string} url
- * @returns {Object|null} Provider or null
+ * Which extensions namespace carries the display tagline: provider id when linked, 'cl' otherwise.
+ * @param {Object} char
+ * @returns {string}
  */
-export function getProviderForUrl(url) {
-    return ProviderRegistry.getProviderForUrl(url);
+export function getActiveTaglineNamespace(char) {
+    return ProviderRegistry.getActiveTaglineNamespace(char);
 }
 
 // ========================================
@@ -1253,29 +1280,15 @@ export function setUpdateLocked(...args) { return window.setUpdateLocked?.(...ar
 // ========================================
 
 export function playlistsLoadPlaylists() { return window.playlistsLoadPlaylists?.(); }
-export function playlistsCreatePlaylist(...args) { return window.playlistsCreatePlaylist?.(...args); }
-export function playlistsDeletePlaylist(...args) { return window.playlistsDeletePlaylist?.(...args); }
-export function playlistsUpdatePlaylist(...args) { return window.playlistsUpdatePlaylist?.(...args); }
-export function playlistsAddToPlaylist(...args) { return window.playlistsAddToPlaylist?.(...args); }
-export function playlistsRemoveFromPlaylist(...args) { return window.playlistsRemoveFromPlaylist?.(...args); }
-export function playlistsReorderPlaylists(...args) { return window.playlistsReorderPlaylists?.(...args); }
 export function playlistsGetAll() { return window.playlistsGetAll?.(); }
-export function playlistsGetPlaylist(...args) { return window.playlistsGetPlaylist?.(...args); }
 export function playlistsGetCharacters(...args) { return window.playlistsGetCharacters?.(...args); }
 export function playlistsGetAvatarSet(...args) { return window.playlistsGetAvatarSet?.(...args); }
-export function playlistsGetForChar(...args) { return window.playlistsGetForChar?.(...args); }
-export function playlistsIsCharInPlaylist(...args) { return window.playlistsIsCharInPlaylist?.(...args); }
-export function playlistsIsCharInAny(...args) { return window.playlistsIsCharInAny?.(...args); }
 export function playlistsOnCharDeleted(...args) { return window.playlistsOnCharDeleted?.(...args); }
 export function openPlaylistPicker(...args) { return window.openPlaylistPicker?.(...args); }
-export function closePlaylistPicker() { return window.closePlaylistPicker?.(); }
-export function setPlaylistFilter(...args) { return window.setPlaylistFilter?.(...args); }
-export function clearPlaylistFilter() { return window.clearPlaylistFilter?.(); }
 export function refreshPlaylistFilterIfActive(...args) { return window.refreshPlaylistFilterIfActive?.(...args); }
-export function openPlaylistManager() { return window.openPlaylistManager?.(); }
-export function closePlaylistManager() { return window.closePlaylistManager?.(); }
 export function refreshPlaylistBadges() { return window.refreshPlaylistBadges?.(); }
 export function closeAllTopbarDropdowns(...args) { return window.closeAllTopbarDropdowns?.(...args); }
+export function openGalleryViewerWithImages(...args) { return window.openGalleryViewerWithImages?.(...args); }
 
 // ========================================
 // DEFAULT EXPORT - Convenience object
@@ -1303,9 +1316,6 @@ export default {
     // UI
     openCharacterModal,
     openCharModalElevated,
-    closeCharacterModal,
-    getActiveChar,
-    setActiveChar,
     showToast,
     hapticFeedback,
     showConfirm,
@@ -1317,14 +1327,17 @@ export default {
     getCSRFToken,
     
     // Gallery
+    openGalleryViewerWithImages,
     getGalleryFolderName,
     isMediaLocalizationEnabled,
     buildMediaLocalizationMap,
     replaceMediaUrlsInText,
     getGalleryThumbUrl,
+    createThumbLoader,
     sanitizeFolderName,
     getCharacterGalleryInfo,
     getCharacterGalleryId,
+    getExistingImageFolders,
     generateGalleryId,
     getGallerySyncAuditDone,
     setGallerySyncAuditDone,
@@ -1349,6 +1362,7 @@ export default {
     isExtensionsRecoveryInProgress,
     debounce,
     truncate,
+    isMobileMode,
     getCharacterTags,
     getAllTags,
     findCardElement,
@@ -1363,9 +1377,7 @@ export default {
     // Rendering
     renderLoadingState,
     renderSkeletonGrid,
-    renderSkeletonList,
     renderEmptyState,
-    getCharacterAvatarUrl,
     getCharacterAvatarStThumbUrl,
     getListingNameFromExtensions,
     bumpAvatarCacheBust,
@@ -1380,10 +1392,14 @@ export default {
     fetchCharacters,
     fetchAndAddCharacter,
     notifySTCharacterAdded,
-    notifySTCharacterEdited,
-    removeCharacterFromList,
     hydrateCharacter,
     performSearch,
+    getActiveFilterState,
+    toggleCharacterFavorite,
+    updateCharacterCardFavoriteStatus,
+    downloadBlobAsFile,
+    crc32,
+    filterListWithInlineCreate,
     evaluateChatAdvancedFilters,
     resetChatFilterCaches,
     getAdvFilterRulesForChats,
@@ -1391,17 +1407,19 @@ export default {
     // Creator Notes
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
-    initCreatorNotesHandlers,
-    initContentExpandHandlers,
-    openCharacterCreator,
     autoSnapshotBeforeChange,
     
     // Import / Download Pipeline
-    checkCharacterForDuplicates,
     checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     findCharacterMediaUrls,
+    collectCardTextChunks,
+    ensureExtractorsLoaded,
+    findCharacterGalleryUrls,
     showImportSummaryModal,
+    queueImportMediaJobs,
+    resetBrowseSectionCollapseState,
+    setBrowseAltGreetings,
     convertImageToPng,
     embedCharacterDataInPng,
     
@@ -1415,7 +1433,6 @@ export default {
     getCompletedMediaLocalizations,
     registerNotificationSection,
     refreshNotificationsUI,
-    openNotificationsDropdown,
     downloadMediaToMemory,
     isUrlSafeForDownload,
     calculateHash,
@@ -1448,39 +1465,23 @@ export default {
     listAllChatsWithMeta,
 
     // Provider Registry (generic)
-    getProviderRegistry,
     getAllProviders,
     getProvider,
     getCharacterProvider,
     getProviderLinkInfo,
     getAllLinkedCharacters,
-    getProviderForUrl,
+    getActiveTaglineNamespace,
     // Update Lock
     isUpdateLocked,
     setUpdateLocked,
     // Playlists
     playlistsLoadPlaylists,
-    playlistsCreatePlaylist,
-    playlistsDeletePlaylist,
-    playlistsUpdatePlaylist,
-    playlistsAddToPlaylist,
-    playlistsRemoveFromPlaylist,
-    playlistsReorderPlaylists,
     playlistsGetAll,
-    playlistsGetPlaylist,
     playlistsGetCharacters,
     playlistsGetAvatarSet,
-    playlistsGetForChar,
-    playlistsIsCharInPlaylist,
-    playlistsIsCharInAny,
     playlistsOnCharDeleted,
     openPlaylistPicker,
-    closePlaylistPicker,
-    setPlaylistFilter,
-    clearPlaylistFilter,
     refreshPlaylistFilterIfActive,
-    openPlaylistManager,
-    closePlaylistManager,
     refreshPlaylistBadges,
     closeAllTopbarDropdowns,
 
@@ -1490,10 +1491,8 @@ export default {
     getIsEmbedded,
     closeEmbeddedPanel,
     resolveProxyForProfile,
-    flattenContentBlocks,
     getLlmSettings,
     callLLM,
     callCustomLLM,
     extractLlmContent,
-    resolvePresetModel,
 };

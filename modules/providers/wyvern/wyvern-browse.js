@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileViewport } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, fetchWithProxy, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, deferCall, isMobileMode, finishBrowseImport } from '../provider-utils.js';
 import {
     WYVERN_API_BASE,
     WYVERN_SITE_BASE,
@@ -38,14 +38,11 @@ const {
     getCurrentView,
     debounce,
     getCharacterGalleryId,
-    fetchCharacters,
-    fetchAndAddCharacter,
     deleteCharacter,
     renderCreatorNotesSecure,
     cleanupCreatorNotesContainer,
     checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
-    showImportSummaryModal,
     getProviderExcludeTags,
 } = CoreAPI;
 /* eslint-enable no-unused-vars */
@@ -649,6 +646,17 @@ class WyvernBrowseView extends BrowseView {
             const el = document.getElementById('wyvernSortSelect');
             if (el) el.value = defaults.sort;
         }
+        if (defaults.hideOwned) {
+            wyvernFilterHideOwned = true;
+            const el = document.getElementById('wyvernFilterHideOwned');
+            if (el) el.checked = true;
+        }
+        if (defaults.hidePossible) {
+            wyvernFilterHidePossible = true;
+            const el = document.getElementById('wyvernFilterHidePossible');
+            if (el) el.checked = true;
+        }
+        if (defaults.hideOwned || defaults.hidePossible) updateWyvernFiltersButtonState();
     }
 
     async activate(container, options = {}) {
@@ -971,7 +979,7 @@ function initWyvernView() {
         const wyvernAvatar = document.getElementById('wyvernCharAvatar');
         if (wyvernAvatar) {
             wyvernAvatar.addEventListener('click', (e) => {
-                if (isMobileViewport()) return;
+                if (isMobileMode()) return;
                 e.stopPropagation();
                 if (!wyvernAvatar.src) return;
                 BrowseView.openAvatarViewer(wyvernAvatar.src);
@@ -1335,7 +1343,7 @@ function initWyvernTagsDropdown() {
         dropdown.classList.toggle('hidden');
         if (wasHidden) {
             renderWyvernTagsList();
-            if (!window.matchMedia('(max-width: 768px)').matches) searchInput?.focus();
+            if (!isMobileMode()) searchInput?.focus();
         }
     });
 
@@ -2045,6 +2053,7 @@ function renderWyvernFollowing() {
 
 async function loadWyvernCreatorCharacters(uid, displayName, vanityUrl) {
     wyvernCreatorFilter = { uid, displayName, vanityUrl };
+    view._cdRef = { uid, name: displayName, nsfwAuth: wyvernNsfwEnabled && !!wyvernToken };
     wyvernCreatorSort = 'created_at';
     ++wyvernLoadGeneration;
     wyvernIsLoading = false;
@@ -2411,7 +2420,7 @@ async function openWyvernCharPreview(char) {
     wyvernSelectedChar = char;
 
     const modal = document.getElementById('wyvernCharModal');
-    window.resetBrowseSectionCollapseState?.(modal);
+    CoreAPI.resetBrowseSectionCollapseState(modal);
     const avatarImg = document.getElementById('wyvernCharAvatar');
     const nameEl = document.getElementById('wyvernCharName');
     const creatorEl = document.getElementById('wyvernCharCreator');
@@ -2571,7 +2580,7 @@ async function openWyvernCharPreview(char) {
             altGreetingsSection.style.display = 'none';
             altGreetingsEl.innerHTML = '';
             if (altGreetingsCountEl) altGreetingsCountEl.textContent = '';
-            window.currentBrowseAltGreetings = [];
+            CoreAPI.setBrowseAltGreetings([]);
             return;
         }
         const buildPreview = (text) => {
@@ -2608,7 +2617,7 @@ async function openWyvernCharPreview(char) {
             }, { once: true });
         });
         if (altGreetingsCountEl) altGreetingsCountEl.textContent = `(${greetings.length})`;
-        window.currentBrowseAltGreetings = greetings;
+        CoreAPI.setBrowseAltGreetings(greetings);
     };
 
     renderAltGreetings(char.alternate_greetings || []);
@@ -2785,7 +2794,7 @@ async function openWyvernCharPreview(char) {
 
 function cleanupWyvernCharModal() {
     BrowseView.closeAvatarViewer();
-    window.currentBrowseAltGreetings = null;
+    CoreAPI.setBrowseAltGreetings(null);
 
     const defLoading = document.getElementById('wyvernCharDefinitionLoading');
     if (defLoading) { defLoading.style.display = 'none'; defLoading.innerHTML = '<div style="color: var(--text-secondary, #888); padding: 8px 0;"><i class="fa-solid fa-spinner fa-spin"></i> Loading character definition...</div>'; }
@@ -2917,35 +2926,20 @@ async function downloadWyvernCharacter() {
             }] : []
         };
 
-        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
-        if (showSummary) {
-            if (window.matchMedia?.('(max-width: 768px)').matches) {
-                showImportSummaryModal(summaryArgs);
-                await new Promise(r => setTimeout(r, 220));
-                closeWyvernCharPreview();
-            } else {
-                closeWyvernCharPreview();
-                await new Promise(r => requestAnimationFrame(r));
-                showImportSummaryModal(summaryArgs);
-            }
-        } else {
-            downloadBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
-            await new Promise(r => setTimeout(r, 350));
-            closeWyvernCharPreview();
-        }
-
-        showToast(`Downloaded "${result.characterName}" successfully!`, 'success');
-
-        await new Promise(r => setTimeout(r, 200));
-
-        const added = await fetchAndAddCharacter(result.fileName);
-        if (added) view.addCharToLookup(added);
-        else await fetchCharacters(true);
-        markWyvernCardAsImported(charId);
+        await finishBrowseImport({
+            view,
+            summaryArgs,
+            showSummary,
+            closePreview: closeWyvernCharPreview,
+            importBtn: downloadBtn,
+            characterName: result.characterName,
+            avatarFileName: result.fileName,
+            markImported: () => markWyvernCardAsImported(charId),
+        });
 
     } catch (e) {
         console.error('[Wyvern] Download error:', e);
-        showToast(`Download failed: ${e.message}`, 'error');
+        showToast(`Import failed: ${e.message}`, 'error');
     } finally {
         if (downloadBtn) {
             downloadBtn.innerHTML = originalHtml;

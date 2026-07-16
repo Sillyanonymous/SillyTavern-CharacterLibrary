@@ -43,12 +43,6 @@ export function init(deps) {
     // Bulk delete confirm (dynamic). Tier 7 so it closes before charModal on back/Escape.
     window.registerOverlay?.({ id: 'bulkDeleteConfirmModal', tier: 7, static: false, close: (el) => el?.remove() });
 
-    // Bridge for legacy card creation paths
-    window.attachCardContextMenu = function(cardElement, char) {
-        if (!cardElement || !char) return;
-        attachToCard(cardElement, char);
-    };
-    
     isInitialized = true;
     CoreAPI.debugLog('[ContextMenu] Module initialized');
 }
@@ -420,39 +414,8 @@ function positionMenu(x, y) {
 }
 
 async function toggleFavorite(char) {
-    // Check both root and extensions location
-    const currentFav = char.fav === true || char.fav === 'true' ||
-                       char.data?.extensions?.fav === true || char.data?.extensions?.fav === 'true';
-    const newFav = !currentFav;
-
-    try {
-        // applyCardFieldUpdates handles hydrate + preflight + merge + in-memory sync (on char and allCharacters entry) + ST notify.
-        const success = await CoreAPI.applyCardFieldUpdates(char.avatar, {
-            'extensions.fav': newFav,
-        });
-        if (!success) throw new Error('API request failed');
-        // Mirror to char root for back-compat with readers that check the V1 fav field directly.
-        char.fav = newFav;
-
-        const card = CoreAPI.findCardElement(char.avatar);
-        if (card) {
-            if (newFav) {
-                card.classList.add('is-favorite');
-                if (!card.querySelector('.favorite-indicator')) {
-                    card.insertAdjacentHTML('afterbegin',
-                        '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
-                }
-            } else {
-                card.classList.remove('is-favorite');
-                card.querySelector('.favorite-indicator')?.remove();
-            }
-        }
-
-        CoreAPI.showToast(newFav ? 'Added to favorites' : 'Removed from favorites', 'success');
-    } catch (err) {
-        console.error('[ContextMenu] Failed to toggle favorite:', err);
-        CoreAPI.showToast('Failed to update favorite', 'error');
-    }
+    // Canonical toggle: write + ST same-tick sync + grid badge + favorites-filter refresh + toasts.
+    await CoreAPI.toggleCharacterFavorite(char);
 }
 
 async function bulkToggleFavorites(setFavorite) {
@@ -471,21 +434,7 @@ async function bulkToggleFavorites(setFavorite) {
             });
             if (success) {
                 char.fav = setFavorite;
-
-                // Update card UI
-                const card = CoreAPI.findCardElement(char.avatar);
-                if (card) {
-                    if (setFavorite) {
-                        card.classList.add('is-favorite');
-                        if (!card.querySelector('.favorite-indicator')) {
-                            card.insertAdjacentHTML('afterbegin',
-                                '<div class="favorite-indicator"><i class="fa-solid fa-star"></i></div>');
-                        }
-                    } else {
-                        card.classList.remove('is-favorite');
-                        card.querySelector('.favorite-indicator')?.remove();
-                    }
-                }
+                CoreAPI.updateCharacterCardFavoriteStatus(char.avatar, setFavorite);
                 successCount++;
             } else {
                 failCount++;
@@ -501,6 +450,16 @@ async function bulkToggleFavorites(setFavorite) {
     } else {
         CoreAPI.showToast(`Updated ${successCount}, failed ${failCount}`, 'warning');
     }
+
+    // Bulk-unfavoriting under the favorites filter strands stale cards in the grid otherwise.
+    if (!setFavorite && CoreAPI.getActiveFilterState().fav) CoreAPI.performSearch();
+}
+
+// Fetch a character's PNG and save it via the shared anchor-download; throws on a failed fetch.
+async function downloadCharacterPng(char) {
+    const response = await fetch(`/characters/${encodeURIComponent(char.avatar)}`);
+    if (!response.ok) throw new Error('Failed to fetch character file');
+    CoreAPI.downloadBlobAsFile(await response.blob(), char.name ? `${char.name}.png` : char.avatar);
 }
 
 async function bulkExport() {
@@ -510,41 +469,34 @@ async function bulkExport() {
     if (CoreAPI.getSetting('exportAsLinks')) {
         return bulkExportLinks(selected);
     }
-    
+    return bulkExportPngs(selected);
+}
+
+async function bulkExportPngs(selected = null) {
+    selected = selected || CoreAPI.getSelectedCharacters();
+    if (selected.length === 0) return;
+
     CoreAPI.showToast(`Exporting ${selected.length} characters...`, 'info');
-    
+
     let successCount = 0;
-    
+
     for (const char of selected) {
         try {
-            const avatarUrl = `/characters/${encodeURIComponent(char.avatar)}`;
-            const response = await fetch(avatarUrl);
-            
-            if (response.ok) {
-                const blob = await response.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                const filename = char.name ? `${char.name}.png` : char.avatar;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                successCount++;
-                
-                // Small delay between downloads to not overwhelm browser
-                await new Promise(r => setTimeout(r, 200));
-            }
+            await downloadCharacterPng(char);
+            successCount++;
+            // Small delay between downloads to not overwhelm browser
+            await new Promise(r => setTimeout(r, 200));
         } catch (err) {
             console.error('[ContextMenu] Export failed for:', char.name, err);
         }
     }
-    
+
     CoreAPI.showToast(`Exported ${successCount}/${selected.length} characters`, 'success');
 }
 
-function bulkExportLinks(selected) {
+function bulkExportLinks(selected = null) {
+    selected = selected || CoreAPI.getSelectedCharacters();
+    if (selected.length === 0) return;
     const links = [];
     let skipped = 0;
     for (const char of selected) {
@@ -575,7 +527,12 @@ async function bulkDelete() {
     // Check which characters have gallery images AND unique gallery IDs
     // Only offer gallery deletion when unique folders feature is ENABLED
     const uniqueFoldersEnabled = CoreAPI.getSetting('uniqueGalleryFolders') || false;
-    
+
+    // gallery_id sits in extensions; a fresh load hasnt recovered them yet
+    if (CoreAPI.isExtensionsRecoveryInProgress()) {
+        await Promise.all(selected.map(c => CoreAPI.hydrateCharacter(c).catch(() => {})));
+    }
+
     const galleryInfos = await Promise.all(
         selected.map(async char => ({
             char,
@@ -738,9 +695,6 @@ async function bulkDelete() {
                 if (context?.getCharacters) {
                     await context.getCharacters();
                 }
-                if (typeof host.printCharactersDebounced === 'function') {
-                    host.printCharactersDebounced();
-                }
             }
         } catch (e) {
             console.warn('[ContextMenu] Could not sync main window:', e);
@@ -769,24 +723,8 @@ async function exportCharacter(char) {
     }
 
     try {
-        const avatarUrl = `/characters/${encodeURIComponent(char.avatar)}`;
-        const response = await fetch(avatarUrl);
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const filename = char.name ? `${char.name}.png` : char.avatar;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-            CoreAPI.showToast('Character exported', 'success');
-        } else {
-            throw new Error('Failed to fetch character file');
-        }
+        await downloadCharacterPng(char);
+        CoreAPI.showToast('Character exported', 'success');
     } catch (err) {
         console.error('[ContextMenu] Export failed:', err);
         CoreAPI.showToast('Failed to export character', 'error');
@@ -813,8 +751,10 @@ export default {
     show,
     hide,
     attachToCard,
-    // Bulk actions - exposed for multi-select toolbar
+    // Bulk actions - exposed for multi-select toolbar + batch-transfer chooser
     bulkToggleFavorites,
     bulkExport,
+    bulkExportPngs,
+    bulkExportLinks,
     bulkDelete
 };

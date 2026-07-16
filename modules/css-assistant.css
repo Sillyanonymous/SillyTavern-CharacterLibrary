@@ -254,98 +254,104 @@ body.modal-size-large .css-assistant-modal .cl-modal-content { max-width: 1125px
     gap: var(--space-sm);
 }
 
-@media (max-width: 768px) {
-    .cl-modal-body.css-assistant-body {
-        padding: var(--space-md);
-        gap: var(--space-md);
-    }
-
-    .css-assistant-toolbar {
-        flex-wrap: nowrap;
-        gap: var(--space-md);
-    }
-    .css-assistant-profile-row {
-        flex: 1;
-        flex-wrap: nowrap;
-        min-width: 0;
-    }
-    .css-assistant-profile-row label { display: none; }
-    .css-assistant-profile-row select {
-        flex: 1;
-        min-width: 0;
-        max-width: none;
-    }
-    #cssAssistantConnectionStatus { display: none; }
-    #cssAssistantResetBtn {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        padding: 0;
-        gap: 0;
-        font-size: 0;
-        justify-content: center;
-        flex-shrink: 0;
-    }
-    #cssAssistantResetBtn i { font-size: var(--font-md); }
-
-    /* Context banner: tighter padding, larger dismiss touch target */
-    .css-assistant-context-banner { padding: var(--space-sm); flex-wrap: wrap; }
-    .css-assistant-context-dismiss { min-width: var(--touch-target-min); min-height: var(--touch-target-min); }
-
-    /* Chat: tighter padding */
-    .css-assistant-chat {
-        padding: var(--space-sm);
-        gap: var(--space-sm);
-    }
-
-    /* Centering reflows under the keyboard, icon slides */
-    .css-assistant-empty {
-        justify-content: flex-start;
-        padding-top: var(--space-xl);
-    }
-    .css-assistant-empty i { font-size: var(--font-xl); }
-
-    /* Code blocks: smaller, scroll horizontally, shorter cap */
-    .css-assistant-code {
-        font-size: var(--font-xs);
-        padding: var(--space-sm);
-        max-height: 280px;
-    }
-
-    /* Per-message action row: subordinate, smaller than cl-btn-sm default. Update X can
-       be long because of the snippet name, so allow wrap. */
-    .css-assistant-code-actions {
-        flex-wrap: wrap;
-        gap: var(--space-xs);
-    }
-    .css-assistant-code-actions .cl-btn {
-        padding: var(--space-xs) var(--space-sm);
-        font-size: var(--font-xs);
-    }
-
-    .cl-modal-footer.css-assistant-footer {
-        flex-direction: row;
-        align-items: flex-end;
-        gap: var(--space-sm);
-        padding: var(--space-md);
-    }
-    .css-assistant-input {
-        flex: 1;
-        font-size: var(--mobile-input-size);
-        min-height: var(--touch-target-min);
-        max-height: 120px;
-        resize: none;
-    }
-    .css-assistant-footer-actions {
-        flex-direction: column;
-        flex-shrink: 0;
-    }
-    .css-assistant-footer-actions .cl-btn {
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        padding: 0;
-        gap: 0;
-        font-size: 0;
-        justify-content: center;
-    }
-    .css-assistant-footer-actions .cl-btn i { font-size: var(--font-md); }
+html.cl-mobile .cl-modal-body.css-assistant-body {
+    padding: var(--space-md);
+    gap: var(--space-md);
 }
+
+html.cl-mobile .css-assistant-toolbar {
+    flex-wrap: nowrap;
+    gap: var(--space-md);
+}
+html.cl-mobile .css-assistant-profile-row {
+    flex: 1;
+    flex-wrap: nowrap;
+    min-width: 0;
+}
+html.cl-mobile .css-assistant-profile-row label { display: none; }
+html.cl-mobile .css-assistant-profile-row .custom-select-container {
+    flex: 1;
+    min-width: 0;
+}
+html.cl-mobile .css-assistant-profile-row .custom-select-trigger {
+    min-width: 0 !important;
+    width: 100%;
+}
+html.cl-mobile .css-assistant-profile-row .custom-select-trigger .trigger-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+html.cl-mobile #cssAssistantConnectionStatus { display: none; }
+html.cl-mobile #cssAssistantResetBtn {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+    flex-shrink: 0;
+}
+html.cl-mobile #cssAssistantResetBtn i { font-size: var(--font-md); }
+
+/* Context banner: tighter padding, larger dismiss touch target */
+html.cl-mobile .css-assistant-context-banner { padding: var(--space-sm); flex-wrap: wrap; }
+html.cl-mobile .css-assistant-context-dismiss { min-width: var(--touch-target-min); min-height: var(--touch-target-min); }
+
+/* Chat: tighter padding */
+html.cl-mobile .css-assistant-chat {
+    padding: var(--space-sm);
+    gap: var(--space-sm);
+}
+
+/* Centering reflows under the keyboard, icon slides */
+html.cl-mobile .css-assistant-empty {
+    justify-content: flex-start;
+    padding-top: var(--space-xl);
+}
+html.cl-mobile .css-assistant-empty i { font-size: var(--font-xl); }
+
+/* Code blocks: smaller, scroll horizontally, shorter cap */
+html.cl-mobile .css-assistant-code {
+    font-size: var(--font-xs);
+    padding: var(--space-sm);
+    max-height: 280px;
+}
+
+/* Per-message action row: subordinate, smaller than cl-btn-sm default. Update X can
+   be long because of the snippet name, so allow wrap. */
+html.cl-mobile .css-assistant-code-actions {
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+}
+html.cl-mobile .css-assistant-code-actions .cl-btn {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-xs);
+}
+
+html.cl-mobile .cl-modal-footer.css-assistant-footer {
+    flex-direction: row;
+    align-items: flex-end;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+}
+html.cl-mobile .css-assistant-input {
+    flex: 1;
+    font-size: var(--mobile-input-size);
+    min-height: var(--touch-target-min);
+    max-height: 120px;
+    resize: none;
+}
+html.cl-mobile .css-assistant-footer-actions {
+    flex-direction: column;
+    flex-shrink: 0;
+}
+html.cl-mobile .css-assistant-footer-actions .cl-btn {
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+}
+html.cl-mobile .css-assistant-footer-actions .cl-btn i { font-size: var(--font-md); }

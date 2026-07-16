@@ -357,24 +357,22 @@
  * Mobile Overrides
  * ======================================== */
 
-@media (max-width: 768px) {
-    /* ---------------------------------------------------
-       GALLERY SYNC DROPDOWN (moved to body via JS)
-       --------------------------------------------------- */
-    .gallery-sync-dropdown {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        top: auto !important;
-        bottom: 0 !important;
-        width: 100% !important;
-        max-width: none !important;
-        min-width: 0 !important;
-        max-height: 70vh !important;
-        overflow-y: auto !important;
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-        border-bottom: none !important;
-        z-index: 1100 !important;
-        padding-bottom: var(--safe-bottom) !important;
-    }
+/* ---------------------------------------------------
+   GALLERY SYNC DROPDOWN (moved to body via JS)
+   --------------------------------------------------- */
+html.cl-mobile .gallery-sync-dropdown {
+    position: fixed !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    max-height: 70vh !important;
+    overflow-y: auto !important;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+    border-bottom: none !important;
+    z-index: 1100 !important;
+    padding-bottom: var(--safe-bottom) !important;
 }

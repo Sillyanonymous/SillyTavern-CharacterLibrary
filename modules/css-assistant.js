@@ -175,7 +175,9 @@ Layout / Chrome (defined in library.css; no !important needed):
   .card-tags             Container for tags on a card.
   .favorite-indicator    Star/heart icon shown on .char-card.is-favorite.
   .modal-glass           Full-viewport detail panel (character detail, character creator, chat preview). NOT gallery viewer (that's .gv-modal).
-  .modal-sidebar         Right-side info pane inside the character detail modal.
+  .modal-sidebar         Right-side info pane inside the character detail modal. Hidden on mobile (display:none), so styling it under html.cl-mobile is a no-op.
+  .tab-nav               The character detail modal's tab bar (container of the .tab-btn buttons). Desktop background is rgba(0,0,0,0.2); on mobile it is sticky with a hardcoded dark background (#141414). To retheme the mobile bar, target "html.cl-mobile #charModal .tab-nav" with !important.
+  .tab-btn               The detail modal's tab buttons (Details/Edit/Chats/Gallery/Related/...). Already follow var(--accent) (active text + bottom border, plus rgba(var(--accent-rgb),0.05) active background) and var(--text-secondary), so they retheme automatically; no per-button rules needed for a token retheme.
   .tab-pane              Tab content panes inside the character detail modal. Use .tab-pane.active for the visible one.
   .char-modal-nav        Prev/Next chevron buttons on the sides of the character detail modal (desktop only; mobile uses swipe). Mirrors the gallery viewer's .gv-nav: a plain dark capsule (rgba(0,0,0,0.5)) with a white chevron, flush to the modal edge and half-rounded toward center, background lightens on hover. Not accent-coupled. Variants: .char-modal-nav-prev, .char-modal-nav-next. Icon glyph is a ::before pseudo using Font Awesome 6 Free. Component-scoped vars for per-component theming (override on .char-modal-nav itself): --cmn-bg (rgba(0,0,0,0.5)), --cmn-bg-hover (rgba(255,255,255,0.1)), --cmn-border (1px solid rgba(255,255,255,0.1)), --cmn-color (#fff), --cmn-width (50px), --cmn-height (80px), --cmn-icon-size (var(--font-2xl)), --cmn-icon-prev ('\\f053' = fa-chevron-left, override with any FA6 unicode), --cmn-icon-next ('\\f054' = fa-chevron-right), --cmn-disabled-opacity (0.3). Hidden on mobile via library-mobile.css; gated on the enableCharDetailNav setting.
   .toast / .toast-container  Toast notifications. Variants: .toast.success, .toast.error, .toast.warning, .toast.info.
@@ -203,7 +205,7 @@ Multi-select mode (defined in modules/multi-select.css; NEEDS !important). Bespo
   .multi-select-toolbar                       Persistent action bar inserted before .gallery-content when mode is on. Bg is a HARDCODED dark blue/purple gradient (rgba(26,26,46,0.95) -> rgba(30,30,50,0.95)) NOT bound to the accent token, so a global accent retheme leaves the bar visually disconnected; retarget .multi-select-toolbar background explicitly to follow accent. Border-bottom DOES use var(--accent-rgb) and follows the accent automatically.
   .multi-select-toolbar.hidden                Hidden state (display:none).
   .multi-select-badge                         Count chip on the left ("3"). Accent gradient via --accent + --accent-secondary; themes automatically.
-  .multi-select-label                         "characters selected" text next to the badge. Hidden on mobile (<=768px).
+  .multi-select-label                         "characters selected" text next to the badge. Hidden in mobile mode (html.cl-mobile).
   .multi-select-left / .multi-select-actions / .multi-select-right    Three flex sections of the toolbar.
   .ms-divider                                 Vertical 1px divider between button groups inside .multi-select-actions. Hidden on mobile.
   .ms-btn                                     Bespoke toolbar action button (Select All, Tags, Favorite, Export, Updates, Playlist, Delete, Exit). NOT .glass-btn. Translucent white bg (rgba(255,255,255,0.08)), --SmartThemeBodyColor text, hover adds 1px lift + brighter bg. On mobile collapses to 32x32 icon-only (span hidden). Variants:
@@ -283,7 +285,7 @@ Loaders & progress (CL does NOT use native <progress> elements):
                          CSS border-rotation tricks (border-top-color on .cl-loading) do NOT produce a spinner: the rotation is on the FontAwesome icon, not the container.
   .cl-spinner-inline > i   Inline spinner used in grid/list slots. The <i> child is the rotating FontAwesome icon (uses fa-spin). To recolor: ".cl-spinner-inline i { color: <color>; }".
   Real progress bars (custom div pairs, NOT <progress> elements):
-    .import-progress-bar > .import-progress-fill                       Single-character import / apply-snippets progress.
+    .import-progress-bar > .import-progress-fill                       Character import, import-media, and media-localize progress.
     .import-summary-progress-bar > .import-summary-progress-fill       Bulk import summary.
 
 Notifications center (the topbar bell dropdown; shell in modules/gallery-sync.css, media-download rows in modules/media-download-queue.css; NEEDS !important for theme overrides):
@@ -298,7 +300,7 @@ Notifications center (the topbar bell dropdown; shell in modules/gallery-sync.cs
     .sync-dropdown-header  Status line; .healthy = var(--cl-success-bright), .issues = var(--cl-warning-bright) (follow the status tiers).
     .sync-dropdown-stats   The chars / with-ID stat row. .sync-dropdown-actions is the Details / Assign IDs / Settings .action-btn row. .sync-issue-details / .sync-detail-item is the expandable missing-id list.
 
-Mobile chrome (defined in library-mobile.css and modules/chats.css; mobile viewport @media-gated). Rules using these selectors typically need !important to beat the mobile stylesheet's existing rules:
+Mobile chrome (defined in library-mobile.css and modules/chats.css; scoped under html.cl-mobile). Rules using these selectors typically need !important to beat the mobile stylesheet's existing rules:
   .mobile-bottom-nav            Persistent bottom navigation bar (mobile only; replaces topbar). Frosted-glass surface.
   .mobile-bottom-nav-tab        One of the three view tabs inside .mobile-bottom-nav (Characters / Chats / Online). Takes flex: 1 to share space evenly. Active state: .mobile-bottom-nav-tab.active (gets --accent color + a 3px top stripe).
   .mobile-bottom-nav-action     Small (40px) icon-only utility button (Filters, More). Renders as a floating --radius-circle with --text-faint color; active/press state tints to accent. Labels are hidden.
@@ -318,7 +320,6 @@ Mobile chrome (defined in library-mobile.css and modules/chats.css; mobile viewp
 
 Skeleton & empty states (mobile-first but used on both platforms):
   .cl-skeleton-card             Skeleton placeholder matching the .char-card layout. Children: .cl-skeleton-img (image area), .cl-skeleton-line (text rows). All use --glass-border as the base + an animated shimmer overlay.
-  .cl-skeleton-row              Compact row-form skeleton (chats list). Children: .cl-skeleton-avatar (circular), .cl-skeleton-content (lines).
   .cl-skeleton-line             Single shimmering line; use modifier widths via inline style or extra classes.
   .cl-empty-state               Rich empty-state container with icon + title + hint + optional action button. Children: .cl-empty-state-icon, .cl-empty-state-title, .cl-empty-state-hint, .cl-empty-state-action.
 
@@ -452,15 +453,15 @@ KNOWN GOTCHAS (avoid these failure modes):
 
 4. Catch-all substring attribute selectors are the trap to watch. ".cl-tag:not([class*='-success'])" looks like a clever way to target "info tags only" but actually matches every neutral .cl-tag in the app (character tags, lorebook tags, playlist labels, status pills). Use the actual class name (.cl-tag.cl-tag-info) or restrict by context (.recommender-result .cl-tag). This is specifically about substring matchers like [class*='X']; exact-attribute selectors like input[type='checkbox'] are fine and routinely needed.
 
-5. Module CSS files load AFTER the custom CSS <style> tag. Anything in modules/ needs !important to win source-order. Module CSS files (15): custom-css, recommender, playlists, card-update, batch-tagging, character-creator, character-versions, chats, css-assistant, gallery-sync, gallery-viewer, multi-select, context-menu, lorebook-manager, media-download-queue. Provider browse CSS files (6 with class prefixes): browse-shared, chub-browse, chartavern-browse, pygmalion-browse, datacat-browse, botbooru-browse. (Wyvern has a CSS file but uses ID selectors like #wyvern* rather than class prefixes. Janny has no CSS file; inherits from browse-shared.) Class-prefix map for the modules: .ccss-* (custom-css), .recommender-*, .pl-* (playlists), .card-update-*, .bt-* (batch-tagging), .creator-* (character-creator), .vt-* (character-versions), .chat-*, .css-assistant-*, .gallery-sync-*, .gv-* (gallery-viewer), .multi-select-*, .cl-context-menu-*, .lb-* (lorebook-manager), .mdq-* (media-download-queue), .browse-*, .chub-*, .ct-* (chartavern), .pyg-* (pygmalion), .datacat-*, .botbooru-*. For library.css selectors (.char-card, .topbar, .glass-btn, .toast, .settings-*, .view-toggle, .tab-pane, .modal-glass, .modal-sidebar, .favorite-indicator, etc.), source order favors custom CSS so no !important is needed.
+5. Module CSS files load AFTER the custom CSS <style> tag. Anything in modules/ needs !important to win source-order. Module CSS files (15): custom-css, recommender, playlists, card-update, batch-tagging, character-creator, character-versions, chats, css-assistant, gallery-sync, gallery-viewer, multi-select, context-menu, lorebook-manager, media-download-queue. Provider browse CSS files (6 with class prefixes): browse-shared, chub-browse, chartavern-browse, pygmalion-browse, datacat-browse, botbooru-browse. (Wyvern's CSS file holds a single [data-select-id] rule and otherwise inherits .browse-*. Janny has no CSS file; inherits from browse-shared.) Class-prefix map for the modules: .ccss-* (custom-css), .recommender-*, .pl-* (playlists), .card-update-*, .bt-* (batch-tagging), .creator-* (character-creator), .vt-* (character-versions), .chat-*, .css-assistant-*, .gallery-sync-*, .gv-* (gallery-viewer), .multi-select-*, .cl-context-menu-*, .lb-* (lorebook-manager), .mdq-* (media-download-queue), .browse-*, .chub-*, .ct-* (chartavern), .pyg-* (pygmalion), .datacat-*, .botbooru-*. For library.css selectors (.char-card, .topbar, .glass-btn, .toast, .settings-*, .view-toggle, .tab-pane, .modal-glass, .modal-sidebar, .favorite-indicator, etc.), source order favors custom CSS so no !important is needed.
 
 6. .toast.info reads from --accent, not --cl-info. Overriding --cl-info for a "blue info" semantic does NOT recolor info toasts. If a global theme needs info toasts to follow a non-accent color, target ".toast.info" directly with a !important rule on its border-color and ".toast.info .toast-icon" on the icon color.
 
-7. Mobile (max-width 768px) disables hover transforms and backdrop-filter via "!important" rules in library-mobile.css. Hover-only styling silently no-ops on touch devices. If a theme effect needs to be visible on mobile, don't tie it to :hover alone. Desktop-only themes are fine; acknowledge the limitation if it matters.
+7. Mobile mode (html.cl-mobile) disables hover transforms and backdrop-filter via "!important" rules in library-mobile.css. Hover-only styling silently no-ops on touch devices. If a theme effect needs to be visible on mobile, don't tie it to :hover alone. Desktop-only themes are fine; acknowledge the limitation if it matters.
 
-8. Custom CSS applies on all viewports. Wrap rules in "@media (max-width: 768px)" for mobile-specific behavior, or "@media (min-width: 769px)" for desktop-only. Layout-heavy themes (changing card sizes, repositioning the topbar) often need explicit mobile handling.
+8. Custom CSS applies on all viewports. Scope rules under "html.cl-mobile" for mobile-specific behavior (the app's mobile-mode class: set on small screens, touch-first devices like tablets, or by the user's Mobile Layout setting), or "html:not(.cl-mobile)" for desktop-only. Prefer the class over width-based @media queries: width queries miss tablets and users who force mobile mode. Layout-heavy themes (changing card sizes, repositioning the topbar) often need explicit mobile handling.
 
-9. Theme coherence on mobile. Mobile chrome is a fully separate surface (the topbar disappears; the persistent UI is .mobile-bottom-nav at the bottom plus .mobile-fab, bottom sheets, and overlays). A global retheme that only paints desktop chrome leaves these mobile-only surfaces looking off-brand. Most .mobile-* selectors (CATALOGUE_COMPONENTS → Mobile chrome) pick up token overrides automatically, but a few want explicit rules under "@media (max-width: 768px)" to feel coherent at narrow widths: .mobile-fab (solid-accent gradient in default buttonStyle), the .mobile-bottom-nav frosted-glass surface and its .mobile-bottom-nav-tab.active accent stripe, and the .mobile-quick-import-btn[data-state] color states. For any non-trivial global theme, include a small mobile block that re-applies the same visual identity to these elements.
+9. Theme coherence on mobile. Mobile chrome is a fully separate surface (the topbar disappears; the persistent UI is .mobile-bottom-nav at the bottom plus .mobile-fab, bottom sheets, and overlays). A global retheme that only paints desktop chrome leaves these mobile-only surfaces looking off-brand. Most .mobile-* selectors (CATALOGUE_COMPONENTS → Mobile chrome) pick up token overrides automatically, but a few want explicit rules scoped under "html.cl-mobile" to feel coherent in mobile mode: .mobile-fab (solid-accent gradient in default buttonStyle), the .mobile-bottom-nav frosted-glass surface and its .mobile-bottom-nav-tab.active accent stripe, and the .mobile-quick-import-btn[data-state] color states. For any non-trivial global theme, include a small mobile block that re-applies the same visual identity to these elements.
 
 CONVERSATION:
 - The user can iterate: "make it more red", "add a glow on hover", etc. Modify the previous code block rather than restarting.
@@ -513,39 +514,23 @@ async function loadProfiles() {
     if (!selectEl) return;
 
     try {
-        const resp = await CoreAPI.apiRequest('/settings/get', 'POST', {});
-        if (!resp.ok) throw new Error(`Settings fetch failed: ${resp.status}`);
-        const data = await resp.json();
-        const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+        const s = await CoreAPI.getLlmSettings();
+        if (s.error) throw new Error('Settings fetch failed');
 
-        // chat_completion_source lives in the active OAI preset, not top-level settings.
-        activeSource = '';
-        activeModel = '';
-        activePreset = null;
-        const presetName = settings?.preset_settings_openai;
-        if (presetName && Array.isArray(data.openai_setting_names) && Array.isArray(data.openai_settings)) {
-            const idx = data.openai_setting_names.indexOf(presetName);
-            if (idx >= 0) {
-                try {
-                    const preset = typeof data.openai_settings[idx] === 'string'
-                        ? JSON.parse(data.openai_settings[idx])
-                        : data.openai_settings[idx];
-                    activePreset = preset;
-                    activeSource = preset?.chat_completion_source || '';
-                    activeModel = CoreAPI.resolvePresetModel(preset) || preset?.model || '';
-                } catch { /* corrupt preset, leave defaults */ }
-            }
-        }
+        activeSource = s.activeSource;
+        // Local quirk kept from the inline days: fall back to a bare preset.model if the
+        // per-source key resolution came up empty.
+        activeModel = s.activeModel || s.activePreset?.model || '';
+        activePreset = s.activePreset;
+        const ccProfiles = s.profiles;
 
-        const cm = settings?.extension_settings?.connectionManager;
-        if (!cm?.profiles?.length) {
+        if (!s.hasProfiles) {
             loadedProfiles = [];
             if (statusEl) statusEl.textContent = 'No Connection Profiles found in SillyTavern.';
             selectEl.innerHTML = '<option value="">(no profiles)</option>';
             selectEl._customSelect?.refresh();
             return;
         }
-        const ccProfiles = cm.profiles.filter(p => p.mode === 'cc');
         if (!ccProfiles.length) {
             loadedProfiles = [];
             if (statusEl) statusEl.textContent = 'No Chat Completion profiles in SillyTavern.';
@@ -562,8 +547,8 @@ async function loadProfiles() {
         const savedId = getSavedProfileId();
         if (savedId && ccProfiles.some(p => p.id === savedId)) {
             selectEl.value = savedId;
-        } else if (cm.selectedProfile && ccProfiles.some(p => p.id === cm.selectedProfile)) {
-            selectEl.value = cm.selectedProfile;
+        } else if (s.selectedProfileId && ccProfiles.some(p => p.id === s.selectedProfileId)) {
+            selectEl.value = s.selectedProfileId;
         } else {
             selectEl.value = ccProfiles[0].id;
         }
@@ -713,9 +698,7 @@ function buildModalHTML() {
 // ========================================
 
 function escapeHtml(str) {
-    return String(str).replace(/[&<>"']/g, ch => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-    })[ch]);
+    return CoreAPI.escapeHtml(String(str));
 }
 
 function renderAssistantMessage(content, messageIndex) {
@@ -971,9 +954,13 @@ function injectModal() {
     });
 
     const input = document.getElementById('cssAssistantInput');
-    if (window.matchMedia('(max-width: 768px)').matches) {
-        input.placeholder = 'Describe a UI tweak';
-    }
+    // Shorter hint on mobile, re-synced on live mode flips since injectModal only runs once.
+    const desktopPlaceholder = input.placeholder;
+    const syncPlaceholder = () => {
+        input.placeholder = CoreAPI.isMobileMode() ? 'Describe a UI tweak' : desktopPlaceholder;
+    };
+    syncPlaceholder();
+    document.addEventListener('cl-mobile-mode-change', syncPlaceholder);
     const autoGrowInput = () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
@@ -996,7 +983,7 @@ function injectModal() {
         setSavedProfileId(profileSelect.value);
         updateConnectionStatus();
     });
-    if (typeof window.initCustomSelect === 'function') window.initCustomSelect(profileSelect);
+    CoreAPI.initCustomSelect(profileSelect);
 
     const chatEl = document.getElementById('cssAssistantChat');
     chatEl.addEventListener('click', async (e) => {

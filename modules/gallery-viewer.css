@@ -431,41 +431,39 @@ body.char-modal-above .gv-modal.visible {
 }
 
 /* =========================================================
-   Mobile overrides (max-width: 768px)
+   Mobile-mode overrides (html.cl-mobile)
    ========================================================= */
-@media (max-width: 768px) {
-    .gv-header { padding: 10px 12px; gap: var(--space-sm); }
-    .gv-header-left { font-size: var(--font-md); gap: var(--space-xs-sm); }
-    .gv-header-right { gap: var(--space-xs-sm); }
-    .gv-btn { width: 34px; height: 34px; }
-    .gv-nav { display: none !important; }
-    .gv-thumbnails { padding: 8px 12px; gap: var(--space-xs-sm); }
-    .gv-thumb { width: 50px; height: 50px; }
-    .gv-footer { padding: 8px 12px; }
-    .gv-filename {
-        font-size: var(--font-xs);
-        display: inline-block;
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: middle;
-    }
-    .gv-image-container {
-        padding: 0;
-        touch-action: none;
-        overflow: hidden;
-        user-select: none;
-        -webkit-user-select: none;
-    }
-    .gv-content {
-        touch-action: none;
-        overflow: hidden;
-    }
-    .gv-image {
-        transform-origin: center center;
-        will-change: transform, opacity;
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-    }
+html.cl-mobile .gv-header { padding: 10px 12px; gap: var(--space-sm); }
+html.cl-mobile .gv-header-left { font-size: var(--font-md); gap: var(--space-xs-sm); }
+html.cl-mobile .gv-header-right { gap: var(--space-xs-sm); }
+html.cl-mobile .gv-btn { width: 34px; height: 34px; }
+html.cl-mobile .gv-nav { display: none !important; }
+html.cl-mobile .gv-thumbnails { padding: 8px 12px; gap: var(--space-xs-sm); }
+html.cl-mobile .gv-thumb { width: 50px; height: 50px; }
+html.cl-mobile .gv-footer { padding: 8px 12px; }
+html.cl-mobile .gv-filename {
+    font-size: var(--font-xs);
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+html.cl-mobile .gv-image-container {
+    padding: 0;
+    touch-action: none;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+}
+html.cl-mobile .gv-content {
+    touch-action: none;
+    overflow: hidden;
+}
+html.cl-mobile .gv-image {
+    transform-origin: center center;
+    will-change: transform, opacity;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }

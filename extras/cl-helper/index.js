@@ -57,7 +57,8 @@ if (!_isLinkedInstall) {
 
 const THUMB_QUALITY = 82;
 const THUMB_MAX_SIZE = 1024;
-const THUMB_EXTENSIONS = /\.(png|jpe?g|webp|gif|bmp|avif|tiff?)$/i;
+// only types the loaded Jimp decoders handle; anything else 400s instead of decode-500ing
+const THUMB_EXTENSIONS = /\.(png|jpe?g|webp|gif)$/i;
 const THUMB_CONCURRENCY = 2;
 const THUMB_MAX_FILE_BYTES = 50 * 1024 * 1024;   // 50 MB on-disk
 const THUMB_MAX_PIXELS = 150_000_000;            // ~150 MP (decoded RAM ~600 MB worst case)
@@ -631,7 +632,7 @@ async function handleBotbooruProxy(req, res) {
     if (bearer) headers['Authorization'] = bearer;
     // Only forward a body when the client actually sent one, so bodyless POSTs
     // (favorite toggle, follow) match the direct path exactly.
-    const hasBody = ['POST', 'PUT', 'PATCH'].includes(req.method)
+    const hasBody = ['POST', 'PATCH'].includes(req.method)
         && req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0;
     if (hasBody) headers['Content-Type'] = 'application/json';
 
@@ -1436,6 +1437,172 @@ function registerCivitaiRoutes(router) {
         } catch (err) {
             console.error('[cl-helper] Civitai proxy error:', err.message);
             res.status(502).json({ error: 'Failed to reach Civitai' });
+        }
+    });
+}
+
+// =============================================================================
+// Pixiv: cookie session + read-only ajax proxy + Referer-injecting image proxy.
+// R-18 image URLs come back from /ajax/illust only when a logged-in PHPSESSID is
+// sent AND the account's "View R-18 works" toggle is ON. i.pximg.net is
+// Referer-gated (403 without Referer: https://www.pixiv.net/), so images are
+// fetched server-side; that image fetch doesnt need the cookie, only the Referer.
+// =============================================================================
+
+const PIXIV_BASE = 'https://www.pixiv.net';
+const PIXIV_IMG_HOSTNAME = 'i.pximg.net';
+const PIXIV_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
+const PIXIV_REFERER = 'https://www.pixiv.net/';
+// Known R-18 illust used to validate a session: urls.original is null when not
+// logged in (or R-18 viewing is off) and populated when both hold. Swap if removed.
+const PIXIV_VALIDATE_ILLUST = '146636754';
+
+// In-memory session, persists until logout or server restart. Primed from the
+// persisted client setting on demand, like CT/civitai.
+let pixivSessionCookie = null; // raw "PHPSESSID=VALUE"
+
+// Read-only ajax paths the proxy is allowed to forward.
+const PIXIV_ALLOWED_PATHS = [
+    /^\/ajax\/illust\/\d+$/,
+    /^\/ajax\/illust\/\d+\/pages$/,
+];
+
+function registerPixivRoutes(router) {
+    /**
+     * POST /pixiv-set-cookie
+     * Body: { cookie: "PHPSESSID=VALUE" } or { cookie: "VALUE" }
+     * Accepts only the bare PHPSESSID value; rejects multi-cookie input.
+     */
+    router.post('/pixiv-set-cookie', (req, res) => {
+        const { cookie } = req.body ?? {};
+        if (!cookie || typeof cookie !== 'string' || !cookie.trim()) {
+            return res.status(400).json({ error: 'cookie string is required' });
+        }
+        let value = cookie.trim();
+        if (value.toUpperCase().startsWith('PHPSESSID=')) {
+            value = value.slice('PHPSESSID='.length).trim();
+        }
+        if (value.includes(';') || value.length > 4096) {
+            return res.status(400).json({ error: 'Invalid cookie value. Paste only the PHPSESSID value.' });
+        }
+        if (!value) return res.status(400).json({ error: 'Empty cookie value' });
+        pixivSessionCookie = `PHPSESSID=${value}`;
+        console.log('[cl-helper] Pixiv session cookie stored');
+        res.json({ ok: true });
+    });
+
+    /**
+     * GET /pixiv-validate
+     * /ajax/user/me errors even on a valid session, so probe a known R-18 illust:
+     * body.urls.original is non-null only when logged in with R-18 viewing ON.
+     */
+    router.get('/pixiv-validate', async (_req, res) => {
+        if (!pixivSessionCookie) return res.json({ valid: false, reason: 'no cookie stored' });
+        try {
+            const response = await fetch(`${PIXIV_BASE}/ajax/illust/${PIXIV_VALIDATE_ILLUST}`, {
+                headers: {
+                    'User-Agent': PIXIV_UA,
+                    'Accept': 'application/json',
+                    'Referer': PIXIV_REFERER,
+                    'Cookie': pixivSessionCookie,
+                },
+            });
+            if (!response.ok) return res.json({ valid: false, reason: `HTTP ${response.status}` });
+            const data = await response.json();
+            const original = data?.body?.urls?.original || null;
+            if (original) return res.json({ valid: true });
+            return res.json({ valid: false, reason: 'No R-18 image URLs returned (login expired, or "View R-18 works" is off on the account).' });
+        } catch (err) {
+            console.error('[cl-helper] Pixiv validate error:', err.message);
+            res.json({ valid: false, reason: err.message });
+        }
+    });
+
+    /** GET /pixiv-session , whether a session cookie is stored. */
+    router.get('/pixiv-session', (_req, res) => {
+        res.json({ active: !!pixivSessionCookie });
+    });
+
+    /** POST /pixiv-logout , clear the stored cookie. */
+    router.post('/pixiv-logout', (_req, res) => {
+        pixivSessionCookie = null;
+        console.log('[cl-helper] Pixiv session cleared');
+        res.json({ ok: true });
+    });
+
+    /**
+     * GET /pixiv-proxy/* , read-only ajax proxy to www.pixiv.net with the stored
+     * cookie + Referer injected. Path-allowlisted, hostname-pinned.
+     */
+    router.get('/pixiv-proxy/*', async (req, res) => {
+        const targetPath = '/' + (req.params[0] || '');
+        let targetUrl;
+        try {
+            targetUrl = new URL(targetPath, PIXIV_BASE);
+        } catch {
+            return res.status(400).json({ error: 'Invalid proxy path' });
+        }
+        if (!PIXIV_ALLOWED_PATHS.some(re => re.test(targetUrl.pathname))) {
+            console.warn(`[cl-helper] Pixiv proxy blocked: ${targetUrl.pathname}`);
+            return res.status(403).json({ error: 'Proxy path not allowed' });
+        }
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== 'www.pixiv.net') {
+            return res.status(403).json({ error: 'Proxy target must be www.pixiv.net' });
+        }
+        const headers = {
+            'User-Agent': PIXIV_UA,
+            'Accept': 'application/json',
+            'Referer': PIXIV_REFERER,
+        };
+        if (pixivSessionCookie) headers['Cookie'] = pixivSessionCookie;
+        try {
+            const response = await fetch(targetUrl.toString(), { method: 'GET', headers, redirect: 'follow' });
+            res.status(response.status);
+            const ct = response.headers.get('content-type') || '';
+            if (ct) res.set('Content-Type', ct);
+            if (ct.includes('application/json') || ct.startsWith('text/')) {
+                res.send(await response.text());
+            } else {
+                res.send(Buffer.from(await response.arrayBuffer()));
+            }
+        } catch (err) {
+            console.error('[cl-helper] Pixiv proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach Pixiv' });
+        }
+    });
+
+    /**
+     * GET /pixiv-image/* , streams an i.pximg.net image with the required Referer
+     * injected (the CDN 403s without it). Referer + UA only, no cookie. Pinned to
+     * i.pximg.net + a pixiv image path prefix to keep it from being an open relay.
+     */
+    router.get('/pixiv-image/*', async (req, res) => {
+        const targetPath = '/' + (req.params[0] || '');
+        let targetUrl;
+        try {
+            targetUrl = new URL(targetPath, `https://${PIXIV_IMG_HOSTNAME}/`);
+        } catch {
+            return res.status(400).json({ error: 'Invalid image path' });
+        }
+        targetUrl.search = new URL(req.url, 'http://localhost').search;
+        if (targetUrl.hostname !== PIXIV_IMG_HOSTNAME) {
+            return res.status(403).json({ error: 'Proxy target must be i.pximg.net' });
+        }
+        if (!/^\/(c|img-original|img-master)\//.test(targetUrl.pathname)) {
+            return res.status(403).json({ error: 'Image path not allowed' });
+        }
+        try {
+            const response = await fetch(targetUrl.toString(), {
+                headers: { 'User-Agent': PIXIV_UA, 'Referer': PIXIV_REFERER },
+                redirect: 'follow',
+            });
+            res.status(response.status);
+            res.set('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
+            res.send(Buffer.from(await response.arrayBuffer()));
+        } catch (err) {
+            console.error('[cl-helper] Pixiv image proxy error:', err.message);
+            res.status(502).json({ error: 'Failed to reach Pixiv image CDN' });
         }
     });
 }
@@ -2269,6 +2436,7 @@ export async function init(router) {
     registerDataCatRoutes(router);
     registerImgchestRoutes(router);
     registerCivitaiRoutes(router);
+    registerPixivRoutes(router);
     registerSaucepanRoutes(router);
     registerDropboxRoutes(router);
     registerFlareSolverrRoutes(router);

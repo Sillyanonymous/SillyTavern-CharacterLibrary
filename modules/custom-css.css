@@ -399,237 +399,263 @@
     flex-shrink: 0;
 }
 
-@media (max-width: 768px) {
-    .custom-css-modal .cl-modal-body.ccss-body {
-        padding: var(--space-md);
-        gap: var(--space-md);
-    }
+/* Full-viewport modal: drop the desktop 85vh cap and let the body fill between header and footer. */
+html.cl-mobile .custom-css-modal .cl-modal-body.ccss-body {
+    padding: var(--space-md);
+    gap: var(--space-md);
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+}
 
-    /* --- Toolbar --- */
-    .ccss-toolbar {
-        flex-wrap: wrap;
-        gap: var(--space-sm);
-    }
-    .ccss-toolbar-spacer { display: none; }
-    .ccss-mode-toggle { flex: 1; }
-    .ccss-mode-btn { flex: 1; justify-content: center; }
+/* --- Toolbar --- */
+html.cl-mobile .ccss-toolbar {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+html.cl-mobile .ccss-toolbar-spacer { display: none; }
+html.cl-mobile .ccss-mode-toggle { flex: 1; }
+html.cl-mobile .ccss-mode-btn { flex: 1; justify-content: center; }
 
-    /* --- Guidelines: hidden on mobile, the editor is the priority here --- */
-    .custom-css-guidelines { display: none; }
+/* --- Guidelines: hidden on mobile, the editor is the priority here --- */
+html.cl-mobile .custom-css-guidelines { display: none; }
 
-    /* --- Snippets pane: editor takes the whole pane; sidebar becomes a bottom sheet
-           (canonical .mobile-sheet pattern, inherits layout from library-mobile.css). --- */
-    .ccss-snippets-layout {
-        display: block;
-    }
+/* --- Snippets pane: editor takes the whole pane; sidebar becomes a bottom sheet
+       (canonical .mobile-sheet pattern, inherits layout from library-mobile.css). --- */
+html.cl-mobile .ccss-snippets-layout {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 420px;
+}
 
-    /* Drawer trigger button (mobile-only) shows above the editor.
-       Doubles as "you're editing X" indicator via .ccss-drawer-trigger-label. */
-    .ccss-drawer-trigger {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-sm);
-        background: var(--bg-secondary);
-        border: 1px solid var(--glass-border);
-        color: var(--text-primary);
-        padding: var(--space-sm) var(--space-md);
-        border-radius: var(--radius-lg);
-        font-size: var(--font-md);
-        cursor: pointer;
-        min-height: var(--touch-target-min);
-        align-self: flex-start;
-        max-width: 100%;
-    }
-    .ccss-drawer-trigger:hover { border-color: var(--accent); }
-    .ccss-drawer-trigger-label {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        max-width: 70vw;
-        font-weight: 500;
-    }
+/* Drawer trigger button (mobile-only) shows above the editor.
+   Doubles as "you're editing X" indicator via .ccss-drawer-trigger-label. */
+html.cl-mobile .ccss-drawer-trigger {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-lg);
+    font-size: var(--font-md);
+    cursor: pointer;
+    min-height: var(--touch-target-min);
+}
+html.cl-mobile .ccss-drawer-trigger:hover { border-color: var(--accent); }
+html.cl-mobile .ccss-drawer-trigger-label {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+html.cl-mobile .ccss-drawer-trigger-caret {
+    flex-shrink: 0;
+    opacity: 0.55;
+    font-size: var(--font-sm);
+}
 
-    /* Scrim behind the sheet. Tap to close. */
-    /* z-index sits above .cl-modal (10000) because openDrawer() teleports the
-       scrim and sidebar out of .cl-modal-content to document.body so they escape
-       the modal's transform containing block, but as body-level siblings they
-       have to outrank the modal in the global stacking context. */
-    .ccss-drawer-scrim {
-        display: block;
-        position: fixed;
-        inset: 0;
-        background: var(--cl-modal-scrim);
-        z-index: 10001;
-    }
-    .ccss-drawer-scrim[hidden] { display: none; }
+/* Scrim behind the sheet. Tap to close. */
+/* z-index sits above .cl-modal (10000) because openDrawer() teleports the
+   scrim and sidebar out of .cl-modal-content to document.body so they escape
+   the modal's transform containing block, but as body-level siblings they
+   have to outrank the modal in the global stacking context. */
+html.cl-mobile .ccss-drawer-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: var(--cl-modal-scrim);
+    z-index: 10001;
+}
+html.cl-mobile .ccss-drawer-scrim[hidden] { display: none; }
 
-    /* Sidebar becomes a slide-up bottom sheet, matching the canonical mobile-sheet
-       visual style from library-mobile.css. Starts off-screen below the viewport;
-       slides up when .drawer-open is added by openDrawer(). */
-    .ccss-sidebar {
-        position: fixed;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        z-index: 10002;
-        max-height: 88vh;
-        background: var(--cl-glass-bg);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid var(--glass-border);
-        border-bottom: none;
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-        padding: var(--space-md);
-        padding-bottom: max(20px, var(--safe-bottom));
-        overflow-y: auto;
-        transform: translateY(100%);
-        transition: transform 0.28s var(--ease-drawer);
-        display: block;
-    }
-    .ccss-sidebar.drawer-open { transform: translateY(0); }
+/* Sidebar becomes a slide-up bottom sheet, matching the canonical mobile-sheet
+   visual style from library-mobile.css. Starts off-screen below the viewport;
+   slides up when .drawer-open is added by openDrawer(). */
+html.cl-mobile .ccss-sidebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10002;
+    max-height: 88vh;
+    background: var(--cl-glass-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-bottom: none;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+    padding: var(--space-md);
+    padding-bottom: max(20px, var(--safe-bottom));
+    overflow-y: auto;
+    transform: translateY(100%);
+    transition: transform 0.28s var(--ease-drawer);
+    display: block;
+}
+html.cl-mobile .ccss-sidebar.drawer-open { transform: translateY(0); }
 
-    .ccss-sidebar .mobile-sheet-handle {
-        display: block;
-        width: 40px;
-        height: 4px;
-        background: var(--text-faint);
-        opacity: 0.4;
-        border-radius: var(--radius-2xs);
-        margin: 0 auto var(--space-sm);
-    }
-    .ccss-snippet-list {
-        display: block;
-        flex: none;
-        overflow: visible;
-    }
+html.cl-mobile .ccss-sidebar .mobile-sheet-handle {
+    display: block;
+    width: 40px;
+    height: 4px;
+    background: var(--text-faint);
+    opacity: 0.4;
+    border-radius: var(--radius-2xs);
+    margin: 0 auto var(--space-sm);
+}
+html.cl-mobile .ccss-snippet-list {
+    display: block;
+    flex: none;
+    overflow: visible;
+}
 
-    /* Sheet header: title on the left, close on the right, New button on its own row */
-    .ccss-sidebar-header {
-        flex-direction: row !important;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: var(--space-sm);
-    }
-    .ccss-drawer-title {
-        display: block;
-        flex: 1;
-        font-size: var(--font-lg);
-        font-weight: 600;
-        color: var(--text-primary);
-    }
-    .ccss-drawer-close {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        font-size: var(--font-lg);
-        border-radius: var(--radius-sm);
-    }
-    .ccss-drawer-close:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
-    .ccss-sidebar-new {
-        flex-basis: 100%;
-        order: 99;
-        min-height: var(--touch-target-min);
-    }
+/* Sheet header: title on the left, close on the right, New button on its own row */
+html.cl-mobile .ccss-sidebar-header {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+html.cl-mobile .ccss-drawer-title {
+    display: block;
+    flex: 1;
+    font-size: var(--font-lg);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+html.cl-mobile .ccss-drawer-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    font-size: var(--font-lg);
+    border-radius: var(--radius-sm);
+}
+html.cl-mobile .ccss-drawer-close:hover { color: var(--text-primary); background: rgba(255,255,255,0.05); }
+html.cl-mobile .ccss-sidebar-new {
+    flex-basis: 100%;
+    order: 99;
+    min-height: var(--touch-target-min);
+}
 
-    /* --- Drawer snippet items --- */
-    .ccss-snippet-item {
-        padding: var(--space-sm) var(--space-xs);
-        min-height: var(--touch-target-min);
-    }
-    /* Drag handle hidden on mobile: drag-reorder is fiddly on touch and rarely needed */
-    .ccss-snippet-drag-handle { display: none; }
-    .ccss-snippet-toggle input { width: 20px; height: 20px; }
-    .ccss-snippet-name { font-size: var(--font-md); }
-    .ccss-snippet-wand {
-        opacity: 1;
-        padding: var(--space-sm);
-        font-size: var(--font-md);
-        min-width: var(--touch-target-min);
-        text-align: center;
-    }
-    .ccss-snippet-item:hover { transform: none; }
+/* --- Drawer snippet items --- */
+html.cl-mobile .ccss-snippet-item {
+    padding: var(--space-sm) var(--space-xs);
+    min-height: var(--touch-target-min);
+}
+/* Drag handle hidden on mobile: drag-reorder is fiddly on touch and rarely needed */
+html.cl-mobile .ccss-snippet-drag-handle { display: none; }
+html.cl-mobile .ccss-snippet-toggle input { width: 20px; height: 20px; }
+html.cl-mobile .ccss-snippet-name { font-size: var(--font-md); }
+html.cl-mobile .ccss-snippet-wand {
+    opacity: 1;
+    padding: var(--space-sm);
+    font-size: var(--font-md);
+    min-width: var(--touch-target-min);
+    text-align: center;
+}
+html.cl-mobile .ccss-snippet-item:hover { transform: none; }
 
-    /* --- Editor pane: takes the whole snippets pane on mobile --- */
-    .ccss-editor {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-md);
-    }
+/* --- Editor pane: takes the whole snippets pane on mobile --- */
+html.cl-mobile .ccss-editor {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    flex: 1;
+    min-height: 0;
+}
 
-    .ccss-editor-form {
-        display: grid;
-        grid-template-columns: 1fr auto auto;
-        grid-template-rows: auto 1fr auto;
-        grid-template-areas:
-            "name name name"
-            "css  css  css"
-            "enabled save delete";
-        gap: var(--space-md);
-    }
-    .ccss-editor-meta { display: contents; }
-    #ccssSnippetName { grid-area: name; }
-    #ccssSnippetCss { grid-area: css; }
-    .ccss-editor-enabled {
-        grid-area: enabled;
-        align-self: center;
-        font-size: var(--font-md);
-    }
-    #ccssSaveSnippetBtn {
-        grid-area: save;
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        padding: 0;
-        gap: 0;
-        font-size: 0;
-        justify-content: center;
-    }
-    #ccssSaveSnippetBtn i { font-size: var(--font-md); }
-    .ccss-editor-delete {
-        grid-area: delete;
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        justify-content: center;
-    }
+html.cl-mobile .ccss-editor-form {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+        "name name name"
+        "css  css  css"
+        "enabled save delete";
+    gap: var(--space-md);
+    flex: 1;
+    min-height: 0;
+}
+/* the bare .ccss-editor-form[hidden] hide loses to the prefixed display:grid above without this */
+html.cl-mobile .ccss-editor-form[hidden] { display: none; }
+html.cl-mobile .ccss-editor-meta { display: contents; }
+html.cl-mobile #ccssSnippetName { grid-area: name; }
+html.cl-mobile #ccssSnippetCss { grid-area: css; }
+html.cl-mobile .ccss-editor-enabled {
+    grid-area: enabled;
+    align-self: center;
+    font-size: var(--font-md);
+}
+html.cl-mobile #ccssSaveSnippetBtn {
+    grid-area: save;
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0;
+    gap: 0;
+    font-size: 0;
+    justify-content: center;
+}
+html.cl-mobile #ccssSaveSnippetBtn i { font-size: var(--font-md); }
+html.cl-mobile .ccss-editor-delete {
+    grid-area: delete;
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    justify-content: center;
+}
 
-    /* Revert is rare on mobile, the close button covers the abandon case */
-    #ccssRevertBtn { display: none; }
+/* Revert is rare on mobile, the close button covers the abandon case */
+html.cl-mobile #ccssRevertBtn { display: none; }
 
-    /* Textarea: prevent iOS zoom-on-focus */
-    .custom-css-textarea {
-        font-size: var(--mobile-input-size);
-        min-height: 280px;
-    }
-    .ccss-raw-textarea { min-height: 360px; }
+/* Textarea: prevent iOS zoom-on-focus */
+html.cl-mobile .custom-css-textarea {
+    font-size: var(--mobile-input-size);
+    min-height: 280px;
+}
+html.cl-mobile .ccss-raw-textarea { min-height: 360px; }
 
-    /* Editor meta buttons: subordinate, compact */
-    .ccss-editor-meta .cl-btn {
-        padding: var(--space-xs) var(--space-sm);
-        font-size: var(--font-xs);
-    }
+/* Editor meta buttons: subordinate, compact */
+html.cl-mobile .ccss-editor-meta .cl-btn {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--font-xs);
+}
 
-    /* Inline dirty indicator + size/status are noise on mobile;
-       the Apply button styling already signals unsaved state */
-    .ccss-dirty-indicator { display: none !important; }
-    .custom-css-meta { display: none; }
+/* Inline dirty indicator + size/status are noise on mobile;
+   the Apply button styling already signals unsaved state */
+html.cl-mobile .ccss-dirty-indicator { display: none !important; }
+html.cl-mobile .custom-css-meta { display: none; }
 
-    /* --- Footer --- */
-    .ccss-footer-hint { display: none; }
-    .cl-modal-footer.ccss-footer {
-        padding: var(--space-md);
-        gap: var(--space-sm);
-    }
-    .ccss-footer-actions {
-        flex-wrap: wrap;
-        width: 100%;
-        justify-content: flex-end;
-    }
-    .ccss-footer-actions .cl-btn {
-        min-height: var(--touch-target-min);
-    }
+/* --- Footer --- */
+html.cl-mobile .ccss-footer-hint { display: none; }
+html.cl-mobile .cl-modal-footer.ccss-footer {
+    padding: var(--space-md);
+    gap: var(--space-sm);
+}
+html.cl-mobile .ccss-footer-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: var(--space-sm);
+}
+/* Snippets mode: Close/Apply side by side. Raw mode: the three secondaries share the top row, Apply Raw full-width beneath. */
+html.cl-mobile .ccss-footer-actions .cl-btn {
+    flex: 1 1 40%;
+    min-height: var(--touch-target-min);
+}
+html.cl-mobile .ccss-mode-raw .ccss-footer-actions .cl-btn {
+    flex: 1 1 auto;
+}
+html.cl-mobile .ccss-mode-raw .ccss-footer-actions .cl-btn-primary {
+    flex-basis: 100%;
+    order: 99;
 }

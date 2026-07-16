@@ -103,49 +103,47 @@
 /* ========================================
    Mobile Overrides
    ======================================== */
-@media (max-width: 768px) {
-    /* Desktop context menu hidden on mobile (replaced by bottom sheet) */
-    .cl-context-menu {
-        display: none !important;
-    }
+/* Desktop context menu hidden on mobile (replaced by bottom sheet) */
+html.cl-mobile .cl-context-menu {
+    display: none !important;
+}
 
-    /* Context-menu items cloned into the canonical .mobile-sheet bottom drawer
-       (the sheet shell, slide, handle + scrim all come from .mobile-sheet). */
-    .mobile-sheet .cl-context-menu-separator {
-        height: 1px;
-        background: var(--glass-border);
-        margin: 4px 12px;
-    }
-    .mobile-sheet .cl-context-menu-header {
-        padding: 10px 20px 6px;
-        font-size: var(--font-2xs);
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-        color: var(--text-secondary, #999);
-        font-weight: 600;
-    }
-    .mobile-sheet .cl-context-menu-item {
-        display: flex;
-        align-items: center;
-        gap: var(--space-md);
-        padding: 14px 20px;
-        min-height: 48px;
-        font-size: var(--font-md);
-        color: var(--text-primary, #eee);
-        cursor: pointer;
-        border-radius: 0;
-        transition: background 0.15s;
-    }
-    .mobile-sheet .cl-context-menu-item:active {
-        background: rgba(255,255,255,0.08);
-    }
-    .mobile-sheet .cl-context-menu-item i {
-        width: 22px;
-        text-align: center;
-        opacity: 0.8;
-        font-size: var(--font-base);
-    }
-    .mobile-sheet .cl-context-menu-item.danger {
-        color: var(--cl-danger-text);
-    }
+/* Context-menu items cloned into the canonical .mobile-sheet bottom drawer
+   (the sheet shell, slide, handle + scrim all come from .mobile-sheet). */
+html.cl-mobile .mobile-sheet .cl-context-menu-separator {
+    height: 1px;
+    background: var(--glass-border);
+    margin: 4px 12px;
+}
+html.cl-mobile .mobile-sheet .cl-context-menu-header {
+    padding: 10px 20px 6px;
+    font-size: var(--font-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary, #999);
+    font-weight: 600;
+}
+html.cl-mobile .mobile-sheet .cl-context-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 14px 20px;
+    min-height: 48px;
+    font-size: var(--font-md);
+    color: var(--text-primary, #eee);
+    cursor: pointer;
+    border-radius: 0;
+    transition: background 0.15s;
+}
+html.cl-mobile .mobile-sheet .cl-context-menu-item:active {
+    background: rgba(255,255,255,0.08);
+}
+html.cl-mobile .mobile-sheet .cl-context-menu-item i {
+    width: 22px;
+    text-align: center;
+    opacity: 0.8;
+    font-size: var(--font-base);
+}
+html.cl-mobile .mobile-sheet .cl-context-menu-item.danger {
+    color: var(--cl-danger-text);
 }

@@ -624,28 +624,6 @@ class ChartavernProvider extends ProviderBase {
     // CT doesn't have a gallery API
     get supportsGallery() { return false; }
 
-    // ── Import Duplicate Detection ──────────────────────────
-
-    async searchForImportMatch(name, creator, localChar) {
-        if (!name) return null;
-        try {
-            const results = await this.searchForBulkLink(name, creator || '');
-            if (results.length === 0) return null;
-
-            const normalizedName = name.toLowerCase().trim();
-            for (const r of results) {
-                const rName = (r.name || '').toLowerCase().trim();
-                if (rName === normalizedName || rName.includes(normalizedName) || normalizedName.includes(rName)) {
-                    return { id: r.id, fullPath: r.fullPath, hasGallery: false };
-                }
-            }
-            return { id: results[0].id, fullPath: results[0].fullPath, hasGallery: false };
-        } catch (e) {
-            console.error('[ChartavernProvider] searchForImportMatch:', e);
-            return null;
-        }
-    }
-
     // ── Private Helpers ─────────────────────────────────────
 
     _normalizeSearchResult(hit) {

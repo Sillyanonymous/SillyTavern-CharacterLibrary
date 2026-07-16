@@ -11,6 +11,7 @@
  */
 
 import { registerExtractor } from './extractor-registry.js';
+import { proxyEncode } from '../providers/provider-utils.js';
 
 const IMGBOX_PATTERNS = [
     /imgbox\.com\/g\/[a-zA-Z0-9]+/
@@ -72,7 +73,7 @@ async function fetchPage(url, signal) {
     try {
         response = await fetch(url, { signal });
     } catch (_) {
-        const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+        const proxyUrl = `/proxy/${proxyEncode(url)}`;
         response = await fetch(proxyUrl, { signal });
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);

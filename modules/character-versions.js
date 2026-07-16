@@ -373,6 +373,9 @@ export function init(deps) {
     // Lazy-load index in background (non-blocking)
     ensureIndexLoaded()
         .catch(e => console.error('[CharVersions] Init error:', e));
+    // confirm/input dialogs share one id (mutually exclusive via _dialogOpen); the registry close
+    // routes through _closeFn so Escape / Android back resolve the promise as cancel, not a bare remove.
+    window.registerOverlay?.({ id: 'vtDialog', tier: 5, static: false, close: (el) => el?._closeFn ? el._closeFn() : el?.remove() });
     isInitialized = true;
     CoreAPI.debugLog('[CharVersions] Module initialized (v4 — filesystem storage)');
 }
@@ -829,7 +832,7 @@ async function selectVersion(shortId, fullId) {
             }
         }
         if (!card) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Could not load version data</div>'; return; }
-        renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
+        renderDiffPreview(preview, currentChar?.data || currentChar, card);
         resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch (e) {
         preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading preview</div>';
@@ -863,7 +866,7 @@ async function selectProviderPageVersion() {
         const card = await currentProvider.fetchRemotePageCard(currentLinkInfo);
         if (gen !== _renderGen) return;
         if (!card) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Could not load page data</div>'; return; }
-        renderDiffPreview(preview, currentChar?.data || currentChar, card, null);
+        renderDiffPreview(preview, currentChar?.data || currentChar, card);
 
         // Info banner about what this entry represents
         const pageInfo = currentProvider.getRemotePageInfo();
@@ -907,7 +910,7 @@ async function selectSnapshot(id) {
         const snap = uid ? await storageGetSnapshot(uid, id) : null;
         if (gen !== _renderGen) return;
         if (!snap) { preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-exclamation-triangle"></i> Snapshot not found</div>'; return; }
-        renderDiffPreview(preview, currentChar?.data || currentChar, snap.data, null);
+        renderDiffPreview(preview, currentChar?.data || currentChar, snap.data);
         resolveVersionWorldFileStatus(preview, currentChar?.avatar).catch(() => {});
     } catch {
         preview.innerHTML = '<div class="vt-error"><i class="fa-solid fa-xmark"></i> Error loading snapshot</div>';
@@ -934,7 +937,7 @@ function updateActionsVisibility() {
 
 // Namespace-level diff/restore allowlist: registered provider ids + 'cl'. Flat keys and orphan namespaces are out; they stay sticky via the spread merge in applyCardFieldUpdates.
 function getKnownProviderNamespaces() {
-    const ids = (window.ProviderRegistry?.getAllProviders?.() || []).map(p => p.id);
+    const ids = CoreAPI.getAllProviders().map(p => p.id);
     return new Set([...ids, 'cl']);
 }
 
@@ -977,14 +980,14 @@ function buildNamespaceUpdates(targetExt, currentExt, deleteValue) {
 // Derived Provider Link summary for the diff row; getCharacterProvider picks the first linked provider, so it's active-agnostic. fullPath is the user-meaningful slug.
 function summarizeProviderLink(data) {
     const charLike = { data };
-    const match = window.ProviderRegistry?.getCharacterProvider?.(charLike);
+    const match = CoreAPI.getCharacterProvider(charLike);
     if (!match?.linkInfo) return 'Unlinked';
     const provider = match.provider;
     const ref = match.linkInfo.fullPath || match.linkInfo.full_path || match.linkInfo.id || '';
     return ref ? `${provider.name}: ${ref}` : provider.name;
 }
 
-function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
+function renderDiffPreview(previewEl, localData, compareData) {
     // During shallow recovery localData.extensions is transiently empty; skip the render so namespaces dont all look deleted.
     if (CoreAPI.isExtensionsRecoveryInProgress?.()) {
         previewEl.innerHTML = `<div class="vt-preview-header"><i class="fa-solid fa-spinner fa-spin"></i> Character data still loading. Open the version diff again in a moment.</div>`;
@@ -1025,7 +1028,7 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
     }
 
     // All known providers' tagline/pageName so stale orphan namespaces from prior links stay diffable; getAllProviders keeps provider.id correct (jannyai not janny).
-    const allProviders = window.ProviderRegistry?.getAllProviders?.() || [];
+    const allProviders = CoreAPI.getAllProviders();
     for (const p of allProviders) {
         const taglinePath = `extensions.${p.id}.tagline`;
         const pageNamePath = `extensions.${p.id}.pageName`;
@@ -1045,9 +1048,7 @@ function renderDiffPreview(previewEl, localData, compareData, rawRemoteData) {
     // Avatar image - show the selected version/snapshot's avatar.
     // Prefer the embedded image data (captured at snapshot time) over the live URL,
     // so snapshots remain accurate after the character's PNG is overwritten.
-    const snapshotAvatar = compareData._avatarImageData || compareData._avatarUrl;
-    const remoteAvatar = rawRemoteData?.data?.avatar;
-    const avatarUrl = remoteAvatar || snapshotAvatar;
+    const avatarUrl = compareData._avatarImageData || compareData._avatarUrl;
     if (avatarUrl) {
         html += renderAvatarPreview(avatarUrl);
     }
@@ -1535,16 +1536,6 @@ async function handleRenameSnapshot() {
 
 function nested(obj, path) { return path.split('.').reduce((o, k) => o?.[k], obj); }
 
-function setNested(obj, path, val) {
-    const keys = path.split('.');
-    let cur = obj;
-    for (let i = 0; i < keys.length - 1; i++) {
-        if (cur[keys[i]] == null) cur[keys[i]] = {};
-        cur = cur[keys[i]];
-    }
-    cur[keys[keys.length - 1]] = val;
-}
-
 // ========================================
 // LOREBOOK DIFF
 // ========================================
@@ -1993,6 +1984,7 @@ function confirmDialog(title, msg) {
         _dialogOpen = true;
         const ov = document.createElement('div');
         ov.className = 'vt-dialog-overlay';
+        ov.id = 'vtDialog';
         ov.innerHTML = `
             <div class="vt-dialog">
                 <div class="vt-dialog-title">${esc(title)}</div>
@@ -2007,6 +1999,7 @@ function confirmDialog(title, msg) {
             ov.remove();
             requestAnimationFrame(() => { _dialogOpen = false; resolve(val); });
         };
+        ov._closeFn = () => close(false); // registry (Escape / Android back) resolves as cancel
         ov.addEventListener('click', e => { e.stopPropagation(); if (e.target === ov) close(false); });
         ov.querySelector('[data-a="cancel"]').addEventListener('click', (e) => { e.stopPropagation(); close(false); });
         ov.querySelector('[data-a="ok"]').addEventListener('click', (e) => { e.stopPropagation(); close(true); });
@@ -2019,6 +2012,7 @@ function inputDialog(title, msg, defaultVal = '') {
         _dialogOpen = true;
         const ov = document.createElement('div');
         ov.className = 'vt-dialog-overlay';
+        ov.id = 'vtDialog';
         ov.innerHTML = `
             <div class="vt-dialog">
                 <div class="vt-dialog-title">${esc(title)}</div>
@@ -2035,9 +2029,10 @@ function inputDialog(title, msg, defaultVal = '') {
             ov.remove();
             requestAnimationFrame(() => { _dialogOpen = false; resolve(val); });
         };
+        ov._closeFn = () => close(null); // registry (Escape / Android back) resolves as cancel
+        // Enter only; Escape/back come from the registered overlay (registry close resolves null).
         inp.addEventListener('keydown', e => {
             if (e.key === 'Enter') close(inp.value.trim());
-            if (e.key === 'Escape') close(null);
         });
         ov.querySelector('[data-a="cancel"]').addEventListener('click', (e) => { e.stopPropagation(); close(null); });
         ov.querySelector('[data-a="ok"]').addEventListener('click', (e) => { e.stopPropagation(); close(inp.value.trim()); });

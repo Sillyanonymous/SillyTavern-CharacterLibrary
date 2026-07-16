@@ -2,6 +2,7 @@
 //
 // Sections: Network, Metadata, Browse/Search, Tags, V2 Card Builder, Extraction, MeiliSearch
 
+import CoreAPI from '../../core-api.js';
 import { CL_HELPER_PLUGIN_BASE, slugify, stripHtml, fetchWithProxy } from '../provider-utils.js';
 import { getSearchToken, JANNY_SEARCH_URL, JANNY_SITE_BASE, TAG_MAP as JANNY_TAG_MAP } from '../janny/janny-api.js';
 import { resolveSaucepanImageUrl, SAUCEPAN_CDN_PROXY_BASE } from '../saucepan/saucepan-api.js';
@@ -54,8 +55,8 @@ export function resolveDatacatAvatarUrl(hit) {
     // Covers freshly rewritten URLs and already-proxied paths alike.
     if (proxied.startsWith(SAUCEPAN_CDN_PROXY_BASE)) return proxied;
     const url = /^https?:\/\//i.test(avatar) ? avatar : `${DATACAT_JANITOR_IMAGE_BASE}${avatar}`;
-    const safety = window.isUrlSafeForDownload?.(url);
-    if (safety && !safety.ok) return null;
+    const safety = CoreAPI.isUrlSafeForDownload(url);
+    if (!safety.ok) return null;
     return url;
 }
 
@@ -237,6 +238,109 @@ export async function clearDcSession() {
     } catch {
         return false;
     }
+}
+
+// ========================================
+// JANITORAI ACCOUNT AUTH (Supabase GoTrue)
+// ========================================
+// Unlocks page 2+ of the Hampter Trending/Popular sorts. JanitorAI auth is Supabase; the
+// anon key below is their PUBLIC publishable key (role:anon), shipped in the janitorai
+// frontend bundle, safe to embed. Login/refresh hit supabase.co directly (CORS *, and it is
+// NOT behind JanitorAI's Cloudflare bot gate), so the whole flow is client-side, no cl-helper.
+// Access tokens live ~3h; the refresh token rotates on every use, so callers must persist the
+// new one each refresh. Pure HTTP here; the stateful session layer lives in datacat-provider.
+
+const JANITORAI_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1jbXp4dHpvbW1wbnhreW5kZGJvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MjgzNzA3NDAsImV4cCI6MjA0Mzk0Njc0MH0.UfRPni4ga9Lmin8j0JjV5ouuK9bXp8tsqPJ8pMTDDAI';
+const JANITORAI_AUTH_BASE = 'https://mcmzxtzommpnxkynddbo.supabase.co/auth/v1';
+const JANITORAI_TOKEN_URL = `${JANITORAI_AUTH_BASE}/token`;
+
+function janitoraiAuthHeaders() {
+    return { 'apikey': JANITORAI_ANON_KEY, 'Authorization': `Bearer ${JANITORAI_ANON_KEY}`, 'Content-Type': 'application/json' };
+}
+
+/** Decode a JanitorAI access-token JWT's claims (email + exp ms). Empty on failure. */
+export function decodeJanitoraiClaims(jwt) {
+    try {
+        const p = JSON.parse(atob(String(jwt).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+        return { email: p.email || '', expMs: (p.exp || 0) * 1000 };
+    } catch { return { email: '', expMs: 0 }; }
+}
+
+// Direct password login is not usable: JanitorAI gates it behind Cloudflare Turnstile,
+// whose sitekey is domain-locked to janitorai.com and cant be solved from CL's origin. So the
+// session is seeded from the sb-auth-auth-token cookie (grabbed once from a real browser login,
+// where the user already solved Turnstile), and kept alive by the captcha-free refresh grant.
+
+function janitoraiB64decode(s) {
+    let t = s.replace(/-/g, '+').replace(/_/g, '/');
+    while (t.length % 4) t += '=';
+    return atob(t);
+}
+
+/**
+ * Extract the token pair from a pasted JanitorAI session: the sb-auth-auth-token cookie value
+ * (base64-<json>), a raw session JSON, or a bare access-token JWT (no refresh; short-lived).
+ * @returns {{access_token: string, refresh_token: string}|null}
+ */
+export function parseJanitoraiSession(raw) {
+    if (!raw || typeof raw !== 'string') return null;
+    let s = raw.trim();
+    if (s.startsWith('base64-')) s = s.slice('base64-'.length);
+    let json = null;
+    try {
+        const dec = janitoraiB64decode(s);
+        if (dec.includes('access_token')) json = JSON.parse(dec);
+    } catch { /* not base64 json */ }
+    if (!json && s.startsWith('{')) {
+        try { json = JSON.parse(s); } catch { /* not json */ }
+    }
+    if (json?.access_token) {
+        return { access_token: json.access_token, refresh_token: json.refresh_token || '' };
+    }
+    const jm = s.match(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
+    return jm ? { access_token: jm[0], refresh_token: '' } : null;
+}
+
+/**
+ * Exchange a (single-use, rotating) refresh token for a fresh pair. `dead` marks a
+ * revoked/expired refresh token so the caller can clear the stored session.
+ * @returns {Promise<{access_token: string, refresh_token: string, dead?: boolean}>}
+ */
+export async function janitoraiRefreshGrant(refreshToken) {
+    if (!refreshToken) return { access_token: '', refresh_token: '', dead: true };
+    let resp;
+    try {
+        resp = await fetch(`${JANITORAI_TOKEN_URL}?grant_type=refresh_token`, {
+            method: 'POST', headers: janitoraiAuthHeaders(), body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+    } catch (e) {
+        return { access_token: '', refresh_token: '', dead: false }; // transient; keep the token for retry
+    }
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok || !data?.access_token) {
+        const dead = resp.status === 400 || resp.status === 401;
+        return { access_token: '', refresh_token: '', dead };
+    }
+    return { access_token: data.access_token, refresh_token: data.refresh_token || refreshToken };
+}
+
+/**
+ * Check an access token server-side against the auth service. Kept off Cloudflare on
+ * purpose: a hampter probe cant tell a bad token from a blocked preflight.
+ * @returns {Promise<{valid: boolean, transient?: boolean}>} transient = auth service unreachable or erroring (429/5xx)
+ */
+export async function janitoraiVerifyToken(accessToken) {
+    if (!accessToken) return { valid: false };
+    let resp;
+    try {
+        resp = await fetch(`${JANITORAI_AUTH_BASE}/user`, {
+            headers: { 'apikey': JANITORAI_ANON_KEY, 'Authorization': `Bearer ${accessToken}` },
+        });
+    } catch {
+        return { valid: false, transient: true };
+    }
+    if (resp.ok) return { valid: true };
+    return { valid: false, transient: resp.status === 429 || resp.status >= 500 };
 }
 
 // ========================================
@@ -428,13 +532,17 @@ export function resolveTagNames(tags) {
 // ========================================
 
 /**
- * Pick the active server-side recovery variant from a DataCat character row.
+ * Pick the active server-side content variant from a DataCat character row.
  *
- * For Saucepan characters with hidden definitions, DataCat runs a server-side
- * "Character Repair" job and exposes the recovered body via
- * `content_variants[primary].content`. The variant's `description` field is
- * overloaded to carry the repaired body text; the row's top-level fields
- * (`personality`, `description`) remain the empty original / short blurb.
+ * For Saucepan characters with hidden definitions, DataCat's "Character Repair"
+ * job exposes the recovered body via `content_variants[primary].content` with
+ * the `description` field overloaded to carry the repaired body text.
+ *
+ * Since the jannyai-recovery release, essentially every JanitorAI row ALSO
+ * carries a primary `janitor_core` variant, and that one uses plain janitor
+ * conventions instead (description = site blurb, personality = definition).
+ * Consumers must map the variant by source kind; treating `description` as
+ * the body is only correct for Saucepan repair variants.
  *
  * @returns {Object|null} The variant content object, or null when no
  *   non-placeholder primary variant is present.
@@ -444,6 +552,67 @@ export function pickRecoveryVariant(character) {
     if (!Array.isArray(variants) || !variants.length) return null;
     const primary = variants.find(v => v && v.isPrimary && !v.isRecoveryPlaceholder);
     return primary?.content || null;
+}
+
+// Recovery-sourced chara_card_v2_json bodies carry edge ##DESCRIPTION START##-style delimiter lines; /download bodies never do.
+export function stripDatacatMarkers(text) {
+    if (!text || typeof text !== 'string') return text || '';
+    return text
+        .replace(/^\s*##[A-Z _]*(?:START|END)##[ \t]*\r?\n?/, '')
+        .replace(/\r?\n?[ \t]*##[A-Z _]*(?:START|END)##\s*$/, '')
+        .trim();
+}
+
+const HAMPTER_SCRIPT_PATH_RE = /^\/hampter\/script\/[a-f0-9-]{36}$/i;
+
+/** True when the row advertises a public lorebook whose content wasnt obtained. */
+export function hasUnfetchedLorebook(character) {
+    const scripts = character?.scripts;
+    if (!Array.isArray(scripts)) return false;
+    return scripts.some(s => s && s.type === 'lorebook' && s.is_public && !s.script);
+}
+
+/**
+ * Fetch missing lorebook script content from janitorai's hampter endpoint and merge it
+ * onto the row's script entries in place. DataCat dropped the inline `script` field from
+ * rows; the content lives at `api_path` on janitorai.com (CORS *).
+ *
+ * Deliberately a plain direct fetch, NOT fetchWithProxy: the endpoint only accepts
+ * browser TLS fingerprints, so the /proxy/ fallback (undici) is a guaranteed 403, and a
+ * poisoned _proxyOrigins entry for janitorai.com would skip the working direct attempt.
+ *
+ * @returns {Promise<boolean>} true when no public lorebook is left unfetched
+ */
+export async function hydrateDatacatScripts(character, { signal } = {}) {
+    const scripts = character?.scripts;
+    if (!Array.isArray(scripts) || !scripts.length) return true;
+    for (const s of scripts) {
+        if (!s || s.type !== 'lorebook' || !s.is_public || s.script) continue;
+        // Listed publicly but the creator locked the content; hampter serves metadata only.
+        if (s.is_code_public === false) continue;
+        if (typeof s.api_path !== 'string' || !HAMPTER_SCRIPT_PATH_RE.test(s.api_path)) continue;
+        try {
+            const resp = await fetch(`https://janitorai.com${s.api_path}`, {
+                signal,
+                headers: { 'Accept': 'application/json' },
+            });
+            if (!resp.ok) {
+                console.warn('[DataCat] script hydration got HTTP', resp.status, 'for', s.api_path);
+                continue;
+            }
+            const full = await resp.json();
+            if (typeof full?.script === 'string' && full.script) {
+                s.script = full.script;
+                if (!s.settings && typeof full.settings === 'string') s.settings = full.settings;
+            } else {
+                console.warn('[DataCat] script hydration returned no content for', s.api_path);
+            }
+        } catch (e) {
+            // leave unfetched; consumers flag it via hasUnfetchedLorebook
+            console.warn('[DataCat] script hydration failed for', s.api_path, e?.message || e);
+        }
+    }
+    return !hasUnfetchedLorebook(character);
 }
 
 // Extract V2 character_book from character.scripts[]. DataCat stores lorebook
@@ -512,6 +681,9 @@ export function extractCharacterBookFromScripts(character) {
  *   JanitorAI (default):
  *     character.personality   -> data.description (main character definition)
  *     character.description   -> data.creator_notes (website blurb)
+ *     Newer rows leave `personality` empty and carry the body only in
+ *     `chara_card_v2_json.data.description` (may be delimiter-wrapped) and
+ *     the /download payload; the primary variant mirrors the row.
  *
  *   Saucepan (open definition):
  *     character.description   -> data.description (main character definition)
@@ -542,28 +714,30 @@ export function buildV2FromDatacat(character) {
     const isSaucepan = character?.primary_content_source_kind === 'saucepan';
     const v2Data = character?.chara_card_v2_json?.data || null;
 
-    // Recovery variant takes precedence: for Saucepan-with-repair items, this
-    // is the only source of the body text. Otherwise body source differs by
-    // row kind: JanitorAI puts the body in `personality`; Saucepan puts it
-    // in `description` (open definition) and exposes a correctly-mapped V2
-    // in `chara_card_v2_json.data`.
-    const description = recovered?.description
-        || recovered?.personality
-        || (isSaucepan ? (v2Data?.description || character.description || '') : (character.personality || ''));
-    const scenario = recovered?.scenario || character.scenario || (isSaucepan ? (v2Data?.scenario || '') : '');
-    const firstMessage = recovered?.first_message || character.first_message || (isSaucepan ? (v2Data?.first_mes || '') : '');
+    // Only Saucepan repair variants overload description with the body; janitor variants mirror the row blurb, never the body.
+    const description = isSaucepan
+        ? (recovered?.description || recovered?.personality || v2Data?.description || character.description || '')
+        : (character.personality || recovered?.personality || stripDatacatMarkers(v2Data?.description) || '');
+    const scenario = isSaucepan
+        ? (recovered?.scenario || character.scenario || v2Data?.scenario || '')
+        : (character.scenario || recovered?.scenario || v2Data?.scenario || '');
+    const firstMessage = isSaucepan
+        ? (recovered?.first_message || character.first_message || v2Data?.first_mes || '')
+        : (character.first_message || recovered?.first_message || v2Data?.first_mes || '');
     const creatorNotes = isSaucepan
         ? (character?.companion_snapshot?.full_description
             || character?.intercepted_chat_data?.companion_snapshot?.full_description
             || v2Data?.creator_notes
             || '')
-        : (character.description || '');
+        : (character.description || recovered?.description || v2Data?.creator_notes || '');
+    const altGreetings = [character.alternate_greetings, recovered?.alternate_greetings, v2Data?.alternate_greetings]
+        .find(a => Array.isArray(a) && a.length) || [];
 
     return {
         spec: 'chara_card_v2',
         spec_version: '2.0',
         data: {
-            name: character.chat_name || character.name || 'Unknown',
+            name: character.chat_name || character.chatName || character.name || 'Unknown',
             description,
             personality: '',
             scenario,
@@ -572,16 +746,16 @@ export function buildV2FromDatacat(character) {
             system_prompt: '',
             post_history_instructions: '',
             creator_notes: creatorNotes,
-            creator: character.creator_name || '',
+            creator: character.creator_name || character.creatorName || '',
             character_version: '1.0',
             tags: tagNames,
-            alternate_greetings: [],
+            alternate_greetings: altGreetings,
             extensions: {
                 datacat: {
-                    id: character.character_id,
+                    id: character.character_id || character.characterId,
                     sourceKind: character.primary_content_source_kind || null,
-                    creatorId: character.creator_id || null,
-                    creatorName: character.creator_name || null
+                    creatorId: character.creator_id || character.creatorId || null,
+                    creatorName: character.creator_name || character.creatorName || null
                 }
             },
             character_book: extractCharacterBookFromScripts(character) || undefined
@@ -610,9 +784,11 @@ export function buildV2FromDownload(downloadData, character) {
     const recovered = character ? pickRecoveryVariant(character) : null;
     const isSaucepan = character?.primary_content_source_kind === 'saucepan';
     const v2Data = character?.chara_card_v2_json?.data || null;
+    // Old downloads carry the janitor body in personality, new ones are proper V2 (personality empty), so the || order covers both shapes, dont reorder.
     const description = d.personality || d.description
-        || recovered?.description || recovered?.personality
-        || (isSaucepan ? (v2Data?.description || character?.description || '') : '');
+        || (isSaucepan
+            ? (recovered?.description || recovered?.personality || v2Data?.description || character?.description || '')
+            : (character?.personality || recovered?.personality || stripDatacatMarkers(v2Data?.description) || ''));
     const scenario = d.scenario || recovered?.scenario || '';
     const firstMes = d.first_mes || recovered?.first_message || '';
     const creatorNotes = isSaucepan
@@ -621,13 +797,19 @@ export function buildV2FromDownload(downloadData, character) {
             || v2Data?.creator_notes
             || d.creator_notes
             || '')
-        : (character?.description || d.creator_notes || '');
+        : (d.creator_notes || character?.description || '');
+    // New downloads ship URLs in creator/character_version; the real creator name lives in download metadata.
+    const isUrl = (s) => typeof s === 'string' && /^https?:\/\//i.test(s);
+    const creatorName = character?.creator_name || character?.creatorName
+        || downloadData?.metadata?.janitor_creator_name
+        || (isUrl(d.creator) ? '' : (d.creator || ''));
+    const cardVersion = (d.character_version && !isUrl(d.character_version)) ? d.character_version : '1.0';
 
     return {
         spec: 'chara_card_v2',
         spec_version: '2.0',
         data: {
-            name: d.name || character?.chat_name || 'Unknown',
+            name: d.name || character?.chat_name || character?.chatName || character?.name || 'Unknown',
             description,
             personality: '',
             scenario,
@@ -636,17 +818,17 @@ export function buildV2FromDownload(downloadData, character) {
             system_prompt: d.system_prompt || '',
             post_history_instructions: d.post_history_instructions || '',
             creator_notes: creatorNotes,
-            creator: character?.creator_name || d.creator || '',
-            character_version: d.character_version || '1.0',
+            creator: creatorName,
+            character_version: cardVersion,
             tags: d.tags || [],
             alternate_greetings: d.alternate_greetings || [],
             extensions: {
                 ...(d.extensions || {}),
                 datacat: {
-                    id: character?.character_id || null,
+                    id: character?.character_id || character?.characterId || null,
                     sourceKind: character?.primary_content_source_kind || null,
-                    creatorId: character?.creator_id || null,
-                    creatorName: character?.creator_name || null
+                    creatorId: character?.creator_id || character?.creatorId || null,
+                    creatorName: character?.creator_name || character?.creatorName || null
                 }
             },
             // Download's character_book is often present-but-empty; fall through to scripts.
@@ -872,12 +1054,12 @@ async function fetchViaFlareSolverr(flareUrl, targetUrl, sessionId = '') {
  * @param {number} [opts.page=1]
  * @param {string} [opts.search='']
  * @param {boolean} [opts.nsfw=true] - false adds mode=sfw
- * @param {string} [opts.flareSolverrUrl] - When set, route the request through this FlareSolverr instance
+ * @param {string} [opts.flareSolverrUrl] - Fallback: route through this FlareSolverr instance (only when the direct fetch was blocked)
  * @param {string} [opts.flareSessionId] - Reuse this FlareSolverr session for hot-Chromium speedup
  * @returns {Promise<{characters: Object[], total: number, page: number, pageSize: number}>}
  */
 export async function fetchHampterCharacters(opts = {}) {
-    const { sort = 'trending', page = 1, search = '', nsfw = true, flareSolverrUrl = '', flareSessionId = '' } = opts;
+    const { sort = 'trending', page = 1, search = '', nsfw = true, flareSolverrUrl = '', flareSessionId = '', authToken = '' } = opts;
     const params = new URLSearchParams({ sort, page: String(page) });
     if (search) params.set('search', search);
     if (!nsfw) params.set('mode', 'sfw');
@@ -896,7 +1078,14 @@ export async function fetchHampterCharacters(opts = {}) {
                 throw new Error('FlareSolverr returned non-JSON body');
             }
         } catch (err) {
-            if (err.status === 401 || err.status === 403) {
+            if (err.status === 401) {
+                // App-level login gate (page 2+ anonymously); no client can pass it, dont retry.
+                const gated = new Error('JanitorAI requires signing in for this request');
+                gated.code = 'HAMPTER_LOGIN_REQUIRED';
+                gated.status = 401;
+                throw gated;
+            }
+            if (err.status === 403) {
                 const blocked = new Error(`Hampter HTTP ${err.status}`);
                 blocked.code = 'HAMPTER_BLOCKED';
                 blocked.status = err.status;
@@ -908,19 +1097,29 @@ export async function fetchHampterCharacters(opts = {}) {
             throw wrapped;
         }
     } else {
-        let response;
+        // Direct browser fetch: hampter serves CORS * and browser TLS passes the bot gate that
+        // 403s every server-side client. Deliberately not fetchWithProxy (the /proxy/ leg cant
+        // pass, and a poisoned _proxyOrigins entry would skip the working direct attempt).
+        // A JanitorAI bearer (Authorization is CORS-allowed here) unlocks page 2+ of these sorts.
+        const headers = { 'Accept': 'application/json' };
+        if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+        let response = null;
         try {
-            response = await fetchWithProxy(url);
-        } catch (err) {
-            const m = /HTTP (\d+)/.exec(err?.message || '');
-            const status = m ? parseInt(m[1], 10) : 0;
-            if (status === 401 || status === 403) {
-                const blocked = new Error(`Hampter HTTP ${status}`);
-                blocked.code = 'HAMPTER_BLOCKED';
-                blocked.status = status;
-                throw blocked;
+            response = await fetch(url, { headers });
+        } catch { response = null; }
+        if (!response || !response.ok) {
+            const status = response?.status ?? 0;
+            if (status === 401) {
+                // With a token, 401 means it expired/was rejected; without, its the anon page-1 wall.
+                const gated = new Error(authToken ? 'JanitorAI session expired' : 'JanitorAI requires signing in for this request');
+                gated.code = authToken ? 'HAMPTER_TOKEN_EXPIRED' : 'HAMPTER_LOGIN_REQUIRED';
+                gated.status = 401;
+                throw gated;
             }
-            throw err;
+            const blocked = new Error(status ? `Hampter HTTP ${status}` : 'Hampter direct fetch failed');
+            blocked.code = 'HAMPTER_BLOCKED';
+            blocked.status = status;
+            throw blocked;
         }
         data = await response.json();
     }

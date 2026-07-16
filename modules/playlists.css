@@ -319,10 +319,8 @@
 
 .pl-chip-add .pl-chip-remove { display: none !important; }
 
-@media (max-width: 768px) {
-    /* hover doesnt apply on touch, picker covers removes on mobile */
-    .pl-chip-remove { display: none !important; }
-}
+/* hover doesnt apply on touch, picker covers removes on mobile */
+html.cl-mobile .pl-chip-remove { display: none !important; }
 
 /* --- Playlist Management Modal --- */
 
@@ -518,65 +516,63 @@
 }
 
 /* =========================================================
-   Mobile overrides (max-width: 768px)
+   Mobile-mode overrides (html.cl-mobile)
    ========================================================= */
-@media (max-width: 768px) {
 
-    /* Drawer chrome (bottom-sheet slide + 75vh) comes from the shared
-       .cl-modal-drawer + .cl-drawer-partial classes on the modal. */
+/* Drawer chrome (bottom-sheet slide + 75vh) comes from the shared
+   .cl-modal-drawer + .cl-drawer-partial classes on the modal. */
 
-    .pl-picker-search {
-        font-size: var(--mobile-input-size);
-    }
+html.cl-mobile .pl-picker-search {
+    font-size: var(--mobile-input-size);
+}
 
-    .pl-picker-row {
-        min-height: var(--touch-target-min);
-        padding: 10px 14px;
-    }
+html.cl-mobile .pl-picker-row {
+    min-height: var(--touch-target-min);
+    padding: 10px 14px;
+}
 
-    .pl-picker-list {
-        max-height: none;
-    }
+html.cl-mobile .pl-picker-list {
+    max-height: none;
+}
 
-    .pl-create-row {
-        min-height: var(--touch-target-min);
-        padding: 10px 14px;
-    }
+html.cl-mobile .pl-create-row {
+    min-height: var(--touch-target-min);
+    padding: 10px 14px;
+}
 
-    /* Shell + slide come from the shared .mobile-fixed-popup (library-mobile.css),
-       added by relocatePopupAsSheet(). Only the inner rows are playlist-specific. */
-    #playlistFilterPopup .pl-filter-search-wrap {
-        padding: 8px 14px;
-        border-bottom: 1px solid var(--glass-border);
-        position: sticky;
-        top: 0;
-        background: var(--cl-glass-bg);
-        z-index: 1;
-    }
-    #playlistFilterPopup .pl-filter-search { font-size: var(--mobile-input-size); padding: 10px 12px; border-radius: var(--radius-lg); }
-    #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: var(--touch-target-min); margin: 0 6px; }
-    #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: var(--touch-target-min); font-size: var(--font-md); }
-    #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, var(--safe-bottom)); }
-    #playlistFilterContent { padding: 4px 0; }
+/* Shell + slide come from the shared .mobile-fixed-popup (library-mobile.css),
+   added by relocatePopupAsSheet(). Only the inner rows are playlist-specific. */
+html.cl-mobile #playlistFilterPopup .pl-filter-search-wrap {
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--glass-border);
+    position: sticky;
+    top: 0;
+    background: var(--cl-glass-bg);
+    z-index: 1;
+}
+html.cl-mobile #playlistFilterPopup .pl-filter-search { font-size: var(--mobile-input-size); padding: 10px 12px; border-radius: var(--radius-lg); }
+html.cl-mobile #playlistFilterPopup .pl-filter-item { padding: 10px 14px; min-height: var(--touch-target-min); margin: 0 6px; }
+html.cl-mobile #playlistFilterPopup .pl-filter-manage-btn { padding: 12px 14px; min-height: var(--touch-target-min); font-size: var(--font-md); }
+html.cl-mobile #playlistFilterPopup .pl-filter-footer { padding: 8px 10px; padding-bottom: max(8px, var(--safe-bottom)); }
+html.cl-mobile #playlistFilterContent { padding: 4px 0; }
 
-    /* Playlist picker & manage modals: fill viewport, list uses all available space */
-    #playlistPickerModal .cl-modal-body,
-    #playlistManageModal .cl-modal-body {
-        display: flex;
-        flex-direction: column;
-        flex: 1 !important;
-        min-height: 0 !important;
-        max-height: none !important;
-        overflow: hidden;
-    }
-    .pl-picker-list,
-    .pl-manage-list {
-        flex: 1;
-        min-height: 0;
-        max-height: none !important;
-    }
-    .pl-manage-search-wrap,
-    .pl-picker-search-wrap {
-        flex-shrink: 0;
-    }
+/* Playlist picker & manage modals: fill viewport, list uses all available space */
+html.cl-mobile #playlistPickerModal .cl-modal-body,
+html.cl-mobile #playlistManageModal .cl-modal-body {
+    display: flex;
+    flex-direction: column;
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden;
+}
+html.cl-mobile .pl-picker-list,
+html.cl-mobile .pl-manage-list {
+    flex: 1;
+    min-height: 0;
+    max-height: none !important;
+}
+html.cl-mobile .pl-manage-search-wrap,
+html.cl-mobile .pl-picker-search-wrap {
+    flex-shrink: 0;
 }

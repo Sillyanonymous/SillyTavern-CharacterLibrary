@@ -16,6 +16,8 @@
  * @property {string} [error] - Error message if the extraction failed entirely
  */
 
+import CoreAPI from '../core-api.js';
+
 const extractors = [];
 
 /**
@@ -59,53 +61,13 @@ export function findGalleryUrls(text) {
 
 /**
  * Scan all text fields of a character for gallery page URLs.
- * Mirrors the field list used by findCharacterMediaUrls in library.js.
  * @param {Object} character - Character object (must be hydrated)
  * @returns {string[]}
  */
 export function findCharacterGalleryUrls(character) {
     if (!character) return [];
-
-    const data = character.data || character;
-    const fields = [
-        'description', 'personality', 'scenario', 'first_mes',
-        'mes_example', 'creator_notes', 'system_prompt', 'post_history_instructions'
-    ];
-
-    const allText = [];
-
-    for (const field of fields) {
-        const val = data[field];
-        if (val && typeof val === 'string') allText.push(val);
-    }
-
-    // Provider taglines
-    const extensions = data.extensions;
-    if (extensions && typeof extensions === 'object') {
-        for (const providerData of Object.values(extensions)) {
-            const tagline = providerData?.tagline;
-            if (tagline && typeof tagline === 'string') allText.push(tagline);
-        }
-    }
-
-    // Alternate greetings
-    const altGreetings = data.alternate_greetings;
-    if (Array.isArray(altGreetings)) {
-        for (const g of altGreetings) {
-            if (g && typeof g === 'string') allText.push(g);
-        }
-    }
-
-    // Lorebook entries
-    const entries = data.character_book?.entries;
-    if (entries) {
-        const entryList = Array.isArray(entries) ? entries : Object.values(entries);
-        for (const entry of entryList) {
-            if (entry?.content && typeof entry.content === 'string') allText.push(entry.content);
-        }
-    }
-
-    return findGalleryUrls(allText.join('\n'));
+    const { main, lorebook } = CoreAPI.collectCardTextChunks(character);
+    return findGalleryUrls([...main, ...lorebook].join('\n'));
 }
 
 /**
@@ -118,8 +80,8 @@ export function findCharacterGalleryUrls(character) {
 const EXTRACT_TIMEOUT_MS = 15000;
 
 export async function extractGalleryImages(url, opts = {}) {
-    const safety = window.isUrlSafeForDownload?.(url);
-    if (safety && !safety.ok) {
+    const safety = CoreAPI.isUrlSafeForDownload(url);
+    if (!safety.ok) {
         return { images: [], error: `URL rejected: ${safety.reason}` };
     }
     for (const ext of extractors) {
@@ -140,15 +102,6 @@ export async function extractGalleryImages(url, opts = {}) {
         }
     }
     return { images: [], error: 'No extractor matched this URL' };
-}
-
-/**
- * Check whether any registered extractor handles this URL
- * @param {string} url
- * @returns {boolean}
- */
-export function isGalleryUrl(url) {
-    return extractors.some(ext => ext.patterns.some(p => p.test(url)));
 }
 
 /**

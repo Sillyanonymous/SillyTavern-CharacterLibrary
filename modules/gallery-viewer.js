@@ -44,10 +44,12 @@ let _gifFreezeRafId = null;
 
 // Thumbnail loading state
 let _currentFolder = null;
-let _gvThumbActive = 0;
-let _gvThumbLoadQueue = [];
-let _gvThumbBlobUrls = new Set();
-let _gvThumbAbort = null;
+let _gvThumbLoader = null;
+
+function _getGvThumbLoader() {
+    if (!_gvThumbLoader) _gvThumbLoader = CoreAPI.createThumbLoader({ concurrency: GV_THUMB_CONCURRENCY });
+    return _gvThumbLoader;
+}
 
 export function init() {
     if (isInitialized) return;
@@ -198,12 +200,7 @@ export function closeViewer() {
     currentIndex = 0;
     currentCharacter = null;
     _currentFolder = null;
-    _gvThumbActive = 0;
-    _gvThumbLoadQueue = [];
-    if (_gvThumbAbort) _gvThumbAbort.abort();
-    _gvThumbAbort = null;
-    _gvThumbBlobUrls.forEach(u => URL.revokeObjectURL(u));
-    _gvThumbBlobUrls.clear();
+    _gvThumbLoader?.reset();
     currentZoom = 1;
     panX = 0;
     panY = 0;
@@ -527,10 +524,7 @@ function renderThumbnails() {
     const strip = document.getElementById('galleryViewerThumbnails');
     if (!strip) return;
 
-    if (_gvThumbAbort) _gvThumbAbort.abort();
-    _gvThumbAbort = new AbortController();
-    _gvThumbActive = 0;
-    _gvThumbLoadQueue = [];
+    _gvThumbLoader?.reset();
 
     _renderedThumbs.clear();
     _gifFreezeQueue.length = 0;
@@ -595,39 +589,9 @@ function measureThumbStride(strip) {
 
 function _getThumbUrl(media) {
     if (!_currentFolder || isVideo(media) || isGif(media)) return null;
+    // only types cl-helper's Jimp can actually decode; extensionless names (the synthesized avatar entry) would 400 per open
+    if (!/\.(png|jpe?g|webp)$/i.test(media.name || '')) return null;
     return CoreAPI.getGalleryThumbUrl(_currentFolder, media.name);
-}
-
-function _enqueueGvThumb(img) {
-    if (_gvThumbActive < GV_THUMB_CONCURRENCY) {
-        _gvThumbActive++;
-        _loadGvThumb(img);
-    } else {
-        _gvThumbLoadQueue.push(img);
-    }
-}
-
-function _drainGvThumbQueue() {
-    _gvThumbActive = Math.max(0, _gvThumbActive - 1);
-    if (_gvThumbLoadQueue.length > 0) {
-        _gvThumbActive++;
-        _loadGvThumb(_gvThumbLoadQueue.shift());
-    }
-}
-
-async function _loadGvThumb(img) {
-    try {
-        const resp = await CoreAPI.apiRequest(img.dataset.thumbUrl, 'GET', null, _gvThumbAbort ? { signal: _gvThumbAbort.signal } : {});
-        if (!resp.ok) throw new Error(resp.status);
-        const blob = await resp.blob();
-        const blobUrl = URL.createObjectURL(blob);
-        _gvThumbBlobUrls.add(blobUrl);
-        img.src = blobUrl;
-    } catch (err) {
-        if (err?.name === 'AbortError') return;
-        img.src = img.dataset.fullUrl || img.dataset.src || '';
-    }
-    _drainGvThumbQueue();
 }
 
 function renderAllThumbnailsDirect(strip) {
@@ -699,7 +663,7 @@ function createThumbElement(media, idx) {
                 img.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E";
                 img.dataset.thumbUrl = thumbUrl;
                 img.dataset.fullUrl = media.url;
-                _enqueueGvThumb(img);
+                _getGvThumbLoader().enqueue(img);
             } else {
                 img.src = media.url;
             }
@@ -775,7 +739,7 @@ function observeGvThumbnails(strip) {
                 const img = entry.target;
                 _gvThumbObserver.unobserve(img);
                 if (img.dataset.thumbUrl) {
-                    _enqueueGvThumb(img);
+                    _getGvThumbLoader().enqueue(img);
                 } else if (img.dataset.src) {
                     img.src = img.dataset.src;
                     delete img.dataset.src;

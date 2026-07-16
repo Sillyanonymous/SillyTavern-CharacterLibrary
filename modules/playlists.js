@@ -187,20 +187,6 @@ async function removeFromPlaylist(uid, avatars) {
     return before - pl.characters.length;
 }
 
-async function reorderPlaylists(orderedIds) {
-    await loadPlaylists();
-    const valid = orderedIds.filter(id => playlistsData.playlists[id]);
-    // Append any IDs not in the provided order
-    const seen = new Set(valid);
-    for (const id of playlistsData.order) {
-        if (!seen.has(id) && playlistsData.playlists[id]) {
-            valid.push(id);
-        }
-    }
-    playlistsData.order = valid;
-    await savePlaylists();
-}
-
 // ========================================
 // QUERY FUNCTIONS
 // ========================================
@@ -246,10 +232,6 @@ function getPlaylistsForChar(avatar) {
             return pl && pl.characters.includes(avatar);
         })
         .map(id => ({ uid: id, ...playlistsData.playlists[id] }));
-}
-
-function isCharInPlaylist(uid, avatar) {
-    return !!playlistsData?.playlists[uid]?.characters.includes(avatar);
 }
 
 function isCharInAnyPlaylist(avatar) {
@@ -340,35 +322,19 @@ function injectPickerModal() {
     window.registerOverlay?.({ id: 'playlistPickerModal', tier: 7, close: () => closePlaylistPicker(), visible: (el) => el.classList.contains('visible') });
 }
 
-function filterPickerList() {
-    const query = (document.getElementById('playlistPickerSearch')?.value || '').trim().toLowerCase();
-    const rows = document.querySelectorAll('#playlistPickerList .pl-picker-row');
-    let visible = 0;
-    let exactMatch = false;
-    rows.forEach(row => {
-        const name = (row.querySelector('.pl-picker-name')?.textContent || '').toLowerCase();
-        const show = !query || name.includes(query);
-        row.style.display = show ? '' : 'none';
-        if (show) visible++;
-        if (query && name === query) exactMatch = true;
-    });
-    const emptyEl = document.getElementById('playlistPickerEmpty');
-    const totalRows = rows.length;
-    if (emptyEl) emptyEl.style.display = totalRows === 0 && !query ? '' : 'none';
+const plCreateRowHtml = (q) => `<i class="fa-solid fa-plus pl-create-row-icon"></i><span class="pl-create-row-text">Create <strong>${esc(q)}</strong></span>`;
 
-    let createRow = document.querySelector('#playlistPickerList .pl-create-row');
-    if (query && !exactMatch) {
-        if (!createRow) {
-            createRow = document.createElement('div');
-            createRow.className = 'pl-create-row';
-            createRow.addEventListener('click', handlePickerCreate);
-            document.getElementById('playlistPickerList').appendChild(createRow);
-        }
-        createRow.innerHTML = `<i class="fa-solid fa-plus pl-create-row-icon"></i><span class="pl-create-row-text">Create <strong>${esc(document.getElementById('playlistPickerSearch').value.trim())}</strong></span>`;
-        createRow.style.display = '';
-    } else if (createRow) {
-        createRow.style.display = 'none';
-    }
+function filterPickerList() {
+    CoreAPI.filterListWithInlineCreate({
+        searchId: 'playlistPickerSearch',
+        listId: 'playlistPickerList',
+        rowSel: '.pl-picker-row',
+        nameOf: (row) => row.querySelector('.pl-picker-name')?.textContent,
+        createRowClass: 'pl-create-row',
+        createRowHtml: plCreateRowHtml,
+        onCreate: handlePickerCreate,
+        emptyId: 'playlistPickerEmpty',
+    });
 }
 
 async function openPlaylistPicker(avatars) {
@@ -649,32 +615,18 @@ function renderManageList() {
     filterManageList();
 }
 
+// Manage rows keep the playlist name in a renameable <input>, so nameOf reads .value not textContent.
 function filterManageList() {
-    const query = (document.getElementById('playlistManageSearch')?.value || '').trim().toLowerCase();
-    const rows = document.querySelectorAll('#playlistManageList .pl-manage-row');
-    let exactMatch = false;
-    rows.forEach(row => {
-        const name = (row.querySelector('.pl-manage-name')?.value || '').toLowerCase();
-        const show = !query || name.includes(query);
-        row.style.display = show ? '' : 'none';
-        if (query && name === query) exactMatch = true;
+    CoreAPI.filterListWithInlineCreate({
+        searchId: 'playlistManageSearch',
+        listId: 'playlistManageList',
+        rowSel: '.pl-manage-row',
+        nameOf: (row) => row.querySelector('.pl-manage-name')?.value,
+        createRowClass: 'pl-create-row',
+        createRowHtml: plCreateRowHtml,
+        onCreate: handleManageCreate,
+        emptyId: 'playlistManageEmpty',
     });
-    const emptyEl = document.getElementById('playlistManageEmpty');
-    if (emptyEl) emptyEl.style.display = rows.length === 0 && !query ? '' : 'none';
-
-    let createRow = document.querySelector('#playlistManageList .pl-create-row');
-    if (query && !exactMatch) {
-        if (!createRow) {
-            createRow = document.createElement('div');
-            createRow.className = 'pl-create-row';
-            createRow.addEventListener('click', handleManageCreate);
-            document.getElementById('playlistManageList').appendChild(createRow);
-        }
-        createRow.innerHTML = `<i class="fa-solid fa-plus pl-create-row-icon"></i><span class="pl-create-row-text">Create <strong>${esc(document.getElementById('playlistManageSearch').value.trim())}</strong></span>`;
-        createRow.style.display = '';
-    } else if (createRow) {
-        createRow.style.display = 'none';
-    }
 }
 
 function positionPickerAtButton(btn, picker) {
@@ -810,25 +762,17 @@ function init() {
 
 export {
     loadPlaylists,
-    createPlaylist,
-    deletePlaylist,
-    updatePlaylist,
-    addToPlaylist,
     removeFromPlaylist,
-    reorderPlaylists,
     getAllPlaylists,
     getPlaylist,
     getPlaylistCharacters,
     getPlaylistAvatarSet,
     getPlaylistsForChar,
-    isCharInPlaylist,
     isCharInAnyPlaylist,
     onCharacterDeleted,
     pruneDeletedCharacters,
     openPlaylistPicker,
-    closePlaylistPicker,
     openPlaylistManager,
-    closePlaylistManager,
 };
 
 export default { init };

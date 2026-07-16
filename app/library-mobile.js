@@ -251,9 +251,9 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 (function MobileEnhancements() {
     'use strict';
 
-    // Only run on mobile viewports
+    // Only run in mobile mode (html.cl-mobile, owned by the boot policy + the mode-sync block below)
     function isMobile() {
-        return window.matchMedia('(max-width: 768px)').matches;
+        return document.documentElement.classList.contains('cl-mobile');
     }
 
     // Shared signal: card-swipe sets this true when it commits to a horizontal
@@ -267,7 +267,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         }
     }
 
-    // ---- Lifecycle: run/teardown so crossing the 768px breakpoint live re-inits cleanly ----
+    // ---- Lifecycle: run/teardown so a live mode flip re-inits cleanly ----
     // mobileLive holds the active session, or null when the mobile layer is torn down. setup() captures
     // everything it attaches/mutates into the session (see the capture block in setup() below), so
     // teardown reverses it all: listeners removed, observers disconnected, timers cleared, created nodes
@@ -324,8 +324,46 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         document.documentElement.classList.remove('cl-keyboard-open');
     }
 
+    // ---- Mode sync: this block + the boot policy are the only writers of html.cl-mobile ----
+    // The class flips immediately on an input change so CSS and event-time readers track the live
+    // mode; the heavy run/teardown stays debounced so dragging a window across the boundary doesn't
+    // thrash. teardown fully reverses the layer, so a desktop session is clean and a re-entry to
+    // mobile rebuilds from scratch.
+    const mq = window.matchMedia('(max-width: 768px)');
+    function syncModeClass() {
+        const mobile = window.computeMobileMode ? window.computeMobileMode() : mq.matches;
+        document.documentElement.classList.toggle('cl-mobile', mobile);
+        return mobile;
+    }
+    let crossTimer = 0;
+    let appliedMode = null;
+    function onModeInputChange() {
+        syncModeClass();
+        clearTimeout(crossTimer);
+        crossTimer = setTimeout(() => {
+            const mobile = syncModeClass();
+            if (mobile === appliedMode) return;
+            appliedMode = mobile;
+            mobile ? runMobile() : teardownMobile();
+            document.dispatchEvent(new CustomEvent('cl-mobile-mode-change', { detail: { mobile } }));
+            // Chrome rebuild + mode-change subscribers (eg. UI-scale zoom) change layout after the
+            // triggering resize already settled; nudge the virtual-scroll grid to re-measure last or
+            // it keeps stale column math (dead right/bottom space).
+            window.dispatchEvent(new Event('resize'));
+        }, 250);
+    }
+    if (mq.addEventListener) mq.addEventListener('change', onModeInputChange);
+    else if (mq.addListener) mq.addListener(onModeInputChange); // older Safari/iOS
+    // The other two policy inputs: touch capability (eg. a convertible losing its keyboard) and
+    // the per-device settings override.
+    const touchMq = window.matchMedia('(pointer: coarse) and (hover: none)');
+    if (touchMq.addEventListener) touchMq.addEventListener('change', onModeInputChange);
+    else if (touchMq.addListener) touchMq.addListener(onModeInputChange); // older Safari/iOS
+    document.addEventListener('cl-mobile-override-changed', onModeInputChange);
+
     // First load: run only on mobile, after a short delay so library.js finishes its own init.
     function init() {
+        appliedMode = syncModeClass();
         if (isMobile()) setTimeout(runMobile, 200);
     }
     if (document.readyState === 'loading') {
@@ -333,23 +371,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
     } else {
         init();
     }
-
-    // Live breakpoint crossing: re-init in the correct mode when the viewport crosses 768px. Debounced
-    // so dragging a window across the boundary doesn't thrash. teardown fully reverses the layer, so a
-    // desktop session is clean and a re-entry to mobile rebuilds from scratch.
-    const mq = window.matchMedia('(max-width: 768px)');
-    let crossTimer = 0;
-    function onBreakpointChange() {
-        clearTimeout(crossTimer);
-        crossTimer = setTimeout(() => {
-            mq.matches ? runMobile() : teardownMobile();
-            // The chrome rebuild changes layout after the triggering resize already settled; nudge the
-            // virtual-scroll grid to re-measure or it keeps stale column math (dead right/bottom space).
-            window.dispatchEvent(new Event('resize'));
-        }, 250);
-    }
-    if (mq.addEventListener) mq.addEventListener('change', onBreakpointChange);
-    else if (mq.addListener) mq.addListener(onBreakpointChange); // older Safari/iOS
 
     function recordInsert(ctx, node) {
         if (!node || node.nodeType !== 1) return;
@@ -442,7 +463,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             createSearchButton, createSettingsButton, createMenuButton, createProviderQuickSwitch,
             setupBottomNav, migrateTopbarToBottomNav, setupHideTopbarOnScroll, setupBottomSheetDismiss,
             setupPullToRefresh, setupCardSwipeGestures, setupOnlineSearchOverlay, setupModalAvatar,
-            setupGallerySwipe, setupBrowseGallerySwipe, setupGreetingsSwipe, setupTabSwipe,
+            setupGallerySwipe, setupGreetingsSwipe, setupTabSwipe,
             setupCharModalNavSwipe, setupViewSwipe, setupContextMenu, setupViewportFix,
             relocateTagPopup, relocatePlaylistPopup, relocateAdvFilterPanel, setDefaultExpandZoom,
             setupLorebookModalToolbar, fixInvalidDateText, setupChubFilterArea, setupGallerySyncDropdown,
@@ -1165,10 +1186,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         const stack = [
             // Tier 0 - avatar/gallery quick-view (highest z-index)
-            ['#browseAvatarViewer', el => {
-                if (el._onKey) document.removeEventListener('keydown', el._onKey);
-                el.remove();
-            }],
+            ['#browseAvatarViewer', el => el.remove()],
             ['.mobile-avatar-viewer', () => closeAvatarViewer()],
 
             // Tier 1 - top z-index overlays
@@ -1953,6 +1971,20 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         chatsSortSection.appendChild(chatsSortChip);
         chatsSection.appendChild(chatsSortSection);
 
+        // Card density; mirrors the real control's hidden state (flat list only, hidden in grouped view)
+        const chatsDensitySection = createSection('Card Density');
+        const chatsDensityChip = createSettingsSelectChip(() => document.getElementById('chatsDensitySelect'), 'Card Density');
+        chatsDensitySection.appendChild(chatsDensityChip);
+        chatsSection.appendChild(chatsDensitySection);
+
+        function syncChatsDensity() {
+            const real = document.getElementById('chatsDensitySelect');
+            const holder = real ? (real._customSelect?.container || real) : null;
+            const show = !!holder && !holder.classList.contains('hidden');
+            if (show) chatsDensityChip._syncLabel();
+            chatsDensitySection.style.display = show ? '' : 'none';
+        }
+
         // Grouping toggle
         const groupSection = createSection('View');
         const groupRow = document.createElement('div');
@@ -1971,6 +2003,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                     groupedChip.classList.toggle('active', b.classList.contains('active'));
                 }
             });
+            syncChatsDensity();
         }
 
         flatChip.addEventListener('click', () => {
@@ -3349,125 +3382,6 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
     }
 
     /* ========================================
-       BROWSE GALLERY SWIPE NAVIGATION
-       Swipe left/right on browse-avatar-viewer to navigate gallery images
-       ======================================== */
-    function setupBrowseGallerySwipe() {
-        // Scan-then-observe (mirror setupGallerySwipe) so an already-present viewer re-wires on re-cross.
-        const scan = () => {
-            const viewer = document.querySelector('.browse-avatar-viewer.has-gallery');
-            if (viewer && !viewer.dataset.swipeInit) {
-                viewer.dataset.swipeInit = 'true';
-                attachBrowseGallerySwipe(viewer);
-            }
-        };
-        scan();
-        new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
-    }
-
-    function attachBrowseGallerySwipe(overlay) {
-        let startX = 0, startY = 0, currentX = 0;
-        let tracking = false, swiping = false;
-        const SWIPE_THRESHOLD = 40, LOCK_THRESHOLD = 8;
-
-        const getImg = () => overlay.querySelector('.browse-av-image');
-        const getPrev = () => overlay.querySelector('.browse-av-prev');
-        const getNext = () => overlay.querySelector('.browse-av-next');
-
-        overlay.addEventListener('touchstart', (e) => {
-            if (e.touches.length !== 1) return;
-            startX = e.touches[0].clientX;
-            startY = e.touches[0].clientY;
-            currentX = 0;
-            tracking = true;
-            swiping = false;
-            const img = getImg();
-            if (img) img.style.transition = '';
-        }, { passive: true });
-
-        overlay.addEventListener('touchmove', (e) => {
-            if (!tracking) return;
-            const dx = e.touches[0].clientX - startX;
-            const dy = e.touches[0].clientY - startY;
-            const absDx = Math.abs(dx), absDy = Math.abs(dy);
-
-            if (!swiping && absDx < LOCK_THRESHOLD && absDy < LOCK_THRESHOLD) return;
-            if (!swiping) {
-                swiping = absDx > absDy;
-                if (!swiping) { tracking = false; return; }
-            }
-            e.preventDefault();
-            currentX = dx;
-
-            const img = getImg();
-            if (img) {
-                const offset = dx;
-                const opacity = 1 - Math.min(Math.abs(offset) / 300, 0.4);
-                img.style.transform = `translateX(${offset}px)`;
-                img.style.opacity = opacity;
-            }
-        }, { passive: false });
-
-        overlay.addEventListener('touchend', () => {
-            if (!tracking) return;
-            tracking = false;
-            const img = getImg();
-
-            if (swiping && Math.abs(currentX) >= SWIPE_THRESHOLD) {
-                const goNext = currentX < 0;
-                const goPrev = currentX > 0;
-
-                if (img) {
-                    const dir = currentX < 0 ? -1 : 1;
-                    img.style.transition = 'transform 0.2s ease-out, opacity 0.2s ease-out';
-                    img.style.transform = `translateX(${dir * window.innerWidth}px)`;
-                    img.style.opacity = '0';
-                }
-                setTimeout(() => {
-                    const btn = goNext ? getNext() : getPrev();
-                    if (btn) btn.click();
-                    if (img) { img.style.transition = 'none'; img.style.transform = ''; img.style.opacity = ''; }
-                    requestAnimationFrame(() => {
-                        const newImg = getImg();
-                        if (newImg) {
-                            newImg.style.transition = 'none';
-                            const fromDir = currentX < 0 ? 1 : -1;
-                            newImg.style.transform = `translateX(${fromDir * 60}px)`;
-                            newImg.style.opacity = '0.5';
-                            requestAnimationFrame(() => {
-                                newImg.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
-                                newImg.style.transform = 'translateX(0)';
-                                newImg.style.opacity = '1';
-                            });
-                        }
-                    });
-                }, 180);
-            } else {
-                // Below threshold, snap back
-                if (img) {
-                    img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
-                    img.style.transform = 'translateX(0)';
-                    img.style.opacity = '1';
-                }
-            }
-            swiping = false;
-        }, { passive: true });
-
-        // Mid-swipe cancel (iOS system gesture, etc.): snap image back so it
-        // doesnt sit off-frame with the tracking flag still armed.
-        overlay.addEventListener('touchcancel', () => {
-            const img = getImg();
-            if (img) {
-                img.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out';
-                img.style.transform = 'translateX(0)';
-                img.style.opacity = '1';
-            }
-            tracking = false;
-            swiping = false;
-        }, { passive: true });
-    }
-
-    /* ========================================
        VIEW SWIPE NAVIGATION
        Swipe left/right on main content to switch
        between Characters ↔ Chats ↔ Online views
@@ -4102,7 +4016,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         const waitForMenu = () => {
             const menuEl = document.getElementById('clContextMenu');
             if (!menuEl) {
-                // Not created yet – keep watching
+                // Not created yet, keep watching
                 const bodyObs = new MutationObserver(() => {
                     const m = document.getElementById('clContextMenu');
                     if (m) { bodyObs.disconnect(); attachObserver(m); }
@@ -4115,8 +4029,8 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
 
         function attachObserver(menuEl) {
             const obs = new MutationObserver(() => {
-                // Check viewport at event time: this observer can outlive a cross to desktop and must no-op there.
-                if (!window.matchMedia('(max-width: 768px)').matches) return;
+                // Check mode at event time: this observer can outlive a flip to desktop and must no-op there.
+                if (!isMobile()) return;
                 if (menuEl.classList.contains('visible')) {
                     menuEl.classList.remove('visible');
                     showCtxSheet(menuEl);

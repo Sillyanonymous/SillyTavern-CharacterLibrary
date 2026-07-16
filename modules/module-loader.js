@@ -14,7 +14,7 @@ import CoreAPI from './core-api.js';
 // CSS LOADER
 // ========================================
 
-const MODULE_CSS_VERSION = 76;
+const MODULE_CSS_VERSION = 78;
 
 function loadModuleCSS(path) {
     return new Promise((resolve) => {
@@ -210,7 +210,6 @@ async function initModuleSystem() {
         loadModuleCSS('./character-versions.css');
         ModuleLoader.register('character-versions', charVersionsModule.default);
 
-        window.openCharVersionHistory = charVersionsModule.openVersionHistory;
         window.renderVersionsPane = charVersionsModule.renderVersionsPane;
         window.cleanupVersionsPane = charVersionsModule.cleanupVersionsPane;
         window.autoSnapshotBeforeChange = charVersionsModule.autoSnapshotBeforeChange;
@@ -223,9 +222,7 @@ async function initModuleSystem() {
         const cardUpdatesModule = await import('./card-updates.js');
         ModuleLoader.register('card-updates', cardUpdatesModule.default);
 
-        window.checkCardUpdates = cardUpdatesModule.checkSingleCharacter;
         window.checkAllCardUpdates = cardUpdatesModule.checkAllLinkedCharacters;
-        window.checkSelectedCardUpdates = cardUpdatesModule.checkSelectedCharacters;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load card-updates module:', err);
     }
@@ -236,7 +233,6 @@ async function initModuleSystem() {
         ModuleLoader.register('gallery-sync', gallerySyncModule.default);
 
         window.auditGalleryIntegrity = gallerySyncModule.auditGalleryIntegrity;
-        window.assignMissingGalleryIds = gallerySyncModule.assignMissingGalleryIds;
         window.updateGallerySyncWarning = gallerySyncModule.updateWarningIndicator;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load gallery-sync module:', err);
@@ -258,8 +254,6 @@ async function initModuleSystem() {
         ModuleLoader.register('custom-css', customCssModule.default);
 
         window.openCustomCssModal = customCssModule.openModal;
-        window.closeCustomCssModal = customCssModule.closeModal;
-        window.clearAllCustomCSSSnippets = customCssModule.clearAllSnippets;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load custom-css module:', err);
     }
@@ -268,9 +262,6 @@ async function initModuleSystem() {
         loadModuleCSS('./css-assistant.css');
         const cssAssistantModule = await import('./css-assistant.js');
         ModuleLoader.register('css-assistant', cssAssistantModule.default);
-
-        window.openCssAssistant = cssAssistantModule.openModal;
-        window.closeCssAssistant = cssAssistantModule.closeModal;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load css-assistant module:', err);
     }
@@ -294,7 +285,6 @@ async function initModuleSystem() {
         ModuleLoader.register('lorebook-manager', lorebookModule.default);
 
         window.openLorebookManager = lorebookModule.openModal;
-        window.closeLorebookManager = lorebookModule.closeModal;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load lorebook-manager module:', err);
     }
@@ -305,25 +295,17 @@ async function initModuleSystem() {
         ModuleLoader.register('playlists', playlistsModule.default);
 
         window.playlistsLoadPlaylists = playlistsModule.loadPlaylists;
-        window.playlistsCreatePlaylist = playlistsModule.createPlaylist;
-        window.playlistsDeletePlaylist = playlistsModule.deletePlaylist;
-        window.playlistsUpdatePlaylist = playlistsModule.updatePlaylist;
-        window.playlistsAddToPlaylist = playlistsModule.addToPlaylist;
         window.playlistsRemoveFromPlaylist = playlistsModule.removeFromPlaylist;
-        window.playlistsReorderPlaylists = playlistsModule.reorderPlaylists;
         window.playlistsGetAll = playlistsModule.getAllPlaylists;
         window.playlistsGetPlaylist = playlistsModule.getPlaylist;
         window.playlistsGetCharacters = playlistsModule.getPlaylistCharacters;
         window.playlistsGetAvatarSet = playlistsModule.getPlaylistAvatarSet;
         window.playlistsGetForChar = playlistsModule.getPlaylistsForChar;
-        window.playlistsIsCharInPlaylist = playlistsModule.isCharInPlaylist;
         window.playlistsIsCharInAny = playlistsModule.isCharInAnyPlaylist;
         window.playlistsOnCharDeleted = playlistsModule.onCharacterDeleted;
         window.playlistsPruneDeleted = playlistsModule.pruneDeletedCharacters;
         window.openPlaylistPicker = playlistsModule.openPlaylistPicker;
-        window.closePlaylistPicker = playlistsModule.closePlaylistPicker;
         window.openPlaylistManager = playlistsModule.openPlaylistManager;
-        window.closePlaylistManager = playlistsModule.closePlaylistManager;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load playlists module:', err);
     }
@@ -335,8 +317,6 @@ async function initModuleSystem() {
 
         window.enqueueMediaDownloadJob = mediaQueueModule.enqueueJob;
         window.mediaDownloadQueueOnCharDeleted = mediaQueueModule.onCharacterDeleted;
-        window.getMediaDownloadQueueState = mediaQueueModule.getQueueState;
-        window.onMediaDownloadQueueChange = mediaQueueModule.onQueueChange;
     } catch (err) {
         console.warn('[ModuleLoader] Could not load media-download-queue module:', err);
     }
@@ -348,7 +328,7 @@ async function initModuleSystem() {
         if (_extractorsLoaded) return;
         _extractorsLoaded = true;
         try {
-            const { findCharacterGalleryUrls, extractGalleryImages, isGalleryUrl, identifyGallerySources } = await import('./gallery-extractors/extractor-registry.js');
+            const { findCharacterGalleryUrls, extractGalleryImages, identifyGallerySources } = await import('./gallery-extractors/extractor-registry.js');
             await Promise.all([
                 import('./gallery-extractors/imgchest.js'),
                 import('./gallery-extractors/imgbb.js'),
@@ -358,11 +338,11 @@ async function initModuleSystem() {
                 import('./gallery-extractors/postimg.js'),
                 import('./gallery-extractors/imgbox.js'),
                 import('./gallery-extractors/civitai.js'),
-                import('./gallery-extractors/dropbox.js')
+                import('./gallery-extractors/dropbox.js'),
+                import('./gallery-extractors/pixiv.js')
             ]);
             window.findCharacterGalleryUrls = findCharacterGalleryUrls;
             window.extractGalleryImages = extractGalleryImages;
-            window.isGalleryUrl = isGalleryUrl;
             window.identifyGallerySources = identifyGallerySources;
             window.debugLog?.('[ModuleLoader] Gallery extractors loaded (on demand)');
         } catch (err) {
@@ -416,6 +396,7 @@ async function initModuleSystem() {
     // ============================
 
     setupLazyBatchTagging();
+    setupLazyBatchTransfer();
     loadModuleCSS('./chats.css');
     setupLazyChats();
 
@@ -443,6 +424,26 @@ function setupLazyBatchTagging() {
 
 
 // ========================================
+// LAZY: BATCH TRANSFER (bundle export/import)
+// ========================================
+
+function setupLazyBatchTransfer() {
+    ModuleLoader._registerLazy('batch-transfer', async () => {
+        const mod = await import('./batch-transfer.js');
+        loadModuleCSS('./batch-transfer.css');
+        ModuleLoader.register('batch-transfer', mod.default);
+        await mod.default.init({});
+        mod.default._mlInitDone = true;
+        window.debugLog?.('[ModuleLoader] Lazy-loaded batch-transfer');
+    });
+
+    // library.js's import modal routes dropped .zip bundles here
+    window.openBatchImportReview = (...args) =>
+        ModuleLoader.ensureLoaded('batch-transfer').then(mod => mod?.openImportReview?.(...args));
+}
+
+
+// ========================================
 // LAZY: CHATS
 // ========================================
 
@@ -457,8 +458,6 @@ function setupLazyChats() {
 
             window.chatsModule = {
                 fetchCharacterChats: chats.fetchCharacterChats,
-                openChat: chats.openChat,
-                deleteChat: chats.deleteChat,
                 createNewChat: chats.createNewChat,
                 loadAllChats: chats.loadAllChats,
                 renderChats: chats.renderChats,
@@ -471,8 +470,6 @@ function setupLazyChats() {
 
             window.fetchCharacterChats = chats.fetchCharacterChats;
             window.createNewChat = chats.createNewChat;
-            window.openChat = chats.openChat;
-            window.deleteChat = chats.deleteChat;
 
             window.debugLog?.('[ModuleLoader] Lazy-loaded chats');
         }
@@ -482,8 +479,6 @@ function setupLazyChats() {
 
     window.chatsModule = {
         fetchCharacterChats: chatStub('fetchCharacterChats'),
-        openChat: chatStub('openChat'),
-        deleteChat: chatStub('deleteChat'),
         createNewChat: chatStub('createNewChat'),
         loadAllChats: chatStub('loadAllChats'),
         renderChats: chatStub('renderChats'),
@@ -496,8 +491,6 @@ function setupLazyChats() {
 
     window.fetchCharacterChats = chatStub('fetchCharacterChats');
     window.createNewChat = chatStub('createNewChat');
-    window.openChat = chatStub('openChat');
-    window.deleteChat = chatStub('deleteChat');
 }
 
 

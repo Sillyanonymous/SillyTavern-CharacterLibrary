@@ -1,7 +1,14 @@
 // BrowseView - base class for provider browse views in the Online tab
 
 import CoreAPI from '../core-api.js';
-import { normalizeBrowseName, isMobileViewport } from './provider-utils.js';
+import { normalizeBrowseName, isMobileMode, scrollBrowseListTop, fetchWithProxy, slugify } from './provider-utils.js';
+import { CHUB_API_BASE, getChubHeaders, extractNodes } from './chub/chub-api.js';
+import { BOTBOORU_BASE, fetchBotbooruUser } from './botbooru/botbooru-api.js';
+import { fetchCharactersByOwner, getCharacterPageUrl } from './pygmalion/pygmalion-api.js';
+import { WYVERN_API_BASE, WYVERN_SITE_BASE, getWyvernHeaders } from './wyvern/wyvern-api.js';
+import { fetchDatacatCreatorCharacters, fetchSaucepanCompanionsOfUser, fetchDatacatCharacter, submitExtraction, fetchExtractionStatus } from './datacat/datacat-api.js';
+import { getSearchToken, JANNY_SEARCH_URL, JANNY_SITE_BASE } from './janny/janny-api.js';
+import { searchCards, isCtSessionActive } from './chartavern/chartavern-api.js';
 
 // ── Shared In-Library lookup base ────────────────────────
 // byNameAndCreator + byNormalizedName are pure functions of the global character list, so
@@ -13,6 +20,26 @@ const _sharedBaseLookup = {
     byNormalizedName: new Map(),
     gen: -1,
 };
+
+// Mobile: reset the browse list to the top on a sort change or a Browse/Following toggle.
+let _browseScrollResetWired = false;
+function wireBrowseScrollReset() {
+    if (_browseScrollResetWired) return;
+    const filterArea = document.getElementById('onlineFilterContent');
+    const onlineView = document.getElementById('onlineView');
+    if (!filterArea || !onlineView) return;
+    _browseScrollResetWired = true;
+    // Every browse <select> is a sort control (some in the filter bar, some in the view), so bind both.
+    const onSortChange = (e) => {
+        if (e.target?.tagName === 'SELECT') scrollBrowseListTop();
+    };
+    filterArea.addEventListener('change', onSortChange);
+    onlineView.addEventListener('change', onSortChange);
+    // Browse/Following tabs render into the filter bar.
+    filterArea.addEventListener('click', (e) => {
+        if (e.target?.closest?.('[class*="-view-btn"]')) scrollBrowseListTop();
+    });
+}
 let _baseLookupGen = 0;
 // getPossibleMatchScore reads only the shared base, so a name|creator score is identical for every
 // provider. Memo the SCORE cross-provider (threshold-independent, so the sensitivity slider re-reads
@@ -69,6 +96,431 @@ function buildSharedBaseLookup() {
 function ensureSharedBaseLookup() {
     if (_sharedBaseLookup.gen !== _baseLookupGen) buildSharedBaseLookup();
 }
+
+// ── Per-provider batch fetch/import table ────────────────
+// Providers stamp their live creator-filter state onto view._cdRef at their
+// filter entry point; everything else reads from here.
+
+function cdMediaEntry(result, extra = {}) {
+    return {
+        name: result.characterName,
+        avatar: result.fileName,
+        avatarUrl: result.avatarUrl,
+        mediaUrls: result.embeddedMediaUrls || [],
+        galleryPageUrls: result.galleryPageUrls || [],
+        galleryId: result.galleryId,
+        cardData: result.cardData,
+        ...extra,
+    };
+}
+
+function cdHasMedia(result) {
+    return (result.embeddedMediaUrls?.length || 0) > 0 || (result.galleryPageUrls?.length || 0) > 0;
+}
+
+let _cdActiveView = null;
+
+const cdCharId = (hit) => hit?.characterId || hit?.character_id || hit?.id || '';
+const cdSourceKind = (hit) => hit?.primary_content_source_kind === 'saucepan' ? 'saucepan' : 'janitor';
+
+async function cdDatacatExtract(view, charId, sourceKind) {
+    const urlBase = sourceKind === 'saucepan' ? 'https://saucepan.ai/companion/' : 'https://janitorai.com/characters/';
+    const url = `${urlBase}${charId}`;
+    const publicFeed = CoreAPI.getSetting('datacatPublicFeed') === true;
+    // anon sessions cap at 3 jobs and timed-out jobs stay alive server-side (no cancel API), so wait for a slot
+    let sub = null;
+    const slotDeadline = Date.now() + 120000;
+    for (;;) {
+        sub = await submitExtraction(url, { publicFeed }).catch(() => null);
+        const errText = String(sub?.error || sub?.message || '');
+        const capped = /Server returned 429/.test(errText) || /already have \d+ jobs/i.test(errText);
+        if (!capped) break;
+        if (view._cdCancelled || Date.now() >= slotDeadline) {
+            view._dcJammed = true;
+            return null;
+        }
+        await new Promise(r => setTimeout(r, 12000));
+    }
+    if (!sub || sub.error || sub.success === false) return null;
+    const targetId = String(charId).trim();
+    const deadline = Date.now() + 120000;
+    while (Date.now() < deadline) {
+        if (view._cdCancelled) return null;
+        await new Promise(r => setTimeout(r, 3000));
+        const status = await fetchExtractionStatus().catch(() => null);
+        if (!status) continue;
+        const entry = status.history?.find(h => String(h.characterId || '').trim() === targetId);
+        if (!entry) continue;
+        if (entry.success === false || entry.status === 'error') {
+            CoreAPI.debugLog?.('[Browse] extraction failed:', charId, entry.error || entry.message);
+            return null;
+        }
+        await new Promise(r => setTimeout(r, 1000));
+        let character = await fetchDatacatCharacter(charId, sourceKind).catch(() => null);
+        if (!character) {
+            await new Promise(r => setTimeout(r, 2000));
+            character = await fetchDatacatCharacter(charId, sourceKind).catch(() => null);
+        }
+        return character;
+    }
+    return null;
+}
+
+const CD_ADAPTERS = {
+    chub: {
+        async fetchAll(view) {
+            const authorName = view._cdRef?.name;
+            if (!authorName) return [];
+            const nsfw = (CoreAPI.getSetting('chubNsfw') === true).toString();
+            const results = [];
+            const seen = new Set();
+            const MAX_PAGES = 200;
+            for (let page = 1; page <= MAX_PAGES; page++) {
+                const params = new URLSearchParams();
+                params.set('first', '48');
+                params.set('page', String(page));
+                params.set('username', authorName);
+                params.set('sort', 'id');
+                params.set('nsfw', nsfw);
+                params.set('nsfl', nsfw);
+                params.set('include_forks', 'true');
+                params.set('venus', 'false');
+                params.set('min_tokens', '50');
+                const resp = await fetch(`${CHUB_API_BASE}/search?${params.toString()}`, { headers: getChubHeaders(true) });
+                if (!resp.ok) throw new Error(`ChubAI API error ${resp.status}`);
+                const data = await resp.json();
+                const nodes = extractNodes(data);
+                let added = 0;
+                for (const node of nodes) {
+                    const fp = node.fullPath || node.full_path || '';
+                    if (!fp || seen.has(fp)) continue;
+                    seen.add(fp);
+                    added++;
+                    results.push({ key: fp.toLowerCase(), name: node.name || '', creator: fp.split('/')[0] || '', raw: node });
+                }
+                const hasMore = (data.data?.cursor ?? data.cursor) != null && nodes.length > 0;
+                if (!hasMore || added === 0) break;
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('chub');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const fullPath = card.raw.fullPath || card.raw.full_path || '';
+            const result = await provider.importCharacter(fullPath, card.raw, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                galleryCharacters: result.hasGallery ? [{
+                    name: result.characterName,
+                    fullPath: result.fullPath,
+                    provider: provider,
+                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                    url: `https://chub.ai/characters/${result.fullPath}`,
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                }] : [],
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result)] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    botbooru: {
+        async fetchAll(view) {
+            const uploader = view._cdRef;
+            if (!uploader?.id) return [];
+            const results = [];
+            const seen = new Set();
+            const PAGE = 50;
+            for (let offset = 0; ; offset += PAGE) {
+                const user = await fetchBotbooruUser(uploader.id, { uploadLimit: PAGE, uploadOffset: offset, uploadSort: 'latest' });
+                if (!user) throw new Error('Botbooru user fetch failed');
+                const uploads = Array.isArray(user.uploads) ? user.uploads : [];
+                let added = 0;
+                for (const post of uploads) {
+                    const key = String(post.id);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    added++;
+                    if (post.uploader_id == null) post.uploader_id = Number(uploader.id);
+                    results.push({ key, name: post.character_name || '', creator: uploader.name || '', raw: post });
+                }
+                const total = user.uploads_list_total ?? 0;
+                if (added === 0 || uploads.length < PAGE || (total > 0 && results.length >= total)) break;
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('botbooru');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const post = card.raw;
+            const result = await provider.importCharacter(String(post.id), post, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                galleryCharacters: result.hasGallery ? [{
+                    name: result.characterName,
+                    fullPath: result.fullPath,
+                    provider: provider,
+                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                    url: `${BOTBOORU_BASE}/character/${post.id}`,
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                }] : [],
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result)] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    pygmalion: {
+        async fetchAll(view) {
+            const ownerId = view._cdRef?.ownerId;
+            if (!ownerId) return [];
+            const token = CoreAPI.getSetting('pygmalionToken') || undefined;
+            const results = [];
+            const seen = new Set();
+            const PAGE = 48;
+            for (let page = 0; ; page++) {
+                const data = await fetchCharactersByOwner(ownerId, 'approved_at', page, token);
+                const hits = data?.characters || [];
+                let added = 0;
+                for (const hit of hits) {
+                    if (!hit.id || seen.has(hit.id)) continue;
+                    seen.add(hit.id);
+                    added++;
+                    const owner = hit.owner || {};
+                    results.push({ key: hit.id, name: hit.displayName || hit.name || '', creator: owner.username || owner.displayName || '', raw: hit });
+                }
+                const totalItems = parseInt(data?.totalItems || '0', 10);
+                if (hits.length < PAGE || added === 0 || (totalItems > 0 && results.length >= totalItems)) break;
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('pygmalion');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const hit = card.raw;
+            const result = await provider.importCharacter(hit.id, hit, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                galleryCharacters: result.hasGallery ? [{
+                    name: result.characterName,
+                    fullPath: result.fullPath,
+                    provider: provider,
+                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                    url: getCharacterPageUrl(result.providerCharId),
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                }] : [],
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result)] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    wyvern: {
+        async fetchAll(view) {
+            const uid = view._cdRef?.uid;
+            if (!uid) return [];
+            const headers = getWyvernHeaders(!!view._cdRef?.nsfwAuth);
+            const resp = await fetchWithProxy(`${WYVERN_API_BASE}/characters/user/${uid}`, { method: 'GET', headers });
+            if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+            const data = await resp.json();
+            const nodes = data.characters || data.results || [];
+            const results = [];
+            const seen = new Set();
+            for (const node of nodes) {
+                if (!node.id || seen.has(node.id)) continue;
+                seen.add(node.id);
+                results.push({ key: node.id, name: node.name || '', creator: node.creator?.displayName || node.creator?.username || '', raw: node });
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('wyvern');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const node = card.raw;
+            const result = await provider.importCharacter(node.id, node, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                galleryCharacters: result.hasGallery ? [{
+                    name: result.characterName,
+                    fullPath: result.fullPath,
+                    provider: provider,
+                    linkInfo: { id: result.providerCharId, fullPath: result.fullPath },
+                    url: `${WYVERN_SITE_BASE}/characters/${result.providerCharId}`,
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                }] : [],
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result)] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    datacat: {
+        async fetchAll(view) {
+            const ref = view._cdRef;
+            if (!ref?.creatorId) return [];
+            view._dcJammed = false;
+            const results = [];
+            const seen = new Set();
+            const push = (hit) => {
+                const id = cdCharId(hit);
+                if (id == null || id === '') return;
+                const key = String(id);
+                if (seen.has(key)) return;
+                seen.add(key);
+                results.push({ key, name: hit.name || '', creator: hit.creator_name || hit.creatorName || ref.name || '', raw: hit });
+            };
+            if (ref.source === 'saucepan') {
+                const data = await fetchSaucepanCompanionsOfUser(ref.handle);
+                for (const hit of (data?.characters || [])) push(hit);
+            } else {
+                const PAGE = 80;
+                for (let offset = 0; ; offset += PAGE) {
+                    const data = await fetchDatacatCreatorCharacters(ref.creatorId, { limit: PAGE, offset, sortBy: 'chat_count' });
+                    if (!data) {
+                        if (offset === 0) throw new Error('DataCat creator fetch failed');
+                        break;
+                    }
+                    const list = data?.list || [];
+                    const before = results.length;
+                    for (const hit of list) push(hit);
+                    const total = data?.total || 0;
+                    if (results.length === before || list.length < PAGE || (total > 0 && results.length >= total)) break;
+                }
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('datacat');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const hit = card.raw;
+            const charId = cdCharId(hit);
+            const sourceKind = cdSourceKind(hit);
+            let character = hit._fullCharacter || await fetchDatacatCharacter(charId, sourceKind).catch(() => null);
+            if (!character) {
+                // once the server queue is provably full, dont burn 2 min per remaining card
+                if (view._dcJammed) return { ok: false, error: 'Extraction queue full (skipped)' };
+                character = await cdDatacatExtract(view, charId, sourceKind);
+                if (!character) {
+                    return { ok: false, error: view._dcJammed ? 'Extraction queue full' : 'Extraction failed or timed out' };
+                }
+            }
+            const result = await provider.importCharacter(charId, character, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                galleryCharacters: result.hasGallery ? [{
+                    name: result.characterName,
+                    provider,
+                    linkInfo: { providerId: 'datacat', id: result.providerCharId },
+                    url: `https://datacat.run/characters/${result.providerCharId}`,
+                    avatar: result.fileName,
+                    galleryId: result.galleryId,
+                    cardData: result.cardData,
+                }] : [],
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result, { characterName: result.characterName, fileName: result.fileName })] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    jannyai: {
+        async fetchAll(view) {
+            const authorName = view._cdRef?.creatorName;
+            if (!authorName) return [];
+            const wanted = authorName.toLowerCase();
+            const nsfw = CoreAPI.getSetting('jannyNsfw') === true;
+            const token = await getSearchToken();
+            const headers = {
+                'Accept': '*/*',
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Origin': JANNY_SITE_BASE,
+                'Referer': `${JANNY_SITE_BASE}/`,
+                'x-meilisearch-client': 'Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)',
+            };
+            const results = [];
+            const seen = new Set();
+            const MAX_PAGES = 50;
+            for (let page = 1; page <= MAX_PAGES; page++) {
+                const body = JSON.stringify({ queries: [{
+                    indexUid: 'janny-characters',
+                    q: authorName,
+                    filter: nsfw ? [] : ['isNsfw = false'],
+                    hitsPerPage: 80,
+                    page,
+                }] });
+                let resp;
+                try {
+                    resp = await fetch(JANNY_SEARCH_URL, { method: 'POST', headers, body });
+                } catch (_) {
+                    resp = await fetchWithProxy(JANNY_SEARCH_URL, { method: 'POST', headers, body });
+                }
+                if (!resp.ok) throw new Error(`JannyAI search error ${resp.status}`);
+                const data = await resp.json();
+                const result = data?.results?.[0];
+                const hits = result?.hits || [];
+                for (const hit of hits) {
+                    if (!hit.id || seen.has(String(hit.id))) continue;
+                    // author view is a text search; keep exact creator matches only
+                    if ((hit.creatorUsername || '').toLowerCase() !== wanted) continue;
+                    seen.add(String(hit.id));
+                    results.push({ key: String(hit.id), name: hit.name || '', creator: hit.creatorUsername || '', raw: hit });
+                }
+                const totalPages = result?.totalPages || 1;
+                if (page >= totalPages || hits.length === 0) break;
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('jannyai');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const hit = card.raw;
+            const identifier = `${hit.id}_character-${slugify(hit.name || 'character')}`;
+            const result = await provider.importCharacter(identifier, hit, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = {
+                mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result, { characterName: result.characterName, fileName: result.fileName })] : [],
+            };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+    chartavern: {
+        async fetchAll(view) {
+            const authorName = view._cdRef?.name;
+            if (!authorName) return [];
+            const wanted = authorName.toLowerCase();
+            const nsfw = CoreAPI.getSetting('ctNsfw') === true && isCtSessionActive();
+            const sort = document.getElementById('ctSortSelect')?.value || 'most_popular';
+            const results = [];
+            const seen = new Set();
+            const MAX_PAGES = 50;
+            for (let page = 1; page <= MAX_PAGES; page++) {
+                const data = await searchCards({ query: authorName, sort, page, limit: 60, nsfw }, CoreAPI.apiRequest);
+                const hits = data?.hits || [];
+                for (const hit of hits) {
+                    const path = hit.path || '';
+                    if (!path || seen.has(path)) continue;
+                    // exclude_tags alone doesnt catch all isNSFW cards
+                    if (!nsfw && hit.isNSFW) continue;
+                    const hitAuthor = (hit.author_username || hit.author || path.split('/')[0] || '').toLowerCase();
+                    if (hitAuthor !== wanted) continue;
+                    seen.add(path);
+                    results.push({ key: path, name: hit.name || '', creator: hit.author_username || hit.author || '', raw: hit });
+                }
+                const totalPages = data?.totalPages || 1;
+                if (page >= totalPages || hits.length === 0) break;
+            }
+            return results;
+        },
+        async importOne(view, card) {
+            const provider = CoreAPI.getProvider('chartavern');
+            if (!provider?.importCharacter) return { ok: false, error: 'Provider not available' };
+            const hit = card.raw;
+            const result = await provider.importCharacter(hit.path, hit, {});
+            if (!result.success) return { ok: false, error: result.error || 'Import failed' };
+            const summaryArgs = { mediaCharacters: cdHasMedia(result) ? [cdMediaEntry(result)] : [] };
+            return { ok: true, avatarFileName: result.fileName, summaryArgs };
+        },
+    },
+};
 
 /**
  * Base class for Online tab browse views.
@@ -133,6 +585,7 @@ export class BrowseView {
      */
     init() {
         this._initialized = true;
+        wireBrowseScrollReset();
         if (this.supportsFollowingManager) {
             this._initFollowingManager();
         }
@@ -164,6 +617,9 @@ export class BrowseView {
         }
         // Attach infinite scroll listener
         this._attachScrollListener();
+        if (this.creatorDownloadEnabled()) {
+            this._injectCreatorDownloadButton(container);
+        }
     }
 
     /**
@@ -272,16 +728,31 @@ export class BrowseView {
      */
     addCharToLookup(char) {
         if (!char) return;
-        // A new local char can create fresh possible-matches; the incremental path below doesn't bump
-        // the gen, so drop the memo here or stale "not a match" verdicts would survive the import.
-        _possibleMatchMemo.clear();
         if (this._lookup.byNameAndCreator !== _sharedBaseLookup.byNameAndCreator
             || _sharedBaseLookup.gen !== _baseLookupGen) {
             // This view is not on the current shared base; rebuild fresh from the live list
-            // (which already contains char).
+            // (which already contains char). The gen bump clears the memo on next score read.
             invalidateSharedBaseLookup();
             this.buildLocalLibraryLookup();
             return;
+        }
+        // The incremental path doesn't bump the gen, so stale "not a match" verdicts must go; but a
+        // full clear makes the post-import re-grade re-score every rendered card cold (an O(cards x
+        // library) main-thread burst). Only entries the new char's name can affect are dropped: maxed
+        // scores cant rise further, and memo keys hold the RAW lowered name so they must be
+        // re-normalized through computeNameVariants before intersecting.
+        const newVariants = computeNameVariants(char.name || '');
+        for (const [key, score] of _possibleMatchMemo) {
+            if (score >= 95) continue;
+            const keyVariants = computeNameVariants(key.slice(0, key.lastIndexOf('|')));
+            let affected = false;
+            for (const kv of keyVariants) {
+                for (const nv of newVariants) {
+                    if (kv === nv || this._isNamePrefixMatch(kv, nv)) { affected = true; break; }
+                }
+                if (affected) break;
+            }
+            if (affected) _possibleMatchMemo.delete(key);
         }
         const name = (char.name || '').toLowerCase().trim();
         const creator = String(char.creator || char.data?.creator || '').toLowerCase().trim();
@@ -317,6 +788,12 @@ export class BrowseView {
      * sensitivity slider re-reads it without recomputing.
      */
     getPossibleMatchScore(name, creator) {
+        // Sync to the current base before the gen stamp, or a refresh in the bump-to-rebuild window memos stale scores that outlive the rebuild.
+        ensureSharedBaseLookup();
+        if (this._lookup.byNormalizedName !== _sharedBaseLookup.byNormalizedName) {
+            this._lookup.byNameAndCreator = _sharedBaseLookup.byNameAndCreator;
+            this._lookup.byNormalizedName = _sharedBaseLookup.byNormalizedName;
+        }
         if (_possibleMatchMemoGen !== _baseLookupGen) {
             _possibleMatchMemo.clear();
             _possibleMatchMemoGen = _baseLookupGen;
@@ -467,6 +944,20 @@ export class BrowseView {
      * @param {function(HTMLElement): boolean} checkCard - Returns true if the card is in the local library
      * @param {string[]} [gridIds] - Grid element IDs to scan (defaults to _getImageGridIds())
      */
+    /**
+     * Possible-match tier for a rendered card during the re-grade pass. The base reads the
+     * two common creator attrs; providers whose markup differs (or who skip name-only
+     * grading, like botbooru) override.
+     * @param {HTMLElement} card - Rendered .browse-card
+     * @param {string} name - Card's character name
+     * @returns {{show: boolean}} Tier object from getPossibleMatchTier
+     */
+    _cardPossibleTier(card, name) {
+        const creatorEl = card.querySelector('.browse-card-creator-link');
+        const creator = creatorEl?.dataset.author || creatorEl?.dataset.creatorName || '';
+        return this.getPossibleMatchTier(name, creator);
+    }
+
     refreshInLibraryBadges(checkCard, gridIds) {
         if (!checkCard) return;
         for (const gridId of (gridIds || this._getImageGridIds())) {
@@ -498,9 +989,7 @@ export class BrowseView {
 
             for (const card of grid.querySelectorAll('.browse-card:not(.in-library)')) {
                 const name = card.querySelector('.browse-card-name')?.textContent || '';
-                const creatorEl = card.querySelector('.browse-card-creator-link');
-                const creator = creatorEl?.dataset.author || creatorEl?.dataset.creatorName || '';
-                const tier = this.getPossibleMatchTier(name, creator);
+                const tier = this._cardPossibleTier(card, name);
                 let badgesEl = card.querySelector(BOTTOM_BADGES_SEL);
                 const existing = badgesEl?.querySelector('.possible-library');
                 if (!tier.show) {
@@ -1222,6 +1711,252 @@ export class BrowseView {
         }
     }
 
+    // ── Creator Downloads ───────────────────────────────────
+
+    get supportsCreatorDownload() { return !!CD_ADAPTERS[this.provider?.id]; }
+
+    creatorDownloadEnabled() {
+        return this.supportsCreatorDownload && CoreAPI.getSetting('creatorDownloads') === true;
+    }
+
+    _injectCreatorDownloadButton(container) {
+        const actions = container?.querySelector('.browse-author-banner-actions, .chub-author-banner-actions');
+        if (!actions || actions.querySelector('.browse-cdl-btn')) return;
+        const btn = document.createElement('button');
+        btn.className = 'glass-btn icon-only browse-cdl-btn';
+        btn.title = 'Download all cards by this creator';
+        btn.innerHTML = '<i class="fa-solid fa-download"></i>';
+        btn.addEventListener('click', () => this.runCreatorDownload(btn));
+        const last = actions.lastElementChild;
+        if (last?.tagName === 'BUTTON' && last.querySelector('.fa-times, .fa-xmark')) {
+            actions.insertBefore(btn, last);
+        } else {
+            actions.appendChild(btn);
+        }
+    }
+
+    async fetchAllCreatorCards() {
+        return CD_ADAPTERS[this.provider?.id]?.fetchAll(this) ?? [];
+    }
+
+    async importOneCreatorCard(card) {
+        const adapter = CD_ADAPTERS[this.provider?.id];
+        return adapter ? adapter.importOne(this, card) : { ok: false, error: 'Not supported' };
+    }
+
+    async runCreatorDownload(triggerBtn = null) {
+        if (!this.creatorDownloadEnabled()) return;
+        // one shared modal, so one active run across ALL views
+        if (_cdActiveView) {
+            CoreAPI.showToast?.('A creator download is already running', 'warning');
+            return;
+        }
+        _cdActiveView = this;
+        this._cdRunning = true;
+        this._cdCancelled = false;
+        const originalBtnHtml = triggerBtn?.innerHTML;
+        if (triggerBtn) {
+            triggerBtn.disabled = true;
+            triggerBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        }
+        try {
+            // Display name straight off the banner; the fetch reads provider state itself
+            const banner = triggerBtn?.closest('.chub-author-banner, .browse-author-banner');
+            const creatorName = banner?.querySelector('strong')?.textContent?.trim() || 'this creator';
+            let cards = [];
+            try {
+                cards = await this.fetchAllCreatorCards();
+            } catch (e) {
+                CoreAPI.showToast?.(`Could not fetch creator catalog: ${e?.message || e}`, 'error');
+                return;
+            }
+            if (!cards.length) {
+                CoreAPI.showToast?.('No cards found for this creator', 'info');
+                return;
+            }
+
+            this.buildLocalLibraryLookup();
+            const minScore = getPossibleMatchMinScore();
+            const toImport = [];
+            let skipped = 0;
+            for (const card of cards) {
+                if (card.key && this._lookup.byProviderId.has(card.key)) { skipped++; continue; }
+                if (this.getPossibleMatchScore(card.name || '', card.creator || '') >= minScore) { skipped++; continue; }
+                toImport.push(card);
+            }
+
+            if (!toImport.length) {
+                CoreAPI.showToast?.(`All ${cards.length} card${cards.length === 1 ? '' : 's'} by ${creatorName} are already in your library`, 'info');
+                return;
+            }
+
+            const confirmed = await this._cdConfirm(creatorName, cards.length, toImport.length, skipped);
+            if (!confirmed) return;
+
+            this._cdShowProgress(creatorName, toImport.length);
+            let imported = 0, failed = 0;
+            const failures = [];
+            for (let i = 0; i < toImport.length; i++) {
+                if (this._cdCancelled) break;
+                const card = toImport[i];
+                this._cdUpdateProgress(i, toImport.length, card.name || '', imported, failed);
+                try {
+                    const res = await this.importOneCreatorCard(card);
+                    if (res?.ok) {
+                        imported++;
+                        if (res.avatarFileName) {
+                            const added = await CoreAPI.fetchAndAddCharacter(res.avatarFileName);
+                            if (added) this.addCharToLookup(added);
+                        }
+                        if (res.summaryArgs && CoreAPI.getSetting('importMediaAction') !== 'none') CoreAPI.queueImportMediaJobs(res.summaryArgs);
+                    } else {
+                        failed++;
+                        failures.push(card.name || '?');
+                        CoreAPI.debugLog?.('[CreatorDownload] Import failed:', card.name, res?.error);
+                    }
+                } catch (e) {
+                    failed++;
+                    failures.push(card.name || '?');
+                    CoreAPI.debugLog?.('[CreatorDownload] Import threw:', card.name, e?.message || e);
+                }
+                await new Promise(r => setTimeout(r, 400));
+            }
+            this.refreshInLibraryBadges();
+            this._cdShowDone({ creatorName, imported, failed, failures, skipped, cancelled: this._cdCancelled });
+        } finally {
+            this._cdRunning = false;
+            _cdActiveView = null;
+            if (triggerBtn) {
+                triggerBtn.disabled = false;
+                triggerBtn.innerHTML = originalBtnHtml;
+            }
+        }
+    }
+
+    _cdEnsureModal() {
+        let modal = document.getElementById('creatorDlModal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'creatorDlModal';
+            modal.className = 'cl-modal cl-modal-drawer cl-drawer-partial';
+            modal.innerHTML = `
+                <div class="cl-modal-content browse-cdl-content">
+                    <div class="cl-modal-header">
+                        <h3><i class="fa-solid fa-download"></i> Creator Download</h3>
+                        <button class="cl-modal-close" id="creatorDlCloseX"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div class="cl-modal-body browse-cdl-body" id="creatorDlBody"></div>
+                    <div class="cl-modal-footer browse-cdl-footer" id="creatorDlFooter"></div>
+                </div>`;
+            document.body.appendChild(modal);
+            document.getElementById('creatorDlCloseX')?.addEventListener('click', () => window.creatorDlModalClose?.());
+        }
+        window.creatorDlModalClose = () => this._cdHandleClose();
+        window.registerOverlay?.({ id: 'creatorDlModal', tier: 5, close: () => window.creatorDlModalClose?.(), visible: (el) => el.classList.contains('visible') });
+        return modal;
+    }
+
+    _cdHandleClose() {
+        const modal = document.getElementById('creatorDlModal');
+        if (!modal) return;
+        if (this._cdRunning && !this._cdCancelled && this._cdPhase === 'progress') {
+            // first close while running = cancel after current card
+            this._cdRequestCancel();
+            return;
+        }
+        if (this._cdConfirmResolve) {
+            const resolve = this._cdConfirmResolve;
+            this._cdConfirmResolve = null;
+            resolve(false);
+        }
+        modal.classList.remove('visible');
+    }
+
+    _cdRequestCancel() {
+        this._cdCancelled = true;
+        const label = document.getElementById('creatorDlCurrent');
+        if (label) label.textContent = 'Cancelling after the current card...';
+        const btn = document.getElementById('creatorDlCancelBtn');
+        if (btn) btn.disabled = true;
+    }
+
+    _cdConfirm(creatorName, total, toImport, skipped) {
+        const modal = this._cdEnsureModal();
+        this._cdPhase = 'confirm';
+        const esc = (s) => CoreAPI.escapeHtml?.(s) ?? s;
+        const body = document.getElementById('creatorDlBody');
+        const footer = document.getElementById('creatorDlFooter');
+        body.innerHTML = `
+            <p class="browse-cdl-lead">Download <strong>${toImport}</strong> of ${total} card${total === 1 ? '' : 's'} by <strong>${esc(creatorName)}</strong>?</p>
+            ${skipped > 0 ? `<p class="browse-cdl-sub">${skipped} already in your library will be skipped.</p>` : ''}
+            <p class="browse-cdl-sub">Cards import one at a time; media downloads continue in the background queue.</p>`;
+        footer.innerHTML = `
+            <button class="cl-btn" id="creatorDlCancelConfirm">Cancel</button>
+            <button class="cl-btn cl-btn-primary" id="creatorDlGo"><i class="fa-solid fa-download"></i> Download</button>`;
+        modal.classList.add('visible');
+        return new Promise(resolve => {
+            this._cdConfirmResolve = resolve;
+            document.getElementById('creatorDlCancelConfirm')?.addEventListener('click', () => {
+                this._cdConfirmResolve = null;
+                modal.classList.remove('visible');
+                resolve(false);
+            });
+            document.getElementById('creatorDlGo')?.addEventListener('click', () => {
+                this._cdConfirmResolve = null;
+                resolve(true);
+            });
+        });
+    }
+
+    _cdShowProgress(creatorName, total) {
+        const modal = this._cdEnsureModal();
+        this._cdPhase = 'progress';
+        const esc = (s) => CoreAPI.escapeHtml?.(s) ?? s;
+        const body = document.getElementById('creatorDlBody');
+        const footer = document.getElementById('creatorDlFooter');
+        body.innerHTML = `
+            <p class="browse-cdl-lead">Downloading cards by <strong>${esc(creatorName)}</strong></p>
+            <div class="browse-cdl-bar"><div class="browse-cdl-bar-fill" id="creatorDlBarFill"></div></div>
+            <div class="browse-cdl-count" id="creatorDlCount">0 / ${total}</div>
+            <div class="browse-cdl-current" id="creatorDlCurrent"></div>`;
+        footer.innerHTML = `<button class="cl-btn" id="creatorDlCancelBtn">Cancel</button>`;
+        document.getElementById('creatorDlCancelBtn')?.addEventListener('click', () => this._cdRequestCancel());
+        modal.classList.add('visible');
+    }
+
+    _cdUpdateProgress(index, total, name, imported, failed) {
+        const fill = document.getElementById('creatorDlBarFill');
+        if (fill) fill.style.width = `${Math.round((index / total) * 100)}%`;
+        const count = document.getElementById('creatorDlCount');
+        if (count) count.textContent = `${index} / ${total}${failed > 0 ? ` (${failed} failed)` : ''}`;
+        const current = document.getElementById('creatorDlCurrent');
+        if (current && !this._cdCancelled) current.textContent = name;
+    }
+
+    _cdShowDone({ creatorName, imported, failed, failures, skipped, cancelled }) {
+        this._cdPhase = 'done';
+        const modal = document.getElementById('creatorDlModal');
+        if (modal && !modal.classList.contains('visible')) {
+            CoreAPI.showToast?.(`Creator download ${cancelled ? 'cancelled' : 'finished'}: ${imported} imported${failed > 0 ? `, ${failed} failed` : ''}`, failed > 0 ? 'warning' : 'success');
+            return;
+        }
+        const esc = (s) => CoreAPI.escapeHtml?.(s) ?? s;
+        const body = document.getElementById('creatorDlBody');
+        const footer = document.getElementById('creatorDlFooter');
+        if (!body || !footer) return;
+        const failList = failures.length
+            ? `<div class="browse-cdl-failures">${failures.map(n => `<div>${esc(n)}</div>`).join('')}</div>`
+            : '';
+        body.innerHTML = `
+            <p class="browse-cdl-lead">${cancelled ? 'Cancelled' : 'Done'}: <strong>${imported}</strong> imported${failed > 0 ? `, <strong>${failed}</strong> failed` : ''}${skipped > 0 ? `, ${skipped} skipped` : ''}</p>
+            ${failList}
+            ${imported > 0 ? '<p class="browse-cdl-sub">Media downloads are running in the background queue (see Notifications).</p>' : ''}`;
+        footer.innerHTML = `<button class="cl-btn cl-btn-primary" id="creatorDlDoneBtn">Close</button>`;
+        document.getElementById('creatorDlDoneBtn')?.addEventListener('click', () => {
+            document.getElementById('creatorDlModal')?.classList.remove('visible');
+        });
+    }
+
     // ── Mobile Integration ──────────────────────────────────
 
     /**
@@ -1292,25 +2027,29 @@ export class BrowseView {
     // ── Avatar Quick-View ───────────────────────────────────
 
     /**
-     * Open a full-screen overlay displaying the given image.
-     * Falls back to fallbackSrc on load error.
-     * If `gallery` array is provided, enables prev/next navigation.
+     * Full-screen view of an image; a multi-image gallery delegates to the shared gallery viewer.
      * @param {string} src
      * @param {string} [fallbackSrc]
-     * @param {string[]} [gallery] - Array of image URLs
-     * @param {number} [startIndex] - Starting index in gallery
+     * @param {string[]} [gallery] - image URLs; more than one opens the gallery viewer
+     * @param {number} [startIndex]
      */
     static openAvatarViewer(src, fallbackSrc, gallery, startIndex) {
         if (!src) return;
         BrowseView.closeAvatarViewer();
 
-        const images = gallery && gallery.length > 1 ? gallery : null;
-        let currentIndex = images ? (startIndex ?? 0) : 0;
+        if (gallery && gallery.length > 1) {
+            // name from the url so gv's extension-based gif/video detection works on remote media
+            const media = gallery.map((u, i) => ({
+                url: u,
+                name: (String(u).split('/').pop() || '').split('?')[0].split('#')[0] || `Image ${i + 1}`,
+            }));
+            CoreAPI.openGalleryViewerWithImages?.(media, startIndex ?? 0, 'Gallery');
+            return;
+        }
 
         const overlay = document.createElement('div');
         overlay.id = 'browseAvatarViewer';
         overlay.className = 'browse-avatar-viewer';
-        if (images) overlay.classList.add('has-gallery');
 
         const img = document.createElement('img');
         img.className = 'browse-av-image';
@@ -1319,69 +2058,14 @@ export class BrowseView {
         img.src = src;
         overlay.appendChild(img);
 
-        // Navigation UI (only for multi-image galleries)
-        let prevBtn, nextBtn, counter;
-        if (images) {
-            prevBtn = document.createElement('button');
-            prevBtn.className = 'browse-av-nav browse-av-prev';
-            prevBtn.innerHTML = '<i class="fa-solid fa-chevron-left"></i>';
-            prevBtn.title = 'Previous';
-
-            nextBtn = document.createElement('button');
-            nextBtn.className = 'browse-av-nav browse-av-next';
-            nextBtn.innerHTML = '<i class="fa-solid fa-chevron-right"></i>';
-            nextBtn.title = 'Next';
-
-            counter = document.createElement('div');
-            counter.className = 'browse-av-counter';
-
-            overlay.appendChild(prevBtn);
-            overlay.appendChild(nextBtn);
-            overlay.appendChild(counter);
-        }
-
-        function showImage(index) {
-            if (!images) return;
-            currentIndex = ((index % images.length) + images.length) % images.length;
-            img.onerror = () => { img.onerror = null; img.style.display = 'none'; };
-            img.style.display = '';
-            img.src = images[currentIndex];
-            if (counter) counter.textContent = `${currentIndex + 1} / ${images.length}`;
-        }
-
-        if (images) {
-            showImage(currentIndex);
-
-            prevBtn.addEventListener('click', (e) => { e.stopPropagation(); showImage(currentIndex - 1); });
-            nextBtn.addEventListener('click', (e) => { e.stopPropagation(); showImage(currentIndex + 1); });
-        }
-
-        // Close on backdrop click (not on image or nav buttons)
-        overlay.addEventListener('click', (e) => {
-            if (e.target === overlay) BrowseView.closeAvatarViewer();
-        });
-        // Close on image click only if no gallery navigation
-        if (!images) {
-            img.addEventListener('click', () => BrowseView.closeAvatarViewer());
-        }
-
-        if (images) {
-            const onKey = (e) => {
-                if (e.key === 'ArrowLeft') { e.preventDefault(); showImage(currentIndex - 1); }
-                if (e.key === 'ArrowRight') { e.preventDefault(); showImage(currentIndex + 1); }
-            };
-            document.addEventListener('keydown', onKey);
-            overlay._onKey = onKey;
-        }
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) BrowseView.closeAvatarViewer(); });
+        img.addEventListener('click', () => BrowseView.closeAvatarViewer());
 
         document.body.appendChild(overlay);
     }
 
     static closeAvatarViewer() {
-        const viewer = document.getElementById('browseAvatarViewer');
-        if (!viewer) return;
-        if (viewer._onKey) document.removeEventListener('keydown', viewer._onKey);
-        viewer.remove();
+        document.getElementById('browseAvatarViewer')?.remove();
     }
 
     // ── Image loading ───────────────────────────────────────
@@ -1446,7 +2130,7 @@ export class BrowseView {
         }
 
         titleEl.addEventListener('click', async () => {
-            if (isMobileViewport()) return; // mobile reveals long titles via its own tap handler
+            if (isMobileMode()) return; // mobile reveals long titles via its own tap handler
             if (_anim) { cancel(); return; }
 
             const distance = titleEl.scrollWidth - titleEl.clientWidth;

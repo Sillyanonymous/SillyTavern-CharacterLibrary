@@ -5,7 +5,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng, slugify } from '../provider-utils.js';
+import { assignGalleryId, importFromPng, slugify, proxyEncode } from '../provider-utils.js';
 import chubBrowseView, { openChubTokenModal } from './chub-browse.js';
 import {
     initChubApi,
@@ -296,7 +296,7 @@ class ChubProvider extends ProviderBase {
             const pngUrl = `${CHUB_AVATAR_BASE}${fullPath}/chara_card_v2.png`;
             let response;
             try { response = await fetch(pngUrl); }
-            catch { response = await fetch(`/proxy/${encodeURIComponent(pngUrl)}`); }
+            catch { response = await fetch(`/proxy/${proxyEncode(pngUrl)}`); }
             if (response.ok) {
                 const buffer = await response.arrayBuffer();
                 const cardData = api?.extractCharacterDataFromPng?.(buffer);
@@ -775,31 +775,6 @@ class ChubProvider extends ProviderBase {
         } catch (e) {
             console.error('[ChubProvider] fetchGalleryImages failed:', e);
             return [];
-        }
-    }
-
-    // ── Import Duplicate Detection ──────────────────────────
-
-    async searchForImportMatch(name, creator, localChar) {
-        if (!name) return null;
-        try {
-            // Reuse searchForBulkLink which already has multi-pass search
-            const results = await this.searchForBulkLink(name, creator || '');
-            if (results.length === 0) return null;
-
-            const normalizedName = name.toLowerCase().trim();
-            for (const r of results) {
-                const rName = (r.name || '').toLowerCase().trim();
-                if (rName === normalizedName || rName.includes(normalizedName) || normalizedName.includes(rName)) {
-                    return { id: r.id, fullPath: r.fullPath, hasGallery: false };
-                }
-            }
-
-            // Return best match if available
-            return { id: results[0].id, fullPath: results[0].fullPath, hasGallery: false };
-        } catch (e) {
-            console.error('[ChubProvider] searchForImportMatch:', e);
-            return null;
         }
     }
 

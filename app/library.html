@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark">
     <meta name="referrer" content="no-referrer">
     <title>SillyTavern Character Library</title>
-    <link rel="stylesheet" href="library.css?v=104">
-    <link rel="stylesheet" href="library-mobile.css?v=33" media="screen and (max-width: 768px)">
+    <link rel="stylesheet" href="library.css?v=106">
+    <link rel="stylesheet" href="library-mobile.css?v=35">
     <!-- Noto Sans from SillyTavern's bundled webfonts -->
     <link rel="stylesheet" href="/webfonts/NotoSans/stylesheet.css">
     <!-- Font Awesome for Icons -->
@@ -34,7 +34,30 @@
                 if (/iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
                     document.documentElement.classList.add('cl-ios');
                 }
-                if (window.matchMedia('(max-width: 768px)').matches) return;
+                // Single owner of the mobile/desktop decision. html.cl-mobile is the broadcast: JS
+                // reads it via isMobileMode(), CSS scopes on it. Policy rules (width, capability,
+                // user override) evolve here so consumers never need to change.
+                // Session copy first, so the settings toggle stays honest when localStorage is
+                // write-blocked. Tri-state: undefined = untouched this session (consult storage);
+                // null = Auto chosen this session (masks a stale persisted value); string = forced.
+                window.getMobileModeOverride = function () {
+                    var o = window.clMobileModeOverrideMem;
+                    if (o === undefined) {
+                        try { o = localStorage.getItem('clMobileModeOverride'); }
+                        catch (e) { /* storage blocked: fall through to auto */ }
+                    }
+                    return (o === 'mobile' || o === 'desktop') ? o : null;
+                };
+                window.computeMobileMode = function () {
+                    var o = window.getMobileModeOverride();
+                    if (o === 'mobile') return true;
+                    if (o === 'desktop') return false;
+                    return window.matchMedia('(max-width: 768px)').matches
+                        || window.matchMedia('(pointer: coarse) and (hover: none)').matches;
+                };
+                var mobileMode = window.computeMobileMode();
+                document.documentElement.classList.toggle('cl-mobile', mobileMode);
+                if (mobileMode) return;
                 var raw = localStorage.getItem('SillyTavernCharacterGallery');
                 if (!raw) return;
                 var s = JSON.parse(raw);
@@ -133,6 +156,8 @@
                     <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
                     <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
                     <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
+                    <option value="tokens_high" data-icon="fa-solid fa-weight-hanging">Token Count (High to Low)</option>
+                    <option value="tokens_low" data-icon="fa-solid fa-feather">Token Count (Low to High)</option>
                     <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
                 </select>
 
@@ -256,6 +281,12 @@
                         <option value="longest_chat" data-icon="fa-solid fa-ruler">Longest Chat</option>
                         <option value="shortest_chat" data-icon="fa-solid fa-ruler">Shortest Chat</option>
                         <option value="most_chats" data-icon="fa-solid fa-layer-group">Most Chats (Character)</option>
+                    </select>
+                    <select id="chatsDensitySelect" class="glass-select" title="Card Density">
+                        <option value="spacious" data-icon="fa-solid fa-expand">Spacious</option>
+                        <option value="comfortable" data-icon="fa-solid fa-rectangle-list">Comfortable</option>
+                        <option value="compact" data-icon="fa-solid fa-table-list">Compact</option>
+                        <option value="minimal" data-icon="fa-solid fa-grip-lines">Minimal</option>
                     </select>
                     <div class="grouping-toggle">
                         <button class="glass-btn grouping-btn active" data-group="flat" title="Flat list">
@@ -958,12 +989,12 @@ https://jannyai.com/characters/uuid_slug
 
                 <!-- Local PNG input -->
                 <div id="importSourceLocal" class="import-source-panel hidden">
-                    <p>Select or drag &amp; drop character card PNG files:</p>
+                    <p>Select or drag &amp; drop character card PNG files, or a Character Library bundle (.zip):</p>
                     <div id="importDropZone" class="import-drop-zone">
-                        <input type="file" id="importFileInput" multiple accept=".png" class="import-file-input">
+                        <input type="file" id="importFileInput" multiple accept=".png,.zip" class="import-file-input">
                         <div class="import-drop-placeholder" id="importDropPlaceholder">
                             <i class="fa-solid fa-cloud-arrow-up"></i>
-                            <span>Drag &amp; drop PNG files here</span>
+                            <span>Drag &amp; drop PNG or bundle files here</span>
                             <button type="button" class="import-browse-btn">Browse Files</button>
                         </div>
                         <div class="import-file-list hidden" id="importFileList"></div>
@@ -1517,7 +1548,7 @@ https://jannyai.com/characters/uuid_slug
                                 <li>Tag filtering is not available in this mode</li>
                                 <li>Creator names are always available</li>
                             </ul>
-                            <p><strong>Cloudflare protection on Hampter:</strong> JanitorAI gates its trending/popular feed behind Cloudflare bot protection, so these sort orders only work when a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance is configured in Settings &rarr; Online &rarr; DataCat (proxied through the cl-helper plugin). Without it, Hampter sorts will show a friendly notice explaining what to do; the other DataCat and JanitorAI sort orders are unaffected. Once configured, sessions are kept warm across tab switches so subsequent fetches skip the multi-second challenge.</p>
+                            <p><strong>Hampter access:</strong> Trending/popular loads directly in the browser with no setup. JanitorAI serves only the <strong>first page</strong> of these sorts anonymously; add your <strong>JanitorAI login</strong> (Settings &rarr; Online &rarr; DataCat) to page through more. You paste your session cookie once and the login then refreshes itself, no repeated pasting. If Cloudflare ever blocks a fetch, an optional <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance is used as a backup fetcher. The other DataCat and JanitorAI sort orders are unaffected.</p>
                             <p><strong>Across all modes:</strong> Pasting a <strong>JanitorAI character URL</strong> into the search bar will look up the character on DataCat. If it's found, the preview opens directly. If not, an extraction panel appears letting you request the character from DataCat's cloud service.</p>
                             <p><strong>Extraction:</strong> When a character only exists on JanitorAI and hasn't been indexed by DataCat yet, the Import button changes to <strong>Extract</strong>. This sends a request to DataCat's cloud service, which visits the JanitorAI page and retrieves the full character definition. You can also paste a JanitorAI URL directly into the search bar to look up and extract specific characters.</p>
                             <p class="info-tip"><i class="fa-solid fa-lightbulb"></i> DataCat requires the cl-helper server plugin. Install it from Settings → Online → DataCat.</p>
@@ -1628,7 +1659,7 @@ https://jannyai.com/characters/uuid_slug
                             <p>Cut decode cost and bandwidth on the characters grid by serving smaller, pre-resized images for the grid cards. Detail modal, gallery, and full-screen viewer always keep full resolution.</p>
                             <ul>
                                 <li>Enable in <strong>Settings &rarr; General &rarr; Grid Card Thumbnails &rarr; Use thumbnails in characters view</strong></li>
-                                <li>Applies to <strong>mobile-sized viewports only</strong> by default. Toggle <strong>"Also use on desktop"</strong> to extend coverage</li>
+                                <li>Applies to <strong>mobile only</strong> by default. Toggle <strong>"Also use on desktop"</strong> to extend coverage</li>
                                 <li>Two backends:
                                     <ul>
                                         <li><strong>cl-helper</strong> (recommended): resizes via jimp and caches each thumbnail on disk at the size you pick (384 / 512 / 640 / 768px wide). 512 is a good baseline. Requires the cl-helper plugin installed</li>
@@ -2026,6 +2057,8 @@ https://jannyai.com/characters/uuid_slug
                                     <option value="date_old" data-icon="fa-solid fa-clock-rotate-left">Last Modified (Oldest)</option>
                                     <option value="created_new" data-icon="fa-solid fa-calendar-plus">Date Created (Newest)</option>
                                     <option value="created_old" data-icon="fa-solid fa-calendar-plus">Date Created (Oldest)</option>
+                                    <option value="tokens_high" data-icon="fa-solid fa-weight-hanging">Token Count (High to Low)</option>
+                                    <option value="tokens_low" data-icon="fa-solid fa-feather">Token Count (Low to High)</option>
                                     <option value="random" data-icon="fa-solid fa-shuffle">Random</option>
                                 </select>
                             </div>
@@ -2063,6 +2096,15 @@ https://jannyai.com/characters/uuid_slug
                             <div class="settings-group-title"><i class="fa-solid fa-palette"></i> Theme &amp; Layout</div>
                             <div class="settings-row" id="themeCustomizerBtnRow" style="display:none;">
                                 <button id="openThemeCustomizerBtn" class="settings-action-btn primary"><i class="fa-solid fa-sliders"></i> Open UI Token Customizer</button>
+                            </div>
+                            <div class="settings-row">
+                                <label for="settingsMobileMode">Mobile Layout:</label>
+                                <select id="settingsMobileMode" class="glass-select">
+                                    <option value="auto" data-icon="fa-solid fa-wand-magic-sparkles" selected>Auto (Default)</option>
+                                    <option value="mobile" data-icon="fa-solid fa-mobile-screen">Always</option>
+                                    <option value="desktop" data-icon="fa-solid fa-desktop">Never</option>
+                                </select>
+                                <span class="settings-hint">Auto uses the mobile layout on small screens and touch-first devices (phones, tablets). Stored per device, not per account.</span>
                             </div>
                             <div class="settings-row" data-platform="desktop">
                                 <label for="settingsUiScale">UI Scale: <i class="fa-solid fa-desktop settings-platform-badge" title="Desktop only"></i></label>
@@ -2254,7 +2296,7 @@ https://jannyai.com/characters/uuid_slug
                                 <label>
                                     <input type="checkbox" id="settingsGridThumbDesktop"> Also use on desktop
                                 </label>
-                                <span class="settings-hint">Off (default): thumbnails only on mobile-sized viewports. On: thumbnails on every viewport. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
+                                <span class="settings-hint">Off (default): thumbnails on mobile only. On: thumbnails everywhere. Desktop has plenty of decode budget, so the win is mostly bandwidth on large libraries.</span>
                             </div>
                             <div class="cl-helper-banner cl-hidden" id="gridThumbsClHelperBanner">
                                 <i class="fa-solid fa-puzzle-piece"></i>
@@ -2681,9 +2723,35 @@ https://jannyai.com/characters/uuid_slug
                                     </div>
                                 </div>
                                 <div class="settings-group">
-                                    <div class="settings-group-title"><i class="fa-solid fa-fire"></i> FlareSolverr (Hampter sort orders)</div>
+                                    <div class="settings-group-title"><i class="fa-solid fa-user-lock"></i> JanitorAI Login (Hampter pagination) <span class="settings-provider-badge">WIP</span></div>
                                     <div class="settings-row">
-                                        <span class="settings-hint">JanitorAI's <strong>Trending</strong> and <strong>Popular</strong> sort orders are behind Cloudflare bot protection. Run a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance and paste its endpoint here to enable them. Other JanitorAI sort orders work without this.</span>
+                                        <span class="settings-hint">Optional. JanitorAI serves only the <strong>first page</strong> of the Trending/Popular sorts without an account. Paste your session cookie to page through more; the session then <strong>refreshes itself</strong> (no repeated pasting). To get it: log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the <strong>sb-auth-auth-token</strong> cookie. Stored locally in your browser. Tip: paste from a browser you are not actively browsing JanitorAI in, so the two sessions do not rotate each other out.</span>
+                                    </div>
+                                    <div class="settings-row">
+                                        <label>Cookie:</label>
+                                        <div class="settings-input-group">
+                                            <input type="password" id="settingsJanitoraiToken" placeholder="Paste the sb-auth-auth-token cookie value" autocomplete="off" spellcheck="false" data-sensitive="true">
+                                            <button id="toggleJanitoraiTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="settings-row" style="gap: 8px;">
+                                        <button id="saveJanitoraiTokenBtn" class="settings-action-btn primary">
+                                            <i class="fa-solid fa-right-to-bracket"></i> Save Login
+                                        </button>
+                                        <button id="clearJanitoraiTokenBtn" class="settings-action-btn danger">
+                                            <i class="fa-solid fa-right-from-bracket"></i> Log Out
+                                        </button>
+                                    </div>
+                                    <div class="settings-row">
+                                        <span id="janitoraiTokenStatus" class="settings-status-badge inactive"><i class="fa-solid fa-circle"></i> Not logged in</span>
+                                    </div>
+                                </div>
+                                <div class="settings-group">
+                                    <div class="settings-group-title"><i class="fa-solid fa-fire"></i> FlareSolverr (Hampter fallback)</div>
+                                    <div class="settings-row">
+                                        <span class="settings-hint">Optional fallback. JanitorAI's <strong>Trending</strong> and <strong>Popular</strong> sort orders normally load directly with no setup; if Cloudflare ever blocks that direct fetch, a <a href="https://github.com/FlareSolverr/FlareSolverr" target="_blank" rel="noopener noreferrer">FlareSolverr</a> instance configured here is used as a backup fetcher. JanitorAI serves only the first page of these sorts without an account, regardless of fetch method.</span>
                                     </div>
                                     <div class="settings-row">
                                         <label>URL:</label>
@@ -2970,8 +3038,37 @@ https://jannyai.com/characters/uuid_slug
                                 </button>
                             </div>
                         </div>
+
+                        <div class="settings-group">
+                            <div class="settings-group-title"><i class="fa-solid fa-images"></i> Pixiv Login</div>
+                            <div class="settings-row">
+                                <label>PHPSESSID:</label>
+                                <div class="settings-input-group">
+                                    <input type="password" id="settingsPixivCookie" placeholder="Paste your Pixiv PHPSESSID cookie" autocomplete="off" spellcheck="false" data-sensitive="true">
+                                    <button id="togglePixivCookieVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                        <i class="fa-solid fa-eye"></i>
+                                    </button>
+                                    <button id="validatePixivCookieBtn" class="settings-verify-btn" title="Test Connection">
+                                        <i class="fa-solid fa-check"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="settings-row">
+                                <span class="settings-hint">
+                                    Required only for <strong>R-18</strong> artworks; public artworks extract without a login. R-18 works also need "View R-18 works" turned ON in your Pixiv account settings, or their images come back empty. Log in at pixiv.net, then copy the <strong>PHPSESSID</strong> cookie value from DevTools (Application &rarr; Cookies &rarr; pixiv.net). Stored persistently and pushed to the cl-helper plugin. Requires the cl-helper plugin.
+                                </span>
+                            </div>
+                            <div class="settings-row" style="gap: 8px;">
+                                <button id="savePixivCookieBtn" class="settings-action-btn primary">
+                                    <i class="fa-solid fa-floppy-disk"></i> Save Login
+                                </button>
+                                <button id="clearPixivCookieBtn" class="settings-action-btn danger">
+                                    <i class="fa-solid fa-trash-can"></i> Clear Login
+                                </button>
+                            </div>
+                        </div>
                     </div>
-                    
+
                     <!-- Gallery Folders Section -->
                     <div class="settings-panel" data-section="gallery-folders">
                         <div class="settings-panel-header">
@@ -3087,7 +3184,7 @@ https://jannyai.com/characters/uuid_slug
                         <div class="settings-group">
                             <div class="settings-group-title"><i class="fa-solid fa-info-circle"></i> Version Info</div>
                             <div class="settings-row">
-                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.4.2</span>
+                                <span class="settings-hint" style="font-family: monospace;">Character Library v6.6.0</span>
                             </div>
                         </div>
 
@@ -3243,8 +3340,8 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=192"></script>
-    <script type="module" src="../modules/module-loader.js?v=43"></script>
-    <script src="library-mobile.js?v=21"></script>
+    <script src="library.js?v=194"></script>
+    <script type="module" src="../modules/module-loader.js?v=45"></script>
+    <script src="library-mobile.js?v=23"></script>
 </body>
 </html>

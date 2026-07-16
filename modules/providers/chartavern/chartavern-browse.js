@@ -2,7 +2,7 @@
 
 import { BrowseView } from '../browse-view.js';
 import CoreAPI from '../../core-api.js';
-import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, isMobileViewport } from '../provider-utils.js';
+import { IMG_PLACEHOLDER, formatNumber, BROWSE_PURIFY_CONFIG, skeletonLines, deferRender, isMobileMode, finishBrowseImport } from '../provider-utils.js';
 import {
     searchCards,
     fetchCharacterDetail,
@@ -27,13 +27,10 @@ const {
     debugLog,
     getSetting,
     setSetting,
-    fetchCharacters,
-    fetchAndAddCharacter,
     checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     deleteCharacter,
     getCharacterGalleryId,
-    showImportSummaryModal,
     formatRichText,
     debounce,
     apiRequest,
@@ -407,7 +404,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('ctCharModal');
     if (!modal) return;
-    window.resetBrowseSectionCollapseState?.(modal);
+    CoreAPI.resetBrowseSectionCollapseState(modal);
 
     const name = hit.name || 'Unknown';
     const author = hit.author || hit.path?.split('/')[0] || 'Unknown';
@@ -554,7 +551,7 @@ function openPreviewModal(hit) {
             if (altGreetings.length > 0) {
                 altGreetingsSection.style.display = 'block';
                 if (altGreetingsCountEl) altGreetingsCountEl.textContent = `(${altGreetings.length})`;
-                window.currentBrowseAltGreetings = altGreetings;
+                CoreAPI.setBrowseAltGreetings(altGreetings);
                 if (altGreetingsEl) {
                     const buildPreview = (text) => {
                         const cleaned = (text || '').replace(/\s+/g, ' ').trim();
@@ -591,7 +588,7 @@ function openPreviewModal(hit) {
                 }
             } else {
                 altGreetingsSection.style.display = 'none';
-                window.currentBrowseAltGreetings = [];
+                CoreAPI.setBrowseAltGreetings([]);
             }
         }
 
@@ -737,7 +734,7 @@ async function fetchAndPopulateDetails(hit, token) {
 
 function cleanupCtCharModal() {
     BrowseView.closeAvatarViewer();
-    window.currentBrowseAltGreetings = null;
+    CoreAPI.setBrowseAltGreetings(null);
     const sectionIds = [
         'ctCharDescription',
         'ctCharScenario',
@@ -849,30 +846,16 @@ async function importCharacter(charData) {
             }]
         };
 
-        // Mobile holds preview behind summary for the fade; desktop snaps preview off first then opens summary.
-        if (showSummary) {
-            if (window.matchMedia?.('(max-width: 768px)').matches) {
-                showImportSummaryModal(summaryArgs);
-                await new Promise(r => setTimeout(r, 220));
-                closePreviewModal();
-            } else {
-                closePreviewModal();
-                await new Promise(r => requestAnimationFrame(r));
-                showImportSummaryModal(summaryArgs);
-            }
-        } else {
-            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
-            await new Promise(r => setTimeout(r, 350));
-            closePreviewModal();
-        }
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
-        // Lightweight single-character add (avoids OOM from full list reload on mobile)
-        const added = await fetchAndAddCharacter(result.fileName);
-        if (added) view.addCharToLookup(added);
-        else await fetchCharacters(true);
-        markCardAsImported(charData.path);
+        await finishBrowseImport({
+            view,
+            summaryArgs,
+            showSummary,
+            closePreview: closePreviewModal,
+            importBtn,
+            characterName: result.characterName,
+            avatarFileName: result.fileName,
+            markImported: () => markCardAsImported(charData.path),
+        });
 
     } catch (err) {
         console.error('[CTBrowse] Import failed:', err);
@@ -887,7 +870,7 @@ async function importCharacter(charData) {
 function markCardAsImported(path) {
     const grid = document.getElementById('ctGrid');
     if (!grid) return;
-    const card = grid.querySelector(`[data-ct-path="${path}"]`);
+    const card = grid.querySelector(`[data-ct-path="${CSS.escape(path)}"]`);
     if (!card) return;
     card.classList.add('in-library');
     card.classList.remove('possible-library');
@@ -1027,8 +1010,10 @@ function updateCtFiltersButton() {
     const btn = document.getElementById('ctFiltersBtn');
     if (!btn) return;
 
-    const active = ctFilterHideOwned || ctFilterHidePossible || ctFilterHasLorebook || ctFilterIsOC;
-    btn.classList.toggle('has-filters', active);
+    const count = [ctFilterHideOwned, ctFilterHidePossible, ctFilterHasLorebook, ctFilterIsOC].filter(Boolean).length;
+    btn.classList.toggle('has-filters', count > 0);
+    const span = btn.querySelector('span');
+    if (span) span.textContent = count > 0 ? `Features (${count})` : 'Features';
 }
 
 // ========================================
@@ -1242,7 +1227,7 @@ function initCtView() {
         const ctAvatar = document.getElementById('ctCharAvatar');
         if (ctAvatar) {
             ctAvatar.addEventListener('click', (e) => {
-                if (isMobileViewport()) return;
+                if (isMobileMode()) return;
                 e.stopPropagation();
                 if (!ctAvatar.src || ctAvatar.src.endsWith('/img/ai4.png')) return;
                 // Strip CDN resize params to get original full-size PNG
@@ -1335,6 +1320,7 @@ function filterByAuthor(authorName) {
         bannerName.textContent = authorName;
         banner.classList.remove('hidden');
         window.pushOverlayGuard?.();
+        view._cdRef = { name: authorName };
     }
 
     closePreviewModal();
@@ -1923,6 +1909,17 @@ class ChartavernBrowseView extends BrowseView {
             const el = document.getElementById('ctSortSelect');
             if (el) el.value = defaults.sort;
         }
+        if (defaults.hideOwned) {
+            ctFilterHideOwned = true;
+            const el = document.getElementById('ctFilterHideOwned');
+            if (el) el.checked = true;
+        }
+        if (defaults.hidePossible) {
+            ctFilterHidePossible = true;
+            const el = document.getElementById('ctFilterHidePossible');
+            if (el) el.checked = true;
+        }
+        if (defaults.hideOwned || defaults.hidePossible) updateCtFiltersButton();
     }
 
     activate(container, options = {}) {

@@ -133,57 +133,55 @@
 }
 
 /* =========================================================
-   Mobile overrides (max-width: 768px)
+   Mobile-mode overrides (html.cl-mobile)
    ========================================================= */
-@media (max-width: 768px) {
-    .bt-section {
-        margin-bottom: 16px;
-    }
+html.cl-mobile .bt-section {
+    margin-bottom: 16px;
+}
 
-    .bt-existing {
-        padding: 10px;
-    }
+html.cl-mobile .bt-existing {
+    padding: 10px;
+}
 
-    .bt-group-pills,
-    .bt-pills {
-        gap: var(--space-sm);
-    }
+html.cl-mobile .bt-group-pills,
+html.cl-mobile .bt-pills {
+    gap: var(--space-sm);
+}
 
-    .bt-existing .cl-tag {
-        touch-action: manipulation;
-    }
+html.cl-mobile .bt-existing .cl-tag {
+    touch-action: manipulation;
+}
 
-    .bt-pill-close {
-        padding: 4px 2px;
-        margin-left: 4px;
-    }
+html.cl-mobile .bt-pill-close {
+    padding: 4px 2px;
+    margin-left: 4px;
+}
 
-    .bt-suggestions {
-        max-height: 40vh;
-    }
+html.cl-mobile .bt-suggestions {
+    max-height: 40vh;
+}
 
-    .bt-suggestion-item {
-        padding: 12px 14px;
-        min-height: var(--touch-target-min);
-        display: flex;
-        align-items: center;
-        font-size: var(--font-sm);
-        touch-action: manipulation;
-    }
+html.cl-mobile .bt-suggestion-item {
+    padding: 12px 14px;
+    min-height: var(--touch-target-min);
+    display: flex;
+    align-items: center;
+    font-size: var(--font-sm);
+    touch-action: manipulation;
+}
 
-    #batchTagModal .cl-modal-close {
-        padding: 8px 12px;
-        font-size: var(--font-xl);
-    }
+html.cl-mobile #batchTagModal .cl-modal-close {
+    padding: 8px 12px;
+    font-size: var(--font-xl);
+}
 
-    #batchTagModal .cl-modal-footer {
-        flex-direction: column;
-        gap: var(--space-sm);
-        padding-bottom: max(14px, var(--safe-bottom));
-    }
+html.cl-mobile #batchTagModal .cl-modal-footer {
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding-bottom: max(14px, var(--safe-bottom));
+}
 
-    #batchTagModal .cl-modal-footer .cl-btn {
-        width: 100%;
-        justify-content: center;
-    }
+html.cl-mobile #batchTagModal .cl-modal-footer .cl-btn {
+    width: 100%;
+    justify-content: center;
 }

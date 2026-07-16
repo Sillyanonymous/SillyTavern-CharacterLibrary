@@ -1647,18 +1647,16 @@
 .ai-studio-pool-max input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .ai-studio-pool-max input:focus { border-color: rgba(var(--accent-rgb), 0.3); }
 
-@media (max-width: 768px) {
-    .ai-studio-pool { gap: var(--space-xs); }
-    .ai-studio-pool-head { flex-wrap: wrap; row-gap: var(--space-2xs); }
-    .ai-studio-pool-head > label { flex: 0 0 auto; }
-    .ai-studio-pool-head .custom-select-container { max-width: none; flex: 1 1 auto; }
-    .ai-studio-pool-status { flex-basis: 100%; margin-left: 0; text-align: left; }
-    .ai-studio-pool-pill { padding: 4px var(--space-sm); }
-    .ai-studio-pool-foot { flex-wrap: wrap; row-gap: var(--space-2xs); }
-    .ai-studio-pool-tokens { flex: 1 1 auto; }
-    .ai-studio-pool-max { margin-left: 0; }
-    .ai-studio-pool-max input { font-size: var(--mobile-input-size); }
-}
+html.cl-mobile .ai-studio-pool { gap: var(--space-xs); }
+html.cl-mobile .ai-studio-pool-head { flex-wrap: wrap; row-gap: var(--space-2xs); }
+html.cl-mobile .ai-studio-pool-head > label { flex: 0 0 auto; }
+html.cl-mobile .ai-studio-pool-head .custom-select-container { max-width: none; flex: 1 1 auto; }
+html.cl-mobile .ai-studio-pool-status { flex-basis: 100%; margin-left: 0; text-align: left; }
+html.cl-mobile .ai-studio-pool-pill { padding: 4px var(--space-sm); }
+html.cl-mobile .ai-studio-pool-foot { flex-wrap: wrap; row-gap: var(--space-2xs); }
+html.cl-mobile .ai-studio-pool-tokens { flex: 1 1 auto; }
+html.cl-mobile .ai-studio-pool-max { margin-left: 0; }
+html.cl-mobile .ai-studio-pool-max input { font-size: var(--mobile-input-size); }
 
 /* --- Footer --- */
 
@@ -1719,397 +1717,394 @@
  * Mobile Overrides
  * ======================================== */
 
-@media (max-width: 768px) {
-    /* --- Character Creator --- */
+/* --- Character Creator --- */
 
-    /* Rounded top to frame as a bottom-sheet (creator reads as a feature) */
-    .creator-modal-glass {
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-    }
+/* Rounded top to frame as a bottom-sheet (creator reads as a feature) */
+html.cl-mobile .creator-modal-glass {
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+}
 
-    .creator-body {
-        flex-direction: column !important;
-    }
+html.cl-mobile .creator-body {
+    flex-direction: column !important;
+}
 
-    .creator-mobile-topbar {
-        display: flex !important;
-        align-items: center;
-        gap: var(--space-sm-md);
-        padding: 0 0 10px;
-        border-bottom: 1px solid var(--glass-border);
-        margin-bottom: 10px;
-    }
+html.cl-mobile .creator-mobile-topbar {
+    display: flex !important;
+    align-items: center;
+    gap: var(--space-sm-md);
+    padding: 0 0 10px;
+    border-bottom: 1px solid var(--glass-border);
+    margin-bottom: 10px;
+}
 
-    .creator-mobile-avatar {
-        width: 52px;
-        height: 52px;
-        border-radius: var(--radius-lg);
-        background: rgba(255,255,255,0.06);
-        border: 1px dashed rgba(255,255,255,0.15);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        cursor: pointer;
-        color: var(--text-secondary);
-        font-size: var(--font-lg);
-        overflow: hidden;
-        touch-action: manipulation;
-    }
+html.cl-mobile .creator-mobile-avatar {
+    width: 52px;
+    height: 52px;
+    border-radius: var(--radius-lg);
+    background: rgba(255,255,255,0.06);
+    border: 1px dashed rgba(255,255,255,0.15);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--font-lg);
+    overflow: hidden;
+    touch-action: manipulation;
+}
 
-    .creator-mobile-avatar img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-    }
+html.cl-mobile .creator-mobile-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
 
-    .creator-mobile-profile {
-        display: flex;
-        align-items: center;
-        gap: var(--space-xs-sm);
-        flex: 1;
-        min-width: 0;
-        min-height: var(--touch-target-min);
-    }
+html.cl-mobile .creator-mobile-profile {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs-sm);
+    flex: 1;
+    min-width: 0;
+    min-height: var(--touch-target-min);
+}
 
-    .creator-mobile-profile-select {
-        flex: 1;
-        min-width: 0;
-        font-size: var(--mobile-input-size);
-        padding: 8px 10px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid var(--glass-border);
-        border-radius: var(--radius-lg);
-        color: var(--text-primary);
-        -webkit-appearance: none;
-        appearance: none;
-        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
-        background-repeat: no-repeat;
-        background-position: right 10px center;
-        background-size: 10px;
-        padding-right: 28px;
-    }
+html.cl-mobile .creator-mobile-profile-select {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--mobile-input-size);
+    padding: 8px 10px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px;
+    padding-right: 28px;
+}
 
-    .creator-fields {
-        padding: 12px !important;
-    }
+html.cl-mobile .creator-fields {
+    padding: 12px !important;
+}
 
-    .creator-fields .glass-input {
-        font-size: var(--mobile-input-size) !important;
-    }
+html.cl-mobile .creator-fields .glass-input {
+    font-size: var(--mobile-input-size) !important;
+}
 
-    .creator-fields textarea.glass-input {
-        font-size: var(--font-md) !important;
-    }
+html.cl-mobile .creator-fields textarea.glass-input {
+    font-size: var(--font-md) !important;
+}
 
-    .creator-footer {
-        padding: 8px 12px !important;
-        padding-bottom: max(8px, var(--safe-bottom)) !important;
-    }
+html.cl-mobile .creator-footer {
+    padding: 8px 12px !important;
+    padding-bottom: max(8px, var(--safe-bottom)) !important;
+}
 
-    .creator-footer-left,
-    .creator-footer-right {
-        gap: var(--space-xs-sm) !important;
-    }
+html.cl-mobile .creator-footer-left,
+html.cl-mobile .creator-footer-right {
+    gap: var(--space-xs-sm) !important;
+}
 
-    .creator-footer .action-btn {
-        padding: 8px 12px !important;
-        font-size: var(--font-sm) !important;
-        min-height: 38px;
-    }
+html.cl-mobile .creator-footer .action-btn {
+    padding: 8px 12px !important;
+    font-size: var(--font-sm) !important;
+    min-height: 38px;
+}
 
-    .creator-footer .creator-split-btn .action-btn:first-child {
-        padding: 8px 12px !important;
-    }
+html.cl-mobile .creator-footer .creator-split-btn .action-btn:first-child {
+    padding: 8px 12px !important;
+}
 
-    /* Hide import button label text, keep icon only */
-    #creatorImportBtn .fa-file-import {
-        margin: 0;
-    }
+/* Hide import button label text, keep icon only */
+html.cl-mobile #creatorImportBtn .fa-file-import {
+    margin: 0;
+}
 
-    #creatorImportBtn {
-        font-size: 0 !important;
-        padding: 8px 14px !important;
-        min-width: var(--touch-target-min);
-    }
+html.cl-mobile #creatorImportBtn {
+    font-size: 0 !important;
+    padding: 8px 14px !important;
+    min-width: var(--touch-target-min);
+}
 
-    #creatorImportBtn i {
-        font-size: var(--font-base) !important;
-    }
+html.cl-mobile #creatorImportBtn i {
+    font-size: var(--font-base) !important;
+}
 
-    .creator-tag-input-row .glass-input {
-        font-size: var(--mobile-input-size) !important;
-    }
+html.cl-mobile .creator-tag-input-row .glass-input {
+    font-size: var(--mobile-input-size) !important;
+}
 
-    .creator-ai-btn {
-        min-height: var(--touch-target-min);
-        min-width: var(--touch-target-min);
-        touch-action: manipulation;
-        padding: 0 !important;
-        justify-content: center;
-    }
+html.cl-mobile .creator-ai-btn {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+    touch-action: manipulation;
+    padding: 0 !important;
+    justify-content: center;
+}
 
-    .creator-alt-remove {
-        min-height: var(--touch-target-min);
-        min-width: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .creator-alt-remove {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+    touch-action: manipulation;
+}
 
-    .creator-split-caret {
-        min-height: var(--touch-target-min);
-        min-width: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .creator-split-caret {
+    min-height: var(--touch-target-min);
+    min-width: var(--touch-target-min);
+    touch-action: manipulation;
+}
 
-    .creator-split-menu .dropdown-item {
-        min-height: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .creator-split-menu .dropdown-item {
+    min-height: var(--touch-target-min);
+    touch-action: manipulation;
+}
 
-    .creator-saveas-diff-content {
-        height: 100% !important;
-    }
+html.cl-mobile .creator-saveas-diff-content {
+    height: 100% !important;
+}
 
-    .diff-avatar-row {
-        gap: var(--space-sm-md);
-    }
+html.cl-mobile .diff-avatar-row {
+    gap: var(--space-sm-md);
+}
 
-    .diff-avatar-side img {
-        width: 52px;
-        height: 52px;
-    }
+html.cl-mobile .diff-avatar-side img {
+    width: 52px;
+    height: 52px;
+}
 
-    .diff-item-label { font-size: var(--font-xs); }
-    .diff-old,
-    .diff-new { font-size: var(--font-xs); }
+html.cl-mobile .diff-item-label { font-size: var(--font-xs); }
+html.cl-mobile .diff-old,
+html.cl-mobile .diff-new { font-size: var(--font-xs); }
 
-    /* --- Import Picker --- */
+/* --- Import Picker --- */
 
-    .creator-import-panel {
-        width: 100% !important;
-        max-width: 100% !important;
-        height: 100% !important;
-        max-height: 100% !important;
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-    }
+html.cl-mobile .creator-import-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+}
 
-    .creator-import-search .glass-input {
-        font-size: var(--mobile-input-size) !important;
-    }
+html.cl-mobile .creator-import-search .glass-input {
+    font-size: var(--mobile-input-size) !important;
+}
 
-    .creator-import-item {
-        min-height: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .creator-import-item {
+    min-height: var(--touch-target-min);
+    touch-action: manipulation;
+}
 
-    .creator-import-name { font-size: var(--font-xs); }
+html.cl-mobile .creator-import-name { font-size: var(--font-xs); }
 
-    /* --- AI Studio --- */
+/* --- AI Studio --- */
 
-    .ai-studio-modal {
-        width: 100% !important;
-        height: 100% !important;
-        max-width: 100% !important;
-        max-height: 100% !important;
-        border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
-        border: none !important;
-    }
+html.cl-mobile .ai-studio-modal {
+    width: 100% !important;
+    height: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+    border: none !important;
+}
 
-    .ai-studio-header {
-        padding: 10px 14px;
-    }
+html.cl-mobile .ai-studio-header {
+    padding: 10px 14px;
+}
 
-    .ai-studio-header-actions {
-        gap: var(--space-xs);
-    }
+html.cl-mobile .ai-studio-header-actions {
+    gap: var(--space-xs);
+}
 
-    .ai-studio-icon {
-        width: 30px;
-        height: 30px;
-        font-size: var(--font-sm);
-    }
+html.cl-mobile .ai-studio-icon {
+    width: 30px;
+    height: 30px;
+    font-size: var(--font-sm);
+}
 
-    .ai-studio-title h3 { font-size: var(--font-md-lg); }
+html.cl-mobile .ai-studio-title h3 { font-size: var(--font-md-lg); }
 
-    .ai-studio-history-nav {
-        gap: var(--space-2xs);
-        padding: 2px;
-    }
+html.cl-mobile .ai-studio-history-nav {
+    gap: var(--space-2xs);
+    padding: 2px;
+}
 
-    .ai-studio-nav-btn {
-        width: 38px;
-        height: 38px;
-        min-height: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .ai-studio-nav-btn {
+    width: 38px;
+    height: 38px;
+    min-height: var(--touch-target-min);
+    touch-action: manipulation;
+}
 
-    /* Brainstorm toggle: square touch target + extra breathing room so
-       the hint glow doesn't clip against the adjacent history-nav pill. */
-    #studioBrainstormToggle {
-        width: var(--touch-target-min);
-        height: var(--touch-target-min);
-        margin-right: var(--space-2xs);
-    }
+/* Brainstorm toggle: square touch target + extra breathing room so
+   the hint glow doesn't clip against the adjacent history-nav pill. */
+html.cl-mobile #studioBrainstormToggle {
+    width: var(--touch-target-min);
+    height: var(--touch-target-min);
+    margin-right: var(--space-2xs);
+}
 
-    /* Replace desktop's outward box-shadow pulse with a contained
-       icon-only drop-shadow + scale. The desktop ring extends ~13px
-       outside the button and clips against neighbors at mobile gaps. */
-    #studioBrainstormToggle.brainstorm-hint {
-        animation: none;
-    }
-    #studioBrainstormToggle.brainstorm-hint i {
-        animation: brainstormHintMobileIcon 0.8s ease-in-out 2;
-    }
-    @keyframes brainstormHintMobileIcon {
-        0%, 100% {
-            transform: scale(1);
-            filter: drop-shadow(0 0 0 rgba(var(--accent-rgb, 74, 158, 255), 0));
-            color: var(--text-secondary);
-        }
-        50% {
-            transform: scale(1.18);
-            filter: drop-shadow(0 0 6px rgba(var(--accent-rgb, 74, 158, 255), 0.75));
-            color: var(--accent);
-        }
-    }
-
-    .ai-studio-header,
-    .creator-import-header {
-        position: relative;
-        padding-left: var(--back-arrow-zone);
-    }
-    .ai-studio-close-btn {
-        position: absolute;
-        top: 50%;
-        left: var(--space-sm);
-        transform: translateY(-50%);
-        min-width: var(--touch-target-min);
-        min-height: var(--touch-target-min);
-        padding: 0;
-        font-size: 0;
-        z-index: 5;
-        touch-action: manipulation;
-    }
-    .ai-studio-close-btn i { display: none; }
-    .ai-studio-close-btn::before {
-        content: '\f060';
-        font-family: 'Font Awesome 6 Free';
-        font-weight: 900;
-        font-size: var(--font-xl);
-        line-height: 1;
+/* Replace desktop's outward box-shadow pulse with a contained
+   icon-only drop-shadow + scale. The desktop ring extends ~13px
+   outside the button and clips against neighbors at mobile gaps. */
+html.cl-mobile #studioBrainstormToggle.brainstorm-hint {
+    animation: none;
+}
+html.cl-mobile #studioBrainstormToggle.brainstorm-hint i {
+    animation: brainstormHintMobileIcon 0.8s ease-in-out 2;
+}
+@keyframes brainstormHintMobileIcon {
+    0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 0 0 rgba(var(--accent-rgb, 74, 158, 255), 0));
         color: var(--text-secondary);
     }
-    .ai-studio-close-btn:active::before { color: var(--text-primary); }
-
-    html.cl-hide-back-arrows .ai-studio-close-btn {
-        display: none !important;
-        visibility: hidden !important;
+    50% {
+        transform: scale(1.18);
+        filter: drop-shadow(0 0 6px rgba(var(--accent-rgb, 74, 158, 255), 0.75));
+        color: var(--accent);
     }
-    html.cl-hide-back-arrows .ai-studio-header,
-    html.cl-hide-back-arrows .creator-import-header {
-        padding-left: var(--space-md) !important;
-    }
+}
 
-    .ai-studio-content-area {
-        padding: 10px 12px 6px;
-    }
+html.cl-mobile .ai-studio-header,
+html.cl-mobile .creator-import-header {
+    position: relative;
+    padding-left: var(--back-arrow-zone);
+}
+html.cl-mobile .ai-studio-close-btn {
+    position: absolute;
+    top: 50%;
+    left: var(--space-sm);
+    transform: translateY(-50%);
+    min-width: var(--touch-target-min);
+    min-height: var(--touch-target-min);
+    padding: 0;
+    font-size: 0;
+    z-index: 5;
+    touch-action: manipulation;
+}
+html.cl-mobile .ai-studio-close-btn i { display: none; }
+html.cl-mobile .ai-studio-close-btn::before {
+    content: '\f060';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    font-size: var(--font-xl);
+    line-height: 1;
+    color: var(--text-secondary);
+}
+html.cl-mobile .ai-studio-close-btn:active::before { color: var(--text-primary); }
 
-    .ai-studio-textarea {
-        font-size: var(--font-md) !important;
-        padding: 12px 14px;
-        border-radius: var(--radius-xl);
-    }
-    .ai-studio-textarea::placeholder { font-size: var(--font-xs); }
+html.cl-hide-back-arrows.cl-mobile .ai-studio-close-btn {
+    display: none !important;
+    visibility: hidden !important;
+}
+html.cl-hide-back-arrows.cl-mobile .ai-studio-header,
+html.cl-hide-back-arrows.cl-mobile .creator-import-header {
+    padding-left: var(--space-md) !important;
+}
 
-    .ai-studio-highlight-layer {
-        padding: 12px 14px;
-        font-size: var(--font-md) !important;
-    }
+html.cl-mobile .ai-studio-content-area {
+    padding: 10px 12px 6px;
+}
 
-    .ai-studio-conversation {
-        padding: 6px 12px;
-        max-height: 160px;
-    }
+html.cl-mobile .ai-studio-textarea {
+    font-size: var(--font-md) !important;
+    padding: 12px 14px;
+    border-radius: var(--radius-xl);
+}
+html.cl-mobile .ai-studio-textarea::placeholder { font-size: var(--font-xs); }
 
-    .ai-studio-conversation:has(.ai-studio-empty-state) {
-        max-height: none;
-        overflow-y: visible;
-    }
+html.cl-mobile .ai-studio-highlight-layer {
+    padding: 12px 14px;
+    font-size: var(--font-md) !important;
+}
 
-    /* Drop the empty-state hint (icon + "Tell the AI what to write"): the length
-       selector lives in .ai-studio-input-area and is untouched. */
-    .ai-studio-empty-state { display: none; }
+html.cl-mobile .ai-studio-conversation {
+    padding: 6px 12px;
+    max-height: 160px;
+}
 
-    /* Field-settings panel (sliders button) fills below the header on mobile;
-       the inline 40%-cap desktop panel is too cramped on a phone. */
-    .studio-settings-panel { max-height: none; animation: none; }
-    .studio-settings-panel:not(.hidden) { flex: 1 1 auto; }
-    .studio-settings-panel:not(.hidden) ~ .ai-studio-body,
-    .studio-settings-panel:not(.hidden) ~ .ai-studio-footer { display: none; }
+html.cl-mobile .ai-studio-conversation:has(.ai-studio-empty-state) {
+    max-height: none;
+    overflow-y: visible;
+}
 
-    html.cl-keyboard-open .ai-studio-conversation { display: none; }
+/* Drop the empty-state hint (icon + "Tell the AI what to write"): the length
+   selector lives in .ai-studio-input-area and is untouched. */
+html.cl-mobile .ai-studio-empty-state { display: none; }
 
-    .ai-studio-input-area {
-        padding: 6px 12px 10px;
-        padding-bottom: max(10px, var(--safe-bottom));
-    }
+/* Field-settings panel (sliders button) fills below the header on mobile;
+   the inline 40%-cap desktop panel is too cramped on a phone. */
+html.cl-mobile .studio-settings-panel { max-height: none; animation: none; }
+html.cl-mobile .studio-settings-panel:not(.hidden) { flex: 1 1 auto; }
+html.cl-mobile .studio-settings-panel:not(.hidden) ~ .ai-studio-body,
+html.cl-mobile .studio-settings-panel:not(.hidden) ~ .ai-studio-footer { display: none; }
 
-    .ai-studio-selection-badge {
-        font-size: var(--font-2xs);
-    }
+html.cl-keyboard-open.cl-mobile .ai-studio-conversation { display: none; }
 
-    .ai-studio-selection-clear {
-        width: 22px;
-        height: 22px;
-        min-height: 22px;
-        touch-action: manipulation;
-    }
+html.cl-mobile .ai-studio-input-area {
+    padding: 6px 12px 10px;
+    padding-bottom: max(10px, var(--safe-bottom));
+}
 
-    .ai-studio-input {
-        font-size: var(--mobile-input-size) !important;
-    }
+html.cl-mobile .ai-studio-selection-badge {
+    font-size: var(--font-2xs);
+}
 
-    .ai-studio-input-row {
-        padding: 3px 3px 3px 14px;
-    }
+html.cl-mobile .ai-studio-selection-clear {
+    width: 22px;
+    height: 22px;
+    min-height: 22px;
+    touch-action: manipulation;
+}
 
-    .ai-studio-send-btn,
-    .ai-studio-stop-btn {
-        width: 36px;
-        height: 36px;
-        min-height: 36px;
-        touch-action: manipulation;
-    }
+html.cl-mobile .ai-studio-input {
+    font-size: var(--mobile-input-size) !important;
+}
 
-    .ai-studio-footer {
-        padding: 10px 12px;
-        padding-bottom: max(10px, var(--safe-bottom));
-    }
+html.cl-mobile .ai-studio-input-row {
+    padding: 3px 3px 3px 14px;
+}
 
-    .ai-studio-send-btn:hover {
-        transform: none !important;
-    }
+html.cl-mobile .ai-studio-send-btn,
+html.cl-mobile .ai-studio-stop-btn {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    touch-action: manipulation;
+}
 
-    .studio-settings-panel {
-        padding: 10px 14px;
-    }
+html.cl-mobile .ai-studio-footer {
+    padding: 10px 12px;
+    padding-bottom: max(10px, var(--safe-bottom));
+}
 
-    .studio-settings-prompt {
-        font-size: var(--font-sm) !important;
-    }
-    .studio-settings-prompt::placeholder { font-size: var(--font-xs); }
+html.cl-mobile .ai-studio-send-btn:hover {
+    transform: none !important;
+}
 
-    .studio-settings-preset-select {
-        font-size: var(--mobile-input-size) !important;
-    }
+html.cl-mobile .studio-settings-panel {
+    padding: 10px 14px;
+}
 
-    .studio-settings-check {
-        min-height: var(--touch-target-min);
-        touch-action: manipulation;
-    }
+html.cl-mobile .studio-settings-prompt {
+    font-size: var(--font-sm) !important;
+}
+html.cl-mobile .studio-settings-prompt::placeholder { font-size: var(--font-xs); }
 
-    .studio-settings-checks {
-        flex-direction: column;
-    }
+html.cl-mobile .studio-settings-preset-select {
+    font-size: var(--mobile-input-size) !important;
+}
 
+html.cl-mobile .studio-settings-check {
+    min-height: var(--touch-target-min);
+    touch-action: manipulation;
+}
+
+html.cl-mobile .studio-settings-checks {
+    flex-direction: column;
 }

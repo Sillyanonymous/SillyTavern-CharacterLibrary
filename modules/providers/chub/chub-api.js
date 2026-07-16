@@ -52,6 +52,7 @@ export function getChubHeaders(includeAuth = true) {
 }
 
 export { fetchWithProxy } from '../provider-utils.js';
+import { proxyEncode } from '../provider-utils.js';
 
 // ========================================
 // RESPONSE HELPERS
@@ -103,7 +104,7 @@ export async function fetchChubMetadata(fullPath) {
             response = await fetch(url, { headers: getChubHeaders(true) });
         } catch (directError) {
             debugLog('[Chub] Direct fetch failed, trying proxy:', directError.message);
-            const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+            const proxyUrl = `/proxy/${proxyEncode(url)}`;
             response = await fetch(proxyUrl, { headers: getChubHeaders(true) });
         }
 
@@ -192,7 +193,7 @@ export async function fetchChubLinkedLorebook(projectId) {
             commitsResp = await fetch(commitsUrl, { headers });
             if (!commitsResp.ok) throw new Error(`HTTP ${commitsResp.status}`);
         } catch (_) {
-            commitsResp = await fetch(`/proxy/${encodeURIComponent(commitsUrl)}`, { headers });
+            commitsResp = await fetch(`/proxy/${proxyEncode(commitsUrl)}`, { headers });
             if (!commitsResp.ok) return null;
         }
         const commits = await commitsResp.json();
@@ -205,7 +206,7 @@ export async function fetchChubLinkedLorebook(projectId) {
             cardResp = await fetch(cardUrl, { headers });
             if (!cardResp.ok) throw new Error(`HTTP ${cardResp.status}`);
         } catch (_) {
-            cardResp = await fetch(`/proxy/${encodeURIComponent(cardUrl)}`, { headers });
+            cardResp = await fetch(`/proxy/${proxyEncode(cardUrl)}`, { headers });
             if (!cardResp.ok) return null;
         }
         const card = await cardResp.json();

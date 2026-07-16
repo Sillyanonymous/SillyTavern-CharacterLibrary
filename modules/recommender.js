@@ -1122,10 +1122,8 @@ function stripOrphanSurrogates(str) {
         .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 }
 
-// Active-namespace read: real provider id when linked, 'cl' for unlinked cards. Ignores orphan provider namespaces left on re-linked cards.
 function getProviderTagline(char) {
-    const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
-    const tagline = char.data?.extensions?.[ns]?.tagline;
+    const tagline = CoreAPI.getDisplayTagline(char);
     if (!tagline) return '';
     return cleanTextForLLM(tagline).slice(0, 400);
 }
@@ -1155,34 +1153,15 @@ async function loadProfiles() {
     else selectEl.classList.add('hidden');
 
     try {
-        const response = await CoreAPI.apiRequest('/settings/get', 'POST', {});
-        if (!response.ok) throw new Error('Could not fetch settings');
+        const s = await CoreAPI.getLlmSettings();
+        if (s.error) throw new Error('Could not fetch settings');
 
-        const data = await response.json();
-        const settings = typeof data.settings === 'string' ? JSON.parse(data.settings) : data.settings;
+        activeSource = s.activeSource;
+        activeModel = s.activeModel;
+        activePreset = s.activePreset;
+        const ccProfiles = s.profiles;
 
-        // chat_completion_source lives inside the active OAI preset, not top-level settings.json
-        activeSource = '';
-        activeModel = '';
-        activePreset = null;
-        const presetName = settings?.preset_settings_openai;
-        if (presetName && Array.isArray(data.openai_setting_names) && Array.isArray(data.openai_settings)) {
-            const idx = data.openai_setting_names.indexOf(presetName);
-            if (idx >= 0) {
-                try {
-                    const preset = typeof data.openai_settings[idx] === 'string'
-                        ? JSON.parse(data.openai_settings[idx])
-                        : data.openai_settings[idx];
-                    activePreset = preset;
-                    activeSource = preset?.chat_completion_source || '';
-                    activeModel = CoreAPI.resolvePresetModel(preset);
-                } catch { /* corrupt preset */ }
-            }
-        }
-
-        const cm = settings?.extension_settings?.connectionManager;
-
-        if (!cm?.profiles?.length) {
+        if (!s.hasProfiles) {
             dot.className = 'recommender-connection-dot connected';
             text.textContent = activeSource
                 ? `${activeSource}${activeModel ? ' — ' + activeModel : ''}`
@@ -1192,7 +1171,6 @@ async function loadProfiles() {
             return;
         }
 
-        const ccProfiles = cm.profiles.filter(p => p.mode === 'cc');
         if (!ccProfiles.length) {
             dot.className = 'recommender-connection-dot connected';
             text.textContent = activeSource
@@ -1211,8 +1189,8 @@ async function loadProfiles() {
         const savedId = getOpt('stProfileId');
         if (savedId && ccProfiles.some(p => p.id === savedId)) {
             selectEl.value = savedId;
-        } else if (cm.selectedProfile && ccProfiles.some(p => p.id === cm.selectedProfile)) {
-            selectEl.value = cm.selectedProfile;
+        } else if (s.selectedProfileId && ccProfiles.some(p => p.id === s.selectedProfileId)) {
+            selectEl.value = s.selectedProfileId;
         } else {
             selectEl.value = ccProfiles[0].id;
         }
@@ -1597,13 +1575,12 @@ function computeLorebookInfo(char) {
 // Content fields only; operational extensions (gallery_id, version_uid, provider links, etc.) are deliberately omitted.
 function buildChatCardContext(char, includeLorebook) {
     const d = char.data || {};
-    const ns = window.ProviderRegistry?.getActiveTaglineNamespace?.(char) ?? 'cl';
     const arr = v => (Array.isArray(v) && v.length) ? v : undefined;
     const card = {
         name: d.name || char.name,
         creator: d.creator || undefined,
         character_version: d.character_version || undefined,
-        tagline: d.extensions?.[ns]?.tagline || undefined,
+        tagline: CoreAPI.getDisplayTagline(char) || undefined,
         tags: arr(d.tags),
         description: d.description || undefined,
         personality: d.personality || undefined,
@@ -1782,7 +1759,7 @@ async function openCharChat(avatar) {
     renderChatMessages();
     modal.classList.add('visible');
     // Mobile: drop the keyboard-only Enter/Shift+Enter hint; desktop keeps the full template placeholder.
-    if (matchMedia('(max-width: 768px)').matches) {
+    if (CoreAPI.isMobileMode()) {
         const ci = document.getElementById('recommenderChatInput');
         if (ci) ci.placeholder = 'Ask about this character';
     }
@@ -1855,7 +1832,7 @@ function forceCloseCharChat() {
 }
 
 function collapseSettingsOnMobile() {
-    if (matchMedia('(pointer: coarse)').matches) {
+    if (CoreAPI.isMobileMode()) {
         const panel = document.getElementById('recommenderSettingsPanel');
         if (panel && !panel.classList.contains('hidden')) {
             panel.classList.add('hidden');

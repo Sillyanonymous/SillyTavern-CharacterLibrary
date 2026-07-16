@@ -1,19 +1,22 @@
 /**
  * ImgBB / ibb.co Gallery Extractor
  *
- * Extracts images from ibb.co album pages via embedded JSON data.
- * Album pages embed `data-object='...'` attributes on each image element,
- * containing URL-encoded JSON with the full-size image URL.
- * Pagination uses POST to /json with seek-based cursors.
+ * Albums: pages embed `data-object='...'` attributes per image (URL-encoded
+ * JSON with the full-size URL); pagination POSTs to same-origin /json with
+ * seek-based cursors. Single image pages: og:image carries the full-size
+ * i.ibb.co URL.
  *
- * Pattern: https://ibb.co/album/{albumId}
- * Full-size URLs: https://i.ibb.co/{id}/{filename}
+ * Patterns: https://ibb.co/album/{albumId}, https://ibb.co/{slug}
+ * (ibb.co.com serves identical markup). Full-size URLs: https://i.ibb.co/{id}/{filename}
  */
 
 import { registerExtractor } from './extractor-registry.js';
+import { proxyEncode } from '../providers/provider-utils.js';
 
+// Host-anchored on // so direct i.ibb.co file URLs never match.
 const IMGBB_PATTERNS = [
-    /ibb\.co\/album\/[a-zA-Z0-9]+/
+    /\/\/(?:www\.)?ibb\.co(?:\.com)?\/album\/[a-zA-Z0-9]+/,
+    /\/\/(?:www\.)?ibb\.co(?:\.com)?\/(?!album\b|json\b|login\b|upload\b)[a-zA-Z0-9]{6,16}\/?$/,
 ];
 
 const DATA_OBJECT_REGEX = /data-object='([^']+)'/g;
@@ -25,7 +28,7 @@ const REQUEST_DELAY_MS = 300;
 const MAX_PAGES = 20;
 
 /**
- * @param {string} url - ibb.co album URL
+ * @param {string} url - ibb.co album or single-image page URL
  * @param {Object} opts
  * @param {AbortSignal} [opts.signal]
  * @returns {Promise<import('./extractor-registry.js').ExtractorResult>}
@@ -36,40 +39,58 @@ async function extractImages(url, opts = {}) {
     if (signal?.aborted) return { images: [], aborted: true };
 
     try {
-        const html = await fetchPage(url, signal);
-
-        const images = parseDataObjects(html);
-
-        const seekMatch = SEEK_REGEX.exec(html);
-        const authMatch = AUTH_TOKEN_REGEX.exec(html);
-        const hasNext = HAS_NEXT_REGEX.test(html);
-
-        if (hasNext && seekMatch && authMatch) {
-            const albumMatch = url.match(/ibb\.co\/album\/([a-zA-Z0-9]+)/);
-            if (albumMatch) {
-                const paginatedImages = await fetchPaginatedImages(
-                    albumMatch[1], seekMatch[1], authMatch[1], signal
-                );
-                images.push(...paginatedImages);
-            }
-        }
-
-        if (images.length === 0) {
-            return { images: [], error: 'No images found in album' };
-        }
-
-        const seen = new Set();
-        const unique = images.filter(img => {
-            if (seen.has(img.url)) return false;
-            seen.add(img.url);
-            return true;
-        });
-
-        return { images: unique };
+        const albumMatch = url.match(/ibb\.co(?:\.com)?\/album\/([a-zA-Z0-9]+)/);
+        return albumMatch
+            ? await extractAlbum(url, albumMatch[1], signal)
+            : await extractSinglePage(url, signal);
     } catch (err) {
         if (err.name === 'AbortError') return { images: [], aborted: true };
         return { images: [], error: err.message };
     }
+}
+
+async function extractAlbum(url, albumId, signal) {
+    const html = await fetchPage(url, signal);
+
+    const images = parseDataObjects(html);
+
+    const seekMatch = SEEK_REGEX.exec(html);
+    const authMatch = AUTH_TOKEN_REGEX.exec(html);
+    const hasNext = HAS_NEXT_REGEX.test(html);
+
+    if (hasNext && seekMatch && authMatch) {
+        const paginatedImages = await fetchPaginatedImages(
+            new URL(url).origin, albumId, seekMatch[1], authMatch[1], signal
+        );
+        images.push(...paginatedImages);
+    }
+
+    if (images.length === 0) {
+        // Flagged albums list nothing to guests (SSR and /json both come back empty).
+        return { images: [], error: 'No images found in album (empty or hidden from anonymous viewers)' };
+    }
+
+    const seen = new Set();
+    const unique = images.filter(img => {
+        if (seen.has(img.url)) return false;
+        seen.add(img.url);
+        return true;
+    });
+
+    return { images: unique };
+}
+
+async function extractSinglePage(url, signal) {
+    const html = await fetchPage(url, signal);
+
+    // og:image is the full-size original (the inline viewer img is a display-size variant with a different id).
+    const m = /<meta property="og:image" content="([^"]+)"/.exec(html)
+        || /<link rel="image_src" href="([^"]+)"/.exec(html);
+    const direct = m?.[1];
+    if (!direct || !/\/\/i\.ibb\.co\//.test(direct)) {
+        return { images: [], error: 'No direct image found on page' };
+    }
+    return { images: [{ url: direct, filename: direct.split('/').pop() }] };
 }
 
 function parseDataObjects(html) {
@@ -95,7 +116,7 @@ function parseDataObjects(html) {
     return images;
 }
 
-async function fetchPaginatedImages(albumId, initialSeek, authToken, signal) {
+async function fetchPaginatedImages(origin, albumId, initialSeek, authToken, signal) {
     const images = [];
     let seek = initialSeek;
     let page = 2;
@@ -113,7 +134,8 @@ async function fetchPaginatedImages(albumId, initialSeek, authToken, signal) {
                 pathname: `/album/${albumId}`,
             });
 
-            const jsonUrl = `https://ibb.co/json`;
+            // Same-origin as the album page; auth_token + seek come from that page's session.
+            const jsonUrl = `${origin}/json`;
             let response;
             try {
                 response = await fetch(jsonUrl, {
@@ -126,7 +148,7 @@ async function fetchPaginatedImages(albumId, initialSeek, authToken, signal) {
                     signal,
                 });
             } catch (_) {
-                const proxyUrl = `/proxy/${encodeURIComponent(jsonUrl)}`;
+                const proxyUrl = `/proxy/${proxyEncode(jsonUrl)}`;
                 response = await fetch(proxyUrl, {
                     method: 'POST',
                     headers: {
@@ -162,7 +184,7 @@ async function fetchPage(url, signal) {
     try {
         response = await fetch(url, { signal });
     } catch (_) {
-        const proxyUrl = `/proxy/${encodeURIComponent(url)}`;
+        const proxyUrl = `/proxy/${proxyEncode(url)}`;
         response = await fetch(proxyUrl, { signal });
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
