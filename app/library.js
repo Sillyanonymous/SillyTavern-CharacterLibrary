@@ -20994,7 +20994,7 @@ const FAST_SKIP_MIN_NAME_LENGTH = 4;
 // Duplicated in index.js (extractSanitizedUrlNameForChat). keep in sync
 const CDN_VARIANT_NAMES = new Set(['public', 'original', 'raw', 'full', 'thumbnail', 'thumb',
     'medium', 'small', 'large', 'xl', 'default', 'image', 'photo', 'download', 'view',
-    'highres', 'hires', 'high', 'lowres', 'lores', 'low', 'preview', 'avatar']);
+    'highres', 'hires', 'high', 'lowres', 'lores', 'low', 'preview', 'avatar', 'card']);
 
 function extractSanitizedUrlName(url) {
     try {

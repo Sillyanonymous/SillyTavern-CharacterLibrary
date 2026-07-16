@@ -1195,7 +1195,9 @@ function renderSaucepanGallery(portraits) {
     if (label) label.textContent = `(${portraits.length})`;
     grid.innerHTML = portraits.map(p => {
         // CORP headers block hotlinking; route through cl-helper's proxy.
-        const url = resolveSaucepanImageUrl(p?.image?.highres_url || p?.image?.url);
+        // Portrait images come back as { id } only, so build the CDN URL from it.
+        const url = resolveSaucepanImageUrl(p?.image?.highres_url || p?.image?.url
+            || (p?.image?.id ? `https://saucepan.ai/cdn/${p.image.id}/card` : ''));
         if (!url) return '';
         const title = p?.description || p?.name || 'Gallery image';
         return `<div class="browse-gallery-cell"><img class="browse-gallery-thumb" src="${escapeHtml(url)}" alt="${escapeHtml(title)}" title="${escapeHtml(title)}" loading="lazy" onload="this.parentElement.classList.add('loaded')" onerror="this.parentElement.classList.add('load-failed')"></div>`;

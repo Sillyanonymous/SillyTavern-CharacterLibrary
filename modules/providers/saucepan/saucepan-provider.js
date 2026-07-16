@@ -55,9 +55,14 @@ function extractSaucepanPortraits(companion) {
     if (!Array.isArray(portraits) || portraits.length === 0) return [];
     const out = [];
     for (const p of portraits) {
-        const url = p?.image?.highres_url || p?.image?.url;
+        // These feed the gallery DOWNLOAD (downloadMediaToMemory), which needs an
+        // absolute external URL it can proxy on CORS failure — the relative cl-helper
+        // proxy path fails isUrlSafeForDownload (invalid URL) and the private-IP guard.
+        // Portrait images come back as { id } only, so build the absolute CDN URL (/card).
+        const url = p?.image?.highres_url || p?.image?.url
+            || (p?.image?.id ? `https://saucepan.ai/cdn/${p.image.id}/card` : null);
         if (!url) continue;
-        out.push({ url: resolveSaucepanImageUrl(url), id: p.image?.id || null });
+        out.push({ url, id: p.image?.id || null });
     }
     return out;
 }
