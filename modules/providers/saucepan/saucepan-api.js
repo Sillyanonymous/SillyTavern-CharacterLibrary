@@ -243,18 +243,41 @@ export async function fetchSaucepanCompanionsOfUser(handle) {
  * @param {string} id
  * @returns {Promise<Object|null>}
  */
-export async function fetchSaucepanCompanion(id) {
+// Short-lived cache so the burst of companion reads when a card opens (preview
+// header, link-modal stats, gallery) collapses to a single network round-trip.
+// Stores the in-flight promise, so concurrent callers coalesce too. Pass
+// { force: true } to bypass it (update checks want live data).
+const _saucepanCompanionCache = new Map(); // id -> { promise, ts }
+const SAUCEPAN_COMPANION_TTL = 60_000;
+
+/** Drop a cached companion (or all) — e.g. after applying an update. */
+export function clearSaucepanCompanionCache(id) {
+    if (id) _saucepanCompanionCache.delete(id);
+    else _saucepanCompanionCache.clear();
+}
+
+export async function fetchSaucepanCompanion(id, { force = false } = {}) {
     if (!id) return null;
-    try {
-        // Companion detail lives at /api/v2/companions/<id> (Bearer-authed). The old
-        // /api/v1/companion?id= form is a different endpoint and 405s on GET.
-        const response = await saucepanFetch('GET', `/api/v2/companions/${encodeURIComponent(id)}`);
-        if (!response.ok) return null;
-        const data = await response.json();
-        return data?.companion || null;
-    } catch {
-        return null;
+    if (!force) {
+        const hit = _saucepanCompanionCache.get(id);
+        if (hit && (Date.now() - hit.ts) < SAUCEPAN_COMPANION_TTL) return hit.promise;
     }
+    // Companion detail lives at /api/v2/companions/<id> (Bearer-authed). The old
+    // /api/v1/companion?id= form is a different endpoint and 405s on GET.
+    const promise = (async () => {
+        try {
+            const response = await saucepanFetch('GET', `/api/v2/companions/${encodeURIComponent(id)}`);
+            if (!response.ok) return null;
+            const data = await response.json();
+            return data?.companion || null;
+        } catch {
+            return null;
+        }
+    })();
+    _saucepanCompanionCache.set(id, { promise, ts: Date.now() });
+    // Don't cache misses: if it resolves null, drop it so the next call retries.
+    promise.then(companion => { if (!companion) _saucepanCompanionCache.delete(id); });
+    return promise;
 }
 
 /**
@@ -289,7 +312,7 @@ export async function fetchSaucepanFandoms() {
  * Submit a Saucepan companion URL for native extraction via cl-helper.
  * Requires a Saucepan Bearer token (login or manually pasted).
  * @param {string} companionUrl - Full Saucepan companion URL
- * @returns {Promise<{success: boolean, companionId?: string, assembled?: Object, greetings?: Object[], error?: string}>}
+ * @returns {Promise<{success: boolean, companionId?: string, assembled?: Object, greetings?: Object[], meta?: Object, error?: string}>}
  */
 export async function submitSaucepanExtraction(companionUrl) {
     if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound');
@@ -324,6 +347,9 @@ export async function submitSaucepanExtraction(companionUrl) {
             companionId: data.companionId,
             assembled: data.assembled,
             greetings: data.greetings,
+            // { updated_at, card_token_count } baseline signals for the cheap
+            // update pre-check; absent from older cl-helper deploys.
+            meta: data.meta || null,
         };
     } catch (e) {
         console.error('[DataCat] submitSaucepanExtraction failed:', e);
@@ -394,6 +420,13 @@ export function buildV2FromSaucepan(hit, extractData) {
                     id: hit.character_id || hit.id,
                     creatorId: hit.creator_id || null,
                     creatorName: hit.creator_name || null,
+                    // Baselines for cheap update checks (hasRemoteChanged).
+                    // updatedAt is the primary signal: it flips on any
+                    // definition edit. tokenCount is the fallback for older
+                    // cl-helper deploys without meta; it's a non-injective sum
+                    // (offsetting edits can preserve it), so it can miss edits.
+                    updatedAt: extractData?.meta?.updated_at || null,
+                    tokenCount: hit.totalTokens || extractData?.meta?.card_token_count || null,
                 },
             },
         },

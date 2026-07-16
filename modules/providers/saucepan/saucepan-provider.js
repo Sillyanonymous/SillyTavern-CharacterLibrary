@@ -172,6 +172,14 @@ class SaucepanProvider extends ProviderBase {
                 linkedAt: linkInfo.linkedAt || existing.linkedAt || new Date().toISOString(),
                 pageName: linkInfo.pageName || existing.pageName || null,
             };
+            // Re-linking to the same companion keeps the update-check baseline
+            // and creator info; a different target must start with neither
+            // (a stale baseline could false-"up to date" the new link).
+            if (existing.id === linkInfo.id) {
+                for (const k of ['creatorId', 'creatorName', 'updatedAt', 'tokenCount']) {
+                    if (existing[k] != null) char.data.extensions.saucepan[k] = existing[k];
+                }
+            }
         } else {
             delete char.data.extensions.saucepan;
         }
@@ -233,6 +241,46 @@ class SaucepanProvider extends ProviderBase {
     async refreshRemoteData() { /* no-op: extraction is always live */ }
 
     // ── Update Checking ─────────────────────────────────────
+
+    // Cheap pre-check: compare the baselines captured at import against the
+    // live /api/v2/companions/<id> values. Both signals are imperfect alone —
+    // card_token_count is a sum (offsetting edits preserve it) and updated_at
+    // is unverified for scenario/greeting-only edits — so ANY mismatch means
+    // "changed" and "unchanged" requires every available signal pair to match.
+    // Worst case of the OR is a false positive -> harmless full check.
+    // Returns false only when provably unchanged (so card-updates.js skips
+    // re-extraction), or null (-> full check) when there's no baseline or the
+    // companion can't be fetched.
+    async hasRemoteChanged(char, linkInfo) {
+        const ext = char?.data?.extensions?.saucepan;
+        if (!linkInfo?.id || (!ext?.updatedAt && !ext?.tokenCount)) return null;
+        const companion = await fetchSaucepanCompanion(linkInfo.id, { force: true });
+        if (!companion) return null;
+        let verdict = null;
+        if (ext.updatedAt && companion.updated_at) {
+            if (companion.updated_at !== ext.updatedAt) return true;
+            verdict = false;
+        }
+        const live = companion.card_token_count;
+        if (ext.tokenCount && Number.isFinite(live)) {
+            if (live !== ext.tokenCount) return true;
+            verdict = false;
+        }
+        return verdict;
+    }
+
+    // Self-heal the pre-check baseline when a full update is applied: the
+    // remote card built by buildV2FromSaucepan carries the fresh signature,
+    // but the diff engine doesn't compare extensions, so without this the
+    // stored baseline would stay stale and every later check would run long.
+    getUpdateBaselineFields(char, remoteCard) {
+        const sig = remoteCard?.data?.extensions?.saucepan;
+        if (!sig) return null;
+        const fields = {};
+        if (sig.updatedAt) fields['extensions.saucepan.updatedAt'] = sig.updatedAt;
+        if (sig.tokenCount) fields['extensions.saucepan.tokenCount'] = sig.tokenCount;
+        return Object.keys(fields).length ? fields : null;
+    }
 
     getComparableFields() { return []; }
     get supportsVersionHistory() { return false; }

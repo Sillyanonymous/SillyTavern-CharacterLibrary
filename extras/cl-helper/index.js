@@ -1935,10 +1935,14 @@ function registerSaucepanRoutes(router) {
         }
 
         try {
-            const [defRes, compRes] = await Promise.all([
-                fetchSaucepanJson(`/api/v1/companion/definition?companion_id=${encodeURIComponent(companionId)}`, token, companionId),
-                fetchSaucepanJson(`/api/v2/companions/${encodeURIComponent(companionId)}`, token, companionId),
-            ]);
+            // Fetch the v2 companion BEFORE the definition: meta.updated_at from
+            // the companion becomes the client's update-check baseline, and it
+            // must never be newer than the definition content it ships with.
+            // If an edit lands between the two fetches this order leaves the
+            // baseline older than the content (next check re-extracts —
+            // harmless); the reverse order would mask the edit as "up to date".
+            const compRes = await fetchSaucepanJson(`/api/v2/companions/${encodeURIComponent(companionId)}`, token, companionId);
+            const defRes = await fetchSaucepanJson(`/api/v1/companion/definition?companion_id=${encodeURIComponent(companionId)}`, token, companionId);
 
             // The definition endpoint is authoritative; surface its auth errors.
             if (!defRes.ok) {
@@ -1984,7 +1988,16 @@ function registerSaucepanRoutes(router) {
                 assembled['Companion Core'] = assembleSaucepanFragments(companion.full_description_fragments);
             }
 
-            res.json({ success: true, companionId, assembled, greetings });
+            // Baseline signals for the client's cheap update pre-check
+            // (hasRemoteChanged): updated_at flips on any definition edit;
+            // card_token_count is the legacy fallback signal.
+            res.json({
+                success: true, companionId, assembled, greetings,
+                meta: {
+                    updated_at: companion?.updated_at ?? null,
+                    card_token_count: companion?.card_token_count ?? null,
+                },
+            });
         } catch (err) {
             console.error('[cl-helper] Saucepan extract error:', err.message);
             res.status(502).json({ error: `Failed to reach Saucepan: ${err.message}` });
