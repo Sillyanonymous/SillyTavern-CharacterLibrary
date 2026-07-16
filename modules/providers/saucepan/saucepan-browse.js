@@ -20,7 +20,7 @@ import {
     skeletonLines,
     deferRender,
     deferCall,
-    isMobileViewport,
+    isMobileMode,
 } from '../provider-utils.js';
 import {
     searchSaucepan,
@@ -176,7 +176,11 @@ function hitFromCompanion(companion, fallbackId) {
         character_id: id,
         id,
         name: companion?.display_name || companion?.name || 'Unknown',
-        avatar: resolveSaucepanImageUrl(companion?.image?.highres_url || companion?.image?.url || ''),
+        avatar: resolveSaucepanImageUrl(
+            companion?.image?.highres_url
+            || companion?.image?.url
+            || (companion?.image?.id ? `https://saucepan.ai/cdn/${companion.image.id}/card` : ''),
+        ),
         description: companion?.short_description || '',
         tags: Array.isArray(companion?.tags) ? companion.tags : [],
         creator_name: companion?.author_handle || '',
@@ -303,14 +307,27 @@ function updateTagsButton() {
     const btn = document.getElementById('saucepanTagsBtn');
     const label = document.getElementById('saucepanTagsBtnLabel');
     if (!btn) return;
-    const count = saucepanActiveTags.size + saucepanExcludedTags.size
-        + saucepanActiveFandoms.size + saucepanExcludedFandoms.size;
+    const count = saucepanActiveTags.size + saucepanExcludedTags.size;
     if (count > 0) {
         btn.classList.add('has-filters');
         if (label) label.innerHTML = `Tags <span class="tag-count">(${count})</span>`;
     } else {
         btn.classList.remove('has-filters');
         if (label) label.textContent = 'Tags';
+    }
+}
+
+function updateFandomsButton() {
+    const btn = document.getElementById('saucepanFandomsBtn');
+    const label = document.getElementById('saucepanFandomsBtnLabel');
+    if (!btn) return;
+    const count = saucepanActiveFandoms.size + saucepanExcludedFandoms.size;
+    if (count > 0) {
+        btn.classList.add('has-filters');
+        if (label) label.innerHTML = `Fandoms <span class="tag-count">(${count})</span>`;
+    } else {
+        btn.classList.remove('has-filters');
+        if (label) label.textContent = 'Fandoms';
     }
 }
 
@@ -455,7 +472,7 @@ function renderSaucepanFandomsList(filter = '') {
                 saucepanActiveFandoms.add(id);
                 cycleTagStateTri(stateBtn, 'include');
             }
-            updateTagsButton();
+            updateFandomsButton();
             saucepanCurrentPage = 1;
             loadCharacters(false);
         });
@@ -1697,6 +1714,7 @@ function initSaucepanView() {
         e.stopPropagation();
         CoreAPI.closeAllTopbarDropdowns?.();
         document.getElementById('saucepanTagsDropdown')?.classList.add('hidden');
+        document.getElementById('saucepanFandomsDropdown')?.classList.add('hidden');
         document.getElementById('saucepanFiltersDropdown')?.classList.toggle('hidden');
     });
 
@@ -1732,11 +1750,12 @@ function initSaucepanView() {
         });
     }
 
-    // Tags & Fandoms dropdown toggle
+    // Tags dropdown toggle
     on('saucepanTagsBtn', 'click', (e) => {
         e.stopPropagation();
         CoreAPI.closeAllTopbarDropdowns?.();
         document.getElementById('saucepanFiltersDropdown')?.classList.add('hidden');
+        document.getElementById('saucepanFandomsDropdown')?.classList.add('hidden');
         const dropdown = document.getElementById('saucepanTagsDropdown');
         if (!dropdown) return;
         dropdown.classList.toggle('hidden');
@@ -1744,12 +1763,6 @@ function initSaucepanView() {
             const searchInput = document.getElementById('saucepanTagsSearchInput');
             if (searchInput) searchInput.value = '';
             renderSaucepanTagsList();
-            renderSaucepanFandomsList(); // "Loading fandoms…" until the vocabulary arrives
-            ensureSaucepanFandomsLoaded().then(() => {
-                if (!dropdown.classList.contains('hidden')) {
-                    renderSaucepanFandomsList(searchInput?.value || '');
-                }
-            });
             setTimeout(() => searchInput?.focus(), 50);
         }
     });
@@ -1758,10 +1771,7 @@ function initSaucepanView() {
         if (searchInput) searchInput.value = '';
         saucepanActiveTags.clear();
         saucepanExcludedTags.clear();
-        saucepanActiveFandoms.clear();
-        saucepanExcludedFandoms.clear();
         renderSaucepanTagsList();
-        renderSaucepanFandomsList();
         updateTagsButton();
         saucepanCurrentPage = 1;
         loadCharacters(false);
@@ -1769,14 +1779,56 @@ function initSaucepanView() {
     on('saucepanTagsSearchInput', 'input', () => {
         const q = document.getElementById('saucepanTagsSearchInput')?.value || '';
         renderSaucepanTagsList(q);
+    });
+
+    // Fandoms dropdown toggle (own dropdown; vocabulary is eager-loaded at init)
+    on('saucepanFandomsBtn', 'click', (e) => {
+        e.stopPropagation();
+        CoreAPI.closeAllTopbarDropdowns?.();
+        document.getElementById('saucepanFiltersDropdown')?.classList.add('hidden');
+        document.getElementById('saucepanTagsDropdown')?.classList.add('hidden');
+        const dropdown = document.getElementById('saucepanFandomsDropdown');
+        if (!dropdown) return;
+        dropdown.classList.toggle('hidden');
+        if (!dropdown.classList.contains('hidden')) {
+            const searchInput = document.getElementById('saucepanFandomsSearchInput');
+            if (searchInput) searchInput.value = '';
+            renderSaucepanFandomsList();
+            // Prefetched at init; re-render once loaded in case that fetch is still in flight.
+            ensureSaucepanFandomsLoaded().then(() => {
+                if (!dropdown.classList.contains('hidden')) {
+                    renderSaucepanFandomsList(searchInput?.value || '');
+                }
+            });
+            setTimeout(() => searchInput?.focus(), 50);
+        }
+    });
+    on('saucepanFandomsClearBtn', 'click', () => {
+        const searchInput = document.getElementById('saucepanFandomsSearchInput');
+        if (searchInput) searchInput.value = '';
+        saucepanActiveFandoms.clear();
+        saucepanExcludedFandoms.clear();
+        renderSaucepanFandomsList();
+        updateFandomsButton();
+        saucepanCurrentPage = 1;
+        loadCharacters(false);
+    });
+    on('saucepanFandomsSearchInput', 'input', () => {
+        const q = document.getElementById('saucepanFandomsSearchInput')?.value || '';
         renderSaucepanFandomsList(q);
     });
 
     // Dropdown dismiss (click outside)
     view._registerDropdownDismiss([
         { dropdownId: 'saucepanTagsDropdown', buttonId: 'saucepanTagsBtn' },
+        { dropdownId: 'saucepanFandomsDropdown', buttonId: 'saucepanFandomsBtn' },
         { dropdownId: 'saucepanFiltersDropdown', buttonId: 'saucepanFiltersBtn' },
     ]);
+
+    // Eager-load the fandom vocabulary so the Fandoms dropdown opens populated
+    // immediately (like Tags), instead of showing "Loading fandoms…" on first open.
+    ensureSaucepanFandomsLoaded().then(() => renderSaucepanFandomsList());
+    updateFandomsButton();
 
     ensureModalEventsAttached();
     debugLog('Saucepan view initialized');
@@ -1820,7 +1872,7 @@ function ensureModalEventsAttached() {
     const avatar = document.getElementById('saucepanCharAvatar');
     if (avatar) {
         avatar.addEventListener('click', (e) => {
-            if (isMobileViewport()) return;
+            if (isMobileMode()) return;
             e.stopPropagation();
             if (!avatar.src || avatar.src.endsWith('/img/ai4.png')) return;
             BrowseView.openAvatarViewer(avatar.src);
@@ -1895,6 +1947,7 @@ class SaucepanBrowseView extends BrowseView {
         return {
             sort: 'saucepanSortSelect',
             tags: 'saucepanTagsBtn',
+            fandoms: 'saucepanFandomsBtn',
             filters: 'saucepanFiltersBtn',
             nsfw: 'saucepanNsfwToggle',
             refresh: 'saucepanRefreshBtn',
@@ -1952,14 +2005,27 @@ class SaucepanBrowseView extends BrowseView {
                 </button>
                 <div id="saucepanTagsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
                     <div class="browse-tags-search-row">
-                        <input type="search" id="saucepanTagsSearchInput" placeholder="Search tags & fandoms..." autocomplete="one-time-code">
-                        <button id="saucepanTagsClearBtn" class="glass-btn icon-only" title="Clear all tag & fandom filters">
+                        <input type="search" id="saucepanTagsSearchInput" placeholder="Search tags..." autocomplete="one-time-code">
+                        <button id="saucepanTagsClearBtn" class="glass-btn icon-only" title="Clear all tag filters">
                             <i class="fa-solid fa-rotate-left"></i>
                         </button>
                     </div>
-                    <div class="dropdown-section-title">Tags</div>
                     <div class="browse-tags-list" id="saucepanTagsList"></div>
-                    <div class="dropdown-section-title">Fandoms</div>
+                </div>
+            </div>
+
+            <!-- Fandoms -->
+            <div class="browse-tags-dropdown-container" style="position: relative;">
+                <button id="saucepanFandomsBtn" class="glass-btn" title="Fandom (franchise) filters">
+                    <i class="fa-solid fa-masks-theater"></i> <span id="saucepanFandomsBtnLabel">Fandoms</span>
+                </button>
+                <div id="saucepanFandomsDropdown" class="dropdown-menu browse-tags-dropdown hidden">
+                    <div class="browse-tags-search-row">
+                        <input type="search" id="saucepanFandomsSearchInput" placeholder="Search fandoms..." autocomplete="one-time-code">
+                        <button id="saucepanFandomsClearBtn" class="glass-btn icon-only" title="Clear all fandom filters">
+                            <i class="fa-solid fa-rotate-left"></i>
+                        </button>
+                    </div>
                     <div class="browse-tags-list" id="saucepanFandomsList"></div>
                 </div>
             </div>
@@ -2237,6 +2303,7 @@ class SaucepanBrowseView extends BrowseView {
 
     closeDropdowns() {
         document.getElementById('saucepanTagsDropdown')?.classList.add('hidden');
+        document.getElementById('saucepanFandomsDropdown')?.classList.add('hidden');
         document.getElementById('saucepanFiltersDropdown')?.classList.add('hidden');
     }
 
@@ -2248,6 +2315,12 @@ class SaucepanBrowseView extends BrowseView {
      */
     openPreview(previewChar) {
         if (!previewChar) return;
+        // Live companion detail available -> full hit with real stats/portraits/tags.
+        if (previewChar._companion) {
+            openPreviewModal(hitFromCompanion(previewChar._companion, previewChar.id));
+            return;
+        }
+        // Local fallback: build a minimal hit from the imported card.
         const hit = {
             character_id: previewChar.id,
             id: previewChar.id,

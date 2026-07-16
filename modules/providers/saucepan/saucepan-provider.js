@@ -269,22 +269,29 @@ class SaucepanProvider extends ProviderBase {
     async buildPreviewObject(char, linkInfo) {
         const charId = linkInfo?.id;
         if (!charId) return null;
-        try {
-            const companion = await fetchSaucepanCompanion(charId);
-            if (!companion) return null;
-            return {
-                id: companion.id,
-                name: companion.display_name || companion.name,
-                description: companion.short_description || '',
-                avatar: resolveSaucepanImageUrl(companion.image?.highres_url || companion.image?.url || ''),
-                tags: companion.tags || [],
-                is_nsfw: !!companion.sus,
-                creator_name: companion.author_handle || '',
-            };
-        } catch (e) {
-            api?.debugLog?.('[SaucepanProvider] buildPreviewObject failed:', e.message);
-            return null;
-        }
+        // Prefer the live companion detail (real stats, portraits, tags, image) from
+        // /api/v2/companions/<id>; openPreview turns it into a full hit via hitFromCompanion.
+        const companion = await fetchSaucepanCompanion(charId);
+        if (companion) return { id: charId, _companion: companion };
+        // Fallback to the locally-imported card when offline / the fetch fails, so the
+        // preview still opens (the definition then loads live via native extraction).
+        const data = char?.data || {};
+        const sp = data.extensions?.saucepan || {};
+        const tags = Array.isArray(data.tags)
+            ? data.tags
+            : (Array.isArray(char?.tags) ? char.tags : []);
+        return {
+            id: charId,
+            name: char?.name || data.name || 'Unknown',
+            description: data.creator_notes || data.description || '',
+            avatar: char?.avatar
+                ? `/thumbnail?type=avatar&file=${encodeURIComponent(char.avatar)}`
+                : '',
+            tags,
+            is_nsfw: false,
+            creator_name: sp.creatorName || data.creator || '',
+            creator_id: sp.creatorId || '',
+        };
     }
 
     openPreview(previewChar) {

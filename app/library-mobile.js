@@ -1916,6 +1916,15 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
             if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
         });
 
+        // Fandoms — only providers that expose an ids.fandoms button (Saucepan) show this;
+        // its visibility is synced per active provider when the online view opens.
+        const genericFandomsChip = createChip('<i class="fa-solid fa-masks-theater"></i> Fandoms');
+        genericFandomsChip.addEventListener('click', () => {
+            const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
+            const realBtn = ids?.fandoms ? document.getElementById(ids.fandoms) : null;
+            if (realBtn) { close(); setTimeout(() => realBtn.click(), 300); }
+        });
+
         const genericFeaturesChip = createChip('<i class="fa-solid fa-sliders"></i> Features');
         genericFeaturesChip.addEventListener('click', () => {
             const ids = window.ProviderRegistry?.getActiveMobileFilterIds?.();
@@ -1941,6 +1950,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         });
 
         genericFilterRow.appendChild(genericTagsChip);
+        genericFilterRow.appendChild(genericFandomsChip);
         genericFilterRow.appendChild(genericFeaturesChip);
         genericFilterRow.appendChild(genericNsfwChip);
         genericFilterSection.appendChild(genericFilterRow);
@@ -2053,6 +2063,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
                     genericProviderLabel.textContent = prov ? prov.name : 'Online';
                     genericSortChip._syncLabel();
                     syncGenericNsfwState();
+                    genericFandomsChip.style.display = ids?.fandoms ? '' : 'none';
                 }
 
                 if (hasModeToggle) {

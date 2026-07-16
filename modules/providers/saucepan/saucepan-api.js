@@ -246,7 +246,9 @@ export async function fetchSaucepanCompanionsOfUser(handle) {
 export async function fetchSaucepanCompanion(id) {
     if (!id) return null;
     try {
-        const response = await saucepanFetch('GET', `/api/v1/companion?id=${encodeURIComponent(id)}`);
+        // Companion detail lives at /api/v2/companions/<id> (Bearer-authed). The old
+        // /api/v1/companion?id= form is a different endpoint and 405s on GET.
+        const response = await saucepanFetch('GET', `/api/v2/companions/${encodeURIComponent(id)}`);
         if (!response.ok) return null;
         const data = await response.json();
         return data?.companion || null;

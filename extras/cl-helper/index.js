@@ -1620,9 +1620,11 @@ const SAUCEPAN_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.3
 const SAUCEPAN_MAX_BYTES = 10 * 1024 * 1024;
 const SAUCEPAN_ALLOWED_PATHS = [
     /^\/api\/v1\/search$/,
+    /^\/api\/v1\/fandoms$/,
     /^\/api\/v1\/companions-of-user$/,
     /^\/api\/v1\/companion$/,
     /^\/api\/v1\/companion\/definition$/,
+    /^\/api\/v2\/companions\/[a-zA-Z0-9-]+$/,
     /^\/cdn\/.+$/,
 ];
 const SAUCEPAN_POST_PATH = '/api/v1/search';

@@ -6,7 +6,8 @@ import { CHUB_API_BASE, getChubHeaders, extractNodes } from './chub/chub-api.js'
 import { BOTBOORU_BASE, fetchBotbooruUser } from './botbooru/botbooru-api.js';
 import { fetchCharactersByOwner, getCharacterPageUrl } from './pygmalion/pygmalion-api.js';
 import { WYVERN_API_BASE, WYVERN_SITE_BASE, getWyvernHeaders } from './wyvern/wyvern-api.js';
-import { fetchDatacatCreatorCharacters, fetchSaucepanCompanionsOfUser, fetchDatacatCharacter, submitExtraction, fetchExtractionStatus } from './datacat/datacat-api.js';
+import { fetchDatacatCreatorCharacters, fetchDatacatCharacter, submitExtraction, fetchExtractionStatus } from './datacat/datacat-api.js';
+import { fetchSaucepanCompanionsOfUser } from './saucepan/saucepan-api.js';
 import { getSearchToken, JANNY_SEARCH_URL, JANNY_SITE_BASE } from './janny/janny-api.js';
 import { searchCards, isCtSessionActive } from './chartavern/chartavern-api.js';
 

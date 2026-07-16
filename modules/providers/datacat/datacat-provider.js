@@ -139,6 +139,11 @@ class DatacatProvider extends ProviderBase {
         const extensions = char.data?.extensions || char.extensions;
         const dc = extensions?.datacat;
         if (!dc) return null;
+        // Saucepan-sourced cards (legacy combined-build namespace) are owned by the
+        // standalone Saucepan provider now. If DataCat claimed them, getCharacterProvider
+        // would resolve them here first (DataCat registers before Saucepan) and
+        // "View on Saucepan" would fail with "character not found on DataCat".
+        if (dc.sourceKind === 'saucepan') return null;
 
         const id = dc.id;
         if (!id) return null;
