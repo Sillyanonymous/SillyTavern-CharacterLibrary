@@ -602,6 +602,23 @@ function showSingleCheckModal(char) {
 }
 
 /**
+ * Cheap pre-check before the expensive re-extraction: ask the provider whether
+ * the remote has changed (e.g. Saucepan's updated_at baseline).
+ * Returns false only when the remote is provably unchanged; true or null
+ * (unknown, no pre-check hook, or a throwing pre-check) means the full check
+ * must run. Fail-safe: a throw is logged and treated as unknown.
+ * @returns {Promise<boolean|null>}
+ */
+async function preCheckRemoteChanged(provider, char, linkInfo) {
+    try {
+        return await provider.hasRemoteChanged?.(char, linkInfo) ?? null;
+    } catch (preErr) {
+        console.warn('[CardUpdates] hasRemoteChanged pre-check failed, running full check:', char.avatar, preErr);
+        return null;
+    }
+}
+
+/**
  * Perform update check for a single character
  * @param {Object} char - Character to check
  */
@@ -620,18 +637,9 @@ async function performSingleCheck(char) {
     try {
         // Ensure heavy fields are loaded before comparing card content
         await CoreAPI.hydrateCharacter(char);
-        
-        // Cheap pre-check: if the provider can prove the remote is unchanged
-        // (e.g. Saucepan's updated_at), skip the expensive re-extraction.
-        // Fail-safe: a throwing pre-check must not abort the check — fall
-        // through to the full compare instead.
-        let unchanged = null;
-        try {
-            unchanged = await provider.hasRemoteChanged?.(char, linkInfo);
-        } catch (preErr) {
-            console.warn('[CardUpdates] hasRemoteChanged pre-check failed, running full check:', preErr);
-        }
-        if (unchanged === false) {
+
+        const remoteChanged = await preCheckRemoteChanged(provider, char, linkInfo);
+        if (remoteChanged === false) {
             statusEl.innerHTML = '<i class="fa-solid fa-check"></i> Character is up to date!';
             return;
         }
@@ -1452,18 +1460,10 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 continue;
             }
 
-            // Cheap pre-check: skip the expensive re-extraction when the provider
-            // can prove the remote is unchanged (e.g. Saucepan's updated_at).
-            // Fail-safe: a throwing pre-check falls through to the full check.
             if (abortController.signal.aborted || batchCheckPaused) break;
-            let unchanged = null;
-            try {
-                unchanged = await match.provider.hasRemoteChanged?.(char, match.linkInfo);
-            } catch (preErr) {
-                console.warn('[CardUpdates] hasRemoteChanged pre-check failed, running full check:', char.avatar, preErr);
-            }
+            const remoteChanged = await preCheckRemoteChanged(match.provider, char, match.linkInfo);
             if (abortController.signal.aborted || batchCheckPaused) break;
-            if (unchanged === false) {
+            if (remoteChanged === false) {
                 if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Up to date';
                 if (itemEl) itemEl.dataset.status = 'up-to-date';
                 // Keep the progress counter honest — this item was checked.

@@ -31,6 +31,8 @@ import {
     buildSaucepanCharacterFromHit,
     hasSaucepanToken,
     resolveSaucepanImageUrl,
+    hitFromCompanion,
+    saucepanCompanionUrl,
 } from './saucepan-api.js';
 // Reciprocal (circular) import: saucepan-provider.js imports this module's
 // default export. Both are singletons and only reference each other inside
@@ -164,38 +166,6 @@ function isNsfw(hit) {
 
 function getAvatar(hit) {
     return hit?.avatar || '/img/ai4.png';
-}
-
-/**
- * Build a normalized hit from a companion-detail object (for URL lookups and
- * the in-app preview). Mirrors the shape of normalizeSaucepanHit.
- */
-function hitFromCompanion(companion, fallbackId) {
-    const id = companion?.id || fallbackId;
-    return {
-        character_id: id,
-        id,
-        name: companion?.display_name || companion?.name || 'Unknown',
-        avatar: resolveSaucepanImageUrl(
-            companion?.image?.highres_url
-            || companion?.image?.url
-            || (companion?.image?.id ? `https://saucepan.ai/cdn/${companion.image.id}/card` : ''),
-        ),
-        description: companion?.short_description || '',
-        tags: Array.isArray(companion?.tags) ? companion.tags : [],
-        creator_name: companion?.author_handle || '',
-        creator_id: companion?.author_id || '',
-        createdAt: companion?.posted_at || '',
-        isNsfw: !!companion?.sus,
-        totalTokens: companion?.card_token_count || 0,
-        chat_count: companion?.chat_count || 0,
-        message_count: companion?.interaction_count || 0,
-        favorite_count: companion?.favorite_count || 0,
-        portrait_count: Array.isArray(companion?.portraits) ? companion.portraits.length : 0,
-        primary_content_source_kind: 'saucepan',
-        _source: 'saucepan',
-        _fullCompanion: companion,
-    };
 }
 
 // ========================================
@@ -1042,7 +1012,7 @@ function openPreviewModal(hit) {
 
     const openBtn = document.getElementById('saucepanOpenInBrowserBtn');
     if (openBtn) {
-        openBtn.href = `https://saucepan.ai/companion/${charId}`;
+        openBtn.href = saucepanCompanionUrl(charId);
         openBtn.title = 'Open on Saucepan';
     }
 
@@ -1467,7 +1437,7 @@ async function importSaucepanCharacter(hit) {
                 name: result.characterName,
                 provider: saucepanProvider,
                 linkInfo: { providerId: 'saucepan', id: result.providerCharId },
-                url: `https://saucepan.ai/companion/${result.providerCharId}`,
+                url: saucepanCompanionUrl(result.providerCharId),
                 avatar: result.fileName,
                 galleryId: result.galleryId,
                 cardData: result.cardData,

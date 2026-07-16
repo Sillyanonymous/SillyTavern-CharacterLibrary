@@ -1,8 +1,5 @@
-// Saucepan (saucepan.ai) client API - used via the DataCat provider.
-//
-// Saucepan is surfaced as a source-kind within DataCat rather than a standalone
-// provider, but its API is distinct enough (search, companion detail, native
-// fragment-based definition extraction, CDN image proxying) to live on its own.
+// Saucepan (saucepan.ai) client API - used by the Saucepan provider, and by
+// DataCat for its Saucepan-sourced index rows (creator lookups, CDN images).
 //
 // All calls go through cl-helper (/plugins/cl-helper/saucepan-*), never ST's
 // /proxy/: Saucepan responds with zstd-compressed bodies that ST's proxy
@@ -23,6 +20,15 @@ const SAUCEPAN_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/saucepan-proxy`;
 // them from our origin. Route them through cl-helper's proxy instead. Images
 // live at saucepan.ai/cdn/{imageId}/card; plugin routes are prefixed with /api.
 export const SAUCEPAN_CDN_PROXY_BASE = `/api${CL_HELPER_PLUGIN_BASE}/saucepan-proxy/cdn/`;
+
+/**
+ * Canonical page URL for a companion.
+ * @param {string} id - companion UUID
+ * @returns {string}
+ */
+export function saucepanCompanionUrl(id) {
+    return `https://saucepan.ai/companion/${id}`;
+}
 
 const SAUCEPAN_ORDER_MAP = {
     saucepan_new: 'created',
@@ -49,7 +55,7 @@ let _getSaucepanToken = null;
 
 /**
  * Bind the CoreAPI.apiRequest function for proxied requests. Called from the
- * DataCat provider's init() alongside the DataCat binding.
+ * Saucepan provider's init().
  */
 export function setApiRequest(fn) { _apiRequest = fn; }
 
@@ -64,6 +70,24 @@ export function setSaucepanTokenGetter(fn) { _getSaucepanToken = fn; }
  * @returns {boolean}
  */
 export function hasSaucepanToken() { return !!(_getSaucepanToken?.() ?? null); }
+
+/**
+ * Ping cl-helper's health endpoint. Used by the auth bridges to report a
+ * friendly "plugin not available" instead of a raw HTTP error.
+ * @returns {Promise<boolean>}
+ */
+export async function checkClHelperAvailable() {
+    try {
+        const resp = _apiRequest
+            ? await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/health`)
+            : await fetch(`/api${CL_HELPER_PLUGIN_BASE}/health`);
+        if (!resp.ok) return false;
+        const data = await resp.json();
+        return data?.ok === true;
+    } catch {
+        return false;
+    }
+}
 
 async function saucepanFetch(method, apiPath, body) {
     if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound (cl-helper required)');
@@ -212,6 +236,42 @@ function normalizeSaucepanHit(hit) {
 }
 
 /**
+ * Build a normalized hit from a companion-detail object (URL lookups, in-app
+ * preview, the V2 builder). Mirrors the shape of normalizeSaucepanHit.
+ * @param {Object|null} companion - Detail object from fetchSaucepanCompanion
+ * @param {string} fallbackId - companion id to use when the detail is missing
+ * @returns {Object}
+ */
+export function hitFromCompanion(companion, fallbackId) {
+    const id = companion?.id || fallbackId;
+    return {
+        character_id: id,
+        id,
+        name: companion?.display_name || companion?.name || 'Unknown',
+        display_name: companion?.display_name || companion?.name || 'Unknown',
+        avatar: resolveSaucepanImageUrl(
+            companion?.image?.highres_url
+            || companion?.image?.url
+            || (companion?.image?.id ? `https://saucepan.ai/cdn/${companion.image.id}/card` : ''),
+        ),
+        description: companion?.short_description || '',
+        tags: Array.isArray(companion?.tags) ? companion.tags : [],
+        creator_name: companion?.author_handle || '',
+        creator_id: companion?.author_id || '',
+        createdAt: companion?.posted_at || '',
+        isNsfw: !!companion?.sus,
+        totalTokens: companion?.card_token_count || 0,
+        chat_count: companion?.chat_count || 0,
+        message_count: companion?.interaction_count || 0,
+        favorite_count: companion?.favorite_count || 0,
+        portrait_count: Array.isArray(companion?.portraits) ? companion.portraits.length : 0,
+        primary_content_source_kind: 'saucepan',
+        _source: 'saucepan',
+        _fullCompanion: companion,
+    };
+}
+
+/**
  * Fetch all companions authored by a Saucepan handle.
  * The endpoint returns the full list in one response (no real pagination
  * support: limit/offset are ignored server-side, total_count == count).
@@ -329,7 +389,7 @@ export async function submitSaucepanExtraction(companionUrl) {
         if (!resp.ok) {
             const errText = await resp.text();
             console.error(
-                '[DataCat] saucepan-extract error:',
+                '[Saucepan] saucepan-extract error:',
                 resp.status,
                 errText.substring(0, 200),
             );
@@ -352,7 +412,7 @@ export async function submitSaucepanExtraction(companionUrl) {
             meta: data.meta || null,
         };
     } catch (e) {
-        console.error('[DataCat] submitSaucepanExtraction failed:', e);
+        console.error('[Saucepan] submitSaucepanExtraction failed:', e);
         return { success: false, error: e.message };
     }
 }
@@ -379,7 +439,7 @@ export function buildV2FromSaucepan(hit, extractData) {
     const description = assembled['Companion Core'] || '';
     if (!description) {
         console.warn(
-            '[DataCat] Companion Core section not found in Saucepan extraction. Available sections:',
+            '[Saucepan] Companion Core section not found in Saucepan extraction. Available sections:',
             Object.keys(assembled).join(', ') || '(none)',
         );
         return null;
@@ -422,11 +482,13 @@ export function buildV2FromSaucepan(hit, extractData) {
                     creatorName: hit.creator_name || null,
                     // Baselines for cheap update checks (hasRemoteChanged).
                     // updatedAt is the primary signal: it flips on any
-                    // definition edit. tokenCount is the fallback for older
-                    // cl-helper deploys without meta; it's a non-injective sum
-                    // (offsetting edits can preserve it), so it can miss edits.
+                    // definition edit. tokenCount prefers the fresh extract
+                    // meta over the possibly-stale search hit (kept as a
+                    // fallback for older cl-helper deploys without meta); it's
+                    // a non-injective sum (offsetting edits can preserve it),
+                    // so it can miss edits.
                     updatedAt: extractData?.meta?.updated_at || null,
-                    tokenCount: hit.totalTokens || extractData?.meta?.card_token_count || null,
+                    tokenCount: extractData?.meta?.card_token_count || hit.totalTokens || null,
                 },
             },
         },
@@ -471,10 +533,9 @@ export function buildSaucepanCharacterFromHit(hit, v2Card) {
  */
 export async function fetchSaucepanV2Card(hit) {
     if (!hit?.character_id && !hit?.id) return null;
-    const companionUrl = `https://saucepan.ai/companion/${hit.character_id || hit.id}`;
-    const result = await submitSaucepanExtraction(companionUrl);
+    const result = await submitSaucepanExtraction(saucepanCompanionUrl(hit.character_id || hit.id));
     if (!result.success) {
-        console.warn('[DataCat] Native Saucepan extraction failed:', result.error);
+        console.warn('[Saucepan] Native extraction failed:', result.error);
         return null;
     }
     return buildV2FromSaucepan(hit, result);

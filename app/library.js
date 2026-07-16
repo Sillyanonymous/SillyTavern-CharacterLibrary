@@ -1662,6 +1662,8 @@ function setupSettingsModal() {
     const saucepanPasswordInput = document.getElementById('settingsSaucepanPassword');
     const saucepanTokenInput = document.getElementById('settingsSaucepanToken');
     const toggleSaucepanTokenVisibility = document.getElementById('toggleSaucepanTokenVisibility');
+    const saucepanPluginBanner = document.getElementById('saucepanPluginBanner');
+    const saucepanSettingsFields = document.getElementById('saucepanSettingsFields');
     const datacatPluginBanner = document.getElementById('datacatPluginBanner');
     const datacatSettingsFields = document.getElementById('datacatSettingsFields');
     const datacatSessionStatus = document.getElementById('datacatSessionStatus');
@@ -2714,6 +2716,7 @@ function setupSettingsModal() {
             botbooruPluginBanner, botbooruSettingsFields,
             ctPluginBanner, ctSettingsFields,
             datacatPluginBanner, datacatSettingsFields,
+            saucepanPluginBanner, saucepanSettingsFields,
             gridThumbsClHelperBanner, settingsGridThumbClHelperFields,
             galleryThumbsClHelperBanner, galleryThumbsClHelperFields,
         ).then(available => {
@@ -3888,7 +3891,7 @@ function setupSettingsModal() {
 
     // ---- Saucepan Account (native extraction) ----
     // Token persistence lives in window.saucepanLogin/saucepanSetToken/
-    // saucepanClearSession (datacat-provider.js); handlers here only drive the UI.
+    // saucepanClearSession (saucepan-provider.js); handlers here only drive the UI.
     if (toggleSaucepanTokenVisibility && saucepanTokenInput) {
         toggleSaucepanTokenVisibility.onclick = () => {
             const isPassword = saucepanTokenInput.type === 'password';
@@ -3907,7 +3910,7 @@ function setupSettingsModal() {
                 return;
             }
             if (!window.saucepanLogin) {
-                showToast('DataCat module not ready', 'error');
+                showToast('Saucepan module not ready', 'error');
                 return;
             }
             const originalHtml = saucepanLoginBtn.innerHTML;
@@ -3940,7 +3943,7 @@ function setupSettingsModal() {
                 return;
             }
             if (!window.saucepanSetToken) {
-                showToast('DataCat module not ready', 'error');
+                showToast('Saucepan module not ready', 'error');
                 return;
             }
             try {
@@ -3960,7 +3963,7 @@ function setupSettingsModal() {
     if (validateSaucepanBtn) {
         validateSaucepanBtn.onclick = async () => {
             if (!window.saucepanValidateSession) {
-                showToast('DataCat module not ready', 'error');
+                showToast('Saucepan module not ready', 'error');
                 return;
             }
             const originalHtml = validateSaucepanBtn.innerHTML;

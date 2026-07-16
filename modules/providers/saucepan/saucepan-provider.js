@@ -18,6 +18,9 @@ import {
     fetchSaucepanCompanion,
     submitSaucepanExtraction,
     buildV2FromSaucepan,
+    hitFromCompanion,
+    saucepanCompanionUrl,
+    checkClHelperAvailable,
 } from './saucepan-api.js';
 
 let api = null;
@@ -29,24 +32,6 @@ function slugify(name) {
         .replace(/[^a-z0-9]+/g, '_')
         .replace(/^_+|_+$/g, '')
         .slice(0, 60) || 'character';
-}
-
-/**
- * Build a normalized Saucepan "hit" from a companion detail object, so the V2
- * builder (which expects the search-hit shape) can consume native detail data.
- */
-function hitFromCompanion(companion, fallbackId) {
-    return {
-        id: companion?.id || fallbackId,
-        character_id: companion?.id || fallbackId,
-        name: companion?.name || 'Unknown',
-        display_name: companion?.display_name || companion?.name || 'Unknown',
-        avatar: resolveSaucepanImageUrl(companion?.image?.highres_url || companion?.image?.url || ''),
-        description: companion?.short_description || '',
-        tags: Array.isArray(companion?.tags) ? companion.tags : [],
-        creator_name: companion?.author_handle || '',
-        creator_id: companion?.author_id || '',
-    };
 }
 
 /** Pull gallery portraits off a companion detail object. */
@@ -215,9 +200,7 @@ class SaucepanProvider extends ProviderBase {
         try {
             const companion = await fetchSaucepanCompanion(linkInfo.id);
             const hit = hitFromCompanion(companion, linkInfo.id);
-            const extractResult = await submitSaucepanExtraction(
-                `https://saucepan.ai/companion/${linkInfo.id}`,
-            );
+            const extractResult = await submitSaucepanExtraction(saucepanCompanionUrl(linkInfo.id));
             if (!extractResult.success) {
                 api?.debugLog?.('[SaucepanProvider] native extraction failed:', extractResult.error);
                 return null;
@@ -304,7 +287,7 @@ class SaucepanProvider extends ProviderBase {
 
     getCharacterUrl(linkInfo) {
         if (!linkInfo?.id) return null;
-        return `https://saucepan.ai/companion/${linkInfo.id}`;
+        return saucepanCompanionUrl(linkInfo.id);
     }
 
     getListingName(hitData) {
@@ -433,7 +416,7 @@ class SaucepanProvider extends ProviderBase {
     async importCharacter(identifier, hitData, options = {}) {
         try {
             const charId = String(identifier);
-            const companionUrl = `https://saucepan.ai/companion/${charId}`;
+            const companionUrl = saucepanCompanionUrl(charId);
 
             // Prefer a supplied hit (from the browse grid); otherwise fetch detail.
             let hit = hitData;
@@ -510,6 +493,9 @@ export default saucepanProvider;
 // for proxy auth. These are invoked by the provider's auth UI.
 
 window.saucepanLogin = async (handle, password) => {
+    if (!await checkClHelperAvailable()) {
+        return { ok: false, error: 'cl-helper plugin not available' };
+    }
     try {
         const resp = await api.apiRequest(
             `${CL_HELPER_PLUGIN_BASE}/saucepan-login`,
@@ -534,6 +520,9 @@ window.saucepanSetToken = async (token) => {
     const trimmed = (token || '').trim();
     if (!trimmed) return { ok: false, error: 'Token is empty' };
     CoreAPI.setSetting('saucepanToken', trimmed);
+    if (!await checkClHelperAvailable()) {
+        return { ok: false, error: 'Saved locally, but cl-helper plugin not available' };
+    }
     try {
         const resp = await api.apiRequest(
             `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
@@ -551,6 +540,9 @@ window.saucepanSetToken = async (token) => {
 };
 
 window.saucepanValidateSession = async () => {
+    if (!await checkClHelperAvailable()) {
+        return { valid: false, reason: 'cl-helper plugin not available' };
+    }
     try {
         // Resync the persisted token first: cl-helper only holds it in memory.
         const saved = CoreAPI.getSetting('saucepanToken');
@@ -575,7 +567,9 @@ window.saucepanValidateSession = async () => {
 };
 
 window.saucepanClearSession = async () => {
+    // Drop the persisted token even when cl-helper is unreachable.
     CoreAPI.setSetting('saucepanToken', null);
+    if (!await checkClHelperAvailable()) return false;
     try {
         const resp = await api.apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-clear-token`, 'POST');
         return resp.ok;

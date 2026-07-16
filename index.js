@@ -1318,7 +1318,7 @@ async function buildChatMediaLocalizationMap(character) {
 // Duplicated from library.js (extractSanitizedUrlName). keep in sync
 const CDN_VARIANT_NAMES = new Set(['public', 'original', 'raw', 'full', 'thumbnail', 'thumb',
     'medium', 'small', 'large', 'xl', 'default', 'image', 'photo', 'download', 'view',
-    'highres', 'hires', 'high', 'lowres', 'lores', 'low', 'preview', 'avatar']);
+    'highres', 'hires', 'high', 'lowres', 'lores', 'low', 'preview', 'avatar', 'card']);
 
 /**
  * Extract a CDN-aware sanitized name from a URL (matches extractSanitizedUrlName in library.js)
