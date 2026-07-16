@@ -39,7 +39,7 @@ import {
     buildSaucepanCharacterFromHit,
     hasSaucepanToken,
     resolveSaucepanImageUrl,
-} from './saucepan-api.js';
+} from '../saucepan/saucepan-api.js';
 
 const {
     onElement: on,

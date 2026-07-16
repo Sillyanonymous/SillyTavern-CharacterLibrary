@@ -30,6 +30,16 @@ const SAUCEPAN_ORDER_MAP = {
     saucepan_popular: 'popularity',
 };
 
+// Saucepan's own default "content warning" exclusion list — the extreme-content
+// tags the site hides by default (the "CW" toggle). We leave these INCLUDED by
+// default (this audience wants the harder content) and only apply them when the
+// user opts into hiding via the "Hide extreme content" toggle.
+export const SAUCEPAN_CW_EXTREME_TAGS = [
+    'noncon_dubcon', 'incest_stepcest', 'gore', 'body_horror', 'slur_usage',
+    'self_harm_suicide', 'vore', 'cannibalism', 'feral', 'user_harm',
+    'eating_disorder', 'amputation', 'miscarriage',
+];
+
 // ========================================
 // TRANSPORT
 // ========================================
@@ -116,20 +126,33 @@ export async function searchSaucepan(opts = {}) {
         openDefinitionOnly = true,
         tags = [],
         excludedTags = [],
+        // NSFW on by default (this audience wants adult content); maps to `sus`.
+        nsfw = true,
+        // Off by default: exclude nothing. When true, apply Saucepan's built-in
+        // content-warning exclusion list on top of any user-excluded tags.
+        hideExtreme = false,
+        fandomTags = [],
+        excludedFandomTags = [],
+        matchAllFandomTags = false,
     } = opts;
     const orderBy = SAUCEPAN_ORDER_MAP[sort] || 'created';
     const offset = Math.max(0, (page - 1) * limit);
 
+    const baseExcluded = Array.isArray(excludedTags) ? excludedTags : [];
+    const excluded = hideExtreme
+        ? Array.from(new Set([...baseExcluded, ...SAUCEPAN_CW_EXTREME_TAGS]))
+        : baseExcluded;
+
     const body = {
         text_search: search || null,
         tags: Array.isArray(tags) ? tags : [],
-        excluded_tags: Array.isArray(excludedTags) ? excludedTags : [],
-        fandom_tags: [],
-        excluded_fandom_tags: [],
-        match_all_fandom_tags: false,
+        excluded_tags: excluded,
+        fandom_tags: Array.isArray(fandomTags) ? fandomTags : [],
+        excluded_fandom_tags: Array.isArray(excludedFandomTags) ? excludedFandomTags : [],
+        match_all_fandom_tags: !!matchAllFandomTags,
         limit,
         offset,
-        sus: true,
+        sus: !!nsfw,
         extra_spicy: null,
         order_by: orderBy,
         asc: false,
@@ -229,6 +252,30 @@ export async function fetchSaucepanCompanion(id) {
         return data?.companion || null;
     } catch {
         return null;
+    }
+}
+
+/**
+ * Fetch Saucepan's curated fandom (franchise/source-material) vocabulary.
+ * Distinct from regular tags — passed to search as fandom_tags/excluded_fandom_tags.
+ * @returns {Promise<Array<{id: string, name: string, description: string, searchTerms: string}>>}
+ */
+export async function fetchSaucepanFandoms() {
+    try {
+        const response = await saucepanFetch('GET', '/api/v1/fandoms');
+        if (!response.ok) return [];
+        const data = await response.json();
+        const list = Array.isArray(data) ? data : (data?.fandoms || []);
+        return list
+            .filter(f => f && f.id && f.is_enabled !== false)
+            .map(f => ({
+                id: f.id,
+                name: f.display_name || f.id,
+                description: f.description || '',
+                searchTerms: f.search_terms || '',
+            }));
+    } catch {
+        return [];
     }
 }
 
@@ -341,9 +388,8 @@ export function buildV2FromSaucepan(hit, extractData) {
             tags: tagNames,
             alternate_greetings: alternateGreetings,
             extensions: {
-                datacat: {
+                saucepan: {
                     id: hit.character_id || hit.id,
-                    sourceKind: 'saucepan',
                     creatorId: hit.creator_id || null,
                     creatorName: hit.creator_name || null,
                 },

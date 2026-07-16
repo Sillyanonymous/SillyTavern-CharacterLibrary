@@ -1,0 +1,15 @@
+/* Saucepan browse view styles.
+ *
+ * The grid, cards, feature badges, and dropdowns reuse the shared browse styles
+ * in browse-shared.css. The preview modal's locked-definition banner and the
+ * token/extraction CTA currently reuse the `datacat-modal-locked-banner` and
+ * `datacat-modal-extract-cta` classes defined in datacat-browse.css (which is
+ * always loaded, since the DataCat provider remains). A follow-up moves those
+ * shared modal classes here / into browse-shared.css and renames them. */
+
+/* Source badge for Saucepan-origin cards (kept for parity; the single-source
+ * view suppresses it by default). */
+.browse-feature-badge.source-saucepan {
+    background: linear-gradient(135deg, #b5651d, #e08a3c);
+    color: #fff;
+}

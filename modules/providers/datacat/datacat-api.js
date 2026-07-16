@@ -4,7 +4,7 @@
 
 import { CL_HELPER_PLUGIN_BASE, slugify, stripHtml, fetchWithProxy } from '../provider-utils.js';
 import { getSearchToken, JANNY_SEARCH_URL, JANNY_SITE_BASE, TAG_MAP as JANNY_TAG_MAP } from '../janny/janny-api.js';
-import { resolveSaucepanImageUrl, SAUCEPAN_CDN_PROXY_BASE } from './saucepan-api.js';
+import { resolveSaucepanImageUrl, SAUCEPAN_CDN_PROXY_BASE } from '../saucepan/saucepan-api.js';
 
 export { slugify, stripHtml, JANNY_TAG_MAP };
 

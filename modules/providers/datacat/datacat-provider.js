@@ -35,7 +35,7 @@ import {
     fetchSaucepanCompanion,
     submitSaucepanExtraction,
     buildV2FromSaucepan,
-} from './saucepan-api.js';
+} from '../saucepan/saucepan-api.js';
 
 let api = null;
 

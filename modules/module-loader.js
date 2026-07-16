@@ -380,6 +380,7 @@ async function initModuleSystem() {
     loadModuleCSS('./providers/pygmalion/pygmalion-browse.css');
     loadModuleCSS('./providers/wyvern/wyvern-browse.css');
     loadModuleCSS('./providers/datacat/datacat-browse.css');
+    loadModuleCSS('./providers/saucepan/saucepan-browse.css');
     loadModuleCSS('./providers/botbooru/botbooru-browse.css');
     {
         const providerImports = [
@@ -389,6 +390,7 @@ async function initModuleSystem() {
             { name: 'pygmalion', load: () => import('./providers/pygmalion/pygmalion-provider.js') },
             { name: 'wyvern', load: () => import('./providers/wyvern/wyvern-provider.js') },
             { name: 'datacat', load: () => import('./providers/datacat/datacat-provider.js') },
+            { name: 'saucepan', load: () => import('./providers/saucepan/saucepan-provider.js') },
             { name: 'botbooru', load: () => import('./providers/botbooru/botbooru-provider.js') },
         ];
         const results = await Promise.allSettled(providerImports.map(p => p.load()));
