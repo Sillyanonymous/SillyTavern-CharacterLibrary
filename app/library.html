@@ -2760,13 +2760,16 @@ https://jannyai.com/characters/uuid_slug
                                     <div class="settings-row">
                                         <label>Handle:</label>
                                         <div class="settings-input-group">
-                                            <input type="text" id="settingsSaucepanHandle" class="glass-input" placeholder="Saucepan handle" autocomplete="off">
+                                            <input type="text" id="settingsSaucepanHandle" placeholder="Saucepan handle" autocomplete="username">
                                         </div>
                                     </div>
                                     <div class="settings-row">
                                         <label>Password:</label>
                                         <div class="settings-input-group">
-                                            <input type="password" id="settingsSaucepanPassword" class="glass-input" placeholder="Password (not stored)" autocomplete="off" data-sensitive="true">
+                                            <input type="password" id="settingsSaucepanPassword" placeholder="Password (not stored)" autocomplete="current-password" data-sensitive="true">
+                                            <button id="toggleSaucepanPasswordVisibility" class="glass-btn icon-only" title="Show/Hide">
+                                                <i class="fa-solid fa-eye"></i>
+                                            </button>
                                             <button id="saucepanLoginBtn" class="settings-verify-btn" title="Log in and store the session token">
                                                 <i class="fa-solid fa-right-to-bracket"></i>
                                             </button>
@@ -2775,7 +2778,7 @@ https://jannyai.com/characters/uuid_slug
                                     <div class="settings-row">
                                         <label>Token:</label>
                                         <div class="settings-input-group">
-                                            <input type="password" id="settingsSaucepanToken" placeholder="No token" autocomplete="off" data-sensitive="true">
+                                            <input type="password" id="settingsSaucepanToken" placeholder="No token" autocomplete="off" spellcheck="false" data-sensitive="true">
                                             <button id="toggleSaucepanTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
                                                 <i class="fa-solid fa-eye"></i>
                                             </button>

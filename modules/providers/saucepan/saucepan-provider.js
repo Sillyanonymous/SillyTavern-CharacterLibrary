@@ -8,7 +8,7 @@
 
 import { ProviderBase } from '../provider-interface.js';
 import CoreAPI from '../../core-api.js';
-import { assignGalleryId, importFromPng, fetchWithProxy, CL_HELPER_PLUGIN_BASE } from '../provider-utils.js';
+import { assignGalleryId, importFromPng, slugify } from '../provider-utils.js';
 import saucepanBrowseView from './saucepan-browse.js';
 import {
     setApiRequest as setSaucepanApiRequest,
@@ -21,18 +21,13 @@ import {
     hitFromCompanion,
     saucepanCompanionUrl,
     checkClHelperAvailable,
+    saucepanLogin,
+    pushSaucepanToken,
+    validateSaucepanSession,
+    clearSaucepanToken,
 } from './saucepan-api.js';
 
 let api = null;
-
-/** Lightweight slug for import filenames (kept local to avoid a cross-provider import). */
-function slugify(name) {
-    return String(name || 'character')
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .slice(0, 60) || 'character';
-}
 
 /** Pull gallery portraits off a companion detail object. */
 function extractSaucepanPortraits(companion) {
@@ -62,6 +57,7 @@ class SaucepanProvider extends ProviderBase {
     get id() { return 'saucepan'; }
     get name() { return 'Saucepan'; }
     get icon() { return 'fa-solid fa-utensils'; }
+    get iconUrl() { return 'https://saucepan.ai/favicon.ico'; }
     get beta() { return true; }
     get disabledByDefault() { return true; }
     get enableWarning() { return 'Saucepan is an experimental source. Native definition extraction requires a Saucepan account (Bearer token) configured in this provider\'s settings.'; }
@@ -88,15 +84,8 @@ class SaucepanProvider extends ProviderBase {
         // every server restart (cl-helper only holds the token in memory).
         const saucepanToken = coreAPI.getSetting('saucepanToken');
         if (saucepanToken) {
-            try {
-                await coreAPI.apiRequest(
-                    `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
-                    'POST',
-                    { token: saucepanToken },
-                );
-            } catch (e) {
-                console.warn('[SaucepanProvider] Failed to push Saucepan token:', e.message);
-            }
+            const result = await pushSaucepanToken(saucepanToken);
+            if (!result.ok) console.warn('[SaucepanProvider] Failed to push Saucepan token:', result.error);
         }
     }
 
@@ -157,11 +146,10 @@ class SaucepanProvider extends ProviderBase {
                 linkedAt: linkInfo.linkedAt || existing.linkedAt || new Date().toISOString(),
                 pageName: linkInfo.pageName || existing.pageName || null,
             };
-            // Re-linking to the same companion keeps the update-check baseline
-            // and creator info; a different target must start with neither
-            // (a stale baseline could false-"up to date" the new link).
+            // Re-linking to the same companion keeps creator info; a
+            // different target must start fresh.
             if (existing.id === linkInfo.id) {
-                for (const k of ['creatorId', 'creatorName', 'updatedAt', 'tokenCount']) {
+                for (const k of ['creatorId', 'creatorName']) {
                     if (existing[k] != null) char.data.extensions.saucepan[k] = existing[k];
                 }
             }
@@ -199,6 +187,12 @@ class SaucepanProvider extends ProviderBase {
         if (!linkInfo?.id) return null;
         try {
             const companion = await fetchSaucepanCompanion(linkInfo.id);
+            if (!companion) {
+                // A null companion would build a placeholder "Unknown" card and
+                // show every field as a spurious remote change.
+                api?.debugLog?.('[SaucepanProvider] companion fetch failed:', linkInfo.id);
+                return null;
+            }
             const hit = hitFromCompanion(companion, linkInfo.id);
             const extractResult = await submitSaucepanExtraction(saucepanCompanionUrl(linkInfo.id));
             if (!extractResult.success) {
@@ -214,56 +208,9 @@ class SaucepanProvider extends ProviderBase {
         }
     }
 
-    normalizeRemoteCard(rawData) {
-        if (rawData?.spec === 'chara_card_v2') return rawData;
-        return rawData;
-    }
-
-    // Native extraction is always fresh (it re-pulls the definition), so there is
-    // nothing to pre-refresh before an update check.
-    async refreshRemoteData() { /* no-op: extraction is always live */ }
-
     // ── Update Checking ─────────────────────────────────────
-
-    // Cheap pre-check: compare the baselines captured at import against the
-    // live /api/v2/companions/<id> values. Both signals are imperfect alone —
-    // card_token_count is a sum (offsetting edits preserve it) and updated_at
-    // is unverified for scenario/greeting-only edits — so ANY mismatch means
-    // "changed" and "unchanged" requires every available signal pair to match.
-    // Worst case of the OR is a false positive -> harmless full check.
-    // Returns false only when provably unchanged (so card-updates.js skips
-    // re-extraction), or null (-> full check) when there's no baseline or the
-    // companion can't be fetched.
-    async hasRemoteChanged(char, linkInfo) {
-        const ext = char?.data?.extensions?.saucepan;
-        if (!linkInfo?.id || (!ext?.updatedAt && !ext?.tokenCount)) return null;
-        const companion = await fetchSaucepanCompanion(linkInfo.id, { force: true });
-        if (!companion) return null;
-        let verdict = null;
-        if (ext.updatedAt && companion.updated_at) {
-            if (companion.updated_at !== ext.updatedAt) return true;
-            verdict = false;
-        }
-        const live = companion.card_token_count;
-        if (ext.tokenCount && Number.isFinite(live)) {
-            if (live !== ext.tokenCount) return true;
-            verdict = false;
-        }
-        return verdict;
-    }
-
-    // Self-heal the pre-check baseline when a full update is applied: the
-    // remote card built by buildV2FromSaucepan carries the fresh signature,
-    // but the diff engine doesn't compare extensions, so without this the
-    // stored baseline would stay stale and every later check would run long.
-    getUpdateBaselineFields(char, remoteCard) {
-        const sig = remoteCard?.data?.extensions?.saucepan;
-        if (!sig) return null;
-        const fields = {};
-        if (sig.updatedAt) fields['extensions.saucepan.updatedAt'] = sig.updatedAt;
-        if (sig.tokenCount) fields['extensions.saucepan.tokenCount'] = sig.tokenCount;
-        return Object.keys(fields).length ? fields : null;
-    }
+    // normalizeRemoteCard/refreshRemoteData use the ProviderBase defaults:
+    // fetchRemoteCard already returns spec-v2 and extraction is always live.
 
     getComparableFields() { return []; }
     get supportsVersionHistory() { return false; }
@@ -358,16 +305,11 @@ class SaucepanProvider extends ProviderBase {
     get hasAuth() { return true; }
     get isAuthenticated() { return hasSaucepanToken(); }
 
-    getAuthHeaders() {
-        const token = api?.getSetting?.('saucepanToken') || null;
-        return token ? { Authorization: `Bearer ${token}` } : {};
-    }
-
     openAuthUI() {
-        // Full login/token modal is wired in a later step; the token can also be
-        // set declaratively via getSettings().
         saucepanBrowseView.openAuthUI?.();
     }
+
+    // ── Settings ────────────────────────────────────────────
 
     getSettings() {
         return [
@@ -377,7 +319,7 @@ class SaucepanProvider extends ProviderBase {
                 type: 'password',
                 defaultValue: null,
                 hint: 'Required for native definition extraction. Get it by logging in, or paste a token from your Saucepan session.',
-                section: 'Saucepan',
+                section: 'Authentication',
             },
         ];
     }
@@ -453,7 +395,10 @@ class SaucepanProvider extends ProviderBase {
             let imageBuffer = null;
             if (avatarUrl) {
                 try {
-                    const resp = await fetchWithProxy(avatarUrl);
+                    // Always a same-origin cl-helper proxy path (resolveSaucepanImageUrl),
+                    // so a plain fetch suffices — no CORS fallback needed.
+                    const resp = await fetch(avatarUrl);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                     imageBuffer = await resp.arrayBuffer();
                 } catch (e) {
                     console.warn('[SaucepanProvider] Avatar download failed:', e.message);
@@ -496,24 +441,11 @@ window.saucepanLogin = async (handle, password) => {
     if (!await checkClHelperAvailable()) {
         return { ok: false, error: 'cl-helper plugin not available' };
     }
-    try {
-        const resp = await api.apiRequest(
-            `${CL_HELPER_PLUGIN_BASE}/saucepan-login`,
-            'POST',
-            { handle, password },
-        );
-        if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
-            return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
-        }
-        const data = await resp.json();
-        if (data?.ok && data.token) {
-            CoreAPI.setSetting('saucepanToken', data.token);
-        }
-        return data;
-    } catch (e) {
-        return { ok: false, error: e.message };
+    const data = await saucepanLogin(handle, password);
+    if (data?.ok && data.token) {
+        CoreAPI.setSetting('saucepanToken', data.token);
     }
+    return data;
 };
 
 window.saucepanSetToken = async (token) => {
@@ -523,57 +455,22 @@ window.saucepanSetToken = async (token) => {
     if (!await checkClHelperAvailable()) {
         return { ok: false, error: 'Saved locally, but cl-helper plugin not available' };
     }
-    try {
-        const resp = await api.apiRequest(
-            `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
-            'POST',
-            { token: trimmed },
-        );
-        if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
-            return { ok: false, error: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
-        }
-        return await resp.json();
-    } catch (e) {
-        return { ok: false, error: e.message };
-    }
+    return await pushSaucepanToken(trimmed);
 };
 
 window.saucepanValidateSession = async () => {
     if (!await checkClHelperAvailable()) {
         return { valid: false, reason: 'cl-helper plugin not available' };
     }
-    try {
-        // Resync the persisted token first: cl-helper only holds it in memory.
-        const saved = CoreAPI.getSetting('saucepanToken');
-        if (saved) {
-            try {
-                await api.apiRequest(
-                    `${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`,
-                    'POST',
-                    { token: saved },
-                );
-            } catch { /* validate reports the failure */ }
-        }
-        const resp = await api.apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-validate`);
-        if (!resp.ok) {
-            const text = await resp.text().catch(() => '');
-            return { valid: false, reason: `HTTP ${resp.status}: ${text.slice(0, 200)}` };
-        }
-        return await resp.json();
-    } catch (e) {
-        return { valid: false, reason: e.message };
-    }
+    // Resync the persisted token first: cl-helper only holds it in memory.
+    const saved = CoreAPI.getSetting('saucepanToken');
+    if (saved) await pushSaucepanToken(saved); // validate reports any failure
+    return await validateSaucepanSession();
 };
 
 window.saucepanClearSession = async () => {
     // Drop the persisted token even when cl-helper is unreachable.
     CoreAPI.setSetting('saucepanToken', null);
     if (!await checkClHelperAvailable()) return false;
-    try {
-        const resp = await api.apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-clear-token`, 'POST');
-        return resp.ok;
-    } catch {
-        return false;
-    }
+    return await clearSaucepanToken();
 };

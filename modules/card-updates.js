@@ -602,23 +602,6 @@ function showSingleCheckModal(char) {
 }
 
 /**
- * Cheap pre-check before the expensive re-extraction: ask the provider whether
- * the remote has changed (e.g. Saucepan's updated_at baseline).
- * Returns false only when the remote is provably unchanged; true or null
- * (unknown, no pre-check hook, or a throwing pre-check) means the full check
- * must run. Fail-safe: a throw is logged and treated as unknown.
- * @returns {Promise<boolean|null>}
- */
-async function preCheckRemoteChanged(provider, char, linkInfo) {
-    try {
-        return await provider.hasRemoteChanged?.(char, linkInfo) ?? null;
-    } catch (preErr) {
-        console.warn('[CardUpdates] hasRemoteChanged pre-check failed, running full check:', char.avatar, preErr);
-        return null;
-    }
-}
-
-/**
  * Perform update check for a single character
  * @param {Object} char - Character to check
  */
@@ -637,19 +620,13 @@ async function performSingleCheck(char) {
     try {
         // Ensure heavy fields are loaded before comparing card content
         await CoreAPI.hydrateCharacter(char);
-
-        const remoteChanged = await preCheckRemoteChanged(provider, char, linkInfo);
-        if (remoteChanged === false) {
-            statusEl.innerHTML = '<i class="fa-solid fa-check"></i> Character is up to date!';
-            return;
-        }
-
+        
         await provider.refreshRemoteData(linkInfo, {
             onStatus: (msg) => {
                 statusEl.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${CoreAPI.escapeHtml(msg)}`;
             },
         });
-
+        
         statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Fetching remote card...';
         const remoteCard = await provider.fetchRemoteCard(linkInfo);
         
@@ -1460,20 +1437,6 @@ async function performBatchCheck(characters, allowedFields, startFrom = 0) {
                 continue;
             }
 
-            if (abortController.signal.aborted || batchCheckPaused) break;
-            const remoteChanged = await preCheckRemoteChanged(match.provider, char, match.linkInfo);
-            if (abortController.signal.aborted || batchCheckPaused) break;
-            if (remoteChanged === false) {
-                if (statusEl) statusEl.innerHTML = '<i class="fa-solid fa-check" style="color: var(--cl-success);"></i> Up to date';
-                if (itemEl) itemEl.dataset.status = 'up-to-date';
-                // Keep the progress counter honest — this item was checked.
-                batchCheckedCount++;
-                progressEl.innerHTML = `Checked ${batchCheckedCount}/${characters.length}`;
-                updateBatchFooter('checking');
-                updateBatchFilterCounts();
-                continue;
-            }
-
             await match.provider.refreshRemoteData(match.linkInfo, {
                 signal: abortController.signal,
                 onStatus: statusEl ? (msg) => {
@@ -1574,23 +1537,6 @@ function viewBatchItemDiffs(avatar) {
 // APPLY UPDATES
 // ========================================
 
-/**
- * Baseline self-heal guard: a provider's cheap-check baseline may only be
- * refreshed when the apply covers EVERY remote difference. The stored diffs
- * can be a subset of those (batch checks honor the field-selection grid,
- * single-modal users can uncheck items), so recompute the unfiltered diff
- * and require each differing field to be part of this apply — otherwise a
- * fresh baseline would make hasRemoteChanged() report "up to date" and hide
- * the differences that were never applied.
- */
-function getBaselineFieldsIfFullApply(char, localData, remoteCard, appliedFields) {
-    const provider = CoreAPI.getCharacterProvider(char)?.provider;
-    if (!provider?.getUpdateBaselineFields) return null;
-    const fullDiffs = compareCards(localData, remoteCard);
-    if (!fullDiffs.every(d => appliedFields.has(d.field))) return null;
-    return provider.getUpdateBaselineFields(char, remoteCard);
-}
-
 async function applyListingName(char, remoteCard) {
     const listingName = remoteCard?._listingName;
     if (!listingName) return;
@@ -1647,9 +1593,6 @@ async function applySingleUpdates() {
             try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
         }
         if (hasListingName) await applyListingName(char, remoteCard);
-        const appliedFields = new Set(Array.from(checkboxes).map(cb => cb.dataset.field));
-        const baseline = getBaselineFieldsIfFullApply(char, checkData.localData, remoteCard, appliedFields);
-        if (baseline) Object.assign(updatedFields, baseline);
         const hasCardFields = Object.keys(updatedFields).length > 0;
         const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(char.avatar, updatedFields) : true;
         
@@ -1858,9 +1801,6 @@ async function applyAllBatchUpdates() {
                 try { await versionsModule.autoSnapshotBeforeChange(char, 'update'); } catch (_) {}
             }
             if (hasListingName) await applyListingName(char, remoteCard);
-            const appliedFields = new Set(diffs.map(d => d.field));
-            const baseline = getBaselineFieldsIfFullApply(char, checkData.localData, remoteCard, appliedFields);
-            if (baseline) Object.assign(updatedFields, baseline);
             const hasCardFields = Object.keys(updatedFields).length > 0;
             const success = hasCardFields ? await CoreAPI.applyCardFieldUpdates(avatar, updatedFields) : true;
             

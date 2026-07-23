@@ -1622,8 +1622,6 @@ const SAUCEPAN_ALLOWED_PATHS = [
     /^\/api\/v1\/search$/,
     /^\/api\/v1\/fandoms$/,
     /^\/api\/v1\/companions-of-user$/,
-    /^\/api\/v1\/companion$/,
-    /^\/api\/v1\/companion\/definition$/,
     /^\/api\/v2\/companions\/[a-zA-Z0-9-]+$/,
     /^\/cdn\/.+$/,
 ];
@@ -1653,10 +1651,11 @@ function saucepanHeaders(token) {
 // The definition endpoint requires auth: grab any open-definition companion
 // id via search, then request its definition with the token under test.
 async function testSaucepanToken(token) {
-    // The search endpoint 422s unless every field is present.
+    // The search endpoint 422s unless every field is present. Send the token
+    // under test here too — Saucepan 403s anonymous search requests.
     const searchResp = await fetch(`${SAUCEPAN_BASE}/api/v1/search`, {
         method: 'POST',
-        headers: { ...saucepanHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...saucepanHeaders(token), 'Content-Type': 'application/json' },
         body: JSON.stringify({
             text_search: null,
             tags: [],
@@ -1935,12 +1934,7 @@ function registerSaucepanRoutes(router) {
         }
 
         try {
-            // Fetch the v2 companion BEFORE the definition: meta.updated_at from
-            // the companion becomes the client's update-check baseline, and it
-            // must never be newer than the definition content it ships with.
-            // If an edit lands between the two fetches this order leaves the
-            // baseline older than the content (next check re-extracts —
-            // harmless); the reverse order would mask the edit as "up to date".
+            // The v2 companion supplies greetings and the Companion Core fallback.
             const compRes = await fetchSaucepanJson(`/api/v2/companions/${encodeURIComponent(companionId)}`, token, companionId);
             const defRes = await fetchSaucepanJson(`/api/v1/companion/definition?companion_id=${encodeURIComponent(companionId)}`, token, companionId);
 
@@ -1988,16 +1982,7 @@ function registerSaucepanRoutes(router) {
                 assembled['Companion Core'] = assembleSaucepanFragments(companion.full_description_fragments);
             }
 
-            // Baseline signals for the client's cheap update pre-check
-            // (hasRemoteChanged): updated_at flips on any definition edit;
-            // card_token_count is the legacy fallback signal.
-            res.json({
-                success: true, companionId, assembled, greetings,
-                meta: {
-                    updated_at: companion?.updated_at ?? null,
-                    card_token_count: companion?.card_token_count ?? null,
-                },
-            });
+            res.json({ success: true, companionId, assembled, greetings });
         } catch (err) {
             console.error('[cl-helper] Saucepan extract error:', err.message);
             res.status(502).json({ error: `Failed to reach Saucepan: ${err.message}` });

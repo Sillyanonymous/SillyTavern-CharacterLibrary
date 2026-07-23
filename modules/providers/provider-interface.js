@@ -331,32 +331,6 @@ export class ProviderBase {
     }
 
     /**
-     * Cheap pre-check for the update flow. Return `false` only when the remote
-     * is provably unchanged (lets card-updates.js skip the expensive
-     * refreshRemoteData()/fetchRemoteCard() re-extraction and report "up to
-     * date"), `true` when it may have changed, or `null` when unknown (fall
-     * through to the full content compare). Providers with a cheap "changed"
-     * signal (e.g. a token count or updated_at) override this.
-     * @param {Object} char - local character object
-     * @param {ProviderLinkInfo} linkInfo
-     * @returns {Promise<boolean|null>}
-     */
-    async hasRemoteChanged(char, linkInfo) { return null; }
-
-    /**
-     * Extra dot-path card-field updates to persist alongside an applied remote
-     * update — e.g. refreshing the stored baseline that hasRemoteChanged()
-     * compares against, so the next check is cheap again instead of
-     * false-positiving on the stale value. Only invoked when the full remote
-     * diff is being applied (a partial apply must keep the old baseline, or
-     * the skipped diffs would vanish from future pre-checks).
-     * @param {Object} char - local character object
-     * @param {Object} remoteCard - normalized remote card the update came from
-     * @returns {Object|null} e.g. { 'extensions.foo.updatedAt': '...' } or null
-     */
-    getUpdateBaselineFields(char, remoteCard) { return null; }
-
-    /**
      * Return provider-specific fields that the update diff engine should
      * compare. These supplement the built-in V2 fields in card-updates.js.
      * @returns {ProviderComparableField[]}

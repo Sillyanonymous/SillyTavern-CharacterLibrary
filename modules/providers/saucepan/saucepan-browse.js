@@ -21,6 +21,7 @@ import {
     deferRender,
     deferCall,
     isMobileMode,
+    finishBrowseImport,
 } from '../provider-utils.js';
 import {
     searchSaucepan,
@@ -34,13 +35,6 @@ import {
     hitFromCompanion,
     saucepanCompanionUrl,
 } from './saucepan-api.js';
-// Reciprocal (circular) import: saucepan-provider.js imports this module's
-// default export. Both are singletons and only reference each other inside
-// method/function bodies (call time, never at module-evaluation time), so the
-// cycle resolves cleanly regardless of which module loads first. Import used
-// solely for importCharacter().
-import saucepanProvider from './saucepan-provider.js';
-
 const {
     onElement: on,
     showToast,
@@ -48,13 +42,10 @@ const {
     debugLog,
     getSetting,
     setSetting,
-    fetchCharacters,
-    fetchAndAddCharacter,
     checkCharacterForDuplicatesAsync,
     showPreImportDuplicateWarning,
     deleteCharacter,
     getCharacterGalleryId,
-    showImportSummaryModal,
     formatRichText,
     safePurify,
     renderCreatorNotesSecure,
@@ -99,10 +90,11 @@ let saucepanActiveTags = new Set();     // include slugs
 let saucepanExcludedTags = new Set();   // exclude slugs
 let saucepanDiscoveredTags = new Set(); // slugs harvested from result rows
 
-// Content filters. NSFW defaults ON (this audience wants adult content) and maps
-// to the server `sus` param; hide-extreme is an opt-OUT that applies Saucepan's
-// built-in content-warning exclusion list (off by default = exclude nothing).
-let saucepanNsfwEnabled = true;
+// Content filters. NSFW defaults OFF (opt-in via toggle, like every other
+// provider) and maps to the server `sus` param; hide-extreme is an opt-OUT that
+// applies Saucepan's built-in content-warning exclusion list (off by default =
+// exclude nothing).
+let saucepanNsfwEnabled = false;
 let saucepanHideExtreme = false;
 let saucepanFilterHideOwned = false;
 let saucepanFilterHidePossible = false;
@@ -129,10 +121,6 @@ const PAGE_SIZE = 80;
 
 function getCharId(hit) {
     return hit?.character_id || hit?.id || '';
-}
-
-function getCreatorId(hit) {
-    return hit?.creator_id || hit?.creatorId || '';
 }
 
 function getCreatorName(hit) {
@@ -367,15 +355,21 @@ function renderSaucepanTagsList(filter = '') {
 
 // ── Fandom picker (franchise/source-material; same tri-state UI as tags) ──
 
+let _saucepanFandomFetch = null; // in-flight promise, coalesces concurrent calls
+
 async function ensureSaucepanFandomsLoaded() {
-    if (Array.isArray(_saucepanFandomList)) return;
-    _saucepanFandomList = []; // mark as loading so we don't double-fetch
-    try {
-        const list = await fetchSaucepanFandoms();
-        _saucepanFandomList = Array.isArray(list) ? list : [];
-    } catch {
-        _saucepanFandomList = [];
+    if (Array.isArray(_saucepanFandomList) && _saucepanFandomList.length > 0) return;
+    if (!_saucepanFandomFetch) {
+        _saucepanFandomFetch = (async () => {
+            try {
+                const list = await fetchSaucepanFandoms(); // returns [] on failure
+                _saucepanFandomList = Array.isArray(list) && list.length > 0 ? list : null;
+            } finally {
+                _saucepanFandomFetch = null; // empty/failed -> next call retries
+            }
+        })();
     }
+    await _saucepanFandomFetch;
 }
 
 function renderSaucepanFandomsList(filter = '') {
@@ -384,7 +378,7 @@ function renderSaucepanFandomsList(filter = '') {
 
     const all = Array.isArray(_saucepanFandomList) ? _saucepanFandomList : [];
     if (all.length === 0) {
-        container.innerHTML = '<div class="browse-tags-empty">Loading fandoms…</div>';
+        container.innerHTML = '<div class="browse-tags-empty">Loading fandoms...</div>';
         return;
     }
 
@@ -551,7 +545,7 @@ function createSaucepanCard(hit) {
             </div>
             <div class="browse-card-body">
                 <div class="browse-card-name">${escapeHtml(name)}</div>
-                ${creatorName ? `<span class="browse-card-creator-link" data-creator-id="${escapeHtml(getCreatorId(hit))}" data-creator-handle="${escapeHtml(creatorName)}" data-author="${escapeHtml(creatorName)}" title="Click to see all characters by ${escapeHtml(creatorName)}">${escapeHtml(creatorName)}</span>` : ''}
+                ${creatorName ? `<span class="browse-card-creator-link" data-author="${escapeHtml(creatorName)}" title="Click to see all characters by ${escapeHtml(creatorName)}">${escapeHtml(creatorName)}</span>` : ''}
                 <div class="browse-card-tags">
                     ${tags.map(t => `<span class="browse-card-tag" title="${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('')}
                 </div>
@@ -927,7 +921,7 @@ function updateFiltersButtonState() {
 function renderLockedDefBanner() {
     // Reuses DataCat's modal locked-banner CSS (shared stylesheet).
     return `
-        <div class="datacat-modal-locked-banner">
+        <div class="saucepan-modal-locked-banner">
             <i class="fa-solid fa-lock"></i>
             <div>
                 <strong>Locked Definition</strong>
@@ -989,7 +983,7 @@ function openPreviewModal(hit) {
 
     const modal = document.getElementById('saucepanCharModal');
     if (!modal) return;
-    window.resetBrowseSectionCollapseState?.(modal);
+    CoreAPI.resetBrowseSectionCollapseState(modal);
 
     const charId = getCharId(hit);
     const name = hit.name || 'Unknown';
@@ -1056,7 +1050,6 @@ function openPreviewModal(hit) {
     }
     const greetingsStat = document.getElementById('saucepanCharGreetingsStat');
     if (greetingsStat) greetingsStat.style.display = 'none';
-    window.currentBrowseAltGreetings = [];
     const galleryGrid = document.getElementById('saucepanCharGalleryGrid');
     if (galleryGrid) galleryGrid.innerHTML = '';
 
@@ -1105,13 +1098,13 @@ function renderTokenCTA({ locked = false } = {}) {
     if (el) {
         el.innerHTML = `
             ${locked ? renderLockedDefBanner() : ''}
-            <div class="datacat-modal-extract-cta">
-                <div class="datacat-modal-extract-icon-wrap">
-                    <i class="fa-solid fa-key datacat-modal-extract-icon"></i>
+            <div class="saucepan-modal-extract-cta">
+                <div class="saucepan-modal-extract-icon-wrap">
+                    <i class="fa-solid fa-key saucepan-modal-extract-icon"></i>
                 </div>
-                <p class="datacat-modal-extract-message">A Saucepan token is required to load this character's full definition.</p>
-                <p class="datacat-modal-extract-hint">Log in or paste a Bearer token in the Saucepan account settings to enable native extraction.</p>
-                <button class="action-btn primary datacat-modal-extract-btn" id="saucepanModalAuthBtn">
+                <p class="saucepan-modal-extract-message">A Saucepan token is required to load this character's full definition.</p>
+                <p class="saucepan-modal-extract-hint">Log in or paste a Bearer token in the Saucepan account settings to enable native extraction.</p>
+                <button class="action-btn primary saucepan-modal-extract-btn" id="saucepanModalAuthBtn">
                     <i class="fa-solid fa-right-to-bracket"></i> Configure Token
                 </button>
             </div>
@@ -1137,11 +1130,11 @@ function renderExtractionUnavailable({ locked = false } = {}) {
     if (el) {
         el.innerHTML = `
             ${locked ? renderLockedDefBanner() : ''}
-            <div class="datacat-modal-extract-cta">
-                <div class="datacat-modal-extract-icon-wrap">
-                    <i class="fa-solid fa-triangle-exclamation datacat-modal-extract-icon"></i>
+            <div class="saucepan-modal-extract-cta">
+                <div class="saucepan-modal-extract-icon-wrap">
+                    <i class="fa-solid fa-triangle-exclamation saucepan-modal-extract-icon"></i>
                 </div>
-                <p class="datacat-modal-extract-message">${locked
+                <p class="saucepan-modal-extract-message">${locked
                     ? "This companion's definition is locked and can't be extracted."
                     : "Could not load this character's definition."}</p>
             </div>
@@ -1280,7 +1273,6 @@ function renderAltGreetings(greetings, charName) {
         listEl.innerHTML = '';
         if (countEl) countEl.textContent = '';
         if (greetingsStat) greetingsStat.style.display = 'none';
-        window.currentBrowseAltGreetings = [];
         return;
     }
 
@@ -1325,12 +1317,10 @@ function renderAltGreetings(greetings, charName) {
     });
 
     if (countEl) countEl.textContent = `(${greetings.length})`;
-    window.currentBrowseAltGreetings = greetings;
 }
 
 function cleanupCharModal() {
     BrowseView.closeAvatarViewer();
-    window.currentBrowseAltGreetings = null;
     const sectionIds = [
         'saucepanCharDescription',
         'saucepanCharScenario',
@@ -1422,8 +1412,11 @@ async function importSaucepanCharacter(hit) {
 
         if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Importing...';
 
+        const provider = CoreAPI.getProvider('saucepan');
+        if (!provider?.importCharacter) throw new Error('Saucepan provider not available');
+
         // The provider re-runs native extraction and downloads the avatar.
-        const result = await saucepanProvider.importCharacter(charId, hit, { inheritedGalleryId });
+        const result = await provider.importCharacter(charId, hit, { inheritedGalleryId });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
         const mediaUrls = result.embeddedMediaUrls || [];
@@ -1435,7 +1428,7 @@ async function importSaucepanCharacter(hit) {
         const summaryArgs = {
             galleryCharacters: hasGallery ? [{
                 name: result.characterName,
-                provider: saucepanProvider,
+                provider,
                 linkInfo: { providerId: 'saucepan', id: result.providerCharId },
                 url: saucepanCompanionUrl(result.providerCharId),
                 avatar: result.fileName,
@@ -1454,28 +1447,16 @@ async function importSaucepanCharacter(hit) {
             }] : [],
         };
 
-        if (showSummary) {
-            if (window.matchMedia?.('(max-width: 768px)').matches) {
-                showImportSummaryModal(summaryArgs);
-                await new Promise(r => setTimeout(r, 220));
-                closePreviewModal();
-            } else {
-                closePreviewModal();
-                await new Promise(r => requestAnimationFrame(r));
-                showImportSummaryModal(summaryArgs);
-            }
-        } else {
-            if (importBtn) importBtn.innerHTML = '<i class="fa-solid fa-check"></i> Imported';
-            await new Promise(r => setTimeout(r, 350));
-            closePreviewModal();
-        }
-
-        showToast(`Imported "${result.characterName}"`, 'success');
-
-        const added = await fetchAndAddCharacter(result.fileName);
-        if (added) view.addCharToLookup(added);
-        else await fetchCharacters(true);
-        markCardAsImported(charId);
+        await finishBrowseImport({
+            view,
+            summaryArgs,
+            showSummary,
+            closePreview: closePreviewModal,
+            importBtn,
+            characterName: result.characterName,
+            avatarFileName: result.fileName,
+            markImported: () => markCardAsImported(charId),
+        });
     } catch (err) {
         console.error('[SaucepanBrowse] Import failed:', err);
         showToast(`Import failed: ${err.message}`, 'error');
@@ -1517,18 +1498,25 @@ function markCardAsImported(charId) {
  * duplicating a login modal.
  */
 function openSaucepanAuthUI() {
-    const modal = document.getElementById('settingsModal');
-    if (modal) {
-        modal.classList.add('visible');
-        requestAnimationFrame(() => {
+    // Open through the settings button (populates fields, resets nav), then
+    // navigate to the Online Providers panel — same pattern as gallery-sync.js.
+    const settingsBtn = document.getElementById('gallerySettingsBtn');
+    if (!settingsBtn) {
+        showToast('Open Settings to configure your Saucepan account.', 'info');
+        return;
+    }
+    settingsBtn.click();
+    setTimeout(() => {
+        document.querySelector('.settings-nav-item[data-section="online"]')?.click();
+        setTimeout(() => {
+            const section = document.getElementById('settingsSaucepanSection');
+            if (section) section.open = true;
             const tokenInput = document.getElementById('settingsSaucepanToken');
             const group = tokenInput?.closest('.settings-group') || tokenInput;
             group?.scrollIntoView({ behavior: 'smooth', block: 'center' });
             document.getElementById('settingsSaucepanHandle')?.focus?.();
-        });
-    } else {
-        showToast('Open Settings to configure your Saucepan account.', 'info');
-    }
+        }, 100);
+    }, 50);
 }
 
 // ========================================
@@ -1539,8 +1527,8 @@ let delegatesInitialized = false;
 let modalEventsAttached = false;
 
 function initSaucepanView() {
-    // Default ON: only an explicit `false` opts out of NSFW.
-    saucepanNsfwEnabled = getSetting('saucepanNsfw') !== false;
+    // Default OFF: NSFW is an explicit opt-in.
+    saucepanNsfwEnabled = getSetting('saucepanNsfw') === true;
     saucepanHideExtreme = getSetting('saucepanHideExtreme') === true;
 
     if (delegatesInitialized) return;
@@ -1564,7 +1552,7 @@ function initSaucepanView() {
             const authorLink = e.target.closest('.browse-card-creator-link');
             if (authorLink) {
                 e.stopPropagation();
-                const handle = authorLink.dataset.creatorHandle || authorLink.dataset.author;
+                const handle = authorLink.dataset.author;
                 if (handle) browseCreator(handle);
                 return;
             }
@@ -1869,11 +1857,6 @@ function ensureModalEventsAttached() {
     window.registerOverlay?.({ id: 'saucepanCharModal', tier: 7, close: () => closePreviewModal() });
     window.registerOverlay?.({ id: 'saucepanCreatorBanner', tier: 9, close: () => clearCreatorFilter() });
 }
-
-// Expose preview opener on window for parity with datacat (used by link modal).
-window.openSaucepanCharPreview = function (char) {
-    openPreviewModal(char);
-};
 
 // ========================================
 // BROWSE VIEW CLASS
@@ -2249,6 +2232,8 @@ class SaucepanBrowseView extends BrowseView {
             saucepanSortMode = 'saucepan_new';
             saucepanActiveTags.clear();
             saucepanExcludedTags.clear();
+            saucepanActiveFandoms.clear();
+            saucepanExcludedFandoms.clear();
         }
         const wasInitialized = this._initialized;
         super.activate(container, options);

@@ -1,5 +1,6 @@
-// Saucepan (saucepan.ai) client API - used by the Saucepan provider, and by
-// DataCat for its Saucepan-sourced index rows (creator lookups, CDN images).
+// Shared Saucepan API utilities - used by both saucepan-provider.js and
+// saucepan-browse.js, plus DataCat for its Saucepan-sourced index rows
+// (creator lookups, CDN images).
 //
 // All calls go through cl-helper (/plugins/cl-helper/saucepan-*), never ST's
 // /proxy/: Saucepan responds with zstd-compressed bodies that ST's proxy
@@ -37,17 +38,16 @@ const SAUCEPAN_ORDER_MAP = {
 };
 
 // Saucepan's own default "content warning" exclusion list — the extreme-content
-// tags the site hides by default (the "CW" toggle). We leave these INCLUDED by
-// default (this audience wants the harder content) and only apply them when the
-// user opts into hiding via the "Hide extreme content" toggle.
-export const SAUCEPAN_CW_EXTREME_TAGS = [
+// tags the site hides by default (the "CW" toggle). Applied only when the user
+// enables the "Hide extreme content" toggle; otherwise no tags are excluded.
+const SAUCEPAN_CW_EXTREME_TAGS = [
     'noncon_dubcon', 'incest_stepcest', 'gore', 'body_horror', 'slur_usage',
     'self_harm_suicide', 'vore', 'cannibalism', 'feral', 'user_harm',
     'eating_disorder', 'amputation', 'miscarriage',
 ];
 
 // ========================================
-// TRANSPORT
+// NETWORK
 // ========================================
 
 let _apiRequest = null;
@@ -95,6 +95,72 @@ async function saucepanFetch(method, apiPath, body) {
     return method === 'POST'
         ? _apiRequest(url, 'POST', body)
         : _apiRequest(url);
+}
+
+// ========================================
+// SESSION (cl-helper token management)
+// ========================================
+
+/** Shared error shaping for the session endpoints. */
+async function sessionError(resp) {
+    const text = await resp.text().catch(() => '');
+    return `HTTP ${resp.status}: ${text.slice(0, 200)}`;
+}
+
+/**
+ * Log into Saucepan via cl-helper (which performs the credentialed request).
+ * The password is never stored; the returned token is what callers persist.
+ * @returns {Promise<{ok: boolean, token?: string, error?: string}>}
+ */
+export async function saucepanLogin(handle, password) {
+    try {
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-login`, 'POST', { handle, password });
+        if (!resp.ok) return { ok: false, error: await sessionError(resp) };
+        return await resp.json();
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
+/**
+ * Push a Bearer token into cl-helper's in-memory store (proxy auth).
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+export async function pushSaucepanToken(token) {
+    try {
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-set-token`, 'POST', { token });
+        if (!resp.ok) return { ok: false, error: await sessionError(resp) };
+        return await resp.json();
+    } catch (e) {
+        return { ok: false, error: e.message };
+    }
+}
+
+/**
+ * Validate the token cl-helper currently holds.
+ * @returns {Promise<{valid: boolean, reason?: string}>}
+ */
+export async function validateSaucepanSession() {
+    try {
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-validate`);
+        if (!resp.ok) return { valid: false, reason: await sessionError(resp) };
+        return await resp.json();
+    } catch (e) {
+        return { valid: false, reason: e.message };
+    }
+}
+
+/**
+ * Clear the token from cl-helper's in-memory store.
+ * @returns {Promise<boolean>}
+ */
+export async function clearSaucepanToken() {
+    try {
+        const resp = await _apiRequest(`${CL_HELPER_PLUGIN_BASE}/saucepan-clear-token`, 'POST');
+        return resp.ok;
+    } catch {
+        return false;
+    }
 }
 
 // ========================================
@@ -150,8 +216,8 @@ export async function searchSaucepan(opts = {}) {
         openDefinitionOnly = true,
         tags = [],
         excludedTags = [],
-        // NSFW on by default (this audience wants adult content); maps to `sus`.
-        nsfw = true,
+        // SFW by default (user opts in via the browse toggle); maps to `sus`.
+        nsfw = false,
         // Off by default: exclude nothing. When true, apply Saucepan's built-in
         // content-warning exclusion list on top of any user-excluded tags.
         hideExtreme = false,
@@ -305,23 +371,14 @@ export async function fetchSaucepanCompanionsOfUser(handle) {
  */
 // Short-lived cache so the burst of companion reads when a card opens (preview
 // header, link-modal stats, gallery) collapses to a single network round-trip.
-// Stores the in-flight promise, so concurrent callers coalesce too. Pass
-// { force: true } to bypass it (update checks want live data).
+// Stores the in-flight promise, so concurrent callers coalesce too.
 const _saucepanCompanionCache = new Map(); // id -> { promise, ts }
 const SAUCEPAN_COMPANION_TTL = 60_000;
 
-/** Drop a cached companion (or all) — e.g. after applying an update. */
-export function clearSaucepanCompanionCache(id) {
-    if (id) _saucepanCompanionCache.delete(id);
-    else _saucepanCompanionCache.clear();
-}
-
-export async function fetchSaucepanCompanion(id, { force = false } = {}) {
+export async function fetchSaucepanCompanion(id) {
     if (!id) return null;
-    if (!force) {
-        const hit = _saucepanCompanionCache.get(id);
-        if (hit && (Date.now() - hit.ts) < SAUCEPAN_COMPANION_TTL) return hit.promise;
-    }
+    const cached = _saucepanCompanionCache.get(id);
+    if (cached && (Date.now() - cached.ts) < SAUCEPAN_COMPANION_TTL) return cached.promise;
     // Companion detail lives at /api/v2/companions/<id> (Bearer-authed). The old
     // /api/v1/companion?id= form is a different endpoint and 405s on GET.
     const promise = (async () => {
@@ -372,7 +429,7 @@ export async function fetchSaucepanFandoms() {
  * Submit a Saucepan companion URL for native extraction via cl-helper.
  * Requires a Saucepan Bearer token (login or manually pasted).
  * @param {string} companionUrl - Full Saucepan companion URL
- * @returns {Promise<{success: boolean, companionId?: string, assembled?: Object, greetings?: Object[], meta?: Object, error?: string}>}
+ * @returns {Promise<{success: boolean, assembled?: Object, greetings?: Object[], error?: string}>}
  */
 export async function submitSaucepanExtraction(companionUrl) {
     if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound');
@@ -404,12 +461,8 @@ export async function submitSaucepanExtraction(companionUrl) {
         }
         return {
             success: true,
-            companionId: data.companionId,
             assembled: data.assembled,
             greetings: data.greetings,
-            // { updated_at, card_token_count } baseline signals for the cheap
-            // update pre-check; absent from older cl-helper deploys.
-            meta: data.meta || null,
         };
     } catch (e) {
         console.error('[Saucepan] submitSaucepanExtraction failed:', e);
@@ -480,15 +533,6 @@ export function buildV2FromSaucepan(hit, extractData) {
                     id: hit.character_id || hit.id,
                     creatorId: hit.creator_id || null,
                     creatorName: hit.creator_name || null,
-                    // Baselines for cheap update checks (hasRemoteChanged).
-                    // updatedAt is the primary signal: it flips on any
-                    // definition edit. tokenCount prefers the fresh extract
-                    // meta over the possibly-stale search hit (kept as a
-                    // fallback for older cl-helper deploys without meta); it's
-                    // a non-injective sum (offsetting edits can preserve it),
-                    // so it can miss edits.
-                    updatedAt: extractData?.meta?.updated_at || null,
-                    tokenCount: extractData?.meta?.card_token_count || hit.totalTokens || null,
                 },
             },
         },

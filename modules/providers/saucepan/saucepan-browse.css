@@ -1,15 +1,127 @@
 /* Saucepan browse view styles.
  *
  * The grid, cards, feature badges, and dropdowns reuse the shared browse styles
- * in browse-shared.css. The preview modal's locked-definition banner and the
- * token/extraction CTA currently reuse the `datacat-modal-locked-banner` and
- * `datacat-modal-extract-cta` classes defined in datacat-browse.css (which is
- * always loaded, since the DataCat provider remains). A follow-up moves those
- * shared modal classes here / into browse-shared.css and renames them. */
+ * in browse-shared.css; only Saucepan-specific chrome lives here. */
 
-/* Source badge for Saucepan-origin cards (kept for parity; the single-source
- * view suppresses it by default). */
-.browse-feature-badge.source-saucepan {
-    background: linear-gradient(135deg, #b5651d, #e08a3c);
-    color: #fff;
+[data-select-id="saucepanCreatorSortSelect"] .custom-select-trigger {
+    min-width: 150px;
+    font-size: var(--font-md);
+    padding: 6px 10px;
+}
+
+/* Mobile overrides */
+
+html.cl-mobile #saucepanCreatorSortSelect, html.cl-mobile [data-select-id="saucepanCreatorSortSelect"] { min-width: 0; flex: 1; font-size: var(--font-sm); }
+html.cl-mobile [data-select-id="saucepanCreatorSortSelect"] .custom-select-trigger { min-width: 0; }
+
+
+/* ============================================
+   In-Modal Extraction CTA
+   ============================================ */
+
+.saucepan-modal-locked-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    margin: 0 auto var(--space-md);
+    max-width: 480px;
+    border-radius: var(--radius-lg);
+    background: rgba(255, 180, 60, 0.08);
+    border: 1px solid rgba(255, 180, 60, 0.25);
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.saucepan-modal-locked-banner > i {
+    color: rgb(255, 180, 60);
+    font-size: var(--font-lg);
+    margin-top: 2px;
+    flex-shrink: 0;
+}
+
+.saucepan-modal-locked-banner strong {
+    display: block;
+    font-size: var(--font-md);
+    margin-bottom: var(--space-2xs);
+}
+
+.saucepan-modal-locked-banner p {
+    margin: 0;
+    font-size: var(--font-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.saucepan-modal-extract-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: var(--space-2xl) 0 var(--space-md);
+    max-width: 360px;
+    margin: 0 auto;
+    line-height: 1;
+}
+
+.saucepan-modal-extract-icon-wrap {
+    width: 56px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-circle);
+    background: rgba(255, 255, 255, 0.04);
+    margin-bottom: var(--space-lg);
+    transition: background 0.3s ease;
+}
+
+.saucepan-modal-extract-cta.extracting .saucepan-modal-extract-icon-wrap {
+    background: rgba(var(--accent-rgb, 52, 152, 219), 0.08);
+}
+
+.saucepan-modal-extract-cta.success .saucepan-modal-extract-icon-wrap {
+    background: rgba(74, 222, 128, 0.08);
+}
+
+.saucepan-modal-extract-cta.error .saucepan-modal-extract-icon-wrap {
+    background: rgba(248, 113, 113, 0.08);
+}
+
+.saucepan-modal-extract-icon {
+    font-size: var(--font-xl);
+    color: var(--text-muted);
+    transition: color 0.3s ease;
+}
+
+.saucepan-modal-extract-cta.extracting .saucepan-modal-extract-icon {
+    color: var(--accent);
+}
+
+.saucepan-modal-extract-cta.success .saucepan-modal-extract-icon {
+    color: #4ade80;
+}
+
+.saucepan-modal-extract-cta.error .saucepan-modal-extract-icon {
+    color: #f87171;
+}
+
+.saucepan-modal-extract-message {
+    color: var(--text-primary);
+    font-size: var(--font-md);
+    margin: 0 0 var(--space-xs);
+    font-weight: 500;
+}
+
+.saucepan-modal-extract-hint {
+    color: var(--text-muted);
+    font-size: var(--font-sm);
+    margin: 0 0 var(--space-xl);
+    line-height: 1.6;
+    max-width: 300px;
+}
+
+.saucepan-modal-extract-btn {
+    gap: var(--space-xs);
+    min-width: 180px;
 }

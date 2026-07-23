@@ -536,10 +536,10 @@ const DEFAULT_SETTINGS = {
     wyvernUid: null,
     wyvernRememberCredentials: true,
     datacatToken: null,
-    saucepanToken: null,
     datacatPublicFeed: false,
     datacatReextractOnUpdate: false,
     datacatFlareSolverrUrl: '',
+    saucepanToken: null,
     janitoraiToken: null,
     janitoraiRefreshToken: null,
     botbooruToken: null,
@@ -3900,9 +3900,19 @@ function setupSettingsModal() {
         };
     }
 
+    const toggleSaucepanPasswordVisibility = document.getElementById('toggleSaucepanPasswordVisibility');
+    if (toggleSaucepanPasswordVisibility && saucepanPasswordInput) {
+        toggleSaucepanPasswordVisibility.onclick = () => {
+            const isPassword = saucepanPasswordInput.type === 'password';
+            saucepanPasswordInput.type = isPassword ? 'text' : 'password';
+            toggleSaucepanPasswordVisibility.innerHTML = `<i class="fa-solid fa-eye${isPassword ? '-slash' : ''}"></i>`;
+        };
+    }
+
     const saucepanLoginBtn = document.getElementById('saucepanLoginBtn');
     if (saucepanLoginBtn) {
-        saucepanLoginBtn.onclick = async () => {
+        saucepanLoginBtn.onclick = async (e) => {
+            e.preventDefault();
             const handle = (saucepanHandleInput?.value || '').trim();
             const password = saucepanPasswordInput?.value || '';
             if (!handle || !password) {
@@ -3921,7 +3931,7 @@ function setupSettingsModal() {
                 if (result?.ok && result.token) {
                     if (saucepanTokenInput) saucepanTokenInput.value = result.token;
                     if (saucepanPasswordInput) saucepanPasswordInput.value = '';
-                    showToast('Saucepan login successful', 'success');
+                    showToast('Saucepan login successful!', 'success');
                 } else {
                     showToast(`Saucepan login failed: ${result?.error || 'unknown error'}`, 'error');
                 }
@@ -3961,7 +3971,8 @@ function setupSettingsModal() {
 
     const validateSaucepanBtn = document.getElementById('validateSaucepanBtn');
     if (validateSaucepanBtn) {
-        validateSaucepanBtn.onclick = async () => {
+        validateSaucepanBtn.onclick = async (e) => {
+            e.preventDefault();
             if (!window.saucepanValidateSession) {
                 showToast('Saucepan module not ready', 'error');
                 return;
@@ -3975,7 +3986,7 @@ function setupSettingsModal() {
                 if (result?.valid) {
                     validateSaucepanBtn.classList.add('success');
                     validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
-                    showToast('Saucepan token is valid', 'success');
+                    showToast('Saucepan token is valid!', 'success');
                 } else {
                     validateSaucepanBtn.classList.add('error');
                     validateSaucepanBtn.innerHTML = '<i class="fa-solid fa-times"></i>';

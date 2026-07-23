@@ -1903,7 +1903,7 @@ window.registerOverlay = window.registerOverlay || function(cfg) {
         genericSection.appendChild(genericProviderLabel);
         genericSection.appendChild(genericSortSection);
 
-        // Filters row (Tags, Features, NSFW)
+        // Filters row (Tags, Fandoms, Features, NSFW)
         const genericFilterSection = createSection('Filters');
         const genericFilterRow = document.createElement('div');
         genericFilterRow.className = 'mobile-settings-row';
