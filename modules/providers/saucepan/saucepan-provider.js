@@ -403,11 +403,16 @@ class SaucepanProvider extends ProviderBase {
                 hit = hitFromCompanion(companion, charId);
             }
 
-            const extractResult = await submitSaucepanExtraction(companionUrl, { allowPartial: !!options.allowPartial });
-            if (!extractResult.success) {
-                throw new Error(extractResult.error || 'Saucepan extraction failed');
+            let characterCard = options.prebuiltCard?.data
+                ? structuredClone(options.prebuiltCard)
+                : null;
+            if (!characterCard) {
+                const extractResult = await submitSaucepanExtraction(companionUrl, { allowPartial: !!options.allowPartial });
+                if (!extractResult.success) {
+                    throw new Error(extractResult.error || 'Saucepan extraction failed');
+                }
+                characterCard = buildV2FromSaucepan(hit, extractResult);
             }
-            const characterCard = buildV2FromSaucepan(hit, extractResult);
             if (!characterCard?.data) throw new Error('Failed to build character card (empty definition)');
 
             const characterName = characterCard.data.name || hit.name || 'Unnamed';

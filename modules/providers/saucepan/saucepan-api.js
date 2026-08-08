@@ -9,6 +9,11 @@ import { CL_HELPER_PLUGIN_BASE } from '../provider-utils.js';
 // ========================================
 
 const SAUCEPAN_PROXY_BASE = `${CL_HELPER_PLUGIN_BASE}/saucepan-proxy`;
+const SAUCEPAN_CUSTOM_PROVIDER_PROFILES = new Set([
+    'custom_and_vetted',
+    'vetted_only_owner_bypass',
+    'internal_only_owner_bypass',
+]);
 
 // Saucepan CDN images can't be hotlinked: the CDN answers with
 // Cross-Origin-Resource-Policy: same-origin, so the browser refuses to render
@@ -80,6 +85,11 @@ export function setSaucepanTokenGetter(fn) { _getSaucepanToken = fn; }
  * @returns {boolean}
  */
 export function hasSaucepanToken() { return !!(_getSaucepanToken?.() ?? null); }
+
+/** Return true only when Saucepan says this companion may use a custom provider. */
+export function canUseSaucepanHiddenCapture(companion) {
+    return SAUCEPAN_CUSTOM_PROVIDER_PROFILES.has(companion?.providers_profile);
+}
 
 /**
  * Ping cl-helper's health endpoint. Used by the auth bridges to report a
@@ -557,7 +567,7 @@ async function fetchSaucepanJson(apiPath) {
  * @param {string} companionUrl - Full Saucepan companion URL
  * @returns {Promise<{success: boolean, assembled?: Object, greetings?: Object[], error?: string}>}
  */
-export async function submitSaucepanExtraction(companionUrl, { allowPartial = false } = {}) {
+export async function submitSaucepanExtraction(companionUrl, { allowPartial = false, allowHiddenCapture = false } = {}) {
     if (!_apiRequest) throw new Error('Saucepan: apiRequest not bound');
 
     let companionId;
@@ -581,7 +591,7 @@ export async function submitSaucepanExtraction(companionUrl, { allowPartial = fa
         const companion = compRes.companion;
         // Locked companions can 403 the definition endpoint outright (the other lock mode
         // answers 200 with empty sections); a user-confirmed partial import continues without it.
-        const partialLocked = allowPartial && companion?.open_definition === false;
+        const partialLocked = (allowPartial || allowHiddenCapture) && companion?.open_definition === false;
         if ((!defRes.ok || !defRes.data) && !partialLocked) {
             if (!defRes.ok) {
                 const msg = defRes.data?.error?.message || defRes.data?.error || `Saucepan HTTP ${defRes.status}`;
@@ -615,9 +625,38 @@ export async function submitSaucepanExtraction(companionUrl, { allowPartial = fa
             }
         }
 
+        const defLocked = companion?.open_definition === false;
+        let cleanupWarning = '';
+        if (allowHiddenCapture && defLocked && !assembled['Companion Core'] && canUseSaucepanHiddenCapture(companion)) {
+            const captureResponse = await _apiRequest(
+                `${CL_HELPER_PLUGIN_BASE}/saucepan-extract-hidden`,
+                'POST',
+                { companionId },
+            );
+            let captureData = null;
+            try { captureData = await captureResponse.json(); } catch { /* non-JSON helper error */ }
+            if (!captureResponse.ok || !captureData?.success) {
+                return {
+                    success: false,
+                    error: captureData?.error || `Hidden extraction failed (HTTP ${captureResponse.status})`,
+                    locked: true,
+                    cleanupWarning: captureData?.cleanupWarning || '',
+                };
+            }
+            cleanupWarning = captureData.cleanupWarning || '';
+            if (captureData.assembled?.['Companion Core']) {
+                assembled['Companion Core'] = captureData.assembled['Companion Core'];
+            }
+            if (captureData.assembled?.['Example Dialogue']) {
+                assembled['Example Dialogue'] = captureData.assembled['Example Dialogue'];
+            }
+            if (!greetings.length && typeof captureData.greeting === 'string' && captureData.greeting.trim()) {
+                greetings.push({ title: '', text: captureData.greeting.trim() });
+            }
+        }
+
         // The companion's full_description is the public profile text, not the definition;
         // substituting it on a locked card silently imports wrong content.
-        const defLocked = companion?.open_definition === false;
         if (!assembled['Companion Core'] && !defLocked && profileDescription) {
             assembled['Companion Core'] = profileDescription;
         }
@@ -626,7 +665,15 @@ export async function submitSaucepanExtraction(companionUrl, { allowPartial = fa
             return { success: false, error: "This companion's definition is locked by its creator", locked: true };
         }
 
-        return { success: true, assembled, greetings, greetingsUnavailable, partial, profileDescription };
+        return {
+            success: true,
+            assembled,
+            greetings,
+            greetingsUnavailable,
+            partial,
+            profileDescription,
+            ...(cleanupWarning ? { cleanupWarning } : {}),
+        };
     } catch (e) {
         console.error('[Saucepan] submitSaucepanExtraction failed:', e);
         return { success: false, error: e.message };
@@ -712,12 +759,22 @@ export function buildV2FromSaucepan(hit, extractData) {
  * @param {Object} hit - Normalized Saucepan hit (must have character_id or id)
  * @returns {Promise<Object|null>} V2 card or null
  */
-export async function fetchSaucepanV2Card(hit) {
+export async function fetchSaucepanV2Card(hit, { allowHiddenCapture = false } = {}) {
     if (!hit?.character_id && !hit?.id) return null;
-    const result = await submitSaucepanExtraction(saucepanCompanionUrl(hit.character_id || hit.id));
+    const result = await submitSaucepanExtraction(
+        saucepanCompanionUrl(hit.character_id || hit.id),
+        { allowHiddenCapture },
+    );
     if (!result.success) {
         console.warn('[Saucepan] Native extraction failed:', result.error);
+        if (allowHiddenCapture) {
+            const error = new Error(result.error || 'Saucepan hidden extraction failed');
+            if (result.cleanupWarning) error.cleanupWarning = result.cleanupWarning;
+            throw error;
+        }
         return null;
     }
-    return buildV2FromSaucepan(hit, result);
+    const card = buildV2FromSaucepan(hit, result);
+    if (card && result.cleanupWarning) card._saucepanCleanupWarning = result.cleanupWarning;
+    return card;
 }

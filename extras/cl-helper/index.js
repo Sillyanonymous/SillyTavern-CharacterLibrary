@@ -14,6 +14,7 @@ import { stat, lstat, readFile, writeFile, rename, unlink, readdir, open } from 
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import { createSaucepanHiddenExtractionHandler } from './saucepan-hidden-extraction.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1763,6 +1764,10 @@ async function readSaucepanBody(response) {
 }
 
 function registerSaucepanRoutes(router) {
+    router.post('/saucepan-extract-hidden', createSaucepanHiddenExtractionHandler({
+        getToken: () => saucepanToken,
+    }));
+
     // Saucepan auth: password login
     router.post('/saucepan-login', async (req, res) => {
         const { handle, password } = req.body ?? {};

@@ -763,7 +763,9 @@ Extraction is handled entirely by DataCat's servers. The `appearOnPublicFeed` op
 - In-app character preview with card details
 - Character linking and card updates
 
-Definitions are extracted natively rather than downloaded as a card file. Some companions have a locked definition that is not publicly available, and the preview says so; extraction may return an incomplete character body for those.
+Definitions are extracted natively rather than downloaded as a card file. For a locked companion whose creator allows custom providers, the preview offers an explicit **Extract for local import** action. It creates one temporary Saucepan provider and chat, sends that one prompt through a short-lived Cloudflare Quick Tunnel to a one-use loopback listener, and then attempts to remove the temporary Saucepan state. Character Library keeps the captured definition in memory only, does not publish it, and warns if cleanup is incomplete. Companions whose creators disallow custom providers remain available only as incomplete imports.
+
+Locked-definition extraction requires [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) on the SillyTavern host. Install it on `PATH`, or set `CLOUDFLARED_PATH` to the executable before starting SillyTavern. This flow is limited to the one companion selected by the signed-in user; it does not provide bulk extraction or redistribution tooling.
 
 #### Login
 1. Install the [cl-helper plugin](#cl-helper-plugin-not-detected). Saucepan sends no CORS headers at all, so every request goes through it, browsing included

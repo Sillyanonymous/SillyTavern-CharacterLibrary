@@ -27,6 +27,7 @@ import {
     fetchSaucepanCompanion,
     fetchSaucepanFandoms,
     fetchSaucepanV2Card,
+    canUseSaucepanHiddenCapture,
     hasSaucepanToken,
     resolveSaucepanImageUrl,
     saucepanCdnUrl,
@@ -951,7 +952,7 @@ function renderLockedDefBanner() {
             <i class="fa-solid fa-lock"></i>
             <div>
                 <strong>Locked Definition</strong>
-                <p>This Saucepan companion's definition is not publicly available. Native extraction cannot retrieve the character body, so importing would produce an incomplete card.</p>
+                <p>This Saucepan companion's definition is not available through the public definition endpoint.</p>
             </div>
         </div>
     `;
@@ -1227,6 +1228,77 @@ function renderExtractionUnavailable({ locked = false } = {}) {
     setImportButtonState('unavailable');
 }
 
+function paintSaucepanV2Card(hit, v2Card, name) {
+    if (saucepanSelectedChar && getCharId(saucepanSelectedChar) === getCharId(hit)) {
+        saucepanSelectedChar._v2Card = v2Card;
+    }
+
+    const data = v2Card.data;
+    paintBodySectionSecure('saucepanCharDescriptionSection', 'saucepanCharDescription', data.description, name);
+    paintBodySection('saucepanCharScenarioSection', 'saucepanCharScenario', data.scenario, name);
+    paintBodySection('saucepanCharFirstMsgSection', 'saucepanCharFirstMsg', data.first_mes, name);
+    paintBodySection('saucepanCharMesExampleSection', 'saucepanCharMesExample', data.mes_example, name);
+    renderAltGreetings(data.alternate_greetings, name);
+    setImportButtonState(isCharInLocalLibrary(hit) ? 'inLibrary' : 'import', hit);
+}
+
+function renderHiddenCaptureCTA(hit, name) {
+    for (const id of [
+        'saucepanCharScenarioSection',
+        'saucepanCharFirstMsgSection',
+        'saucepanCharMesExampleSection',
+        'saucepanCharAltGreetingsSection',
+    ]) {
+        const section = document.getElementById(id);
+        if (section) section.style.display = 'none';
+    }
+    const section = document.getElementById('saucepanCharDescriptionSection');
+    const el = document.getElementById('saucepanCharDescription');
+    if (section) section.style.display = 'block';
+    if (el) {
+        el.innerHTML = `
+            ${renderLockedDefBanner()}
+            <div class="saucepan-modal-extract-cta">
+                <div class="saucepan-modal-extract-icon-wrap locked">
+                    <i class="fa-solid fa-shield-halved saucepan-modal-extract-icon"></i>
+                </div>
+                <p class="saucepan-modal-extract-message">This creator allows custom providers.</p>
+                <p class="saucepan-modal-extract-hint">For this one card, Character Library can create a temporary Saucepan provider and chat, receive the prompt through a short-lived Cloudflare Quick Tunnel, then attempt to delete the temporary Saucepan state. The definition stays in memory for local import and is not published; you will be warned if cleanup is incomplete.</p>
+                <button class="action-btn primary saucepan-modal-extract-btn" id="saucepanHiddenCaptureBtn">
+                    <i class="fa-solid fa-file-import"></i> Extract for local import
+                </button>
+            </div>
+        `;
+        el.querySelector('#saucepanHiddenCaptureBtn')?.addEventListener('click', async () => {
+            const charId = getCharId(hit);
+            const button = document.getElementById('saucepanHiddenCaptureBtn');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Extracting...';
+            }
+            try {
+                const v2Card = await fetchSaucepanV2Card(hit, { allowHiddenCapture: true });
+                if (!v2Card?.data) throw new Error('Hidden extraction did not return a character definition');
+                if (!saucepanSelectedChar || getCharId(saucepanSelectedChar) !== charId) return;
+                paintSaucepanV2Card(hit, v2Card, name);
+                if (v2Card._saucepanCleanupWarning) {
+                    showToast(v2Card._saucepanCleanupWarning, 'warning');
+                } else {
+                    showToast('Definition extracted for local import', 'success');
+                }
+            } catch (error) {
+                debugLog('[SaucepanBrowse] Hidden extraction failed:', error);
+                showToast(error?.message || 'Hidden extraction failed', 'error');
+                if (error?.cleanupWarning) showToast(error.cleanupWarning, 'warning');
+                if (saucepanSelectedChar && getCharId(saucepanSelectedChar) === charId) {
+                    renderExtractionUnavailable({ locked: true });
+                }
+            }
+        });
+    }
+    setImportButtonState('unavailable');
+}
+
 function renderSaucepanGallery(portraits) {
     const section = document.getElementById('saucepanCharGallerySection');
     const grid = document.getElementById('saucepanCharGalleryGrid');
@@ -1315,26 +1387,15 @@ async function fetchAndPopulateDetails(hit, token) {
         if (defLoading) defLoading.style.display = 'none';
 
         if (!v2Card?.data) {
-            renderExtractionUnavailable({ locked: lockedDef });
+            if (lockedDef && canUseSaucepanHiddenCapture(companion)) {
+                renderHiddenCaptureCTA(hit, name);
+            } else {
+                renderExtractionUnavailable({ locked: lockedDef });
+            }
             return;
         }
 
-        // Cache the V2 card on the selected hit for the pre-import duplicate check.
-        if (saucepanSelectedChar && getCharId(saucepanSelectedChar) === charId) {
-            saucepanSelectedChar._v2Card = v2Card;
-        }
-
-        const data = v2Card.data;
-        // Companion Core -> Description (the character body)
-        paintBodySectionSecure('saucepanCharDescriptionSection', 'saucepanCharDescription', data.description, name);
-        // Scenario is empty for Saucepan cards, but paint defensively.
-        paintBodySection('saucepanCharScenarioSection', 'saucepanCharScenario', data.scenario, name);
-        paintBodySection('saucepanCharFirstMsgSection', 'saucepanCharFirstMsg', data.first_mes, name);
-        paintBodySection('saucepanCharMesExampleSection', 'saucepanCharMesExample', data.mes_example, name);
-        renderAltGreetings(data.alternate_greetings, name);
-
-        // Enable import now that a usable definition is confirmed.
-        setImportButtonState(isCharInLocalLibrary(hit) ? 'inLibrary' : 'import', hit);
+        paintSaucepanV2Card(hit, v2Card, name);
     } catch (err) {
         debugLog('[SaucepanBrowse] Detail fetch error:', err);
         if (token === saucepanDetailFetchToken) {
@@ -1508,8 +1569,12 @@ async function importSaucepanCharacter(hit, opts = {}) {
         const provider = CoreAPI.getProvider('saucepan');
         if (!provider?.importCharacter) throw new Error('Saucepan provider not available');
 
-        // The provider re-runs native extraction and downloads the avatar.
-        const result = await provider.importCharacter(charId, hit, { inheritedGalleryId, allowPartial: !!opts.allowPartial });
+        // Reuse the explicitly captured card so import never opens a second tunnel.
+        const result = await provider.importCharacter(charId, hit, {
+            inheritedGalleryId,
+            allowPartial: !!opts.allowPartial,
+            prebuiltCard: hit._v2Card,
+        });
         if (!result.success) throw new Error(result.error || 'Import failed');
 
         const mediaUrls = result.embeddedMediaUrls || [];
