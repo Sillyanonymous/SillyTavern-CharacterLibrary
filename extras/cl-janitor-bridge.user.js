@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Character Library - JanitorAI Bridge
 // @namespace    https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary
-// @version      1.3.1
+// @version      1.4.0
 // @description  Lets Character Library reach Cloudflare-gated pages from your own browser: DataCat's JanitorAI Hampter sorts and JannyAI card definitions. Not used by the JanitorAI provider, which needs a real browser.
 // @author       Sillyanonymous
 // @match        *://*/*
@@ -10,6 +10,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        GM.xmlHttpRequest
 // @grant        GM_openInTab
+// @grant        GM_cookie
+// @grant        GM_info
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -60,169 +62,426 @@
  */
 
 (function () {
-    'use strict';
+  'use strict';
 
-    const PAGE_SRC = 'character-library';
-    const SCRIPT_SRC = 'cl-janitor-bridge';
+  const PAGE_SRC = 'character-library';
+  const SCRIPT_SRC = 'cl-janitor-bridge';
+  const BLANK_PAGE = 'about:blank';
 
-    // Only run on the Character Library page (the manifest @match is broad; this narrows it without
-    // needing to know the user's SillyTavern host). CL announces itself with a page marker.
-    // Frames are deliberately NOT excluded: CL's embedded pane mode IS an iframe, so @noframes
-    // would make the bridge unreachable there. Every other frame exits on the next line.
-    const isCLPage = /\/SillyTavern-CharacterLibrary\/app\/library\.html/i.test(location.pathname)
-        || !!document.querySelector('meta[name="character-library"]');
-    if (!isCLPage) return;
-    console.debug('[CL-JanitorBridge] active on Character Library page');
+  /** Which userscript manager is running this? */
+  const SCRIPT_HANDLER =
+    (typeof GM_info !== 'undefined' && GM_info.scriptHandler) || '';
+  const IS_TAMPERMONKEY = /Tampermonkey/i.test(SCRIPT_HANDLER);
+  const IS_VIOLENTMONKEY = /Violentmonkey/i.test(SCRIPT_HANDLER);
 
-    // Hard allowlist: the ONLY things this bridge is permitted to fetch.
-    const ALLOWED = [
-        { prefix: 'https://janitorai.com/hampter/', host: 'janitorai.com' },
-        { prefix: 'https://jannyai.com/characters/', host: 'jannyai.com' },
-    ];
-    // Returns the matched allowlist rule, or null. The prefix compares against the NORMALIZED
-    // origin+pathname (dot segments already resolved), not the raw string: a raw startsWith
-    // would let "/hampter/../" escape the allowed prefix at request time.
-    function allowedRule(url) {
-        if (typeof url !== 'string') return null;
-        let u;
-        try { u = new URL(url); } catch { return null; }
-        const normalized = u.origin + u.pathname;
-        return ALLOWED.find(r => u.hostname === r.host && normalized.startsWith(r.prefix)) || null;
+  /**
+   * @type {URL}
+   */
+  let winUrl;
+  try {
+    if (typeof window == 'object') {
+      winUrl = new URL(window.location.href);
     }
+  } catch {
+    winUrl = new URL(BLANK_PAGE);
+  }
 
-    const gmRequest = (typeof GM_xmlhttpRequest === 'function')
-        ? GM_xmlhttpRequest
-        : (typeof GM !== 'undefined' && GM.xmlHttpRequest ? GM.xmlHttpRequest.bind(GM) : null);
+  const isCLPage =
+    /\/SillyTavern-CharacterLibrary\/app\/library\.html/i.test(
+      winUrl.pathname,
+    ) || !!document.querySelector('meta[name="character-library"]');
+  if (!isCLPage) return;
 
-    // Clearance refresh can only ever target these roots, never a caller-supplied URL.
-    const CLEARANCE_URLS = {
-        'janitorai.com': 'https://janitorai.com/',
-        'jannyai.com': 'https://jannyai.com/characters/',
-    };
-    // Clearance is POLLED for, never waited out on a timer. A fixed wait made the request that
-    // triggered the refresh retry on a guess: it fired before Cloudflare had issued the cookie and
-    // failed, while every later request succeeded. Polling means the reply only comes back once the
-    // cookie demonstrably works, so the caller's single retry always lands on a cleared session.
-    // Poll fast and close the moment clearance lands: the tab is visible in the tab strip while
-    // it exists, so its lifetime is the whole UX cost. A managed challenge usually clears in a
-    // couple of seconds, so the common case is a tab that appears and vanishes.
-    const CLEARANCE_POLL_MS = 600;
-    const CLEARANCE_FIRST_POLL_MS = 1200;
-    const CLEARANCE_MAX_MS = 30000;
-    const CLEARANCE_GRACE_MS = 400;
-    let clearanceBusy = false;
-
-    // Mirrors isCloudflareBlockPage in provider-utils.js. Duplicated deliberately: the userscript
-    // is a separate execution context and cannot import from the page's modules.
-    function looksChallenged(status, body) {
-        if (status === 403 || status === 503) return true;
-        return /Just a moment|__cf_chl|cf-error-details|Attention Required! \| Cloudflare/i.test((body || '').slice(0, 2000));
+  // #region Console
+  const conAlerts = new Set();
+  class con extends null {
+    static #title = '[%cCL-JanitorBridge%c]';
+    static #color = 'color: rgb(74, 158, 255);';
+    static dbg(...msg) {
+      const dt = new Date();
+      console.debug(
+        `${con.#title} %cDBG`,
+        con.#color,
+        '',
+        'color: rgb(255, 212, 0);',
+        `[${dt.getHours()}:${('0' + dt.getMinutes()).slice(-2)}:${('0' + dt.getSeconds()).slice(-2)}]`,
+        ...msg,
+      );
     }
+    static alert(message) {
+      if (typeof alert !== 'undefined' && !conAlerts.has(message)) {
+        conAlerts.add(message);
+        alert(message);
+      }
+    }
+  }
+  // #endregion
+  con.dbg(
+    `active on Character Library page (manager: ${SCRIPT_HANDLER || 'unknown'})`,
+  );
 
-    function refreshClearance(id, host) {
-        const target = CLEARANCE_URLS[host];
-        if (!target) { reply(id, false, 0, 'Blocked: host not in the clearance allowlist'); return; }
-        if (typeof GM_openInTab !== 'function') { reply(id, false, 0, 'Userscript manager does not expose GM_openInTab'); return; }
-        if (!gmRequest) { reply(id, false, 0, 'Userscript manager does not expose GM_xmlhttpRequest'); return; }
-        if (clearanceBusy) { reply(id, false, 0, 'A clearance refresh is already running'); return; }
-        clearanceBusy = true;
+  const ALLOWED = new Map([
+    ['janitorai.com', 'https://janitorai.com/hampter/'],
+    ['jannyai.com', 'https://jannyai.com/characters/'],
+  ]);
 
-        let tab = null;
+  function allowedRule(url) {
+    if (typeof url === 'string' || url instanceof URL) {
+      /**
+       * @type {?URL}
+       */
+      let u;
+      try {
+        u = new URL(url);
+      } catch {
+        return null;
+      }
+      const prefix = ALLOWED.get(u.hostname);
+      if (prefix && (u.origin + u.pathname).startsWith(prefix)) {
+        return { prefix, host: u.hostname };
+      }
+    }
+    return null;
+  }
+
+  const gmRequest =
+    typeof GM_xmlhttpRequest === 'function'
+      ? GM_xmlhttpRequest
+      : typeof GM !== 'undefined' && GM.xmlHttpRequest
+        ? GM.xmlHttpRequest.bind(GM)
+        : null;
+
+  const CLEARANCE_URLS = new Map([
+    ['janitorai.com', 'https://janitorai.com/'],
+    ['jannyai.com', 'https://jannyai.com/characters/'],
+  ]);
+
+  const CLEARANCE_POLL_MS = 600;
+  const CLEARANCE_FIRST_POLL_MS = 1200;
+  const CLEARANCE_MAX_MS = 30000;
+  const CLEARANCE_GRACE_MS = 400;
+  let clearanceBusy = false;
+
+  function looksChallenged(status, body) {
+    if (status === 403 || status === 503) return true;
+    return /Just a moment|__cf_chl|cf-error-details|Attention Required! \| Cloudflare/i.test(
+      (body || '').slice(0, 2000),
+    );
+  }
+
+  /**
+   * Tries to read cf_clearance from the webbrowser's cookies.
+   * Returns the cookie value, or null if unavailable.
+   *
+   * Tampermonkey: httpOnly cookies are supported at the BETA versions of Tampermonkey only.
+   * Violentmonkey: httpOnly cookies require the "Allow access to HTTP-only cookies" option enabled BOTH globally and for this script under "Script settings".
+   *
+   * @param {string} url
+   * @returns {Promise<?string>}
+   */
+  function readCfClearance(url) {
+    return new Promise((resolve) => {
+      if (
+        typeof GM_cookie === 'undefined' ||
+        typeof GM_cookie.list !== 'function'
+      ) {
+        resolve(null);
+        return;
+      }
+      /**
+       * @param {object} details
+       * @param {?() => void} next
+       */
+      const attempt = (details, next) => {
         try {
-            // active:false keeps focus with the user; insert/setParent keep the tab adjacent so a
-            // manager that ignores the auto-close still leaves something obvious to shut.
-            tab = GM_openInTab(target, { active: false, insert: true, setParent: true });
-        } catch (e) {
-            clearanceBusy = false;
-            reply(id, false, 0, `Could not open a refresh tab: ${e.message}`);
-            return;
-        }
-
-        const started = Date.now();
-        const finish = (ok, note) => {
-            // Small grace period so the cookie is committed before the caller retries.
-            setTimeout(() => {
-                try { tab?.close?.(); } catch { /* manager may have closed it already */ }
-                clearanceBusy = false;
-                reply(id, ok, ok ? 200 : 0, note);
-            }, ok ? CLEARANCE_GRACE_MS : 0);
-        };
-
-        const poll = () => {
-            if (Date.now() - started > CLEARANCE_MAX_MS) {
-                finish(false, 'Cloudflare did not clear within the timeout');
-                return;
+          GM_cookie.list(details, (cookies, error) => {
+            if (error || !cookies || cookies.length === 0) {
+              if (next) next();
+              else resolve(null);
+            } else {
+              resolve(cookies[0].value);
             }
-            gmRequest({
-                method: 'GET',
-                url: target,
-                headers: { 'Accept': 'text/html,application/xhtml+xml' },
-                timeout: 8000,
-                onload: (r) => {
-                    if (!looksChallenged(r.status, r.responseText)) finish(true, 'clearance confirmed');
-                    else setTimeout(poll, CLEARANCE_POLL_MS);
-                },
-                onerror: () => setTimeout(poll, CLEARANCE_POLL_MS),
-                ontimeout: () => setTimeout(poll, CLEARANCE_POLL_MS),
-            });
-        };
-        setTimeout(poll, CLEARANCE_FIRST_POLL_MS);
-    }
-
-    function reply(id, ok, status, body) {
-        window.postMessage({ source: SCRIPT_SRC, type: 'result', id, ok, status, body }, location.origin);
-    }
-
-    function announce() {
-        // `caps` lets CL skip features an older installed script cannot serve, instead of
-        // waiting out a timeout on a message that will never be answered.
-        window.postMessage({
-            source: SCRIPT_SRC,
-            type: 'ready',
-            version: '1.3.0',
-            caps: { clearance: typeof GM_openInTab === 'function' },
-        }, location.origin);
-    }
-
-    window.addEventListener('message', (e) => {
-        // Origin-guarded rather than e.source === window: under an Xray wrapper the sandbox window
-        // is not identity-equal to the page window, so the identity check would drop every message.
-        if (e.origin !== location.origin) return;
-        const msg = e.data;
-        if (!msg || msg.source !== PAGE_SRC) return;
-
-        if (msg.type === 'ping') {
-            announce();
-            return;
+          });
+        } catch {
+          if (next) next();
+          else resolve(null);
         }
-        if (msg.type === 'clearance') {
-            if (msg.id) refreshClearance(msg.id, msg.host);
-            return;
-        }
-        if (msg.type !== 'fetch') return;
-
-        const { id, url, authToken } = msg;
-        if (!id) return;
-        if (!gmRequest) { reply(id, false, 0, 'Userscript manager does not expose GM_xmlhttpRequest'); return; }
-        const rule = allowedRule(url);
-        if (!rule) { reply(id, false, 0, 'Blocked: URL not in the bridge allowlist'); return; }
-
-        // hampter is a JSON API; the jannyai character pages are HTML documents
-        const headers = { 'Accept': rule.host === 'jannyai.com' ? 'text/html,application/xhtml+xml' : 'application/json' };
-        // The Bearer is the JanitorAI session; it must never travel to the other host.
-        if (rule.host === 'janitorai.com' && typeof authToken === 'string' && authToken) headers['Authorization'] = `Bearer ${authToken}`;
-
-        gmRequest({
-            method: 'GET',
-            url,
-            headers,
-            timeout: 20000,
-            onload: (r) => reply(id, r.status >= 200 && r.status < 300, r.status, r.responseText || ''),
-            onerror: () => reply(id, false, 0, 'Network error'),
-            ontimeout: () => reply(id, false, 0, 'Timed out'),
-        });
+      };
+      // 1) Try with partitionKey (Tampermonkey v5.2+)
+      attempt({ url, name: 'cf_clearance', partitionKey: {} }, () => {
+        // 2) Fallback without partitionKey (Violentmonkey, older Tampermonkey)
+        attempt({ url, name: 'cf_clearance' }, null);
+      });
     });
+  }
 
-    // Announce on load; CL also pings, so the handshake works whichever side is ready first.
-    announce();
+  /**
+   * Build GM_xmlhttpRequest options with correct cookie handling for the
+   * target site's partition.
+   *
+   * Tampermonkey v5.2+: cookiePartition uses the target site's jar partition.
+   * Violentmonkey: read the cookie and send it explicitly via the Cookie header.
+   *
+   * @param {string} url
+   * @param {Record<string,string>} headers
+   * @param {(r: any) => void} onload
+   * @param {() => void} onerror
+   * @param {() => void} ontimeout
+   * @returns {Promise<object>}
+   */
+  async function makeOpts(url, headers, onload, onerror, ontimeout) {
+    const origin = new URL(url).origin;
+    const opts = {
+      method: 'GET',
+      url,
+      headers: { ...headers },
+      timeout: 20000,
+      responseType: 'text',
+      anonymous: false,
+      onload,
+      onerror,
+      ontimeout,
+    };
+
+    if (IS_TAMPERMONKEY) {
+      // Tampermonkey v5.2+: use the target site's cookie partition.
+      // This sends the partitioned cf_clearance cookie automatically.
+      opts.cookiePartition = { topLevelSite: origin };
+    } else if (IS_VIOLENTMONKEY) {
+      // Violentmonkey: partitioned cookie is not sent automatically.
+      // Read it from the jar and send it explicitly.
+      const cf = await readCfClearance(url);
+      if (cf) {
+        opts.headers = { ...headers, Cookie: `cf_clearance=${cf}` };
+      } else {
+        con.alert(
+          'Violentmonkey: cf_clearance not readable. Enable "Allow access to HTTP-only cookies" in Violentmonkey settings + this UserScript settings.',
+        );
+      }
+    } else {
+      // Unknown manager: try cookiePartition anyway.
+      opts.cookiePartition = { topLevelSite: origin };
+    }
+
+    return opts;
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} host
+   * @param {?(ok: boolean, note: string) => void} [done]
+   */
+  function refreshClearance(id, host, done) {
+    const target = CLEARANCE_URLS.get(host);
+    if (!target) {
+      const msg = 'Blocked: host not in the clearance allowlist';
+      if (done) done(false, msg);
+      else reply(id, false, 0, msg);
+      return;
+    }
+    if (typeof GM_openInTab !== 'function' || !gmRequest) {
+      const msg =
+        'Userscript manager does not expose GM.* / GM_openInTab / GM_xmlhttpRequest';
+      if (done) done(false, msg);
+      else reply(id, false, 0, msg);
+      return;
+    }
+    if (clearanceBusy) {
+      const msg = 'A clearance refresh is already running';
+      if (done) done(false, msg);
+      else reply(id, false, 0, msg);
+      return;
+    }
+    clearanceBusy = true;
+
+    let tab = null;
+    try {
+      tab = GM_openInTab(target, {
+        active: false,
+        insert: true,
+        setParent: true,
+      });
+    } catch (e) {
+      clearanceBusy = false;
+      const msg = `Could not open a refresh tab: ${e.message}`;
+      if (done) done(false, msg);
+      else reply(id, false, 0, msg);
+      return;
+    }
+
+    const started = Date.now();
+    const finish = (ok, note) => {
+      setTimeout(
+        () => {
+          try {
+            tab?.close?.();
+          } catch {
+            /* manager may have closed it already */
+          }
+          clearanceBusy = false;
+          if (done) done(ok, note);
+          else reply(id, ok, ok ? 200 : 0, note);
+        },
+        ok ? CLEARANCE_GRACE_MS : 0,
+      );
+    };
+
+    const poll = async () => {
+      if (Date.now() - started > CLEARANCE_MAX_MS) {
+        finish(false, 'Cloudflare did not clear within the timeout');
+        return;
+      }
+      const opts = await makeOpts(
+        target,
+        { Accept: 'text/html,application/xhtml+xml' },
+        (r) => {
+          if (!looksChallenged(r.status, r.responseText)) {
+            finish(true, 'clearance confirmed');
+          } else {
+            setTimeout(poll, CLEARANCE_POLL_MS);
+          }
+        },
+        () => setTimeout(poll, CLEARANCE_POLL_MS),
+        () => setTimeout(poll, CLEARANCE_POLL_MS),
+      );
+      gmRequest(opts);
+    };
+    setTimeout(poll, CLEARANCE_FIRST_POLL_MS);
+  }
+
+  function reply(id, ok, status, body) {
+    if (typeof window.postMessage === 'function') {
+      window.postMessage(
+        { source: SCRIPT_SRC, type: 'result', id, ok, status, body },
+        winUrl.origin,
+      );
+    }
+  }
+
+  function announce() {
+    if (typeof window.postMessage === 'function') {
+      window.postMessage(
+        {
+          source: SCRIPT_SRC,
+          type: 'ready',
+          version:
+            (typeof GM_info !== 'undefined' && GM_info.version) || 'v0.0.0',
+          caps: { clearance: typeof GM_openInTab === 'function' },
+        },
+        winUrl.origin,
+      );
+    }
+  }
+
+  const loadDOM = (onDomReady) => {
+    if (typeof onDomReady === 'function') {
+      if (
+        document.readyState === 'interactive' ||
+        document.readyState === 'complete'
+      ) {
+        onDomReady(document);
+      } else {
+        document.addEventListener(
+          'DOMContentLoaded',
+          (evt) => onDomReady(evt.target),
+          { once: true },
+        );
+      }
+    }
+  };
+
+  /**
+   * @param {string} id
+   * @param {{prefix: string;host: string;}} rule
+   * @param {string} url
+   * @param {string} [authToken]
+   * @param {boolean} retryOnChallenge
+   */
+  async function doFetch(id, rule, url, authToken, retryOnChallenge) {
+    const headers = {};
+    if (rule.host === 'janitorai.com') {
+      headers['Accept'] = 'application/json';
+      if (typeof authToken === 'string' && !Object.is(authToken.trim(), ''))
+        headers['Authorization'] = `Bearer ${authToken}`;
+    }
+    if (rule.host === 'jannyai.com') {
+      headers['Accept'] = 'text/html,application/xhtml+xml';
+    }
+    const opts = await makeOpts(
+      url,
+      headers,
+      (r) => {
+        if (retryOnChallenge && looksChallenged(r.status, r.responseText)) {
+          con.dbg(
+            'challenge detected; refreshing clearance then retrying once',
+          );
+          refreshClearance(`${id}:auto`, rule.host, (ok, note) => {
+            if (!ok) {
+              reply(
+                id,
+                false,
+                r.status || 0,
+                `Clearance refresh failed: ${note}`,
+              );
+              return;
+            }
+            doFetch(id, rule, url, authToken, false);
+          });
+          return;
+        }
+        reply(
+          id,
+          r.status >= 200 && r.status < 300,
+          r.status,
+          r.responseText || '',
+        );
+      },
+      () => reply(id, false, 0, 'Network error'),
+      () => reply(id, false, 0, 'Timed out'),
+    );
+
+    gmRequest(opts);
+  }
+
+  window.addEventListener('message', (e) => {
+    if (e.origin !== winUrl.origin) {
+      return;
+    }
+    const msg = e.data;
+    if (!msg || msg.source !== PAGE_SRC) {
+      return;
+    }
+    const {
+      type,
+      id = null,
+      host = BLANK_PAGE,
+      url = BLANK_PAGE,
+      authToken,
+    } = msg;
+    if (type === 'ping') {
+      announce();
+    } else if (id) {
+      if (type === 'clearance') {
+        refreshClearance(id, host);
+      } else if (type === 'fetch') {
+        if (!gmRequest) {
+          reply(
+            id,
+            false,
+            0,
+            'Userscript manager does not expose GM_xmlhttpRequest',
+          );
+          return;
+        }
+        const rule = allowedRule(url);
+        if (!rule) {
+          reply(id, false, 0, 'Blocked: URL not in the bridge allowlist');
+          return;
+        }
+        doFetch(id, rule, url, authToken, true);
+      }
+    }
+  });
+
+  loadDOM(announce);
 })();
