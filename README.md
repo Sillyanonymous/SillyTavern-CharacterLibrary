@@ -1,8 +1,19 @@
 # SillyTavern Character Library
 
-A powerful SillyTavern extension for discovering, organizing, and managing your character library with a modern glassmorphic interface.
+> **Development on this extension is paused** until the standalone version, **Project Σ**, is released.
+>
+> Project Σ is Character Library rebuilt as its own app, with its own server and database. It does not rely or use SillyTavern at all. The main differences:
+>
+> - **Fast at any size.** Your library lives in a real database, built for libraries of up to a million characters. One search box covers your characters, chats, messages and lorebook entries at once.
+> - **Chats run in the app.** It works with any OpenAI-compatible connection or Anthropic's API.
+> - **No more workarounds.** There's no cl-helper plugin to install and no CORS proxy to switch on, because the server talks to the character sites itself.
+> - **Your existing library comes with you.** A built-in migration brings over your cards, tags, favorites, chats, lorebooks, gallery media, version snapshots, playlists, personas and custom CSS. It then checks the result against the original, field by field. Your SillyTavern folder is only read, never changed.
+> - **Extensions with real power.** Extensions can do anything the app's own code does: hook events, store data, add settings, windows, views and even new character sites, each with database tables of its own. Anthropic support itself ships as an extension. Install them from a git URL or a zip, or start with the bundled set: memory summaries, trackers, a translator, story beats, library stats and more.
+> - **And a lot more.** A theme editor with presets and live preview, a full phone layout, optional accounts with a separate library each, scheduled backups with a consistency checker, and a documented HTTP API for scripting and automation.
+>
+> It's coming **soon**. Join the [Discord](https://discord.gg/vYBPEFAny) for news and more information. See you there!
 
-> **Note:** This is a hobby project but things mostly work. Expect bugs, use at your own risk.
+A powerful SillyTavern extension for discovering, organizing, and managing your character library with a modern glassmorphic interface.
 
 ## Screenshots
 
