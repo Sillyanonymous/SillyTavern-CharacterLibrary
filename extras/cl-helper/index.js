@@ -2340,17 +2340,37 @@ function readJanitoraiCookie(cookies) {
     return chunks.map(c => c.value).join('');
 }
 
-/** Pull the access token out of janitorai's supabase session cookie. '' when absent. */
+/** Pull the session out of janitorai's supabase cookie. Empty strings when absent. */
 function readJanitoraiToken(cookies) {
     const raw = readJanitoraiCookie(cookies);
-    if (!raw) return { token: '', cookie: '' };
+    if (!raw) return { token: '', cookie: '', refreshToken: '', userId: '' };
     try {
         const dec = decodeURIComponent(raw);
         const json = dec.startsWith('base64-') ? Buffer.from(dec.slice(7), 'base64').toString('utf8') : dec;
-        return { token: JSON.parse(json).access_token || '', cookie: raw };
+        const s = JSON.parse(json);
+        return { token: s.access_token || '', cookie: raw, refreshToken: s.refresh_token || '', userId: s.user?.id || '' };
     } catch {
-        return { token: '', cookie: raw };
+        return { token: '', cookie: raw, refreshToken: '', userId: '' };
     }
+}
+
+function janitoraiJwtClaims(token) {
+    try {
+        return JSON.parse(Buffer.from(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8')) || null;
+    } catch {
+        return null;
+    }
+}
+
+// older builds wrote an empty user, which the chat page reads as signed out
+function janitoraiSessionToInject(browser, clientToken, refreshToken) {
+    const token = clientToken || browser.token;
+    if (!token) return null;
+    const sub = janitoraiJwtClaims(token)?.sub;
+    if (browser.token && browser.userId && (!sub || browser.userId === sub)) return null;
+    return clientToken
+        ? { accessToken: clientToken, refreshToken }
+        : { accessToken: browser.token, refreshToken: browser.refreshToken };
 }
 
 const CF_CHALLENGE_RE = /just a moment|checking your browser|attention required|access restricted|verifying you are human/i;
@@ -2446,11 +2466,8 @@ async function waitForCloudflare(page) {
  */
 async function injectJanitoraiSession(page, accessToken, refreshToken) {
     if (!accessToken) return false;
-    let expiresAt = Math.floor(Date.now() / 1000) + 3600;
-    try {
-        const claims = JSON.parse(Buffer.from(String(accessToken).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));
-        if (claims?.exp) expiresAt = claims.exp;
-    } catch { /* keep the default */ }
+    const claims = janitoraiJwtClaims(accessToken) || {};
+    const expiresAt = claims.exp || Math.floor(Date.now() / 1000) + 3600;
 
     const session = {
         access_token: accessToken,
@@ -2458,7 +2475,16 @@ async function injectJanitoraiSession(page, accessToken, refreshToken) {
         expires_in: Math.max(60, expiresAt - Math.floor(Date.now() / 1000)),
         expires_at: expiresAt,
         refresh_token: refreshToken || '',
-        user: {},
+        user: {
+            id: claims.sub || '',
+            aud: claims.aud || 'authenticated',
+            role: claims.role || 'authenticated',
+            email: claims.email || '',
+            phone: claims.phone || '',
+            app_metadata: claims.app_metadata || {},
+            user_metadata: claims.user_metadata || {},
+            is_anonymous: !!claims.is_anonymous,
+        },
     };
     const value = 'base64-' + Buffer.from(JSON.stringify(session), 'utf8').toString('base64');
 
@@ -3274,14 +3300,13 @@ function registerJanitoraiBrowserRoutes(router) {
                 // keeps a self-refreshing token of its own, so prefer that and treat a session
                 // inside the browser as a fallback: requiring the browser to be independently
                 // signed in would refuse perfectly good credentials the user already gave us.
-                const browserToken = readJanitoraiToken(await page.cookies([JANITORAI_ORIGIN])).token;
-                const token = clientToken || browserToken;
+                const browser = readJanitoraiToken(await page.cookies([JANITORAI_ORIGIN]));
+                const token = clientToken || browser.token;
 
                 // The chat UI renders no composer for a signed-out browser, so the session has
                 // to exist as a cookie too, not just as a Bearer on our fetches.
-                if (clientToken && !browserToken) {
-                    await injectJanitoraiSession(page, clientToken, refreshToken);
-                }
+                const inject = janitoraiSessionToInject(browser, clientToken, refreshToken);
+                if (inject) await injectJanitoraiSession(page, inject.accessToken, inject.refreshToken);
 
                 const detailRes = await page.evaluate(janitoraiCall('GET', `/hampter/characters/${characterId}`, null, token));
                 if (detailRes.status === 404) throw new Error('That character no longer exists on JanitorAI.');
@@ -3338,11 +3363,10 @@ function registerJanitoraiBrowserRoutes(router) {
                 await page.goto(`${JANITORAI_ORIGIN}/`, { timeout: CDP_NAV_TIMEOUT });
                 await new Promise(r => setTimeout(r, 3500));
 
-                const browserToken = readJanitoraiToken(await page.cookies([JANITORAI_ORIGIN])).token;
-                const token = clientToken || browserToken;
-                if (clientToken && !browserToken) {
-                    await injectJanitoraiSession(page, clientToken, refreshToken);
-                }
+                const browser = readJanitoraiToken(await page.cookies([JANITORAI_ORIGIN]));
+                const token = clientToken || browser.token;
+                const inject = janitoraiSessionToInject(browser, clientToken, refreshToken);
+                if (inject) await injectJanitoraiSession(page, inject.accessToken, inject.refreshToken);
                 if (!token) throw new Error('This needs a JanitorAI account. Sign in under Settings > Online > JanitorAI.');
 
                 const detailRes = await page.evaluate(janitoraiCall('GET', `/hampter/characters/${characterId}`, null, token));
