@@ -600,12 +600,12 @@ window.datacatJanitoraiGetToken = async () => {
 // Force a refresh (reactive path after an unexpected 401). Returns the new token or ''.
 window.datacatJanitoraiForceRefresh = async () => janitoraiDoRefresh();
 
-// Seed the session from a pasted sb-auth-auth-token cookie (or session JSON / bare JWT).
+// Seed the session from a pasted sb-...-auth-token cookie (or session JSON / bare JWT).
 // Verification stays off Cloudflare-gated hampter: its preflight can 403 on a perfectly
 // good token, and failing after the up-front rotation would strand the fresh pair.
 window.datacatJanitoraiSetSession = async (pasted) => {
     const pair = parseJanitoraiSession(pasted);
-    if (!pair) return { ok: false, error: 'Could not find a session in that value. Copy the whole sb-auth-auth-token cookie.' };
+    if (!pair) return { ok: false, error: 'Could not find a session in that value. Copy the whole sb-...-auth-token cookie.' };
     const { email, expMs } = decodeJanitoraiClaims(pair.access_token);
     let token = pair.access_token;
     // If the pasted access token is already stale but a refresh token came with it, rotate up front.

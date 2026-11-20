@@ -2268,6 +2268,8 @@ class CdpPage {
             }
 
             if (!requestId && msg.method === 'Network.responseReceived') {
+                // a cross-origin call's CORS preflight answers first, empty, on the same url
+                if (msg.params?.type === 'Preflight') return;
                 if (re.test(msg.params?.response?.url || '')) { requestId = msg.params.requestId; markStarted(true); }
                 return;
             }
@@ -2319,20 +2321,28 @@ function janitoraiCall(method, path, body, token) {
     })()`;
 }
 
-const JANITORAI_COOKIE = 'sb-auth-auth-token';
+const JANITORAI_COOKIE_DEFAULT = 'sb-mcmzxtzommpnxkynddbo-auth-token';
+const JANITORAI_COOKIE_LEGACY = 'sb-auth-auth-token';
+// end-anchored so the PKCE -code-verifier cookies on the same stem never match
+const JANITORAI_SESSION_COOKIE_RE = /^sb-[a-z0-9][a-z0-9-]*-auth-token(\.\d+)?$/;
 // Browsers cap a cookie near 4KB, so supabase splits a larger session across `<name>.0`, `.1`,
 // ... and then does NOT write the unsuffixed one. Whether a given account crosses the line
 // depends on its JWT claims, which is why an exact-name read works for some people and reports
 // a perfectly good session as missing for others.
 const JANITORAI_COOKIE_CHUNK_LIMIT = 3180;
+let janitoraiLearnedCookie = '';
 
-/** Join the session cookie back together, chunked or not. '' when absent. */
-function readJanitoraiCookie(cookies) {
-    const whole = cookies.find(c => c.name === JANITORAI_COOKIE)?.value;
+function janitoraiCookieName() {
+    return janitoraiLearnedCookie || JANITORAI_COOKIE_DEFAULT;
+}
+
+function readJanitoraiCookie(cookies, name) {
+    const whole = cookies.find(c => c.name === name)?.value;
     if (whole) return whole;
+    const prefix = name + '.';
     const chunks = cookies
-        .map(c => ({ n: Number(new RegExp(`^${JANITORAI_COOKIE}\\.(\\d+)$`).exec(c.name)?.[1]), value: c.value }))
-        .filter(c => Number.isInteger(c.n))
+        .filter(c => c.name.startsWith(prefix) && /^\d+$/.test(c.name.slice(prefix.length)))
+        .map(c => ({ n: Number(c.name.slice(prefix.length)), value: c.value }))
         .sort((a, b) => a.n - b.n);
     // A gap means a chunk expired or was evicted; a partial join decodes to garbage, so treat
     // the session as absent rather than handing back half a token.
@@ -2340,18 +2350,74 @@ function readJanitoraiCookie(cookies) {
     return chunks.map(c => c.value).join('');
 }
 
-/** Pull the session out of janitorai's supabase cookie. Empty strings when absent. */
-function readJanitoraiToken(cookies) {
-    const raw = readJanitoraiCookie(cookies);
-    if (!raw) return { token: '', cookie: '', refreshToken: '', userId: '' };
+function decodeJanitoraiSession(raw) {
     try {
         const dec = decodeURIComponent(raw);
         const json = dec.startsWith('base64-') ? Buffer.from(dec.slice(7), 'base64').toString('utf8') : dec;
         const s = JSON.parse(json);
-        return { token: s.access_token || '', cookie: raw, refreshToken: s.refresh_token || '', userId: s.user?.id || '' };
+        return { token: s?.access_token || '', refreshToken: s?.refresh_token || '', userId: s?.user?.id || '' };
     } catch {
-        return { token: '', cookie: raw, refreshToken: '', userId: '' };
+        return { token: '', refreshToken: '', userId: '' };
     }
+}
+
+function janitoraiSessionCookieBases(cookies) {
+    const bases = new Set();
+    for (const c of cookies) {
+        if (JANITORAI_SESSION_COOKIE_RE.test(c.name)) bases.add(c.name.replace(/\.\d+$/, ''));
+    }
+    return [...bases];
+}
+
+function readJanitoraiToken(cookies) {
+    const ours = [...new Set([janitoraiCookieName(), JANITORAI_COOKIE_DEFAULT])];
+    for (const name of janitoraiSessionCookieBases(cookies)) {
+        if (ours.includes(name) || name === JANITORAI_COOKIE_LEGACY) continue;
+        const raw = readJanitoraiCookie(cookies, name);
+        const s = raw ? decodeJanitoraiSession(raw) : null;
+        if (s?.token) {
+            janitoraiLearnedCookie = name;
+            return { ...s, cookie: raw, name };
+        }
+    }
+    let unreadable = null;
+    for (const name of [...ours, JANITORAI_COOKIE_LEGACY]) {
+        const raw = readJanitoraiCookie(cookies, name);
+        if (!raw) continue;
+        const s = decodeJanitoraiSession(raw);
+        if (s.token) return { ...s, cookie: raw, name };
+        unreadable ??= { ...s, cookie: raw, name };
+    }
+    return unreadable || { token: '', cookie: '', refreshToken: '', userId: '', name: '' };
+}
+
+function janitoraiAuthMessage(body) {
+    try {
+        const j = JSON.parse(body);
+        if (j?.access_token) return '';
+        return String(j?.message || j?.error_description || j?.msg || '').slice(0, 200);
+    } catch {
+        return '';
+    }
+}
+
+function janitoraiLoginFailureMessage(state, addedCookies) {
+    const said = state?.authMessage || state?.message;
+    if (said) return `Login did not produce a session. JanitorAI said: "${said}".`;
+    const onLogin = /^\/login(\/|$)/.test(state?.path || '');
+    if (state?.turnstile === 'pending' && onLogin) {
+        return 'Cloudflare\'s "Verify you are human" check on the JanitorAI sign-in form did not pass, so the sign-in was never sent. '
+            + 'Cloudflare asks for it when the connection looks unusual, most often a VPN or proxy: switch it off and sign in again.';
+    }
+    if (state?.path && !onLogin) {
+        const added = addedCookies?.length ? addedCookies.join(', ') : 'none';
+        return 'The sign-in seems to have gone through (the page left /login), but no session cookie was found. '
+            + 'JanitorAI may have changed how it stores the session; please report this. '
+            + `Cookies the sign-in added: ${added}.`;
+    }
+    return state?.title
+        ? `Login did not produce a session. The page was "${state.title}".`
+        : 'Login did not produce a session.';
 }
 
 function janitoraiJwtClaims(token) {
@@ -2488,22 +2554,31 @@ async function injectJanitoraiSession(page, accessToken, refreshToken) {
     };
     const value = 'base64-' + Buffer.from(JSON.stringify(session), 'utf8').toString('base64');
 
-    // Match supabase's own storage shape: one cookie when it fits, otherwise numbered chunks and
-    // no unsuffixed cookie. A single oversized cookie is dropped by the browser, which reads to
-    // the site as signed out.
-    const parts = [];
-    if (value.length <= JANITORAI_COOKIE_CHUNK_LIMIT) {
-        parts.push([JANITORAI_COOKIE, value]);
-    } else {
-        for (let i = 0, n = 0; i < value.length; i += JANITORAI_COOKIE_CHUNK_LIMIT, n++) {
-            parts.push([`${JANITORAI_COOKIE}.${n}`, value.slice(i, i + JANITORAI_COOKIE_CHUNK_LIMIT)]);
-        }
-    }
-
     try {
-        // Stale cookies from the other shape would otherwise win the read and pin a dead session.
-        for (const name of [JANITORAI_COOKIE, ...Array.from({ length: 8 }, (_, i) => `${JANITORAI_COOKIE}.${i}`)]) {
-            try { await page.send('Network.deleteCookies', { name, domain: 'janitorai.com', path: '/' }); } catch {}
+        const jar = await page.cookies([JANITORAI_ORIGIN]);
+        readJanitoraiToken(jar); // learns the site's current cookie name
+        const cookieName = janitoraiCookieName();
+
+        // supabase's shape: one cookie when it fits, else numbered chunks (an oversized cookie is dropped)
+        const parts = [];
+        if (value.length <= JANITORAI_COOKIE_CHUNK_LIMIT) {
+            parts.push([cookieName, value]);
+        } else {
+            for (let i = 0, n = 0; i < value.length; i += JANITORAI_COOKIE_CHUNK_LIMIT, n++) {
+                parts.push([`${cookieName}.${n}`, value.slice(i, i + JANITORAI_COOKIE_CHUNK_LIMIT)]);
+            }
+        }
+
+        const stale = new Map();
+        const addStale = (name, domain, path) => stale.set(`${name}|${domain}|${path}`, { name, domain, path });
+        for (const c of jar) {
+            if (JANITORAI_SESSION_COOKIE_RE.test(c.name)) addStale(c.name, c.domain || 'janitorai.com', c.path || '/');
+        }
+        for (const base of new Set([cookieName, JANITORAI_COOKIE_DEFAULT, JANITORAI_COOKIE_LEGACY])) {
+            for (const name of [base, ...Array.from({ length: 8 }, (_, i) => `${base}.${i}`)]) addStale(name, 'janitorai.com', '/');
+        }
+        for (const c of stale.values()) {
+            try { await page.send('Network.deleteCookies', c); } catch {}
         }
         for (const [name, chunk] of parts) {
             await page.send('Network.setCookie', {
@@ -3084,7 +3159,8 @@ function registerJanitoraiBrowserRoutes(router) {
 
                 // A browser that is already signed in has nothing to log into: janitorai serves
                 // no form, and re-driving one would only risk the session it already holds.
-                const existing = readJanitoraiToken(await page.cookies([JANITORAI_ORIGIN]));
+                const before = await page.cookies([JANITORAI_ORIGIN]);
+                const existing = readJanitoraiToken(before);
                 if (existing.token) return { session: existing.cookie };
 
                 // React tracks value through its own descriptor, so a plain el.value = x is
@@ -3112,6 +3188,8 @@ function registerJanitoraiBrowserRoutes(router) {
                 }
 
                 await new Promise(r => setTimeout(r, 2500));
+                // the page reports a refusal as a toast gone long before the wait below ends
+                const authCapture = page.captureResponse(/\/auth\/v1\/token/, { timeout: 1000 });
                 await page.evaluate(`
                     (() => {
                         const b = [...document.querySelectorAll('button')]
@@ -3120,16 +3198,14 @@ function registerJanitoraiBrowserRoutes(router) {
                         return !!b;
                     })()`);
                 await new Promise(r => setTimeout(r, 13000));
+                const auth = await authCapture.wait();
 
                 const after = await page.cookies([JANITORAI_ORIGIN]);
                 const { token, cookie } = readJanitoraiToken(after);
                 if (!token) {
                     // Naming the session cookies we can see separates "the sign-in was refused"
                     // from "a session exists but we could not read it".
-                    // Session cookie and chunks only; a fresh login leaves PKCE verifiers on the
-                    // same prefix.
-                    const chunkName = new RegExp(`^${JANITORAI_COOKIE}\\.\\d+$`);
-                    const seen = after.map(c => c.name).filter(n => n === JANITORAI_COOKIE || chunkName.test(n));
+                    const seen = after.map(c => c.name).filter(n => JANITORAI_SESSION_COOKIE_RE.test(n));
                     if (seen.length) {
                         throw new Error(`Signed in, but the session cookie could not be read (${seen.join(', ')}). Please report this.`);
                     }
@@ -3142,12 +3218,15 @@ function registerJanitoraiBrowserRoutes(router) {
                             const text = [...document.querySelectorAll('[role="alert"], [class*="error" i], [class*="Error"]')]
                                 .map(el => (el.textContent || '').trim())
                                 .filter(t => t && t.length < 160 && !seen.has(t) && seen.add(t));
-                            return { path: location.pathname, title: document.title, message: text[0] || '' };
+                            const human = document.querySelector('input[name="cf-turnstile-response"]');
+                            return {
+                                path: location.pathname, title: document.title, message: text[0] || '',
+                                turnstile: human ? (human.value ? 'passed' : 'pending') : 'none',
+                            };
                         })()`).catch(() => null);
-                    const said = state?.message
-                        ? ` JanitorAI said: "${state.message}".`
-                        : (state?.title ? ` The page was "${state.title}".` : '');
-                    throw new Error(`Login did not produce a session.${said}`);
+                    const had = new Set(before.map(c => c.name));
+                    const added = [...new Set(after.map(c => c.name).filter(n => !had.has(n)))];
+                    throw new Error(janitoraiLoginFailureMessage({ ...state, authMessage: janitoraiAuthMessage(auth?.text) }, added));
                 }
                 return { session: cookie };
             });

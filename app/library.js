@@ -4550,7 +4550,7 @@ function setupSettingsModal() {
     if (saveDatacatJanitoraiTokenBtn && datacatJanitoraiTokenInputEl) {
         saveDatacatJanitoraiTokenBtn.onclick = async () => {
             const raw = (datacatJanitoraiTokenInputEl.value || '').trim();
-            if (!raw) { showToast('Paste your sb-auth-auth-token cookie value first', 'warning'); return; }
+            if (!raw) { showToast('Paste your sb-...-auth-token cookie value first', 'warning'); return; }
             const original = saveDatacatJanitoraiTokenBtn.innerHTML;
             saveDatacatJanitoraiTokenBtn.disabled = true;
             saveDatacatJanitoraiTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
@@ -4560,7 +4560,7 @@ function setupSettingsModal() {
                     datacatJanitoraiTokenInputEl.value = '';
                     updateDatacatJanitoraiStatus();
                     if (res.hasRefresh) showToast(`DataCat is now signed in to JanitorAI${res.email ? ' as ' + res.email : ''}`, 'success');
-                    else showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-auth-auth-token cookie for a lasting login.', 'warning', 9000);
+                    else showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-...-auth-token cookie for a lasting login.', 'warning', 9000);
                 } else {
                     showToast(res?.error || 'Could not save the session', 'error');
                 }
@@ -4613,7 +4613,7 @@ function setupSettingsModal() {
     if (saveJanitoraiTokenBtn && janitoraiTokenInputEl) {
         saveJanitoraiTokenBtn.onclick = async () => {
             const raw = (janitoraiTokenInputEl.value || '').trim();
-            if (!raw) { showToast('Paste your sb-auth-auth-token cookie value first', 'warning'); return; }
+            if (!raw) { showToast('Paste your sb-...-auth-token cookie value first', 'warning'); return; }
             const original = saveJanitoraiTokenBtn.innerHTML;
             saveJanitoraiTokenBtn.disabled = true;
             saveJanitoraiTokenBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Saving...';
@@ -4632,7 +4632,7 @@ function setupSettingsModal() {
                         inBrowser = !!push?.ok;
                     } catch { /* reported through the toast below */ }
                     const who = res.email ? ' as ' + res.email : '';
-                    if (!res.hasRefresh) showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-auth-auth-token cookie for a lasting login.', 'warning', 9000);
+                    if (!res.hasRefresh) showToast('Logged in, but no refresh token was in that value; this session expires in ~3h. Copy the whole sb-...-auth-token cookie for a lasting login.', 'warning', 9000);
                     else if (inBrowser) showToast(`Signed in to JanitorAI${who}; the browser is signed in too`, 'success');
                     else showToast(`Signed in to JanitorAI${who}. Browsing works, but the browser could not be signed in, so character extraction may not. Check that the browser is running and cl-helper is up to date.`, 'warning', 12000);
                 } else {

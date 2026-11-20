@@ -287,7 +287,7 @@ export function decodeJanitoraiClaims(jwt) {
 
 // Direct password login is not usable: JanitorAI gates it behind Cloudflare Turnstile,
 // whose sitekey is domain-locked to janitorai.com and cant be solved from CL's origin. So the
-// session is seeded from the sb-auth-auth-token cookie (grabbed once from a real browser login,
+// session is seeded from the sb-...-auth-token cookie (grabbed once from a real browser login,
 // where the user already solved Turnstile), and kept alive by the captcha-free refresh grant.
 
 function janitoraiB64decode(s) {
@@ -297,7 +297,7 @@ function janitoraiB64decode(s) {
 }
 
 /**
- * Extract the token pair from a pasted JanitorAI session: the sb-auth-auth-token cookie value
+ * Extract the token pair from a pasted JanitorAI session: the sb-...-auth-token cookie value
  * (base64-<json>), a raw session JSON, or a bare access-token JWT (no refresh; short-lived).
  * @returns {{access_token: string, refresh_token: string}|null}
  */

@@ -709,7 +709,7 @@ DataCat aggregates JanitorAI characters with its own REST API and AI-powered cha
 
 - Browse recent and popular characters
 - Sort by newest, trending, popular, and Hampter algorithm modes
-- Hampter sort orders (Latest, Trending, Trending 24h, Popular, Relevance) sit behind Cloudflare bot protection. A direct browser load is hit-or-miss (Cloudflare usually blocks it), so the companion **userscript** (`extras/cl-janitor-bridge.user.js`, installed in Tampermonkey or Violentmonkey) is the reliable path; it makes the Cloudflare-gated request from your own browser. JanitorAI serves only the first page of these sorts anonymously; paste your JanitorAI `sb-auth-auth-token` cookie under Settings > Online > DataCat to page further (the session then refreshes itself). Other DataCat and MeiliSearch sort orders need neither
+- Hampter sort orders (Latest, Trending, Trending 24h, Popular, Relevance) sit behind Cloudflare bot protection. A direct browser load is hit-or-miss (Cloudflare usually blocks it), so the companion **userscript** (`extras/cl-janitor-bridge.user.js`, installed in Tampermonkey or Violentmonkey) is the reliable path; it makes the Cloudflare-gated request from your own browser. JanitorAI serves only the first page of these sorts anonymously; paste your JanitorAI session cookie (the one whose name starts with `sb-` and ends in `-auth-token`, today `sb-mcmzxtzommpnxkynddbo-auth-token`) under Settings > Online > DataCat to page further (the session then refreshes itself). Other DataCat and MeiliSearch sort orders need neither
 - Filter by tags and NSFW toggle
 - In-app character preview with card details
 - Character linking and card updates

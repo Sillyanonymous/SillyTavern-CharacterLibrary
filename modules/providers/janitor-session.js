@@ -128,7 +128,7 @@ export async function janitoraiForceRefresh() {
 
 export async function janitoraiSetSession(pasted) {
     const pair = parseJanitoraiSession(pasted);
-    if (!pair) return { ok: false, error: 'Could not find a session in that value. Copy the whole sb-auth-auth-token cookie.' };
+    if (!pair) return { ok: false, error: 'Could not find a session in that value. Copy the whole sb-...-auth-token cookie.' };
     const { email, expMs } = decodeJanitoraiClaims(pair.access_token);
     let token = pair.access_token;
     if ((!expMs || expMs - Date.now() < 120000) && pair.refresh_token) {

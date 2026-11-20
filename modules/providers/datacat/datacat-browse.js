@@ -658,7 +658,7 @@ async function loadCharacters(append = false) {
                         <i class="fa-solid fa-user-lock" style="font-size: 2rem; color: #f5a623;"></i>
                         <p style="margin-top: 12px; color: var(--text-primary);"><strong>${expired ? 'Your JanitorAI session expired' : 'JanitorAI requires an account for this request'}</strong></p>
                         <p style="margin-top: 8px;">${expired
-                            ? 'JanitorAI tokens last about 3 hours. Re-copy the sb-auth-auth-token cookie and paste it under Settings &rarr; Online &rarr; DataCat.'
+                            ? 'JanitorAI tokens last about 3 hours. Re-copy the sb-...-auth-token cookie and paste it under Settings &rarr; Online &rarr; DataCat.'
                             : 'The Hampter sorts show the first page without a login. Paste your JanitorAI token under Settings &rarr; Online &rarr; DataCat to browse further, or use the MeiliSearch sort orders, which need no login.'}</p>
                         <button class="glass-btn" style="margin-top: 12px;" id="datacatRetryBtn">
                             <i class="fa-solid fa-redo"></i> Retry

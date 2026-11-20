@@ -2725,12 +2725,12 @@ https://jannyai.com/characters/uuid_slug
                                     </div>
                                     <div class="provider-link-divider"><span>or use a session token</span></div>
                                     <div class="settings-row">
-                                        <span class="settings-hint">Use this if you sign in to JanitorAI with <strong>Google, Discord, X or Apple</strong> (those accounts have no password to give here), or if the sign-in above keeps failing. Log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the <strong>sb-auth-auth-token</strong> cookie. If you see <strong>sb-auth-auth-token.0</strong> and <strong>.1</strong> instead of one cookie, paste their values joined in order. The session refreshes itself afterwards, the same as signing in above.</span>
+                                        <span class="settings-hint">Use this if you sign in to JanitorAI with <strong>Google, Discord, X or Apple</strong> (those accounts have no password to give here), or if the sign-in above keeps failing. Log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the cookie whose name starts with <strong>sb-</strong> and ends in <strong>-auth-token</strong> (today <strong>sb-mcmzxtzommpnxkynddbo-auth-token</strong>). If it is split into <strong>.0</strong> and <strong>.1</strong> cookies instead of one, paste their values joined in order. The session refreshes itself afterwards, the same as signing in above.</span>
                                     </div>
                                     <div class="settings-row">
                                         <label>Token:</label>
                                         <div class="settings-input-group">
-                                            <input type="password" id="settingsJanitoraiToken" placeholder="Paste the sb-auth-auth-token cookie value" autocomplete="off" spellcheck="false">
+                                            <input type="password" id="settingsJanitoraiToken" placeholder="Paste the sb-...-auth-token cookie value" autocomplete="off" spellcheck="false">
                                             <button id="toggleJanitoraiTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
                                                 <i class="fa-solid fa-eye"></i>
                                             </button>
@@ -2954,12 +2954,12 @@ https://jannyai.com/characters/uuid_slug
                                 <div class="settings-group">
                                     <div class="settings-group-title"><i class="fa-solid fa-user-lock"></i> JanitorAI Login (Hampter pagination)</div>
                                     <div class="settings-row">
-                                        <span class="settings-hint">Optional, and separate from the JanitorAI provider's own login. JanitorAI serves only the <strong>first page</strong> of the Hampter sorts without an account. Paste your session cookie to page through more; the session then <strong>refreshes itself</strong> (no repeated pasting). To get it: log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the <strong>sb-auth-auth-token</strong> cookie. Stored locally in your browser. Tip: paste from a browser you are not actively browsing JanitorAI in, so the two sessions do not rotate each other out.</span>
+                                        <span class="settings-hint">Optional, and separate from the JanitorAI provider's own login. JanitorAI serves only the <strong>first page</strong> of the Hampter sorts without an account. Paste your session cookie to page through more; the session then <strong>refreshes itself</strong> (no repeated pasting). To get it: log in at <strong>janitorai.com</strong>, open DevTools (F12) &rarr; <strong>Application &rarr; Cookies &rarr; janitorai.com</strong>, and copy the value of the cookie whose name starts with <strong>sb-</strong> and ends in <strong>-auth-token</strong> (today <strong>sb-mcmzxtzommpnxkynddbo-auth-token</strong>). Stored locally in your browser. Tip: paste from a browser you are not actively browsing JanitorAI in, so the two sessions do not rotate each other out.</span>
                                     </div>
                                     <div class="settings-row">
                                         <label>Cookie:</label>
                                         <div class="settings-input-group">
-                                            <input type="password" id="settingsDatacatJanitoraiToken" placeholder="Paste the sb-auth-auth-token cookie value" autocomplete="off" spellcheck="false">
+                                            <input type="password" id="settingsDatacatJanitoraiToken" placeholder="Paste the sb-...-auth-token cookie value" autocomplete="off" spellcheck="false">
                                             <button id="toggleDatacatJanitoraiTokenVisibility" class="glass-btn icon-only" title="Show/Hide">
                                                 <i class="fa-solid fa-eye"></i>
                                             </button>
@@ -3628,7 +3628,7 @@ https://jannyai.com/characters/uuid_slug
     <div id="toastContainer" class="toast-container"></div>
 
     <!-- Scripts -->
-    <script src="library.js?v=199"></script>
+    <script src="library.js?v=200"></script>
     <script type="module" src="../modules/module-loader.js?v=51"></script>
     <script src="library-mobile.js?v=26"></script>
 </body>

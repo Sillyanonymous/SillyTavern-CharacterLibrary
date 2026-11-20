@@ -496,7 +496,7 @@ export async function testBrowserEndpoint(endpoint) {
 
 /**
  * Turnstile is domain-locked to janitorai.com, so login must run in the hosted browser.
- * @returns {Promise<{session: string}>} the raw sb-auth-auth-token cookie value
+ * @returns {Promise<{session: string}>} the raw sb-...-auth-token cookie value
  */
 export async function browserLogin(email, password, endpoint) {
     return callHelper('/janitorai-browser-login', {
